@@ -1,0 +1,36 @@
+#!/bin/sh
+# pre-commit
+#
+# Scans staged files for secrets before they leave the machine.
+# Blocks the commit if any secrets are detected.
+#
+# Requires gitleaks. Install: brew install gitleaks
+# Config: .gitleaks.toml in the repo root
+#
+# NOTE: Git hooks run with a stripped PATH. Never assume `command -v` will
+# find a binary that works in your interactive shell. Always check known
+# install locations explicitly.
+
+GITLEAKS_BIN=""
+
+if command -v gitleaks >/dev/null 2>&1; then
+  GITLEAKS_BIN="gitleaks"
+elif [ -x "/usr/local/bin/gitleaks" ]; then
+  GITLEAKS_BIN="/usr/local/bin/gitleaks"
+elif [ -x "/opt/homebrew/bin/gitleaks" ]; then
+  GITLEAKS_BIN="/opt/homebrew/bin/gitleaks"
+fi
+
+if [ -n "$GITLEAKS_BIN" ]; then
+  "$GITLEAKS_BIN" protect --staged --config .gitleaks.toml --no-banner
+  if [ $? -ne 0 ]; then
+    echo ""
+    echo "gitleaks blocked this commit — secrets detected in staged files."
+    echo "Review the findings above, remove the secret, and re-stage."
+    echo "If it is a known false positive, add it to .gitleaks.toml allowlist."
+    exit 1
+  fi
+else
+  echo "WARNING: gitleaks not installed — secret scanning skipped."
+  echo "Install it to protect yourself: brew install gitleaks"
+fi
