@@ -1,0 +1,4 @@
+# CONTEXT_SNAPSHOT.md is session state, not project history.
+# It may contain sensitive environment notes and in-flight decisions.
+# It lives on disk only — read at session start, never committed.
+CONTEXT_SNAPSHOT.md
