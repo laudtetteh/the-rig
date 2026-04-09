@@ -26,9 +26,35 @@ if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" ]]; then
   # Extract the target file path from the JSON input
   PATH_ARG=$(echo "$INPUT" | grep -o '"file_path":"[^"]*"' | head -1 | cut -d'"' -f4)
 
-  # ── Configure your project's protected paths here ────────────────────────
-  # These paths cannot be written to by the agent under any circumstances.
-  # Use partial paths — anything containing the string will be blocked.
+  # ── THE RIG'S OWN GOVERNANCE FILES (self-protection) ─────────────────────
+  # The agent must not rewrite the rules it is supposed to follow.
+  # These paths are protected by default. To intentionally modify a workflow,
+  # rule, or hook, the user must either:
+  #   (a) temporarily comment out the relevant entry below, or
+  #   (b) make the edit manually outside of a Claude Code session.
+  #
+  # The /propose slash command is the approved path for suggesting changes —
+  # it stages a proposal for human review rather than modifying files directly.
+  RIG_PROTECTED=(
+    "processes/"
+    "rules/"
+    ".husky/"
+    "CLAUDE.md"
+    ".claude/hooks/"
+  )
+
+  for protected in "${RIG_PROTECTED[@]}"; do
+    if [[ "$PATH_ARG" == *"$protected"* ]]; then
+      echo "Blocked: '$PATH_ARG' is a The Rig governance file." >&2
+      echo "The agent must not modify its own rules directly." >&2
+      echo "Use /propose to stage a change for human review, or edit manually." >&2
+      exit 1
+    fi
+  done
+
+  # ── PROJECT-SPECIFIC PROTECTED PATHS ─────────────────────────────────────
+  # Add paths that should never be written by the agent in this project.
+  # Substring matching — any file path containing the string will be blocked.
   # Examples:
   #   ".env.production"   — production environment file
   #   "migrations/"       — database migrations (run manually, not by agent)
@@ -38,7 +64,6 @@ if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" ]]; then
     # "migrations/"
     # "data/approved/"
   )
-  # ─────────────────────────────────────────────────────────────────────────
 
   for blocked in "${BLOCKED_PATHS[@]}"; do
     if [[ "$PATH_ARG" == *"$blocked"* ]]; then
