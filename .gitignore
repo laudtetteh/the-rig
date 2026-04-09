@@ -1,0 +1,21 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+/tmp/
+
+# Node (install script deps, if any)
+node_modules/
+
+# The Rig runtime artifacts
+# CONTEXT_SNAPSHOT.md is session state — never committed
+templates/project/memory/CONTEXT_SNAPSHOT.md
