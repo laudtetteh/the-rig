@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/pre-tool.sh\""
+            "command": "bash [REPO_ROOT]/.claude/hooks/pre-tool.sh"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/post-tool.sh\""
+            "command": "bash [REPO_ROOT]/.claude/hooks/post-tool.sh"
           }
         ]
       }

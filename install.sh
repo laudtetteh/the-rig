@@ -220,17 +220,37 @@ if [[ "$DO_PROJECT" == true ]]; then
     copy_file "$src_file" "$dest_file"
   done < <(find "$PROJECT_TEMPLATES" -type f -print0)
 
-  # ── Substitute project name in CLAUDE.md ─────────────────────────────────
+  # ── Substitute placeholders ───────────────────────────────────────────────
+  # Resolve the absolute path to the target directory for settings.json.
+  # This avoids the fragility of $(git rev-parse ...) being evaluated in an
+  # unknown shell environment when Claude Code invokes the hook.
+  TARGET_ABS="$(cd "$TARGET" && pwd)"
+
+  # Portable in-place sed: GNU sed uses -i ""; macOS BSD sed uses -i ''
+  sed_inplace() {
+    local pattern="$1"
+    local file="$2"
+    if sed --version 2>/dev/null | grep -q GNU; then
+      sed -i "$pattern" "$file"
+    else
+      sed -i '' "$pattern" "$file"
+    fi
+  }
+
   TARGET_CLAUDE="$TARGET/CLAUDE.md"
   if [[ -f "$TARGET_CLAUDE" ]]; then
-    # In-place replacement — macOS sed needs a backup extension
-    if sed --version 2>/dev/null | grep -q GNU; then
-      sed -i "s/\\[Project Name\\]/${PROJECT_NAME}/g" "$TARGET_CLAUDE"
-    else
-      # macOS BSD sed
-      sed -i '' "s/\\[Project Name\\]/${PROJECT_NAME}/g" "$TARGET_CLAUDE"
-    fi
-    success "Substituted project name in CLAUDE.md"
+    sed_inplace "s/\\[Project Name\\]/${PROJECT_NAME}/g" "$TARGET_CLAUDE"
+    success "Substituted [Project Name] in CLAUDE.md"
+  fi
+
+  # Substitute [REPO_ROOT] in settings.json with the absolute project path.
+  # The placeholder avoids shell-evaluation issues when Claude Code runs hooks.
+  TARGET_SETTINGS="$TARGET/.claude/settings.json"
+  if [[ -f "$TARGET_SETTINGS" ]]; then
+    # Escape forward slashes in the path for sed
+    ESCAPED_PATH="${TARGET_ABS//\//\\/}"
+    sed_inplace "s/\\[REPO_ROOT\\]/${ESCAPED_PATH}/g" "$TARGET_SETTINGS"
+    success "Substituted [REPO_ROOT] in .claude/settings.json → $TARGET_ABS"
   fi
 
   # ── Set executable bits on hook scripts ───────────────────────────────────

@@ -110,6 +110,15 @@ For scaffolding a new project (global layer already installed):
 ./install.sh --project-only
 ```
 
+For a **brand new project from scratch**:
+```bash
+mkdir my-project && cd my-project
+git init
+# Then from the the-rig directory:
+./install.sh --project-only
+# Point the installer at your new my-project/ directory when prompted.
+```
+
 ---
 
 ## How it works at session start
