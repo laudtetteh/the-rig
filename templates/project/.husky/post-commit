@@ -1,0 +1,34 @@
+#!/bin/sh
+# post-commit
+#
+# Re-applies trailer stripping after the commit lands.
+# Some git clients (and `git commit --trailer`) re-inject trailers after
+# the commit-msg hook has already run. This hook catches and amends them away.
+#
+# Amends the commit in-place only if the message actually changed.
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+FILTER="${ROOT}/.husky/filter-commit-message-inplace.sh"
+
+tmp=$(mktemp) || exit 0
+orig=$(mktemp) || exit 0
+
+git log -1 --format=%B | sed 's/\r$//' > "$tmp"
+cp "$tmp" "$orig"
+
+if [ -f "$FILTER" ]; then
+  sh "$FILTER" "$tmp"
+else
+  grep -viE '^[[:space:]]*(co-authored-by|signed-off-by|reviewed-by|acked-by|tested-by|helped-by|on-behalf-of|made-with)[[:space:]]*:' "$tmp" \
+    | sed 's/\r$//' > "${tmp}.out"
+  mv "${tmp}.out" "$tmp"
+fi
+
+# Only amend if the message actually changed
+if cmp -s "$orig" "$tmp"; then
+  rm -f "$orig" "$tmp"
+  exit 0
+fi
+
+git commit --amend -F "$tmp" --no-edit 2>/dev/null
+rm -f "$orig" "$tmp"

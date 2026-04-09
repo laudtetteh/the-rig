@@ -1,0 +1,22 @@
+#!/bin/sh
+# commit-msg
+#
+# Strips AI-generated attribution trailers from the commit message
+# before it is written to the repository.
+#
+# Delegates to filter-commit-message-inplace.sh for the actual filtering.
+# Falls back to inline grep if the filter script is not present.
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+FILTER="${ROOT}/.husky/filter-commit-message-inplace.sh"
+
+if [ -f "$FILTER" ]; then
+  sh "$FILTER" "$1"
+else
+  # Inline fallback — strips the most common trailer patterns
+  FILE="$1"
+  tmp=$(mktemp) || exit 1
+  grep -viE '^[[:space:]]*(co-authored-by|signed-off-by|reviewed-by|acked-by|tested-by|helped-by|on-behalf-of|made-with)[[:space:]]*:' "$FILE" \
+    | sed 's/\r$//' > "$tmp"
+  mv "$tmp" "$FILE"
+fi
