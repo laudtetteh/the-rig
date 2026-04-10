@@ -65,7 +65,7 @@ The Rig has two layers that load in sequence at every session start:
 | Rules (4) | `templates/project/rules/` | Coding standards, git conventions, security rules, verification protocol |
 | Memory system | `templates/project/memory/` | PROGRESS log, ERRORS log, CONTEXT_SNAPSHOT (session state) |
 | Task lifecycle | `templates/project/tasks/` | Structured task files through backlog → active → done |
-| Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 4 slash commands |
+| Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 8 slash commands |
 | Git hooks | `templates/project/.husky/` | Secret scanning (gitleaks) + AI attribution trailer stripping |
 | GitHub templates | `templates/project/.github/` | PR template + 3 issue templates |
 | Installer | `install.sh` | Interactive setup script — handles both layers |
@@ -136,13 +136,30 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 
 ---
 
-## The session workflow
+## The command set
 
+**Start a project**
 ```
-/new-feature  →  creates task file, plans before coding, waits for approval
-/ship         →  runs pre-ship checklist, commits, opens PR
+/kickoff      →  reads PROJECT_BRIEF.md, scaffolds CLAUDE.md + task backlog + GitHub issues
+```
+
+**Daily work**
+```
+/task         →  intake wizard: define the task + configure autonomy, check-ins, and risk
+/run          →  execute the backlog; respects per-task operating mode; chains at High autonomy
+/run [slug]   →  run a single specific task
+```
+
+**Ship and debug**
+```
+/ship         →  pre-ship checklist, commit, open PR
 /debug        →  hypothesis-first diagnosis, mandatory ERRORS.md entry
-/wrap         →  writes CONTEXT_SNAPSHOT, ensures memory is current before closing
+```
+
+**Governance and housekeeping**
+```
+/propose      →  submit a change to governance files for human approval before anything is touched
+/wrap         →  write CONTEXT_SNAPSHOT, ensure memory is current before closing the session
 ```
 
 ---

@@ -7,7 +7,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [1.0.0] — 2026-04-09
+## [1.0.0] — 2026-04-10
 
 First stable release. Built and refined across 100+ PRs on the LaudBot project.
 
@@ -23,7 +23,8 @@ First stable release. Built and refined across 100+ PRs on the LaudBot project.
 - `skills/explain.md` — audience-calibrated, one-sentence answer first
 
 **Project layer** (`templates/project/`)
-- `CLAUDE.md` — project brain template with stack table, conventions, off-limits paths, session context-loading sequence, and `@rules/` imports
+- `CLAUDE.md` — project brain template with stack table, conventions, off-limits paths, session context-loading sequence, `@rules/` imports, and "Project context for task mode" section
+- `PROJECT_BRIEF.md` — greenfield project brief template covering goal, users, MVP features, out-of-scope, stack choices, constraints, success metrics, and open questions
 - `processes/NEW_TASK_WORKFLOW.md` — 6-step task start process with working-directory orientation gate
 - `processes/SHIP_WORKFLOW.md` — issue-first rule, pre-ship checklist, PR template enforcement, label discipline
 - `processes/DEBUG_WORKFLOW.md` — hypothesis-first debugging, mandatory ERRORS.md entry
@@ -36,11 +37,15 @@ First stable release. Built and refined across 100+ PRs on the LaudBot project.
 - `memory/ERRORS.md` — pitfall log template with example entry
 - `memory/CONTEXT_SNAPSHOT.md` — session state template (gitignored)
 - `memory/.gitignore` — excludes CONTEXT_SNAPSHOT.md from version control
-- `tasks/backlog/TASK_example.md` — complete task file template
+- `tasks/backlog/TASK_example.md` — complete task file template with `## Depends on` and `## Operating mode` fields
 - `tasks/active/.gitkeep`, `tasks/done/.gitkeep`
-- `.claude/settings.json` — PreToolUse and PostToolUse hook wiring
-- `.claude/hooks/pre-tool.sh` — write protection for configured paths (PascalCase tool names)
+- `.claude/settings.json` — PreToolUse and PostToolUse hook wiring with stable `[REPO_ROOT]` path substitution
+- `.claude/hooks/pre-tool.sh` — write protection for governance files (`RIG_PROTECTED` block) and configured project paths; PascalCase tool name matching
 - `.claude/hooks/post-tool.sh` — PROGRESS.md auto-stub after git commits
+- `.claude/commands/kickoff.md` — `/kickoff` greenfield bootstrap: reads PROJECT_BRIEF.md, resolves open questions, scaffolds CLAUDE.md + task backlog + GitHub issues in one pass
+- `.claude/commands/task.md` — `/task` intake wizard: three-part order (goal/context/constraints → autonomy/check-ins/risk → confirmation); persists operating mode in task file
+- `.claude/commands/run.md` — `/run` execution loop: dependency-aware priority queue, per-task autonomy level enforcement, automatic chaining at High autonomy
+- `.claude/commands/propose.md` — `/propose` governance gate: writes change proposal to `/tmp/`, waits for human approval before touching any governance file
 - `.claude/commands/new-feature.md` — `/new-feature` slash command
 - `.claude/commands/ship.md` — `/ship` slash command
 - `.claude/commands/debug.md` — `/debug` slash command
@@ -54,7 +59,7 @@ First stable release. Built and refined across 100+ PRs on the LaudBot project.
 - `.github/ISSUE_TEMPLATE/feature.md`, `bug.md`, `chore.md`
 
 **Installer**
-- `install.sh` — interactive setup for global and project layers; handles path substitution, executable bits, Husky initialization, gitleaks check
+- `install.sh` — interactive setup for global and project layers; handles `[REPO_ROOT]` path substitution (GNU/BSD sed compatible), executable bits, Husky initialization, gitleaks check
 
 **Documentation**
 - `docs/how-it-works.md` — architecture deep-dive with diagrams
