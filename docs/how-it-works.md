@@ -60,7 +60,9 @@ The Rig solves this at three levels:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-The global layer is loaded first, automatically, by Claude Code. It provides universal context. The project layer is read during orientation and provides project-specific context.
+The global layer is loaded first, automatically, by Claude Code. It provides
+universal context. The project layer is read during orientation and provides
+project-specific context.
 
 ---
 
@@ -82,8 +84,9 @@ CLAUDE.md instructs: read ./CLAUDE.md
      │  Project identity, stack, conventions
      │
      ▼
-CLAUDE.md instructs: read ./memory/PROGRESS.md
-     │  Where the project stands — full build history
+CLAUDE.md instructs: check memory/CONTEXT_SNAPSHOT.md
+     │  If it exists → sufficient for orientation. Load it and stop.
+     │  If absent or stale → load PROGRESS.md (last 20 entries only)
      │
      ▼
 CLAUDE.md instructs: read ./memory/ERRORS.md
@@ -102,8 +105,8 @@ Agent is oriented. Hooks are live. Ready to work.
      │
      ▼
 /wrap — session end
-     │  Writes CONTEXT_SNAPSHOT.md
-     │  Ensures PROGRESS.md is current
+     │  Writes CONTEXT_SNAPSHOT.md (full current state)
+     │  Ensures PROGRESS.md is current; trims if > 20 entries
      └─ Surfaces next priority
 ```
 
@@ -113,23 +116,24 @@ Agent is oriented. Hooks are live. Ready to work.
 
 Three files, three purposes:
 
+### CONTEXT_SNAPSHOT.md
+- **The primary orientation file** — written at session end via `/wrap`
+- **Gitignored** — lives on disk only, never committed
+- Contains: project state, open PRs, backlog priority, key decisions, known footguns, environment notes
+- When it exists, the agent reads *only this* at session start. PROGRESS.md is skipped.
+- What allows a new session to orient in seconds rather than minutes
+
 ### PROGRESS.md
-- Append-only build log
-- One entry per PR merge (format: date, summary, bullets, PR number)
-- Auto-stubbed by `post-tool.sh` after every git commit — the stub exists even if the agent forgets to write the narrative
+- Append-only build log, one entry per meaningful unit of work
+- Auto-stubbed by `post-tool.sh` after every git commit — stub exists even if the agent forgets
 - Most recent entry at the top
+- **Trim convention:** capped at 20 entries. `/wrap` moves older entries to `PROGRESS_archive.md` (gitignored, disk-only) when the cap is exceeded. Keeps session startup cost low indefinitely.
 
 ### ERRORS.md
 - Pitfall log — every non-obvious bug logged with structured format
 - Never deleted, only appended
 - Format: Symptom → Root cause → Fix → Watch for
 - The most valuable file in the system — it's institutional memory
-
-### CONTEXT_SNAPSHOT.md
-- Session state — overwritten (never deleted) at session end via `/wrap`
-- **Gitignored** — lives on disk only, never committed
-- Contains: project state paragraph, full PR list, open PRs, backlog priority order, key decisions, known footguns, environment notes
-- What allows a new session to orient in seconds rather than minutes
 
 ---
 
@@ -140,7 +144,7 @@ Four workflow files that define step-by-step behaviour at each phase:
 ### NEW_TASK_WORKFLOW
 ```
 Step 0: Confirm working directory (main repo, not worktree)
-Step 1: Orient (read SNAPSHOT → PROGRESS → ERRORS → task file)
+Step 1: Orient (read SNAPSHOT → PROGRESS if needed → ERRORS → task file)
 Step 2: Confirm understanding — restate goal, files, risks. Wait for approval.
 Step 3: Plan — write numbered plan into task file. Wait for approval.
 Step 4: Implement — one step at a time, surface surprises
@@ -192,10 +196,10 @@ Every tool call
      │
      ├─► pre-tool.sh (PreToolUse)
      │     Logs call to /tmp/the-rig-session.log
-     │     If tool is Write or Edit:
-     │       Extract file_path from JSON input
-     │       Check against BLOCKED_PATHS array
-     │       Exit 1 (block) if match found
+     │     Checks RIG_PROTECTED: blocks writes to governance files
+     │     (processes/, rules/, .husky/, CLAUDE.md, .claude/hooks/)
+     │     Checks BLOCKED_PATHS: blocks project-specific protected paths
+     │     Exit 1 (block) if match found
      │
      └─► post-tool.sh (PostToolUse)
            Logs completion to session log
@@ -206,7 +210,10 @@ Every tool call
                Append dated stub to PROGRESS.md (idempotent)
 ```
 
-**Critical implementation note:** Tool names in Claude Code are `PascalCase` (`Write`, `Edit`, `Bash`). Using `snake_case` (`write_file`, `edit_file`) causes the hooks to silently never fire. This was the most costly silent bug in the pilot — it ran undetected for 30+ PRs.
+**Critical implementation note:** Tool names in Claude Code are `PascalCase`
+(`Write`, `Edit`, `Bash`). Using `snake_case` (`write_file`, `edit_file`) causes
+the hooks to silently never fire. This was the most costly silent bug in the pilot —
+it ran undetected for 30+ PRs.
 
 ### Git hooks (`.husky/`)
 
@@ -234,28 +241,65 @@ git commit
 ## The task lifecycle
 
 ```
-tasks/backlog/TASK_name.md    ← created during planning
+tasks/backlog/TASK_name.md    ← created by /task or /kickoff
         │
-        │  (user starts work)
+        │  (user starts work via /run or /task)
         ▼
 tasks/active/TASK_name.md     ← Status: active
-        │
+        │                        ## Operating mode set (autonomy/check-ins/risk)
         │  (implementation complete, tests pass)
         ▼
 tasks/done/TASK_name.md       ← Status: done, Done notes filled in
 ```
 
-**Staging rule:** The task file is never staged in the implementation commit. It's staged only from `tasks/done/` in a separate housekeeping commit. Committing from `tasks/active/` creates a confusing history where in-progress and completed states appear in the same PR.
+**Staging rule:** The task file is never staged in the implementation commit. It's
+staged only from `tasks/done/` in a separate housekeeping commit.
 
 ---
 
-## The slash commands
+## The command set
 
-Four commands that map to the process workflows:
+Eight slash commands covering the full development lifecycle:
 
+### Project bootstrap
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/new-feature` | `NEW_TASK_WORKFLOW` | Creates task file, plans before coding, waits for approval |
-| `/ship` | `SHIP_WORKFLOW` | Pre-ship checklist, shows commit message, waits for "go ahead" |
+| `/kickoff` | `NEW_TASK_WORKFLOW` | Reads `PROJECT_BRIEF.md`, confirms understanding, scaffolds `CLAUDE.md` + task backlog + GitHub issues in one pass |
+
+### Daily work
+| Command | Triggers | Key behaviour |
+|---|---|---|
+| `/task` | `NEW_TASK_WORKFLOW` | Three-part intake wizard: goal → autonomy/check-ins/risk configuration → confirmation. Persists operating mode in task file. |
+| `/run` | Task execution loop | Surveys backlog, builds dependency-aware priority queue, executes tasks respecting per-task operating mode. Chains automatically at High autonomy. |
+
+### Ship and debug
+| Command | Triggers | Key behaviour |
+|---|---|---|
+| `/ship` | `SHIP_WORKFLOW` | Pre-ship checklist, conventional commit, opens PR |
 | `/debug` | `DEBUG_WORKFLOW` | Hypothesis before code, mandatory ERRORS.md entry |
-| `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, surfaces next priority |
+
+### Governance and housekeeping
+| Command | Triggers | Key behaviour |
+|---|---|---|
+| `/propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
+| `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, trims if > 20 entries, surfaces next priority |
+| `/new-feature` | `NEW_TASK_WORKFLOW` | Original task entry point — creates task file, plans before coding, waits for approval |
+
+---
+
+## The autonomy system
+
+`/task` and `/run` support per-task operating mode configuration:
+
+| Setting | Options |
+|---|---|
+| **Autonomy** | 🌶 Low (Guided) · 🌶🌶 Medium (Supervised) · 🌶🌶🌶 High (Autonomous) |
+| **Check-ins** | Verbose · Normal · Quiet |
+| **Risk tolerance** | Conservative · Balanced · Aggressive |
+
+The configuration is written to `## Operating mode` in the task file and persists
+across sessions. `/run` reads the stored mode and executes accordingly — chaining
+tasks without interruption at High autonomy, pausing between tasks at Medium and Low.
+
+Governance (protected paths, `/propose` gate, pre-ship checklist) applies at all
+autonomy levels. "High Autonomous" means fewer interruptions, not fewer safeguards.
