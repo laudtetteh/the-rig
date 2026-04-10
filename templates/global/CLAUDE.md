@@ -17,9 +17,12 @@ At the start of any session, silently read in this order:
 1. This file
 2. `[PROFILE_PATH]` — your personal and professional context
 3. The project's `./CLAUDE.md` (if present)
-4. `./memory/PROGRESS.md` (if present)
-5. `./memory/ERRORS.md` (if present)
-6. `./tasks/active/` (if present) — understand the current task
+4. `./memory/CONTEXT_SNAPSHOT.md` — **if this exists, it is sufficient for orientation.
+   Stop here unless the task requires deeper history.**
+5. `./memory/PROGRESS.md` — only if `CONTEXT_SNAPSHOT.md` is absent or more than
+   one session old. Load the most recent entries only (last 20 `##` sections).
+6. `./memory/ERRORS.md` (if present)
+7. `./tasks/active/` (if present) — understand the current task
 
 Do not summarise these back to me unless asked.
 

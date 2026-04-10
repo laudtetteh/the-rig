@@ -8,9 +8,10 @@ Performs the session-end housekeeping that prevents state loss between sessions:
 
 1. Writes (overwrites) `memory/CONTEXT_SNAPSHOT.md` with full current project state
 2. Ensures `memory/PROGRESS.md` is up to date — expands any auto-stubbed entries
-3. Checks `memory/ERRORS.md` — prompts you to log anything unexpected from this session
-4. Reports what's in `tasks/active/` so you know what's in flight
-5. Surfaces the next priority from `tasks/backlog/` and asks: "What's next?"
+3. **Trims `memory/PROGRESS.md`** if it has grown beyond 20 entries (see Trim step below)
+4. Checks `memory/ERRORS.md` — prompts you to log anything unexpected from this session
+5. Reports what's in `tasks/active/` so you know what's in flight
+6. Surfaces the next priority from `tasks/backlog/` and asks: "What's next?"
 
 ## Usage
 
@@ -24,9 +25,33 @@ Run this:
 - Before switching to a different task or project
 - Any time you want to ensure a future session can pick up exactly where you left off
 
+## Trim step — PROGRESS.md
+
+After updating `PROGRESS.md`, count the number of `## ` entry headers in the file.
+
+**If the count is 20 or fewer:** nothing to do.
+
+**If the count exceeds 20:** tell the user:
+
+> "`PROGRESS.md` has [N] entries. I'll move the oldest [N-20] to
+> `memory/PROGRESS_archive.md` to keep session startup lean. The archive is
+> gitignored — history is preserved locally but won't be loaded at session start.
+> Trim now?"
+
+If the user confirms:
+1. Identify the oldest entries (bottom of the file, since entries are newest-first)
+2. Prepend them to `memory/PROGRESS_archive.md` (create if absent)
+3. Remove them from `memory/PROGRESS.md`, leaving the 20 most recent entries
+4. Confirm: "`PROGRESS.md` trimmed to 20 entries. Archive: `memory/PROGRESS_archive.md`"
+
+Never trim without confirmation. Never delete entries — only move them.
+
+---
+
 ## Notes
 
 - `CONTEXT_SNAPSHOT.md` is gitignored — it lives on disk only, never committed
+- `PROGRESS_archive.md` is also gitignored — full history on disk, not in the repo
 - Always **overwrite** the snapshot, never append to it; it represents current state, not history
-- History belongs in `PROGRESS.md`; the snapshot is purely for session continuity
+- History belongs in `PROGRESS.md` (recent) and `PROGRESS_archive.md` (older); the snapshot is for session continuity only
 - If a task is in progress but not done, note its exact state in the snapshot so the next session can resume without re-reading the whole conversation

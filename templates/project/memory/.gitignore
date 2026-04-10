@@ -2,3 +2,7 @@
 # It may contain sensitive environment notes and in-flight decisions.
 # It lives on disk only — read at session start, never committed.
 CONTEXT_SNAPSHOT.md
+
+# PROGRESS_archive.md holds older entries trimmed from PROGRESS.md.
+# Archive is disk-only: useful for manual reference but not loaded at session start.
+PROGRESS_archive.md
