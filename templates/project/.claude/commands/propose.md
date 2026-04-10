@@ -16,8 +16,24 @@ Instead of modifying a governance file directly, the agent:
 2. Shows you the full before/after diff in the proposal document
 3. Explains why the change is warranted (symptom, pattern, or lesson)
 4. Waits for your explicit approval before anything is touched
-5. On approval: applies the change and logs it in `memory/ERRORS.md` or
-   `memory/PROGRESS.md` as appropriate
+5. On approval: provides the exact change to apply — **but you apply it**
+
+**Why the agent can't apply it directly:** `pre-tool.sh` blocks writes to all
+governance files unconditionally — including during an approved proposal. This is
+intentional. The governance system protects itself. The human is always the one who
+applies governance changes.
+
+**How to apply after approval:**
+
+Option A — paste in editor:
+> Copy the diff from the proposal file and apply it manually in your editor.
+
+Option B — the agent generates a ready-to-paste block:
+> After you approve, say "show me the apply block". The agent will output the
+> complete file content (not a diff) so you can paste it directly into the file.
+
+After applying: tell the agent it's done. It will log the change in
+`memory/PROGRESS.md` and clean up `/tmp/rig-proposal-[name].md`.
 
 ---
 
