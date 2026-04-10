@@ -320,6 +320,15 @@ if [[ "$DO_PROJECT" == true ]]; then
   read -r -p "    Name [${DEFAULT_PROJECT_NAME}]: " PROJECT_NAME_INPUT
   PROJECT_NAME="${PROJECT_NAME_INPUT:-$DEFAULT_PROJECT_NAME}"
 
+  # Sanitize project name for safe sed substitution.
+  # Strip characters that are sed metacharacters or shell-special in this context.
+  # Allow: letters, digits, spaces, hyphens, underscores, periods.
+  PROJECT_NAME="$(echo "$PROJECT_NAME" | tr -dc 'A-Za-z0-9 ._-')"
+  if [[ -z "$PROJECT_NAME" ]]; then
+    PROJECT_NAME="$(basename "$TARGET")"
+    warn "Project name contained only invalid characters — using directory name: $PROJECT_NAME"
+  fi
+
   echo ""
 
   # ── COMPONENT SELECTION ───────────────────────────────────────────────────
