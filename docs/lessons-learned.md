@@ -114,6 +114,24 @@ Every component in this system exists because something went wrong without it. T
 
 ---
 
+## 11. Moving the project directory broke Claude Code hooks silently
+
+**Symptom**: Pre-tool and post-tool hooks stopped firing after renaming or moving the project directory. No error was shown — file writes to protected paths went through without any block message.
+
+**Root cause**: `install.sh` bakes the absolute project path into `.claude/settings.json` at install time via the `[REPO_ROOT]` placeholder substitution. The hook commands look like `bash /Users/you/projects/old-name/.claude/hooks/pre-tool.sh`. After a move or rename, that path no longer exists — the hook script silently fails to launch, and Claude Code treats this as a passing hook (exit 0 by default).
+
+**Fix**: Re-run the installer after moving the project:
+```bash
+cd the-rig && ./install.sh --project-only
+```
+Choose **Overwrite** or **Merge** strategy. The installer will substitute the new absolute path into `settings.json`.
+
+Alternatively, edit `.claude/settings.json` directly and update the hook command paths to the new location.
+
+**Watch for**: Any time you rename, move, or reorganize a project directory where The Rig is installed. Check `/tmp/the-rig-session.log` — if hooks are firing, you'll see timestamped `PRE` entries. If the log is empty or stale, hooks aren't running.
+
+---
+
 ## 10. useSearchParams() broke the standalone Next.js build
 
 **Symptom**: `next build` completed successfully in development. The production standalone build failed with a static generation error pointing to a page that used `useSearchParams()`.
