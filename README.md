@@ -82,22 +82,19 @@ cd the-rig
 # 2. Run the installer
 ./install.sh
 
-# The installer will:
-# - Copy ~/.claude/CLAUDE.md (global identity)
-# - Copy skill files to ~/.claude/skills/
-# - Create your personal profile template
-# - Scaffold the project layer into any target directory
-# - Set executable bits on all hook scripts
-# - Optionally initialize Husky
+# The installer will ask:
+# - How to handle collisions (skip / overwrite / merge / interactive)
+# - Which components to install (all, or choose)
+# - Where your personal profile should live
+# - Which project directory to scaffold into
 
 # 3. Fill in your personal profile
 $EDITOR ~/.your-ai-contexts/PROFILE.md
 
-# 4. Fill in the project CLAUDE.md
-$EDITOR your-project/CLAUDE.md
-
-# 5. Open Claude Code in your project
-# The agent now loads full context automatically at session start.
+# 4. Open Claude Code in your project and run /kickoff
+# /kickoff reads PROJECT_BRIEF.md, resolves open questions,
+# fills in CLAUDE.md, generates a task backlog, and opens
+# GitHub issues — all in one pass.
 ```
 
 For first-time global setup only:
