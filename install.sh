@@ -31,15 +31,10 @@ bold()    { echo -e "${BOLD}$*${RESET}"; }
 ask()     { echo -e "${BOLD}?${RESET} $*"; }
 
 confirm() {
-  # confirm "message" [default: y/n]
   local msg="$1"
   local default="${2:-n}"
   local prompt
-  if [[ "$default" == "y" ]]; then
-    prompt="[Y/n]"
-  else
-    prompt="[y/N]"
-  fi
+  if [[ "$default" == "y" ]]; then prompt="[Y/n]"; else prompt="[y/N]"; fi
   read -r -p "$(echo -e "${BOLD}?${RESET} ${msg} ${prompt} ")" answer
   answer="${answer:-$default}"
   [[ "$answer" =~ ^[Yy]$ ]]
@@ -69,15 +64,184 @@ for arg in "$@"; do
   esac
 done
 
+# ── Portable in-place sed ─────────────────────────────────────────────────────
+# GNU sed uses -i ""; macOS BSD sed uses -i ''
+sed_inplace() {
+  local pattern="$1"
+  local file="$2"
+  if sed --version 2>/dev/null | grep -q GNU; then
+    sed -i "$pattern" "$file"
+  else
+    sed -i '' "$pattern" "$file"
+  fi
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 bold "╔══════════════════════════════════════╗"
 bold "║         The Rig — Installer          ║"
 bold "╚══════════════════════════════════════╝"
 echo ""
-echo "This script deploys The Rig's templates to your machine."
-echo "It will not overwrite existing files without asking."
+
+# ── COLLISION STRATEGY ───────────────────────────────────────────────────────
+# Ask once upfront. Applied consistently to every file copy.
+#
+# STRATEGY values:
+#   interactive  — ask per file (original behaviour)
+#   skip         — keep existing, only create new files
+#   overwrite    — replace all, back up originals to .rig-backup/
+#   merge        — smart-merge .claude/settings.json; skip everything else
+
+echo "How should I handle files that already exist at the destination?"
 echo ""
+echo "  1) Interactive  — ask me for each file"
+echo "  2) Skip         — keep all existing files, only install new ones"
+echo "  3) Overwrite    — replace everything (backs up originals to .rig-backup/)"
+echo "  4) Merge        — smart-merge .claude/settings.json; skip everything else"
+echo ""
+read -r -p "$(echo -e "${BOLD}?${RESET} Choose a strategy [1/2/3/4] (default: 1): ")" strategy_input
+strategy_input="${strategy_input:-1}"
+
+case "$strategy_input" in
+  1) COLLISION_STRATEGY="interactive" ;;
+  2) COLLISION_STRATEGY="skip" ;;
+  3) COLLISION_STRATEGY="overwrite" ;;
+  4) COLLISION_STRATEGY="merge" ;;
+  *)
+    warn "Invalid choice — defaulting to Interactive."
+    COLLISION_STRATEGY="interactive"
+    ;;
+esac
+
+echo ""
+info "Collision strategy: ${COLLISION_STRATEGY}"
+echo ""
+
+# ── BACKUP HELPER ─────────────────────────────────────────────────────────────
+# Used by overwrite strategy. Backs up to <target>/.rig-backup/<timestamp>/
+BACKUP_DIR=""
+BACKUP_TS="$(date +%Y%m%d_%H%M%S)"
+
+init_backup_dir() {
+  local base="$1"
+  BACKUP_DIR="${base}/.rig-backup/${BACKUP_TS}"
+  mkdir -p "$BACKUP_DIR"
+}
+
+backup_file() {
+  local src="$1"
+  local base="$2"
+  if [[ -z "$BACKUP_DIR" ]]; then init_backup_dir "$base"; fi
+  local rel="${src#$base/}"
+  local dest="${BACKUP_DIR}/${rel}"
+  mkdir -p "$(dirname "$dest")"
+  cp "$src" "$dest"
+}
+
+# ── SMART MERGE: .claude/settings.json ───────────────────────────────────────
+# Merges The Rig's hooks into an existing settings.json without duplicating
+# any hook that already has the same command string.
+# Requires Python 3 (guaranteed on macOS/Linux).
+merge_settings_json() {
+  local existing="$1"   # path to the existing settings.json
+  local incoming="$2"   # path to The Rig's settings.json (with [REPO_ROOT] already substituted)
+  local output="$3"     # where to write the merged result
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    warn "python3 not found — cannot merge settings.json. Skipping."
+    return 1
+  fi
+
+  python3 - "$existing" "$incoming" "$output" << 'PYEOF'
+import json, sys
+
+existing_path, incoming_path, output_path = sys.argv[1], sys.argv[2], sys.argv[3]
+
+with open(existing_path) as f:
+    existing = json.load(f)
+with open(incoming_path) as f:
+    incoming = json.load(f)
+
+existing.setdefault("hooks", {})
+
+for event, incoming_hooks in incoming.get("hooks", {}).items():
+    existing.setdefault("hooks", {}).setdefault(event, [])
+    # Collect the command strings already registered for this event
+    existing_commands = set()
+    for entry in existing["hooks"][event]:
+        for h in entry.get("hooks", []):
+            cmd = h.get("command", "")
+            if cmd:
+                existing_commands.add(cmd)
+    # Append incoming hooks whose command isn't already present
+    for entry in incoming_hooks:
+        for h in entry.get("hooks", []):
+            cmd = h.get("command", "")
+            if cmd not in existing_commands:
+                existing["hooks"][event].append(entry)
+                existing_commands.add(cmd)
+                break  # each entry is a unit; add it once
+
+with open(output_path, "w") as f:
+    json.dump(existing, f, indent=2)
+    f.write("\n")
+PYEOF
+}
+
+# ── COPY FILE (respects collision strategy) ───────────────────────────────────
+# copy_file <src> <dest> [base_dir]
+# base_dir is used for backup paths in overwrite mode.
+copy_file() {
+  local src="$1"
+  local dest="$2"
+  local base="${3:-}"
+  local dir
+  dir="$(dirname "$dest")"
+  mkdir -p "$dir"
+
+  if [[ ! -f "$dest" ]]; then
+    # No collision — always copy
+    cp "$src" "$dest"
+    success "Created ${dest#${base}/}"
+    return
+  fi
+
+  # File exists — apply strategy
+  case "$COLLISION_STRATEGY" in
+    interactive)
+      if confirm "Overwrite existing: ${dest#${base}/}?"; then
+        cp "$src" "$dest"
+        success "Updated ${dest#${base}/}"
+      else
+        info "Skipped ${dest#${base}/}"
+      fi
+      ;;
+    skip)
+      info "Skipped (exists): ${dest#${base}/}"
+      ;;
+    overwrite)
+      if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
+      cp "$src" "$dest"
+      success "Overwrote ${dest#${base}/}"
+      ;;
+    merge)
+      # settings.json gets special treatment; everything else is skipped
+      if [[ "$(basename "$dest")" == "settings.json" && "$dest" == *".claude/settings.json" ]]; then
+        local tmp_merged
+        tmp_merged="$(mktemp /tmp/rig-settings-merged-XXXXXX.json)"
+        if merge_settings_json "$dest" "$src" "$tmp_merged"; then
+          cp "$tmp_merged" "$dest"
+          success "Merged .claude/settings.json"
+        else
+          info "Skipped settings.json (merge failed — see warning above)"
+        fi
+        rm -f "$tmp_merged"
+      else
+        info "Skipped (exists): ${dest#${base}/}"
+      fi
+      ;;
+  esac
+}
 
 # ── GLOBAL LAYER ─────────────────────────────────────────────────────────────
 if [[ "$DO_GLOBAL" == true ]]; then
@@ -98,49 +262,26 @@ if [[ "$DO_GLOBAL" == true ]]; then
   info "Profile path:  $PROFILE_PATH"
   echo ""
 
-  # Create directories
   mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR" "$(dirname "$PROFILE_PATH")"
 
   # ── CLAUDE.md ──────────────────────────────────────────────────────────────
   DEST_CLAUDE="$CLAUDE_DIR/CLAUDE.md"
-  SHOULD_INSTALL_CLAUDE=true
-
-  if [[ -f "$DEST_CLAUDE" ]]; then
-    warn "$DEST_CLAUDE already exists."
-    if ! confirm "Overwrite it?"; then
-      SHOULD_INSTALL_CLAUDE=false
-      info "Skipped CLAUDE.md"
-    fi
-  fi
-
-  if [[ "$SHOULD_INSTALL_CLAUDE" == true ]]; then
-    # Substitute [PROFILE_PATH] with the actual path
-    sed "s|\\[PROFILE_PATH\\]|${PROFILE_PATH}|g" \
-      "$GLOBAL_TEMPLATES/CLAUDE.md" > "$DEST_CLAUDE"
-    success "Installed ~/.claude/CLAUDE.md"
-  fi
+  CLAUDE_TMP="$(mktemp /tmp/rig-global-claude-XXXXXX.md)"
+  sed "s|\\[PROFILE_PATH\\]|${PROFILE_PATH}|g" "$GLOBAL_TEMPLATES/CLAUDE.md" > "$CLAUDE_TMP"
+  copy_file "$CLAUDE_TMP" "$DEST_CLAUDE" "$CLAUDE_DIR"
+  rm -f "$CLAUDE_TMP"
 
   # ── Skills ────────────────────────────────────────────────────────────────
   for skill_src in "$GLOBAL_TEMPLATES/skills/"*.md; do
     skill_name="$(basename "$skill_src")"
     skill_dest="$SKILLS_DIR/$skill_name"
-    if [[ -f "$skill_dest" ]]; then
-      if confirm "Overwrite existing skill: $skill_name?"; then
-        cp "$skill_src" "$skill_dest"
-        success "Updated ~/.claude/skills/$skill_name"
-      else
-        info "Skipped $skill_name"
-      fi
-    else
-      cp "$skill_src" "$skill_dest"
-      success "Installed ~/.claude/skills/$skill_name"
-    fi
+    copy_file "$skill_src" "$skill_dest" "$SKILLS_DIR"
   done
 
   # ── Profile ───────────────────────────────────────────────────────────────
   if [[ -f "$PROFILE_PATH" ]]; then
-    warn "$PROFILE_PATH already exists — skipping (don't want to overwrite personal data)."
-    info "To re-generate the template: cp $GLOBAL_TEMPLATES/PROFILE.md.example $PROFILE_PATH"
+    warn "$PROFILE_PATH already exists — skipping (personal data, never auto-overwritten)."
+    info "To regenerate the template: cp $GLOBAL_TEMPLATES/PROFILE.md.example $PROFILE_PATH"
   else
     cp "$GLOBAL_TEMPLATES/PROFILE.md.example" "$PROFILE_PATH"
     success "Created $PROFILE_PATH"
@@ -169,73 +310,91 @@ if [[ "$DO_PROJECT" == true ]]; then
     exit 1
   fi
 
-  # Check it looks like a project (has a git repo or is obviously a project dir)
   if [[ ! -d "$TARGET/.git" ]]; then
     warn "$TARGET does not appear to be a git repository."
-    if ! confirm "Continue anyway?"; then
-      exit 0
-    fi
+    if ! confirm "Continue anyway?"; then exit 0; fi
   fi
 
-  # Project name for substitution
   DEFAULT_PROJECT_NAME="$(basename "$TARGET")"
   ask "Project name (used in CLAUDE.md)?"
   read -r -p "    Name [${DEFAULT_PROJECT_NAME}]: " PROJECT_NAME_INPUT
   PROJECT_NAME="${PROJECT_NAME_INPUT:-$DEFAULT_PROJECT_NAME}"
 
   echo ""
+
+  # ── COMPONENT SELECTION ───────────────────────────────────────────────────
+  echo "Which components do you want to install?"
+  echo ""
+  echo "  a) All (recommended)"
+  echo "  b) Let me choose"
+  echo ""
+  read -r -p "$(echo -e "${BOLD}?${RESET} Choose [a/b] (default: a): ")" component_choice
+  component_choice="${component_choice:-a}"
+
+  # Component flags (all default to true)
+  INSTALL_CLAUDE_MD=true
+  INSTALL_MEMORY=true
+  INSTALL_TASKS=true
+  INSTALL_PROCESSES=true
+  INSTALL_RULES=true
+  INSTALL_CLAUDE_HOOKS=true
+  INSTALL_COMMANDS=true
+  INSTALL_GIT_HOOKS=true
+  INSTALL_GITHUB=true
+  INSTALL_PROJECT_BRIEF=true
+
+  if [[ "$component_choice" == "b" ]]; then
+    echo ""
+    confirm "Install CLAUDE.md (project brain template)?" "y"     && INSTALL_CLAUDE_MD=true    || INSTALL_CLAUDE_MD=false
+    confirm "Install memory system (memory/, PROGRESS, ERRORS)?" "y" && INSTALL_MEMORY=true   || INSTALL_MEMORY=false
+    confirm "Install task lifecycle (tasks/backlog, active, done)?" "y" && INSTALL_TASKS=true  || INSTALL_TASKS=false
+    confirm "Install process workflows (processes/)?" "y"          && INSTALL_PROCESSES=true   || INSTALL_PROCESSES=false
+    confirm "Install rules (rules/)?" "y"                          && INSTALL_RULES=true        || INSTALL_RULES=false
+    confirm "Install Claude Code hooks (.claude/hooks/, settings.json)?" "y" && INSTALL_CLAUDE_HOOKS=true || INSTALL_CLAUDE_HOOKS=false
+    confirm "Install slash commands (.claude/commands/)?" "y"      && INSTALL_COMMANDS=true    || INSTALL_COMMANDS=false
+    confirm "Install git hooks (.husky/, .gitleaks.toml)?" "y"     && INSTALL_GIT_HOOKS=true   || INSTALL_GIT_HOOKS=false
+    confirm "Install GitHub templates (.github/)?" "y"             && INSTALL_GITHUB=true       || INSTALL_GITHUB=false
+    confirm "Install PROJECT_BRIEF.md template?" "y"               && INSTALL_PROJECT_BRIEF=true || INSTALL_PROJECT_BRIEF=false
+    echo ""
+  fi
+
+  echo ""
   info "Scaffolding into: $TARGET"
   info "Project name:     $PROJECT_NAME"
   echo ""
 
-  # ── Copy project template files ───────────────────────────────────────────
-  # We walk the template tree and copy each file, preserving directory structure.
-  # dotfiles (like .claude/, .husky/, .gitleaks.toml) are included explicitly.
-
-  copy_file() {
-    local src="$1"
-    local dest="$2"
-    local dir
-    dir="$(dirname "$dest")"
-    mkdir -p "$dir"
-
-    if [[ -f "$dest" ]]; then
-      if confirm "Overwrite existing: ${dest#$TARGET/}?"; then
-        cp "$src" "$dest"
-        success "Updated ${dest#$TARGET/}"
-      else
-        info "Skipped ${dest#$TARGET/}"
-      fi
-    else
-      cp "$src" "$dest"
-      success "Created ${dest#$TARGET/}"
-    fi
+  # ── FILE → COMPONENT MAPPING ──────────────────────────────────────────────
+  # Returns 0 (install) or 1 (skip) for a given relative path.
+  should_install_file() {
+    local rel="$1"
+    case "$rel" in
+      CLAUDE.md)                           [[ "$INSTALL_CLAUDE_MD" == true ]]      ;;
+      PROJECT_BRIEF.md)                    [[ "$INSTALL_PROJECT_BRIEF" == true ]]  ;;
+      memory/*)                            [[ "$INSTALL_MEMORY" == true ]]         ;;
+      tasks/*)                             [[ "$INSTALL_TASKS" == true ]]          ;;
+      processes/*)                         [[ "$INSTALL_PROCESSES" == true ]]      ;;
+      rules/*)                             [[ "$INSTALL_RULES" == true ]]          ;;
+      .claude/hooks/*|.claude/settings*)   [[ "$INSTALL_CLAUDE_HOOKS" == true ]]   ;;
+      .claude/commands/*)                  [[ "$INSTALL_COMMANDS" == true ]]       ;;
+      .husky/*|.gitleaks.toml)             [[ "$INSTALL_GIT_HOOKS" == true ]]      ;;
+      .github/*)                           [[ "$INSTALL_GITHUB" == true ]]         ;;
+      *)                                   return 0 ;;  # install unknown files by default
+    esac
   }
 
-  # Walk template tree (find handles dotfiles)
+  # ── COPY PROJECT FILES ────────────────────────────────────────────────────
   while IFS= read -r -d '' src_file; do
-    # Compute relative path within templates/project/
     rel="${src_file#$PROJECT_TEMPLATES/}"
+    if ! should_install_file "$rel"; then
+      info "Component not selected — skipped: $rel"
+      continue
+    fi
     dest_file="$TARGET/$rel"
-    copy_file "$src_file" "$dest_file"
+    copy_file "$src_file" "$dest_file" "$TARGET"
   done < <(find "$PROJECT_TEMPLATES" -type f -print0)
 
-  # ── Substitute placeholders ───────────────────────────────────────────────
-  # Resolve the absolute path to the target directory for settings.json.
-  # This avoids the fragility of $(git rev-parse ...) being evaluated in an
-  # unknown shell environment when Claude Code invokes the hook.
+  # ── SUBSTITUTE PLACEHOLDERS ───────────────────────────────────────────────
   TARGET_ABS="$(cd "$TARGET" && pwd)"
-
-  # Portable in-place sed: GNU sed uses -i ""; macOS BSD sed uses -i ''
-  sed_inplace() {
-    local pattern="$1"
-    local file="$2"
-    if sed --version 2>/dev/null | grep -q GNU; then
-      sed -i "$pattern" "$file"
-    else
-      sed -i '' "$pattern" "$file"
-    fi
-  }
 
   TARGET_CLAUDE="$TARGET/CLAUDE.md"
   if [[ -f "$TARGET_CLAUDE" ]]; then
@@ -244,16 +403,15 @@ if [[ "$DO_PROJECT" == true ]]; then
   fi
 
   # Substitute [REPO_ROOT] in settings.json with the absolute project path.
-  # The placeholder avoids shell-evaluation issues when Claude Code runs hooks.
+  # This step runs after copy/merge to ensure the final file has the real path.
   TARGET_SETTINGS="$TARGET/.claude/settings.json"
   if [[ -f "$TARGET_SETTINGS" ]]; then
-    # Escape forward slashes in the path for sed
     ESCAPED_PATH="${TARGET_ABS//\//\\/}"
     sed_inplace "s/\\[REPO_ROOT\\]/${ESCAPED_PATH}/g" "$TARGET_SETTINGS"
     success "Substituted [REPO_ROOT] in .claude/settings.json → $TARGET_ABS"
   fi
 
-  # ── Set executable bits on hook scripts ───────────────────────────────────
+  # ── EXECUTABLE BITS ───────────────────────────────────────────────────────
   HUSKY_DIR="$TARGET/.husky"
   CLAUDE_HOOKS_DIR="$TARGET/.claude/hooks"
 
@@ -267,28 +425,36 @@ if [[ "$DO_PROJECT" == true ]]; then
     success "Set executable bits on .claude/hooks/ scripts"
   fi
 
-  # ── Husky initialization ───────────────────────────────────────────────────
-  if [[ -f "$TARGET/package.json" ]]; then
-    echo ""
-    info "package.json detected."
-    if confirm "Initialize Husky? (runs: npx husky install)"; then
-      if command -v npx >/dev/null 2>&1; then
-        (cd "$TARGET" && npx husky install)
-        success "Husky initialized"
-      else
-        warn "npx not found — run 'npx husky install' manually in $TARGET"
+  # ── HUSKY INITIALIZATION ──────────────────────────────────────────────────
+  if [[ "$INSTALL_GIT_HOOKS" == true ]]; then
+    if [[ -f "$TARGET/package.json" ]]; then
+      echo ""
+      info "package.json detected."
+      if confirm "Initialize Husky? (runs: npx husky install)"; then
+        if command -v npx >/dev/null 2>&1; then
+          (cd "$TARGET" && npx husky install)
+          success "Husky initialized"
+        else
+          warn "npx not found — run 'npx husky install' manually in $TARGET"
+        fi
       fi
+    else
+      warn "No package.json found in $TARGET."
+      echo "  Husky requires a package.json. To set it up later:"
+      echo "    cd $TARGET && npm init -y && npm install --save-dev husky && npx husky install"
     fi
-  else
-    warn "No package.json found in $TARGET."
-    echo "  Husky requires a package.json. To set it up later:"
-    echo "    cd $TARGET && npm init -y && npm install --save-dev husky && npx husky install"
+  fi
+
+  # ── BACKUP REPORT ─────────────────────────────────────────────────────────
+  if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
+    echo ""
+    info "Originals backed up to: ${BACKUP_DIR#$TARGET/}"
   fi
 
   echo ""
 fi
 
-# ── Gitleaks check ────────────────────────────────────────────────────────────
+# ── GITLEAKS CHECK ────────────────────────────────────────────────────────────
 echo ""
 bold "── Checking dependencies ──"
 echo ""
@@ -308,7 +474,7 @@ else
   echo "  Docs: https://github.com/gitleaks/gitleaks"
 fi
 
-# ── Done ─────────────────────────────────────────────────────────────────────
+# ── DONE ──────────────────────────────────────────────────────────────────────
 echo ""
 bold "── Done ──"
 echo ""
@@ -328,8 +494,7 @@ if [[ "$DO_PROJECT" == true ]]; then
   echo "  3. Fill in ${TARGET:-your-project}/CLAUDE.md"
   echo "     (stack, conventions, off-limits paths)"
   echo ""
-  echo "  4. Open a Claude Code session in your project and run:"
-  echo "       /new-feature"
+  echo "  4. Open a Claude Code session in your project and run /kickoff or /task"
   echo ""
 fi
 
