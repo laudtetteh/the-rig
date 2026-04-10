@@ -28,13 +28,19 @@ if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" ]]; then
 
   # ── THE RIG'S OWN GOVERNANCE FILES (self-protection) ─────────────────────
   # The agent must not rewrite the rules it is supposed to follow.
-  # These paths are protected by default. To intentionally modify a workflow,
-  # rule, or hook, the user must either:
-  #   (a) temporarily comment out the relevant entry below, or
-  #   (b) make the edit manually outside of a Claude Code session.
+  # These paths are protected unconditionally — even after a /propose approval.
   #
-  # The /propose slash command is the approved path for suggesting changes —
-  # it stages a proposal for human review rather than modifying files directly.
+  # APPROVED CHANGE FLOW:
+  #   1. Run /propose — agent writes proposal to /tmp/rig-proposal-[name].md
+  #      and shows the exact before/after diff.
+  #   2. Review and approve the proposal in chat.
+  #   3. The agent cannot apply the change itself (this block stops it).
+  #      Apply it one of two ways:
+  #      (a) Copy the diff from the proposal and paste it manually into the file.
+  #      (b) Open the file in your editor and apply the change.
+  #
+  # This is intentional. The governance system protects itself even during
+  # approved changes — the human is always the one who applies them.
   RIG_PROTECTED=(
     "processes/"
     "rules/"
