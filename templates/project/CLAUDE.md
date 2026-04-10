@@ -46,6 +46,21 @@
 
 ---
 
+## Project context for task mode
+
+> `/task` reads this section to orient itself when working on an existing project.
+> Fill in everything that applies. Delete lines that don't.
+
+- **Entry points**: [e.g. "Backend starts in `backend/app/main.py`. Frontend starts in `frontend/src/app/page.tsx`."]
+- **Key services/modules**: [e.g. "Auth lives in `services/auth.py`. All LLM calls go through `services/llm.py`."]
+- **Data layer**: [e.g. "PostgreSQL via SQLAlchemy. Migrations in `alembic/versions/`. Never run raw SQL."]
+- **Environment setup**: [e.g. "Copy `.env.example` → `.env`. Run `docker compose up` to start everything."]
+- **Test command**: [e.g. "`pytest backend/` for Python, `npm test` for frontend."]
+- **Common gotchas**: [e.g. "Frontend runs on port 3001, not 3000. The Docker volume for Postgres is named — don't delete it."]
+- **Off-limits at all times**: [e.g. "`data/approved/` is read-only. Never modify `.husky/`."]
+
+---
+
 ## Key conventions
 
 - [Project-specific convention — e.g. "Never call the LLM API directly from a route — always go through the service layer"]

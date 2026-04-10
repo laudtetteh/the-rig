@@ -9,6 +9,7 @@
 **Updated**: [YYYY-MM-DD]
 **GitHub issue**: #[N]
 **PR**: #[N] *(filled after merge)*
+**Depends on**: #[N] *(remove if no dependency)*
 
 ---
 
@@ -70,6 +71,22 @@
 ## Blockers
 
 - [ ] [Anything preventing progress — remove when resolved]
+
+---
+
+## Operating mode
+
+> Set by the `/task` intake wizard. This is the source of truth for how the agent
+> operates on this task. Do not change mid-task without noting it in Prompt history.
+
+| Setting | Value |
+|---|---|
+| Autonomy | 🌶🌶 Medium (Supervised) |
+| Check-ins | Normal |
+| Risk tolerance | Balanced |
+
+**In practice:** I'll execute the full plan after you approve it, give you progress
+updates at milestones, and flag any change that touches more than 5 files.
 
 ---
 
