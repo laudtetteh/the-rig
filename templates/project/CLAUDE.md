@@ -100,12 +100,12 @@ docker compose up
 
 When starting a new session, read in this order:
 
-1. `memory/CONTEXT_SNAPSHOT.md` — current state (fastest orientation)
-2. `memory/PROGRESS.md` — full build history
+1. `memory/CONTEXT_SNAPSHOT.md` — **if this exists, it is sufficient for orientation.
+   Stop here unless the task requires deeper history.**
+2. `memory/PROGRESS.md` — only if `CONTEXT_SNAPSHOT.md` is absent or more than one
+   session old. Load the most recent entries only (last 20 `##` sections).
 3. `memory/ERRORS.md` — known pitfalls
 4. `tasks/active/` — current in-flight task(s)
-
-If `CONTEXT_SNAPSHOT.md` does not exist, fall back to `PROGRESS.md` as primary orientation.
 
 ---
 

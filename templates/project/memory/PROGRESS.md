@@ -3,6 +3,11 @@
 > Running log of completed work. Most recent entry at the top.
 > Updated at the end of every task and after every PR merge.
 > The post-tool hook auto-stubs an entry after each git commit — expand it during wrap-up.
+>
+> **Trim convention:** keep the 20 most recent entries in this file.
+> When `/wrap` detects more than 20 entries, it moves the oldest to
+> `memory/PROGRESS_archive.md` (gitignored — disk only, never committed).
+> This keeps session startup cost low while preserving full history locally.
 
 ---
 
