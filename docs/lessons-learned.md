@@ -42,15 +42,15 @@ Every component in this system exists because something went wrong without it. T
 
 ---
 
-## 4. Task file committed from tasks/active/ rather than tasks/done/
+## 4. Task file committed from .rig/tasks/active/ rather than .rig/tasks/done/
 
-**Symptom**: A PR contained both `tasks/active/TASK_auth.md` (in-progress state) and `tasks/done/TASK_auth.md` (completed state). The commit history was confusing — a reviewer couldn't tell which state was canonical.
+**Symptom**: A PR contained both `.rig/tasks/active/TASK_auth.md` (in-progress state) and `.rig/tasks/done/TASK_auth.md` (completed state). The commit history was confusing — a reviewer couldn't tell which state was canonical.
 
 **Root cause**: Task file was staged during the implementation commit before being moved to `done/`.
 
-**Fix**: Explicit staging rule added to `NEW_TASK_WORKFLOW` Step 6 and `SHIP_WORKFLOW`: "Stage the task file only after it has been moved to `tasks/done/`. Never commit a task file from `tasks/active/`." The move and the housekeeping commit happen separately from the implementation commit.
+**Fix**: Explicit staging rule added to `NEW_TASK_WORKFLOW` Step 6 and `SHIP_WORKFLOW`: "Stage the task file only after it has been moved to `.rig/tasks/done/`. Never commit a task file from `.rig/tasks/active/`." The move and the housekeeping commit happen separately from the implementation commit.
 
-**Watch for**: Staging `tasks/active/` files. Check `git status --short` before committing and verify task files are coming from `tasks/done/`.
+**Watch for**: Staging `.rig/tasks/active/` files. Check `git status --short` before committing and verify task files are coming from `.rig/tasks/done/`.
 
 ---
 
@@ -60,7 +60,7 @@ Every component in this system exists because something went wrong without it. T
 
 **Root cause**: `docker-compose.yml` declares an anonymous volume (`- /app/node_modules`) to shadow the bind-mounted `node_modules`. Docker named volumes and anonymous volumes are not recreated by `docker compose up --build`. The new image had the package; the running container used the stale anonymous volume.
 
-**Fix**: `docker compose down && docker compose up -d` (recreates the volume on next start) or `docker compose up -d -V` (the `-V` flag forces anonymous volume recreation). Added to `rules/verification.md` — dependency changes always require verification with a test import in-container.
+**Fix**: `docker compose down && docker compose up -d` (recreates the volume on next start) or `docker compose up -d -V` (the `-V` flag forces anonymous volume recreation). Added to `.rig/rules/verification.md` — dependency changes always require verification with a test import in-container.
 
 **Watch for**: Any time you add a dependency and the container is already running. Always run `docker compose up -d -V` after dependency changes, not just `--build`.
 
@@ -96,7 +96,7 @@ Every component in this system exists because something went wrong without it. T
 
 **Root cause**: Migration file created a table named `mode_configs` (plural). Application code queried `mode_config` (singular). One character difference. Migrations run on startup — the mismatch surfaced immediately in production but was never caught locally because the local database had been reset.
 
-**Fix**: `rules/verification.md` updated — migrations explicitly require in-container verification before committing. The smoke test must include a query against the new table to confirm the name matches what the application expects.
+**Fix**: `.rig/rules/verification.md` updated — migrations explicitly require in-container verification before committing. The smoke test must include a query against the new table to confirm the name matches what the application expects.
 
 **Watch for**: Any migration that creates a table or column referenced by application code. Always verify the exact name matches at both ends before committing.
 
@@ -108,7 +108,7 @@ Every component in this system exists because something went wrong without it. T
 
 **Root cause**: FastAPI validates route definitions at module load time. A route with `status_code=204` (No Content) must also explicitly declare `response_model=None`. If omitted, FastAPI raises at startup, not at request time — so the error surfaces in production even if the route is never called.
 
-**Fix**: Added `response_model=None` to all `204` routes. Logged in `ERRORS.md`. Pattern documented in `rules/coding-standards.md`.
+**Fix**: Added `response_model=None` to all `204` routes. Logged in `ERRORS.md`. Pattern documented in `.rig/rules/coding-standards.md`.
 
 **Watch for**: Any route that returns 204. Always pair `status_code=204` with `response_model=None`. The error message when this is missing is not intuitive — it points to the module, not the route.
 

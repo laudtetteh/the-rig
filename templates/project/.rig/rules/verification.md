@@ -1,7 +1,7 @@
 # Verification rules
 
 > Defines when and how to verify code before committing.
-> Applied in addition to the pre-ship checklist in `processes/SHIP_WORKFLOW.md`.
+> Applied in addition to the pre-ship checklist in `.rig/processes/SHIP_WORKFLOW.md`.
 
 ---
 

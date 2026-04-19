@@ -8,8 +8,8 @@
 ## When to follow this workflow
 
 - When the user says "start a task", "let's work on X", or "pick up the next task"
-- When pulling a task from `tasks/backlog/`
-- When resuming an interrupted task from `tasks/active/`
+- When pulling a task from `.rig/tasks/backlog/`
+- When resuming an interrupted task from `.rig/tasks/active/`
 
 ---
 
@@ -37,10 +37,10 @@ git rev-parse --show-toplevel
 
 Read these files before anything else, in this order:
 
-1. `memory/CONTEXT_SNAPSHOT.md` — current state, decisions in flight, known footguns
-2. `memory/PROGRESS.md` — what has shipped and when
-3. `memory/ERRORS.md` — pitfalls to avoid
-4. The task file in `tasks/active/` or `tasks/backlog/`
+1. `.rig/memory/CONTEXT_SNAPSHOT.md` — current state, decisions in flight, known footguns
+2. `.rig/memory/PROGRESS.md` — what has shipped and when
+3. `.rig/memory/ERRORS.md` — pitfalls to avoid
+4. The task file in `.rig/tasks/active/` or `.rig/tasks/backlog/`
 
 **If no task file exists:** stop and ask the user to create one before proceeding.
 Do not invent a task file unilaterally.
@@ -81,7 +81,7 @@ Work through the plan one step at a time.
 - After each meaningful step, briefly confirm what was done before moving to the next
 - If you hit something unexpected, **surface it** — do not silently work around it
 - Do not refactor unrelated code while implementing
-- Do not fix unrelated bugs — log them in `memory/ERRORS.md` and move on
+- Do not fix unrelated bugs — log them in `.rig/memory/ERRORS.md` and move on
 
 ---
 
@@ -100,12 +100,12 @@ Before declaring done:
 In this order:
 
 1. Update the task file: change `**Status**` to `done`, fill in `## Done notes`
-2. Move the task file from `tasks/active/` → `tasks/done/`
-3. Update `memory/PROGRESS.md` with a one-line summary of what was built
-4. Log any new pitfalls or surprises in `memory/ERRORS.md`
+2. Move the task file from `.rig/tasks/active/` → `.rig/tasks/done/`
+3. Update `.rig/memory/PROGRESS.md` with a one-line summary of what was built
+4. Log any new pitfalls or surprises in `.rig/memory/ERRORS.md`
 5. Commit with a conventional commit message referencing the task name and issue number
 6. Follow `SHIP_WORKFLOW.md` to open the PR
 
-> **Staging note:** Stage the task file **only after** it has been moved to `tasks/done/`.
-> Never commit a task file from `tasks/active/` — it creates a confusing history where
+> **Staging note:** Stage the task file **only after** it has been moved to `.rig/tasks/done/`.
+> Never commit a task file from `.rig/tasks/active/` — it creates a confusing history where
 > the "in-progress" and "completed" states both appear in the same PR.

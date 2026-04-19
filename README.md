@@ -41,10 +41,11 @@ The Rig has two layers that load in sequence at every session start:
 │  Scaffolded per project. Defines project-specific behaviour.    │
 │                                                                 │
 │  CLAUDE.md          ← project identity, stack, conventions      │
-│  processes/         ← new-task, ship, debug, post-merge flows   │
-│  rules/             ← coding standards, git, security, verify   │
-│  memory/            ← PROGRESS, ERRORS, CONTEXT_SNAPSHOT        │
-│  tasks/             ← active / backlog / done lifecycle         │
+│  .rig/              ← The Rig system files                       │
+│  .rig/processes/    ← new-task, ship, debug, post-merge flows   │
+│  .rig/rules/        ← coding standards, git, security, verify   │
+│  .rig/memory/       ← PROGRESS, ERRORS, CONTEXT_SNAPSHOT        │
+│  .rig/tasks/        ← active / backlog / done lifecycle         │
 │  .claude/           ← hook wiring + slash commands              │
 │  .husky/            ← secret scanning + AI trailer stripping    │
 │  .github/           ← PR template + issue templates             │
@@ -61,10 +62,10 @@ The Rig has two layers that load in sequence at every session start:
 | Personal profile | `templates/global/PROFILE.md.example` | Your professional context — the agent reads it so you never re-explain yourself |
 | Skills (5) | `templates/global/skills/` | Reusable prompt scripts for debug, review, refactor, tests, explain |
 | Project brain | `templates/project/CLAUDE.md` | Project-specific identity, stack, conventions, off-limits paths |
-| Processes (4) | `templates/project/processes/` | Step-by-step workflows: new-task, ship, debug, post-merge |
-| Rules (4) | `templates/project/rules/` | Coding standards, git conventions, security rules, verification protocol |
-| Memory system | `templates/project/memory/` | PROGRESS log, ERRORS log, CONTEXT_SNAPSHOT (session state) |
-| Task lifecycle | `templates/project/tasks/` | Structured task files through backlog → active → done |
+| Processes (4) | `templates/project/.rig/processes/` | Step-by-step workflows: new-task, ship, debug, post-merge |
+| Rules (4) | `templates/project/.rig/rules/` | Coding standards, git conventions, security rules, verification protocol |
+| Memory system | `templates/project/.rig/memory/` | PROGRESS log, ERRORS log, CONTEXT_SNAPSHOT (session state) |
+| Task lifecycle | `templates/project/.rig/tasks/` | Structured task files through backlog → active → done |
 | Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 8 slash commands |
 | Git hooks | `templates/project/.husky/` | Secret scanning (gitleaks) + AI attribution trailer stripping |
 | GitHub templates | `templates/project/.github/` | PR template + 3 issue templates |
@@ -142,9 +143,9 @@ When you open Claude Code in a project using The Rig, the agent automatically re
 1. `~/.claude/CLAUDE.md` — who it is and how to behave
 2. `~/.your-ai-contexts/PROFILE.md` — who you are
 3. `./CLAUDE.md` — what this project is
-4. `./memory/PROGRESS.md` — where the project stands
-5. `./memory/ERRORS.md` — what to avoid
-6. `./tasks/active/` — what's currently in flight
+4. `./.rig/memory/PROGRESS.md` — where the project stands
+5. `./.rig/memory/ERRORS.md` — what to avoid
+6. `./.rig/tasks/active/` — what's currently in flight
 
 No re-briefing. No repeating context. Every session picks up exactly where the last one left off.
 

@@ -42,8 +42,8 @@ if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" ]]; then
   # This is intentional. The governance system protects itself even during
   # approved changes — the human is always the one who applies them.
   RIG_PROTECTED=(
-    "processes/"
-    "rules/"
+    ".rig/processes/"
+    ".rig/rules/"
     ".husky/"
     "CLAUDE.md"
     ".claude/hooks/"

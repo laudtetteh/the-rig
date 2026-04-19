@@ -11,8 +11,8 @@ How to adapt The Rig for your stack, team size, and workflow preferences.
 | `CLAUDE.md` (global) | Stack defaults, personal sections | Hard rules, memory discipline, working style |
 | `CLAUDE.md` (project) | Everything — it's project-specific | — |
 | `PROJECT_BRIEF.md` | All of it — fill in your project | — |
-| `rules/coding-standards.md` | All of it — fill in your stack's conventions | Structure (sections by runtime) |
-| `rules/security.md` | Project-specific additions section | Non-negotiables (top of file) |
+| `.rig/rules/coding-standards.md` | All of it — fill in your stack's conventions | Structure (sections by runtime) |
+| `.rig/rules/security.md` | Project-specific additions section | Non-negotiables (top of file) |
 | `.claude/hooks/pre-tool.sh` | `BLOCKED_PATHS` array | `RIG_PROTECTED` block, tool name casing (`Write`, `Edit`) |
 | `.claude/commands/task.md` | Autonomy/check-in/risk default levels | Wizard structure and operating mode persistence |
 | `.husky/filter-commit-message-inplace.sh` | Add patterns for other AI tools | Existing patterns |
@@ -24,7 +24,7 @@ How to adapt The Rig for your stack, team size, and workflow preferences.
 ## Adapting for your language stack
 
 ### Python-only project
-In `rules/coding-standards.md`: delete the TypeScript section, fill in Python
+In `.rig/rules/coding-standards.md`: delete the TypeScript section, fill in Python
 conventions fully. Adjust imports section for your actual toolchain (Black, isort,
 mypy, etc.).
 
@@ -55,7 +55,8 @@ BLOCKED_PATHS=(
 The matching is substring-based — any file path containing the string will be blocked.
 Keep entries specific enough to not accidentally block legitimate paths.
 
-The `RIG_PROTECTED` block above `BLOCKED_PATHS` protects The Rig's own governance files.
+The `RIG_PROTECTED` block above `BLOCKED_PATHS` protects The Rig's own governance files
+(`.rig/processes/`, `.rig/rules/`, `.husky/`, `CLAUDE.md`, `.claude/hooks/`).
 Don't modify it directly — use `/propose` instead.
 
 ---
@@ -70,7 +71,7 @@ workflow consistently runs at a different spice level, update the defaults in
 Default: **3 — High (Autonomous)**
 ```
 
-You can also update `tasks/backlog/TASK_example.md` — the `## Operating mode` table
+You can also update `.rig/tasks/backlog/TASK_example.md` — the `## Operating mode` table
 is pre-filled with defaults. Change those values and every new task starts with your
 preferred settings.
 
@@ -112,7 +113,7 @@ Runs the code-review skill against the current diff.
 
 ## Adjusting the pre-ship checklist
 
-Edit `processes/SHIP_WORKFLOW.md` Step 1. Add or remove checklist items to match your
+Edit `.rig/processes/SHIP_WORKFLOW.md` Step 1. Add or remove checklist items to match your
 project's requirements. Common additions:
 
 - Accessibility check for UI changes
@@ -137,7 +138,7 @@ same rules and workflows.
 sees the same build history and pitfall log. `CONTEXT_SNAPSHOT.md` is gitignored and
 machine-local — each engineer has their own.
 
-**Task files**: One task per `tasks/active/` file per engineer. Use naming conventions
+**Task files**: One task per `.rig/tasks/active/` file per engineer. Use naming conventions
 to avoid collisions: `TASK_[engineer-initials]-[feature].md`.
 
 ---
@@ -189,7 +190,7 @@ Common alternatives: `trufflehog`, `git-secrets`, `detect-secrets`.
 
 The memory system has `PROGRESS.md` (what shipped) and `ERRORS.md` (what went wrong),
 but not a structured decisions log. If your project benefits from explicit decision
-records, add `memory/DECISIONS.md`:
+records, add `.rig/memory/DECISIONS.md`:
 
 ```markdown
 # Decisions log
@@ -223,4 +224,4 @@ Choose **Merge** as the collision strategy. This will:
 - Skip all existing files (your customizations are preserved)
 
 After upgrading, review the CHANGELOG for any manual steps — some releases may
-require updating `rules/` or `processes/` files that the merge strategy skips.
+require updating `.rig/rules/` or `.rig/processes/` files that the merge strategy skips.

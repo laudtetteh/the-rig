@@ -35,11 +35,12 @@
 ├── .husky/           # Git hooks
 ├── [backend/]        # Backend application
 ├── [frontend/]       # Frontend application
+├── .rig/             # The Rig system files
+│   ├── memory/       # PROGRESS.md, ERRORS.md, CONTEXT_SNAPSHOT.md (gitignored)
+│   ├── processes/    # Agent workflow files
+│   ├── rules/        # Coding standards, git conventions, security, verification
+│   └── tasks/        # active/, backlog/, done/
 ├── docs/             # Architecture, decisions, PRD
-├── memory/           # PROGRESS.md, ERRORS.md, CONTEXT_SNAPSHOT.md (gitignored)
-├── processes/        # Agent workflow files
-├── rules/            # Coding standards, git conventions, security, verification
-├── tasks/            # active/, backlog/, done/
 ├── CLAUDE.md         # This file
 └── README.md
 ```
@@ -100,18 +101,18 @@ docker compose up
 
 When starting a new session, read in this order:
 
-1. `memory/CONTEXT_SNAPSHOT.md` — **if this exists, it is sufficient for orientation.
+1. `.rig/memory/CONTEXT_SNAPSHOT.md` — **if this exists, it is sufficient for orientation.
    Stop here unless the task requires deeper history.**
-2. `memory/PROGRESS.md` — only if `CONTEXT_SNAPSHOT.md` is absent or more than one
+2. `.rig/memory/PROGRESS.md` — only if `CONTEXT_SNAPSHOT.md` is absent or more than one
    session old. Load the most recent entries only (last 20 `##` sections).
-3. `memory/ERRORS.md` — known pitfalls
-4. `tasks/active/` — current in-flight task(s)
+3. `.rig/memory/ERRORS.md` — known pitfalls
+4. `.rig/tasks/active/` — current in-flight task(s)
 
 ---
 
 ## Imported rules
 
-@rules/coding-standards.md
-@rules/git-conventions.md
-@rules/security.md
-@rules/verification.md
+@.rig/rules/coding-standards.md
+@.rig/rules/git-conventions.md
+@.rig/rules/security.md
+@.rig/rules/verification.md

@@ -109,10 +109,10 @@ Wait for explicit go-ahead before proceeding.
 
 ## After confirmation
 
-1. Create a task file in `tasks/backlog/` using the task template.
+1. Create a task file in `.rig/tasks/backlog/` using the task template.
 2. Fill in `## Goal`, `## Context`, and `## Operating mode` from the wizard answers.
-3. Move the task file to `tasks/active/`.
-4. Follow `processes/NEW_TASK_WORKFLOW.md` from Step 0 (GitHub issue first).
+3. Move the task file to `.rig/tasks/active/`.
+4. Follow `.rig/processes/NEW_TASK_WORKFLOW.md` from Step 0 (GitHub issue first).
 5. Execute according to the configured autonomy level.
 
 ### Autonomy level execution guide
@@ -140,7 +140,7 @@ Wait for explicit go-ahead before proceeding.
 
 Regardless of autonomy level:
 - Pre-tool hooks still run. Governance files (listed in `pre-tool.sh`) are still protected.
-- Changes to The Rig's own processes, rules, hooks, or CLAUDE.md still require `/propose`.
+- Changes to The Rig's own `.rig/processes/`, `.rig/rules/`, hooks, or CLAUDE.md still require `/propose`.
 - Secrets and credentials are never written to files.
 - The pre-ship checklist (`/ship`) still runs before any PR is opened.
 
@@ -148,7 +148,7 @@ Regardless of autonomy level:
 
 ## Notes
 
-- If a task file already exists in `tasks/active/`, check before creating a new one —
+- If a task file already exists in `.rig/tasks/active/`, check before creating a new one —
   offer to resume it instead.
 - The `## Operating mode` block in the task file is the source of truth for this task's
   configuration. Never change it mid-task without asking the user first.

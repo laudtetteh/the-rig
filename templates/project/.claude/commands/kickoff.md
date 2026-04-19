@@ -85,11 +85,11 @@ Present the full scaffolding plan before touching any files:
 > "Here's what I'm about to scaffold:
 >
 > **1. Fill in `CLAUDE.md`** — project description, stack table, conventions, run commands
-> **2. Create initial task backlog** — [N] tasks in `tasks/backlog/` covering the MVP features:
+> **2. Create initial task backlog** — [N] tasks in `.rig/tasks/backlog/` covering the MVP features:
 >    - `[task-slug]` — [one-line description]
 >    - [...]
 > **3. Open GitHub issues** — one issue per task, labelled and ready to work from
-> **4. Update `memory/PROGRESS.md`** — log the kickoff as the starting entry
+> **4. Update `.rig/memory/PROGRESS.md`** — log the kickoff as the starting entry
 >
 > Say **go** to scaffold, or adjust the plan."
 
@@ -116,7 +116,7 @@ Do not leave any `[PLACEHOLDER]` lines in the final file.
 
 #### 4b. Generate task backlog
 
-For each MVP feature in the brief, create a task file in `tasks/backlog/` using the
+For each MVP feature in the brief, create a task file in `.rig/tasks/backlog/` using the
 task template. Each task file must have:
 - A meaningful slug (e.g. `feat-user-auth.md`, `feat-dashboard-ui.md`)
 - `## Goal` — the user-facing outcome this task delivers
@@ -136,7 +136,7 @@ For each task file, open a GitHub issue:
 - Labels: `type: feat` + the most relevant area label
 - Update the task file's `## GitHub issue` field with the issue number
 
-#### 4d. Update memory/PROGRESS.md
+#### 4d. Update .rig/memory/PROGRESS.md
 
 Append a dated entry:
 
@@ -145,7 +145,7 @@ Append a dated entry:
 
 - Ran /kickoff from PROJECT_BRIEF.md
 - Filled in CLAUDE.md with real project content
-- Generated [N] tasks in tasks/backlog/
+- Generated [N] tasks in .rig/tasks/backlog/
 - Opened GitHub issues #[X]–#[Y]
 - Stack confirmed: [one-line summary]
 - Open decisions deferred: [list, or 'none']
@@ -160,7 +160,7 @@ After scaffolding is complete:
 > "Kickoff complete. Here's where things stand:
 >
 > - `CLAUDE.md` is filled in — The Rig is oriented on your project
-> - [N] tasks are in `tasks/backlog/` — ordered by dependency
+> - [N] tasks are in `.rig/tasks/backlog/` — ordered by dependency
 > - GitHub issues #[X]–#[Y] are open and labelled
 >
 > Suggested first move: run `/task` and pick up `[first-task-slug]` — that's the
@@ -174,7 +174,7 @@ After scaffolding is complete:
 
 - `/kickoff` is a one-time command. Running it again on an established project will
   likely overwrite things. If you want to re-scaffold after a major pivot, archive
-  the existing `CLAUDE.md` and `tasks/` first.
+  the existing `CLAUDE.md` and `.rig/tasks/` first.
 - The task backlog generated here is a starting point, not a contract. Adjust
   priorities, split tasks, or add new ones freely as the project develops.
 - All governance rules apply during scaffolding. Protected paths, the `/propose`

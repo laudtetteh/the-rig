@@ -61,7 +61,7 @@ Make the **smallest possible change** that resolves the confirmed root cause.
 
 Rules:
 - Do not refactor while fixing — one concern at a time
-- Do not fix unrelated issues discovered during investigation — log them in `memory/ERRORS.md`
+- Do not fix unrelated issues discovered during investigation — log them in `.rig/memory/ERRORS.md`
 - If the proper fix requires a larger refactor, apply a minimal patch first, then open a
   separate task for the refactor
 
@@ -78,7 +78,7 @@ Rules:
 
 ## Step 6 — Log it
 
-Add an entry to `memory/ERRORS.md`:
+Add an entry to `.rig/memory/ERRORS.md`:
 
 ```markdown
 ## [YYYY-MM-DD] — [Short title]

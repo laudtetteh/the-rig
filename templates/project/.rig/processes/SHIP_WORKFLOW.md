@@ -38,7 +38,7 @@ Work through this list before staging anything:
 - [ ] No hardcoded secrets, tokens, or credentials
 - [ ] Error cases handled — not just the happy path
 - [ ] If the PR touches `Dockerfile`, `requirements.txt`, `package.json`, or the service layer:
-      in-container verification has been run per `rules/verification.md`
+      in-container verification has been run per `.rig/rules/verification.md`
 - [ ] After any Docker verification step: `git status --short` checked — volume mounts
       can generate untracked files that must be committed or gitignored
 
@@ -86,10 +86,10 @@ git commit -F /tmp/commit-msg.txt
 
 In this order:
 
-1. Move task file from `tasks/active/` → `tasks/done/`
-2. Update `memory/PROGRESS.md` — add entry at top with what shipped
-3. Overwrite `memory/CONTEXT_SNAPSHOT.md` — full current state, never delete
-4. If anything surprised you during the task, log it in `memory/ERRORS.md`
+1. Move task file from `.rig/tasks/active/` → `.rig/tasks/done/`
+2. Update `.rig/memory/PROGRESS.md` — add entry at top with what shipped
+3. Overwrite `.rig/memory/CONTEXT_SNAPSHOT.md` — full current state, never delete
+4. If anything surprised you during the task, log it in `.rig/memory/ERRORS.md`
 
 ---
 
@@ -126,7 +126,7 @@ If the memory updates and task file move were not included in the implementation
 make a follow-up housekeeping commit on the same branch:
 
 ```bash
-git add memory/PROGRESS.md tasks/done/TASK_[name].md
+git add .rig/memory/PROGRESS.md .rig/tasks/done/TASK_[name].md
 git commit -m "chore: post-task housekeeping [#N]"
 ```
 

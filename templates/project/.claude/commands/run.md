@@ -29,7 +29,7 @@ start working through them.
 
 ### Step 1 — Survey the backlog
 
-Read all files in `tasks/backlog/` and `tasks/active/`. For each task, extract:
+Read all files in `.rig/tasks/backlog/` and `.rig/tasks/active/`. For each task, extract:
 - Task slug (filename without `.md`)
 - Status
 - Priority (`P0`–`P3`)
@@ -38,7 +38,7 @@ Read all files in `tasks/backlog/` and `tasks/active/`. For each task, extract:
 
 Build a work queue: tasks ordered by priority (P0 first), with dependency-blocked
 tasks excluded. A task is dependency-blocked if its `## Depends on` references a
-task that is not yet in `tasks/done/`.
+task that is not yet in `.rig/tasks/done/`.
 
 Present the queue:
 
@@ -74,8 +74,8 @@ For each task in the confirmed queue:
 
 4. **Complete the task.** When all acceptance criteria are met:
    - Fill in `## Done notes` in the task file
-   - Move the task file from `tasks/active/` (or `tasks/backlog/`) to `tasks/done/`
-   - Append an entry to `memory/PROGRESS.md`
+   - Move the task file from `.rig/tasks/active/` (or `.rig/tasks/backlog/`) to `.rig/tasks/done/`
+   - Append an entry to `.rig/memory/PROGRESS.md`
    - Run the pre-ship checklist (`/ship`) before opening any PR
 
 5. **Decide whether to continue.** See chaining rules below.
@@ -86,7 +86,7 @@ For each task in the confirmed queue:
 
 ### 🌶 Low (Guided)
 
-- Move the task to `tasks/active/` and announce you're starting.
+- Move the task to `.rig/tasks/active/` and announce you're starting.
 - Write the implementation plan into `## Approach` and wait for explicit approval.
 - Before **each file write**: state what you're about to do and why. Wait for "ok".
 - After each file write: summarize what changed.
@@ -94,7 +94,7 @@ For each task in the confirmed queue:
 
 ### 🌶🌶 Medium (Supervised)
 
-- Move the task to `tasks/active/` and announce you're starting.
+- Move the task to `.rig/tasks/active/` and announce you're starting.
 - Write the implementation plan into `## Approach` and wait for explicit approval.
 - Execute the full plan without pausing for individual file writes.
 - Narrate progress at milestones: plan approved → implementation done → tests → PR-ready.
@@ -106,7 +106,7 @@ For each task in the confirmed queue:
 
 ### 🌶🌶🌶 High (Autonomous)
 
-- Move the task to `tasks/active/` and announce you're starting.
+- Move the task to `.rig/tasks/active/` and announce you're starting.
 - Write the implementation plan into `## Approach` and wait for approval (one pause only).
 - Execute end-to-end without interruption.
 - Only pause for irreversible actions: DB migrations, deleting files, force pushes,
@@ -130,7 +130,7 @@ not the next task.
 
 If the queue is exhausted, always surface to the user regardless of autonomy level:
 
-> "Queue complete. All [N] tasks are done. `tasks/done/` has [list].
+> "Queue complete. All [N] tasks are done. `.rig/tasks/done/` has [list].
 > Anything to add to the backlog, or is the milestone complete?"
 
 ---
@@ -141,7 +141,7 @@ If the queue is exhausted, always surface to the user regardless of autonomy lev
 /run feat-user-auth
 ```
 
-1. Find `tasks/backlog/feat-user-auth.md` or `tasks/active/feat-user-auth.md`.
+1. Find `.rig/tasks/backlog/feat-user-auth.md` or `.rig/tasks/active/feat-user-auth.md`.
 2. Check its `## Depends on` — if the dependency isn't done, say so and stop.
 3. Execute that task only, using its configured operating mode.
 4. After completion, return to the user. Do not automatically start another task.
@@ -168,7 +168,7 @@ process.
 
 - If a task has no `## Operating mode` block, default to Medium / Normal / Balanced
   and note the assumption.
-- If `tasks/active/` already has a task in it when `/run` is called, offer to resume
+- If `.rig/tasks/active/` already has a task in it when `/run` is called, offer to resume
   it rather than starting a new one from the backlog.
 - `/run` does not modify the queue mid-execution. If new tasks are added to the backlog
   while `/run` is active, they'll appear in the next run.

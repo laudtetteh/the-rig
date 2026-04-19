@@ -355,10 +355,10 @@ if [[ "$DO_PROJECT" == true ]]; then
   if [[ "$component_choice" == "b" ]]; then
     echo ""
     confirm "Install CLAUDE.md (project brain template)?" "y"     && INSTALL_CLAUDE_MD=true    || INSTALL_CLAUDE_MD=false
-    confirm "Install memory system (memory/, PROGRESS, ERRORS)?" "y" && INSTALL_MEMORY=true   || INSTALL_MEMORY=false
-    confirm "Install task lifecycle (tasks/backlog, active, done)?" "y" && INSTALL_TASKS=true  || INSTALL_TASKS=false
-    confirm "Install process workflows (processes/)?" "y"          && INSTALL_PROCESSES=true   || INSTALL_PROCESSES=false
-    confirm "Install rules (rules/)?" "y"                          && INSTALL_RULES=true        || INSTALL_RULES=false
+    confirm "Install memory system (.rig/memory/, PROGRESS, ERRORS)?" "y" && INSTALL_MEMORY=true   || INSTALL_MEMORY=false
+    confirm "Install task lifecycle (.rig/tasks/backlog, active, done)?" "y" && INSTALL_TASKS=true  || INSTALL_TASKS=false
+    confirm "Install process workflows (.rig/processes/)?" "y"     && INSTALL_PROCESSES=true   || INSTALL_PROCESSES=false
+    confirm "Install rules (.rig/rules/)?" "y"                     && INSTALL_RULES=true        || INSTALL_RULES=false
     confirm "Install Claude Code hooks (.claude/hooks/, settings.json)?" "y" && INSTALL_CLAUDE_HOOKS=true || INSTALL_CLAUDE_HOOKS=false
     confirm "Install slash commands (.claude/commands/)?" "y"      && INSTALL_COMMANDS=true    || INSTALL_COMMANDS=false
     confirm "Install git hooks (.husky/, .gitleaks.toml)?" "y"     && INSTALL_GIT_HOOKS=true   || INSTALL_GIT_HOOKS=false
@@ -379,10 +379,10 @@ if [[ "$DO_PROJECT" == true ]]; then
     case "$rel" in
       CLAUDE.md)                           [[ "$INSTALL_CLAUDE_MD" == true ]]      ;;
       PROJECT_BRIEF.md)                    [[ "$INSTALL_PROJECT_BRIEF" == true ]]  ;;
-      memory/*)                            [[ "$INSTALL_MEMORY" == true ]]         ;;
-      tasks/*)                             [[ "$INSTALL_TASKS" == true ]]          ;;
-      processes/*)                         [[ "$INSTALL_PROCESSES" == true ]]      ;;
-      rules/*)                             [[ "$INSTALL_RULES" == true ]]          ;;
+      .rig/memory/*)                       [[ "$INSTALL_MEMORY" == true ]]         ;;
+      .rig/tasks/*)                        [[ "$INSTALL_TASKS" == true ]]          ;;
+      .rig/processes/*)                    [[ "$INSTALL_PROCESSES" == true ]]      ;;
+      .rig/rules/*)                        [[ "$INSTALL_RULES" == true ]]          ;;
       .claude/hooks/*|.claude/settings*)   [[ "$INSTALL_CLAUDE_HOOKS" == true ]]   ;;
       .claude/commands/*)                  [[ "$INSTALL_COMMANDS" == true ]]       ;;
       .husky/*|.gitleaks.toml)             [[ "$INSTALL_GIT_HOOKS" == true ]]      ;;
@@ -507,8 +507,8 @@ if [[ "$DO_PROJECT" == true && -n "${TARGET_ABS:-}" ]]; then
     echo "    LICENSE        — The Rig's MIT license"
     echo "    README.md      — The Rig's README (replace with your project's)"
     echo ""
-    echo "  Your project files (CLAUDE.md, memory/, processes/, rules/, tasks/,"
-    echo "  .claude/, .husky/, PROJECT_BRIEF.md, etc.) are NOT affected."
+    echo "  Your project files (CLAUDE.md, .rig/, .claude/, .husky/, PROJECT_BRIEF.md, etc.)"
+    echo "  are NOT affected."
     echo ""
     if confirm "Remove these Rig source files from your project directory?" "y"; then
       for rig_file in templates docs CHANGELOG.md install.sh LICENSE README.md; do
