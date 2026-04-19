@@ -74,46 +74,63 @@ The Rig has two layers that load in sequence at every session start:
 
 ## Quickstart
 
+### Step 1 — Install The Rig once (per machine)
+
 ```bash
-# 1. Clone The Rig
-git clone https://github.com/laudtetteh/the-rig.git
-cd the-rig
+# Clone to a permanent tools location — do this once, not per project
+# HTTPS:
+git clone https://github.com/laudtetteh/the-rig.git ~/tools/the-rig
+# SSH:
+git clone git@github.com:laudtetteh/the-rig.git ~/tools/the-rig
 
-# 2. Run the installer
-./install.sh
-
-# The installer will ask:
-# - How to handle collisions (skip / overwrite / merge / interactive)
-# - Which components to install (all, or choose)
-# - Where your personal profile should live
-# - Which project directory to scaffold into
-
-# 3. Fill in your personal profile
-$EDITOR ~/.your-ai-contexts/PROFILE.md
-
-# 4. Open Claude Code in your project and run /kickoff
-# /kickoff reads PROJECT_BRIEF.md, resolves open questions,
-# fills in CLAUDE.md, generates a task backlog, and opens
-# GitHub issues — all in one pass.
-```
-
-For first-time global setup only:
-```bash
+cd ~/tools/the-rig
 ./install.sh --global-only
+
+# Fill in your personal profile
+$EDITOR ~/.your-ai-contexts/PROFILE.md
 ```
 
-For scaffolding a new project (global layer already installed):
-```bash
-./install.sh --project-only
-```
+This installs the global layer (`~/.claude/CLAUDE.md` + skills) once. Every project
+on your machine shares it.
 
-For a **brand new project from scratch**:
+---
+
+### Step 2 — Scaffold a new project
+
 ```bash
-mkdir my-project && cd my-project
+# Create your project directory (name it whatever you want)
+mkdir ~/code/my-project && cd ~/code/my-project
 git init
-# Then from the the-rig directory:
+
+# Run the installer from your permanent Rig location
+~/tools/the-rig/install.sh --project-only
+# When prompted, point it at ~/code/my-project
+
+# Then open Claude Code in your project and run /kickoff
+# /kickoff reads PROJECT_BRIEF.md, confirms the project shape,
+# and scaffolds CLAUDE.md + task backlog + GitHub issues in one pass.
+```
+
+The Rig stays in `~/tools/the-rig/`. Your project is clean.
+
+---
+
+### Dropping The Rig into an existing project
+
+```bash
+~/tools/the-rig/install.sh --project-only
+# Point it at your existing project directory
+# Choose collision strategy: Skip (safest) or Merge (.claude/settings.json only)
+```
+
+---
+
+### Upgrading
+
+```bash
+cd ~/tools/the-rig && git pull
 ./install.sh --project-only
-# Point the installer at your new my-project/ directory when prompted.
+# Choose Merge — adds new files, preserves your customizations
 ```
 
 ---

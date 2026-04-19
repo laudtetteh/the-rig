@@ -483,6 +483,51 @@ else
   echo "  Docs: https://github.com/gitleaks/gitleaks"
 fi
 
+# ── IN-PLACE CLEANUP ─────────────────────────────────────────────────────────
+# If the installer was run from inside the target project directory (i.e. the user
+# cloned The Rig directly into their project folder), offer to remove the Rig's
+# own source files — they've been consumed by the installer and don't belong in
+# the project.
+#
+# Files removed are Rig-specific repo files only. Scaffolded project files
+# (CLAUDE.md, memory/, processes/, rules/, tasks/, .claude/, .husky/, etc.)
+# are never touched.
+
+if [[ "$DO_PROJECT" == true && -n "${TARGET_ABS:-}" ]]; then
+  SCRIPT_ABS="$(cd "$SCRIPT_DIR" && pwd)"
+  if [[ "$SCRIPT_ABS" == "$TARGET_ABS" ]]; then
+    echo ""
+    warn "The installer was run from inside the target project directory."
+    echo "  The following The Rig source files are no longer needed in your project:"
+    echo ""
+    echo "    templates/     — scaffolding source (already consumed)"
+    echo "    docs/          — The Rig's own architecture docs"
+    echo "    CHANGELOG.md   — The Rig's changelog"
+    echo "    install.sh     — this installer"
+    echo "    LICENSE        — The Rig's MIT license"
+    echo "    README.md      — The Rig's README (replace with your project's)"
+    echo ""
+    echo "  Your project files (CLAUDE.md, memory/, processes/, rules/, tasks/,"
+    echo "  .claude/, .husky/, PROJECT_BRIEF.md, etc.) are NOT affected."
+    echo ""
+    if confirm "Remove these Rig source files from your project directory?" "y"; then
+      for rig_file in templates docs CHANGELOG.md install.sh LICENSE README.md; do
+        if [[ -e "$TARGET_ABS/$rig_file" ]]; then
+          rm -rf "${TARGET_ABS:?}/$rig_file"
+          success "Removed $rig_file"
+        fi
+      done
+      echo ""
+      warn "README.md was removed. Create a new one for your project:"
+      echo "  Your project description, setup instructions, and usage go here."
+    else
+      info "Skipped cleanup. Remove them manually when you're ready:"
+      echo "    cd $TARGET_ABS"
+      echo "    rm -rf templates/ docs/ CHANGELOG.md install.sh LICENSE README.md"
+    fi
+  fi
+fi
+
 # ── DONE ──────────────────────────────────────────────────────────────────────
 echo ""
 bold "── Done ──"
