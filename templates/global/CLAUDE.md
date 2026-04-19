@@ -17,12 +17,12 @@ At the start of any session, silently read in this order:
 1. This file
 2. `[PROFILE_PATH]` — your personal and professional context
 3. The project's `./CLAUDE.md` (if present)
-4. `./memory/CONTEXT_SNAPSHOT.md` — **if this exists, it is sufficient for orientation.
+4. `./.rig/memory/CONTEXT_SNAPSHOT.md` — **if this exists, it is sufficient for orientation.
    Stop here unless the task requires deeper history.**
-5. `./memory/PROGRESS.md` — only if `CONTEXT_SNAPSHOT.md` is absent or more than
+5. `./.rig/memory/PROGRESS.md` — only if `CONTEXT_SNAPSHOT.md` is absent or more than
    one session old. Load the most recent entries only (last 20 `##` sections).
-6. `./memory/ERRORS.md` (if present)
-7. `./tasks/active/` (if present) — understand the current task
+6. `./.rig/memory/ERRORS.md` (if present)
+7. `./.rig/tasks/active/` (if present) — understand the current task
 
 Do not summarise these back to me unless asked.
 
@@ -56,7 +56,7 @@ Do not summarise these back to me unless asked.
 5. **Write complete code.** No placeholders, no stubs, no `// TODO: implement`,
    no ellipses in functions. If it ships, it works.
 6. **One thing at a time.** Don't refactor while adding a feature. Don't fix
-   unrelated bugs mid-task — note them in `memory/ERRORS.md`.
+   unrelated bugs mid-task — note them in `.rig/memory/ERRORS.md`.
 7. **Always run the linter/formatter** after editing code, unless told otherwise.
 8. **Never touch files outside the current task scope** unless explicitly asked.
 9. **Never make architectural decisions silently** — surface them for discussion first.
@@ -71,11 +71,11 @@ Do not summarise these back to me unless asked.
 
 ## Memory discipline
 
-- At the start of each session, check `memory/PROGRESS.md` and `memory/ERRORS.md`.
-- After completing meaningful work, update `memory/PROGRESS.md`.
-- When you hit an error or unexpected edge case, log it in `memory/ERRORS.md`.
+- At the start of each session, check `.rig/memory/PROGRESS.md` and `.rig/memory/ERRORS.md`.
+- After completing meaningful work, update `.rig/memory/PROGRESS.md`.
+- When you hit an error or unexpected edge case, log it in `.rig/memory/ERRORS.md`.
 - Before ending a session or when approaching a context limit, run `/wrap` to write
-  `memory/CONTEXT_SNAPSHOT.md`. Never delete it — always overwrite.
+  `.rig/memory/CONTEXT_SNAPSHOT.md`. Never delete it — always overwrite.
 - Never assume continuity from a prior session — always re-read context files.
 
 ---
@@ -95,7 +95,7 @@ Do not summarise these back to me unless asked.
 Read the context profile above silently. No summary unless asked.
 
 ### Starting a task
-1. Read `./processes/NEW_TASK_WORKFLOW.md`
+1. Read `./.rig/processes/NEW_TASK_WORKFLOW.md`
 2. Restate the goal in one sentence
 3. List the files to be touched
 4. Identify risks or open questions

@@ -19,7 +19,7 @@ Do not skip steps. Do not fix before understanding.
    vs. what you assumed. Verify your hypothesis against the actual code.
 5. **Make the smallest possible fix.** Do not refactor while fixing.
 6. **Verify** the fix resolves the original symptom without introducing regressions.
-7. **Log it** in `memory/ERRORS.md` using the standard format.
+7. **Log it** in `.rig/memory/ERRORS.md` using the standard format.
 
 ---
 

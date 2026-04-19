@@ -17,7 +17,7 @@ if [[ -z "$REPO" ]]; then
   exit 0  # Not in a git repo, nothing to do
 fi
 
-PROGRESS_FILE="$REPO/memory/PROGRESS.md"
+PROGRESS_FILE="$REPO/.rig/memory/PROGRESS.md"
 SESSION_LOG="/tmp/the-rig-session.log"
 
 # ── Session log ───────────────────────────────────────────────────────────────

@@ -60,7 +60,7 @@ devops(ci): add Docker build step to GitHub Actions [#7]
 
 - [ ] Issue created before any code was written
 - [ ] Tests added or updated (note if test framework not yet set up)
-- [ ] `memory/PROGRESS.md` updated if completing a task
+- [ ] `.rig/memory/PROGRESS.md` updated if completing a task
 - [ ] No `console.log`, `print()`, or debug statements left in
 - [ ] Self-reviewed diff before opening PR
 - [ ] No secrets or credentials in staged files

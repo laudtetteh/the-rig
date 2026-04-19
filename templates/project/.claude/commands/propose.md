@@ -1,8 +1,8 @@
 # Command: /propose
 
 Use this command when you believe a change to The Rig's governance files would
-improve the system. Governance files — `processes/`, `rules/`, `.husky/`, `CLAUDE.md`,
-and `.claude/hooks/` — are protected from direct writes by `pre-tool.sh`.
+improve the system. Governance files — `.rig/processes/`, `.rig/rules/`, `.husky/`,
+`CLAUDE.md`, and `.claude/hooks/` — are protected from direct writes by `pre-tool.sh`.
 
 This command is the approved path for proposing changes to them.
 
@@ -33,7 +33,7 @@ Option B — the agent generates a ready-to-paste block:
 > complete file content (not a diff) so you can paste it directly into the file.
 
 After applying: tell the agent it's done. It will log the change in
-`memory/PROGRESS.md` and clean up `/tmp/rig-proposal-[name].md`.
+`.rig/memory/PROGRESS.md` and clean up `/tmp/rig-proposal-[name].md`.
 
 ---
 
@@ -59,7 +59,7 @@ Use `/propose` when you've noticed:
 - A step in a workflow that consistently gets skipped or causes confusion
 - A rule that's either too strict or not strict enough for this project
 - A hook behaviour that needs adjustment
-- A pattern in `memory/ERRORS.md` that should be codified as a rule
+- A pattern in `.rig/memory/ERRORS.md` that should be codified as a rule
 
 ---
 

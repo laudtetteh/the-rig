@@ -24,7 +24,7 @@ Confirm the expected commit is at HEAD before proceeding.
 
 ## Step 2 — Update PROGRESS.md
 
-Add an entry at the **top** of `memory/PROGRESS.md` (below the header):
+Add an entry at the **top** of `.rig/memory/PROGRESS.md` (below the header):
 
 ```markdown
 ## [YYYY-MM-DD] — [PR title or one-line summary]
@@ -38,15 +38,15 @@ Add an entry at the **top** of `memory/PROGRESS.md` (below the header):
 
 ## Step 3 — Move the task file
 
-1. Move the completed task file: `tasks/active/TASK_[name].md` → `tasks/done/TASK_[name].md`
+1. Move the completed task file: `.rig/tasks/active/TASK_[name].md` → `.rig/tasks/done/TASK_[name].md`
 2. Update its `**Status**` field to `done`
-3. Verify `tasks/active/` is clean — only `.gitkeep` should remain if all tasks are done
+3. Verify `.rig/tasks/active/` is clean — only `.gitkeep` should remain if all tasks are done
 
 ---
 
 ## Step 4 — Overwrite CONTEXT_SNAPSHOT.md
 
-Rewrite `memory/CONTEXT_SNAPSHOT.md` with the current state of the project.
+Rewrite `.rig/memory/CONTEXT_SNAPSHOT.md` with the current state of the project.
 **Never delete this file — always overwrite it.**
 
 The snapshot must include:
@@ -72,12 +72,12 @@ Do not defer — the detail is freshest immediately after the work.
 
 ## Step 6 — Housekeeping commit
 
-If `PROGRESS.md` updates and the task file move were not already committed
+If `.rig/memory/PROGRESS.md` updates and the task file move were not already committed
 as part of the PR:
 
 ```bash
 git checkout -b chore/post-merge-[N]
-git add memory/PROGRESS.md tasks/done/TASK_[name].md
+git add .rig/memory/PROGRESS.md .rig/tasks/done/TASK_[name].md
 git commit -m "chore: post-merge housekeeping for PR #N"
 git push -u origin chore/post-merge-[N]
 # Then open a small PR or push directly per your team's convention
@@ -87,7 +87,7 @@ git push -u origin chore/post-merge-[N]
 
 ## Step 7 — Surface what's next
 
-Read the updated `CONTEXT_SNAPSHOT.md` and state the next priority.
+Read the updated `.rig/memory/CONTEXT_SNAPSHOT.md` and state the next priority.
 Ask the user: **"What's next?"**
 
 Do not begin the next task until the user confirms.

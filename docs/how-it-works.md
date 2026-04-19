@@ -49,11 +49,12 @@ The Rig solves this at three levels:
 ┌─────────────────────────────────────────────────────────────────┐
 │  PROJECT LAYER  (per-repo, version-controlled)                  │
 │                                                                 │
-│  CLAUDE.md              ← project identity + @rules/ imports    │
-│  processes/             ← step-by-step workflows                │
-│  rules/                 ← coding/git/security/verification      │
-│  memory/                ← PROGRESS + ERRORS + SNAPSHOT          │
-│  tasks/                 ← backlog → active → done lifecycle     │
+│  CLAUDE.md              ← project identity + @.rig/rules/ imports│
+│  .rig/                  ← The Rig system files                   │
+│  .rig/processes/        ← step-by-step workflows                │
+│  .rig/rules/            ← coding/git/security/verification      │
+│  .rig/memory/           ← PROGRESS + ERRORS + SNAPSHOT          │
+│  .rig/tasks/            ← backlog → active → done lifecycle     │
 │  .claude/               ← hooks + slash commands                │
 │  .husky/                ← git hooks                             │
 │  .github/               ← PR + issue templates                  │
@@ -84,16 +85,16 @@ CLAUDE.md instructs: read ./CLAUDE.md
      │  Project identity, stack, conventions
      │
      ▼
-CLAUDE.md instructs: check memory/CONTEXT_SNAPSHOT.md
+CLAUDE.md instructs: check .rig/memory/CONTEXT_SNAPSHOT.md
      │  If it exists → sufficient for orientation. Load it and stop.
-     │  If absent or stale → load PROGRESS.md (last 20 entries only)
+     │  If absent or stale → load .rig/memory/PROGRESS.md (last 20 entries only)
      │
      ▼
-CLAUDE.md instructs: read ./memory/ERRORS.md
+CLAUDE.md instructs: read ./.rig/memory/ERRORS.md
      │  Known pitfalls to avoid
      │
      ▼
-CLAUDE.md instructs: read ./tasks/active/
+CLAUDE.md instructs: read ./.rig/tasks/active/
      │  What task is currently in flight
      │
      ▼
@@ -105,8 +106,8 @@ Agent is oriented. Hooks are live. Ready to work.
      │
      ▼
 /wrap — session end
-     │  Writes CONTEXT_SNAPSHOT.md (full current state)
-     │  Ensures PROGRESS.md is current; trims if > 20 entries
+     │  Writes .rig/memory/CONTEXT_SNAPSHOT.md (full current state)
+     │  Ensures .rig/memory/PROGRESS.md is current; trims if > 20 entries
      └─ Surfaces next priority
 ```
 
@@ -116,20 +117,20 @@ Agent is oriented. Hooks are live. Ready to work.
 
 Three files, three purposes:
 
-### CONTEXT_SNAPSHOT.md
+### .rig/memory/CONTEXT_SNAPSHOT.md
 - **The primary orientation file** — written at session end via `/wrap`
 - **Gitignored** — lives on disk only, never committed
 - Contains: project state, open PRs, backlog priority, key decisions, known footguns, environment notes
 - When it exists, the agent reads *only this* at session start. PROGRESS.md is skipped.
 - What allows a new session to orient in seconds rather than minutes
 
-### PROGRESS.md
+### .rig/memory/PROGRESS.md
 - Append-only build log, one entry per meaningful unit of work
 - Auto-stubbed by `post-tool.sh` after every git commit — stub exists even if the agent forgets
 - Most recent entry at the top
-- **Trim convention:** capped at 20 entries. `/wrap` moves older entries to `PROGRESS_archive.md` (gitignored, disk-only) when the cap is exceeded. Keeps session startup cost low indefinitely.
+- **Trim convention:** capped at 20 entries. `/wrap` moves older entries to `.rig/memory/PROGRESS_archive.md` (gitignored, disk-only) when the cap is exceeded. Keeps session startup cost low indefinitely.
 
-### ERRORS.md
+### .rig/memory/ERRORS.md
 - Pitfall log — every non-obvious bug logged with structured format
 - Never deleted, only appended
 - Format: Symptom → Root cause → Fix → Watch for
@@ -197,7 +198,7 @@ Every tool call
      ├─► pre-tool.sh (PreToolUse)
      │     Logs call to /tmp/the-rig-session.log
      │     Checks RIG_PROTECTED: blocks writes to governance files
-     │     (processes/, rules/, .husky/, CLAUDE.md, .claude/hooks/)
+     │     (.rig/processes/, .rig/rules/, .husky/, CLAUDE.md, .claude/hooks/)
      │     Checks BLOCKED_PATHS: blocks project-specific protected paths
      │     Exit 1 (block) if match found
      │
@@ -207,7 +208,7 @@ Every tool call
              Scan output for git commit hash pattern
              If commit detected:
                Read commit message + hash from git log
-               Append dated stub to PROGRESS.md (idempotent)
+               Append dated stub to .rig/memory/PROGRESS.md (idempotent)
 ```
 
 **Critical implementation note:** Tool names in Claude Code are `PascalCase`
@@ -241,19 +242,19 @@ git commit
 ## The task lifecycle
 
 ```
-tasks/backlog/TASK_name.md    ← created by /task or /kickoff
+.rig/tasks/backlog/TASK_name.md    ← created by /task or /kickoff
         │
         │  (user starts work via /run or /task)
         ▼
-tasks/active/TASK_name.md     ← Status: active
-        │                        ## Operating mode set (autonomy/check-ins/risk)
+.rig/tasks/active/TASK_name.md     ← Status: active
+        │                             ## Operating mode set (autonomy/check-ins/risk)
         │  (implementation complete, tests pass)
         ▼
-tasks/done/TASK_name.md       ← Status: done, Done notes filled in
+.rig/tasks/done/TASK_name.md       ← Status: done, Done notes filled in
 ```
 
 **Staging rule:** The task file is never staged in the implementation commit. It's
-staged only from `tasks/done/` in a separate housekeeping commit.
+staged only from `.rig/tasks/done/` in a separate housekeeping commit.
 
 ---
 
