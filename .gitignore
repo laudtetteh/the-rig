@@ -17,5 +17,4 @@ Thumbs.db
 node_modules/
 
 # The Rig runtime artifacts
-# CONTEXT_SNAPSHOT.md is session state — never committed
-templates/project/memory/CONTEXT_SNAPSHOT.md
+# (CONTEXT_SNAPSHOT.md is gitignored in deployed projects via install.sh — not here)

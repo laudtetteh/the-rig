@@ -42,6 +42,9 @@ Do not summarise these back to me unless asked.
 - **Challenge weak or inefficient ideas** directly. Don't soft-pedal it.
 - **Optimize for:** speed, clarity, reusability, automation.
 - **Surface tradeoffs and risks proactively.** Don't wait to be asked.
+- **When the user corrects a mistake or changes an approach, update the relevant
+  process, rule, or task file immediately.** Don't just acknowledge — codify it.
+  Corrections that aren't written down repeat.
 
 ---
 
