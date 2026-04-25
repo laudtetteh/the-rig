@@ -441,8 +441,14 @@ if [[ "$DO_PROJECT" == true ]]; then
       info "package.json detected."
       if confirm "Initialize Husky? (runs: npx husky install)"; then
         if command -v npx >/dev/null 2>&1; then
-          (cd "$TARGET" && npx husky install)
-          success "Husky initialized"
+          if (cd "$TARGET" && npx husky install); then
+            success "Husky initialized"
+          else
+            warn "Husky initialization failed — run it manually:"
+            echo "    cd $TARGET && npx husky install"
+            echo "  If you see a permission error on node_modules/.bin/husky:"
+            echo "    chmod +x $TARGET/node_modules/.bin/husky"
+          fi
         else
           warn "npx not found — run 'npx husky install' manually in $TARGET"
         fi
