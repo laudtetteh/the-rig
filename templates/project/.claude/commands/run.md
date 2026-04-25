@@ -29,7 +29,10 @@ start working through them.
 
 ### Step 1 — Survey the backlog
 
-Read all files in `.rig/tasks/backlog/` and `.rig/tasks/active/`. For each task, extract:
+Read all files in `.rig/tasks/backlog/` and `.rig/tasks/active/`. Skip any file named
+`TASK_example.md` — it is the task template, not a real task.
+
+For each task, extract:
 - Task slug (filename without `.md`)
 - Status
 - Priority (`P0`–`P3`)
