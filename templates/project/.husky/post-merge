@@ -1,0 +1,21 @@
+#!/bin/sh
+# post-merge
+#
+# Fires after `git merge` completes — including `git pull` that brings in a merge.
+# Reminds you to run the post-merge housekeeping workflow in Claude Code.
+#
+# The reminder only shows when a merge commit was brought in (MERGE_HEAD existed),
+# not on fast-forward pulls or regular branch merges.
+#
+# To silence on a specific pull: git pull --no-verify
+
+# $1 is 1 if this was a squash merge, 0 otherwise.
+# We want to show the reminder on all merge types.
+
+echo ""
+echo "  ✔ Merge complete."
+echo ""
+echo "  → Open Claude Code in this project and run: /post-merge"
+echo "    This pulls latest, updates memory, moves the task file, and surfaces what's next."
+echo "    Skipping this is how sessions start stale."
+echo ""

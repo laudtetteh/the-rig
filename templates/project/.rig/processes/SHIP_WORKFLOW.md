@@ -20,6 +20,23 @@ The commit message must reference the issue number: `feat(scope): description [#
 If you create the issue after the commit, you cannot reference it honestly — the
 number belongs in the commit, not as a retroactive edit.
 
+**First, verify the labels you need exist:**
+
+```bash
+gh label list --repo <owner>/<repo>
+```
+
+If `type: feat`, `type: fix`, `type: chore`, etc. are missing, create them before
+proceeding — `gh issue create` with an unknown label silently drops it or errors:
+
+```bash
+gh label create "type: feat" --color "#0075ca" --description "New feature"
+gh label create "type: fix"  --color "#d73a4a" --description "Bug fix"
+gh label create "type: chore" --color "#e4e669" --description "Tooling and maintenance"
+```
+
+Then create the issue:
+
 ```bash
 gh issue create --title "..." --body-file /tmp/issue-body.md --label "type: feat"
 ```

@@ -8,6 +8,7 @@
 **Created**: [YYYY-MM-DD]
 **Updated**: [YYYY-MM-DD]
 **GitHub issue**: #[N]
+**Branch**: [type/short-description] *(e.g. feat/user-auth)*
 **PR**: #[N] *(filled after merge)*
 **Depends on**: #[N] *(remove if no dependency)*
 
