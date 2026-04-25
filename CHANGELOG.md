@@ -11,6 +11,29 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.3.0] — 2026-04-25
+
+### Added
+
+- **`/post-merge` slash command** (`templates/project/.claude/commands/post-merge.md`): wraps `POST_MERGE_WORKFLOW.md` into a runnable 7-step command — pull main, update PROGRESS, move task file, overwrite CONTEXT_SNAPSHOT, check ERRORS, housekeeping commit, surface next priority. Closes #51.
+- **`.husky/post-merge` reminder hook** (`templates/project/.husky/post-merge`): fires after every `git merge` / `git pull` with a merge commit and prints a visible reminder to run `/post-merge` in Claude Code. Closes #52.
+- **`CONTEXT_SNAPSHOT.md` template** (`templates/project/.rig/memory/CONTEXT_SNAPSHOT.md`): new template file that ships with The Rig. Includes a `Last updated:` header so staleness checks are deterministic — agent reads the date rather than inferring freshness from content. Closes #53.
+
+### Changed
+
+- **`templates/global/CLAUDE.md`**: added self-correction principle to Working style — "When the user corrects a mistake or changes an approach, update the relevant process, rule, or task file immediately." Corrections not written down repeat. Closes #53.
+- **`templates/project/.rig/processes/SHIP_WORKFLOW.md`** Step 0: added label verification block (`gh label list`, `gh label create`) before `gh issue create` — fresh GitHub repos silently drop unknown labels without this check. Closes #53.
+- **`templates/project/.rig/tasks/backlog/TASK_example.md`**: added `**Branch**:` field between GitHub issue and PR fields so branch name is tracked alongside PR number. Closes #53.
+
+### Fixed
+
+- **`install.sh`**: Husky init failure no longer kills the install. `npx husky install` is now wrapped in an `if` block — on failure, a warning is printed with manual recovery instructions instead of aborting the entire script. Closes #47.
+- **`templates/project/.claude/commands/run.md`**: `/run` no longer queues `TASK_example.md` as a real task. The example file has `Status: backlog` and `Priority: P0`; the command now explicitly skips any file named `TASK_example.md`. Closes #49.
+- **`templates/project/.husky/filter-commit-message-inplace.sh`**: `Co-authored-by:` stripping is now scoped to known AI tools only (Claude, Cursor, Copilot, `noreply@anthropic.com`, etc.). Previously stripped all `Co-authored-by:` lines including legitimate human pair-programmers. Closes #50.
+- **`.gitignore`**: removed stale pre-consolidation path (`templates/project/memory/CONTEXT_SNAPSHOT.md`); `CONTEXT_SNAPSHOT.md` in deployed projects is correctly ignored via `.rig/memory/.gitignore`.
+
+---
+
 ## [1.2.0] — 2026-04-19
 
 ### Added
