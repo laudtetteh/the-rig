@@ -74,6 +74,20 @@ If any answer gives you pause, fix it before committing.
 
 ---
 
+## Step 2.5 — Pause for local testing
+
+**Stop. Do not commit yet.**
+
+Ask the user:
+> "Ready to commit. Have you tested the changes locally and confirmed they work
+> as expected?"
+
+Wait for explicit confirmation. Do not proceed until the user says yes (or
+equivalent). This step is **non-negotiable** — it cannot be skipped regardless
+of autonomy level or how confident the agent is in the changes.
+
+---
+
 ## Step 3 — Commit
 
 Use conventional commit format:
@@ -112,7 +126,14 @@ In this order:
 
 ## Step 5 — Open the PR
 
-Use the PR template **exactly**. Five sections: Summary, Changes, Closes, Test plan, Notes.
+**First, check for a PR template:**
+
+```bash
+cat .github/pull_request_template.md 2>/dev/null
+```
+
+If a template exists, fill in **every section** of it. Do not skip sections or
+leave placeholders. If no template exists, use this default:
 
 ```bash
 cat > /tmp/pr-body.md << 'EOF'
@@ -128,7 +149,13 @@ Closes #N
 
 ## Notes
 EOF
-gh pr create --title "..." --body-file /tmp/pr-body.md --base main --label "type: feat"
+```
+
+Then create the PR:
+
+```bash
+gh pr create --title "..." --body-file /tmp/pr-body.md --base main \
+  --label "type: [type]" --label "area: [area]"
 ```
 
 **Apply labels at creation time.** Never retroactively. Required labels:

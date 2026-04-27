@@ -15,6 +15,22 @@
 TOOL="$1"
 INPUT=$(cat)
 
+# ── Repo root — dynamic, never hardcoded ─────────────────────────────────────
+REPO=$(git rev-parse --show-toplevel 2>/dev/null)
+if [[ -z "$REPO" ]]; then
+  exit 0  # Not in a git repo, nothing to do
+fi
+
+# ── Resolve RIG_DIR ───────────────────────────────────────────────────────────
+# Supports external .rig/ installations (see install.sh --rig-dir).
+# If .rigpath exists in the repo root, it contains the absolute path to the
+# .rig/ directory (which may be outside the repo). Otherwise default to $REPO/.rig.
+if [[ -f "$REPO/.rigpath" ]]; then
+  RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+else
+  RIG_DIR="$REPO/.rig"
+fi
+
 # ── Session log ──────────────────────────────────────────────────────────────
 # Logs every tool call with a timestamp. Useful for debugging agent behaviour.
 # Comment out if too noisy.
@@ -41,12 +57,15 @@ if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" ]]; then
   #
   # This is intentional. The governance system protects itself even during
   # approved changes — the human is always the one who applies them.
+  #
+  # Uses absolute paths so the block works whether .rig/ is inside the repo
+  # or at an external location (see .rigpath / install.sh --rig-dir).
   RIG_PROTECTED=(
-    ".rig/processes/"
-    ".rig/rules/"
-    ".husky/"
-    "CLAUDE.md"
-    ".claude/hooks/"
+    "$RIG_DIR/processes/"
+    "$RIG_DIR/rules/"
+    "$REPO/.husky/"
+    "$REPO/CLAUDE.md"
+    "$REPO/.claude/hooks/"
   )
 
   for protected in "${RIG_PROTECTED[@]}"; do
