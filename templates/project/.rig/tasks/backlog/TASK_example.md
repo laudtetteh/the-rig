@@ -57,6 +57,18 @@
 
 ---
 
+## Batches
+
+> Use this section when a task spans multiple commits or PR checkpoints.
+> Record each sub-goal as it lands. Delete this section for single-commit tasks.
+
+| # | Sub-goal | Commit | PR checkpoint |
+|---|---|---|---|
+| 1 | [What this batch delivers] | `[hash]` *(filled after commit)* | — |
+| 2 | [Next sub-goal] | — | — |
+
+---
+
 ## Prompt history
 
 > Running log of significant prompts and outcomes during this task.

@@ -50,7 +50,8 @@ Note the issue number. It goes in every commit on this branch.
 Work through this list before staging anything:
 
 - [ ] All acceptance criteria in the task file are met
-- [ ] No `console.log`, `print()`, or other debug statements left in code
+- [ ] No debug statements left in code (`console.log`, `var_dump`, `pdb.set_trace`, etc.)
+      *(the pre-commit hook will also catch these automatically — this is a manual pre-check)*
 - [ ] No commented-out code (we have git history)
 - [ ] No hardcoded secrets, tokens, or credentials
 - [ ] Error cases handled — not just the happy path

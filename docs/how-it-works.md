@@ -132,9 +132,9 @@ Three files, three purposes:
 
 ### .rig/memory/ERRORS.md
 - Pitfall log — every non-obvious bug logged with structured format
-- Never deleted, only appended
 - Format: Symptom → Root cause → Fix → Watch for
 - The most valuable file in the system — it's institutional memory
+- **Trim convention:** capped at 30 entries. `/wrap` moves older entries to `.rig/memory/ERRORS_archive.md` (gitignored, disk-only) when the cap is exceeded. Same pattern as PROGRESS.md.
 
 ---
 
@@ -144,7 +144,7 @@ Four workflow files that define step-by-step behaviour at each phase:
 
 ### NEW_TASK_WORKFLOW
 ```
-Step 0: Confirm working directory (main repo, not worktree)
+Step 0: GitHub issue first — /task wizard enforces this at intake time
 Step 1: Orient (read SNAPSHOT → PROGRESS if needed → ERRORS → task file)
 Step 2: Confirm understanding — restate goal, files, risks. Wait for approval.
 Step 3: Plan — write numbered plan into task file. Wait for approval.
@@ -225,9 +225,12 @@ it ran undetected for 30+ PRs.
 git commit
      │
      ├─► pre-commit
-     │     Run gitleaks --staged
-     │     Block commit if secrets detected
+     │     Run gitleaks --staged → block if secrets detected
      │     (PATH-safe: checks command -v + /usr/local/bin + /opt/homebrew/bin)
+     │     Run debug artifact scanner → block if leftover debug code detected
+     │     (console.log, var_dump, pdb.set_trace, debugger, etc.)
+     │     Extend with project patterns in .rig-debug-patterns
+     │     Override per-line with # rig-debug-ok; bypass with --no-verify
      │
      ├─► commit-msg
      │     Apply filter-commit-message-inplace.sh to message file
