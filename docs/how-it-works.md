@@ -155,12 +155,13 @@ Step 6: Wrap up — move task, update PROGRESS, log ERRORS, commit
 
 ### SHIP_WORKFLOW
 ```
-Step 0: Create GitHub issue FIRST — commit must reference [#N]
-Step 1: Pre-ship checklist (AC, no debug code, no secrets, Docker verification)
-Step 2: Self-review — does this do ONLY what was asked?
-Step 3: Commit (conventional format, issue reference)
-Step 4: Update memory (move task, PROGRESS, SNAPSHOT, ERRORS)
-Step 5: Open PR (template exactly, labels at creation time)
+Step 0:   Create GitHub issue FIRST — commit must reference [#N]
+Step 1:   Pre-ship checklist (AC, no debug code, no secrets, Docker verification)
+Step 2:   Self-review — does this do ONLY what was asked?
+Step 2.5: Pause — ask user to confirm local testing done (non-negotiable)
+Step 3:   Commit (conventional format, issue reference)
+Step 4:   Update memory (move task, PROGRESS, SNAPSHOT, ERRORS)
+Step 5:   Open PR (read .github/pull_request_template.md; labels at creation time)
 ```
 
 ### DEBUG_WORKFLOW
@@ -196,19 +197,21 @@ Wired via `.claude/settings.json`. Run on every tool call (`"matcher": ".*"`).
 Every tool call
      │
      ├─► pre-tool.sh (PreToolUse)
+     │     Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
      │     Logs call to /tmp/the-rig-session.log
      │     Checks RIG_PROTECTED: blocks writes to governance files
-     │     (.rig/processes/, .rig/rules/, .husky/, CLAUDE.md, .claude/hooks/)
+     │     (RIG_DIR/processes/, RIG_DIR/rules/, .husky/, CLAUDE.md, .claude/hooks/)
      │     Checks BLOCKED_PATHS: blocks project-specific protected paths
      │     Exit 1 (block) if match found
      │
      └─► post-tool.sh (PostToolUse)
+           Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
            Logs completion to session log
            If tool is Bash:
              Scan output for git commit hash pattern
              If commit detected:
                Read commit message + hash from git log
-               Append dated stub to .rig/memory/PROGRESS.md (idempotent)
+               Append dated stub to RIG_DIR/memory/PROGRESS.md (idempotent)
 ```
 
 **Critical implementation note:** Tool names in Claude Code are `PascalCase`
@@ -276,7 +279,7 @@ Eight slash commands covering the full development lifecycle:
 ### Ship and debug
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/ship` | `SHIP_WORKFLOW` | Pre-ship checklist, conventional commit, opens PR |
+| `/ship` | `SHIP_WORKFLOW` | Sequential 9-step hard gate: task confirm → issue → labels → checklist → local test pause → commit approval → commit → housekeeping → PR |
 | `/debug` | `DEBUG_WORKFLOW` | Hypothesis before code, mandatory ERRORS.md entry |
 
 ### Governance and housekeeping

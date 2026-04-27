@@ -19,6 +19,8 @@ At the start of any session, silently read in this order:
 3. The project's `./CLAUDE.md` (if present)
 4. `./.rig/memory/CONTEXT_SNAPSHOT.md` — **if this exists, it is sufficient for orientation.
    Stop here unless the task requires deeper history.**
+   *(If `.rigpath` exists at the project root, read that file to get the real `.rig/` path
+   and substitute it for `.rig/` in steps 4–7.)*
 5. `./.rig/memory/PROGRESS.md` — only if `CONTEXT_SNAPSHOT.md` is absent or more than
    one session old. Load the most recent entries only (last 20 `##` sections).
 6. `./.rig/memory/ERRORS.md` (if present)
@@ -45,6 +47,9 @@ Do not summarise these back to me unless asked.
 - **When the user corrects a mistake or changes an approach, update the relevant
   process, rule, or task file immediately.** Don't just acknowledge — codify it.
   Corrections that aren't written down repeat.
+- **When you see a compaction warning** (e.g. "8% until auto-compact"), run `/wrap`
+  immediately — before the next tool call. Compaction destroys in-flight context.
+  A timely `/wrap` means the next session can resume cleanly.
 
 ---
 
@@ -64,7 +69,10 @@ Do not summarise these back to me unless asked.
 8. **Never touch files outside the current task scope** unless explicitly asked.
 9. **Never make architectural decisions silently** — surface them for discussion first.
 10. **Never assume continuity from a prior session** — always re-read context files.
-11. **Always work in the main repo, not the worktree.** Claude Code sessions run inside
+11. **Never run `git commit` without first pausing to ask the user to confirm that
+    local testing is done.** Show the proposed commit message, then wait for explicit
+    go-ahead. This is non-negotiable regardless of autonomy level.
+12. **Always work in the main repo, not the worktree.** Claude Code sessions run inside
     `.claude/worktrees/<name>/`. File edits made there are invisible to the user's git
     client. At the start of every session, identify the main repo root with
     `git rev-parse --show-toplevel` and target ALL Write/Edit tool calls and `git`

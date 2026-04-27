@@ -48,20 +48,35 @@ PROJECT_TEMPLATES="$SCRIPT_DIR/templates/project"
 # ── Parse flags ───────────────────────────────────────────────────────────────
 DO_GLOBAL=true
 DO_PROJECT=true
+EXTERNAL_RIG_DIR=""   # set via --rig-dir <path>
 
 for arg in "$@"; do
   case "$arg" in
     --global-only)  DO_PROJECT=false ;;
     --project-only) DO_GLOBAL=false ;;
+    --rig-dir)
+      # --rig-dir is handled below as a two-arg flag; skip here
+      ;;
     --help|-h)
-      echo "Usage: ./install.sh [--global-only | --project-only | --help]"
+      echo "Usage: ./install.sh [--global-only | --project-only] [--rig-dir <path>] [--help]"
       echo ""
-      echo "  --global-only   Install ~/.claude/ layer only (CLAUDE.md + skills)"
-      echo "  --project-only  Scaffold project layer only (processes, rules, memory, etc.)"
-      echo "  (no flags)      Interactive — prompts for both"
+      echo "  --global-only      Install ~/.claude/ layer only (CLAUDE.md + skills)"
+      echo "  --project-only     Scaffold project layer only (processes, rules, memory, etc.)"
+      echo "  --rig-dir <path>   Install .rig/ to an external directory outside the repo."
+      echo "                     A .rigpath pointer file is written to the project root."
+      echo "                     Useful for shared repos where teammates don't use The Rig."
+      echo "  (no flags)         Interactive — prompts for both"
       exit 0
       ;;
   esac
+done
+
+# Capture --rig-dir value (two-argument flag)
+args=("$@")
+for (( i=0; i<${#args[@]}; i++ )); do
+  if [[ "${args[$i]}" == "--rig-dir" && $((i+1)) -lt ${#args[@]} ]]; then
+    EXTERNAL_RIG_DIR="${args[$((i+1))]}"
+  fi
 done
 
 # ── Portable in-place sed ─────────────────────────────────────────────────────
@@ -331,6 +346,54 @@ if [[ "$DO_PROJECT" == true ]]; then
 
   echo ""
 
+  # ── GIT TRACKING FOR .rig/ ────────────────────────────────────────────────
+  # How should .rig/ appear (or not appear) in git?
+  # Only asked in interactive mode; --rig-dir flag bypasses this.
+  RIG_TRACKING="repo"   # default: committed with the project
+  RIGPATH_FILE=""       # absolute path to .rigpath (set if external or exclude mode)
+
+  if [[ -z "$EXTERNAL_RIG_DIR" ]]; then
+    echo "How should .rig/ be tracked in git?"
+    echo ""
+    echo "  1) In the repo      — committed with the project (default, recommended for solo projects)"
+    echo "  2) Local only       — added to .git/info/exclude; invisible to teammates, no .gitignore change"
+    echo "  3) External         — install .rig/ to a path outside this repo entirely"
+    echo ""
+    read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3] (default: 1): ")" rig_tracking_input
+    rig_tracking_input="${rig_tracking_input:-1}"
+
+    case "$rig_tracking_input" in
+      1) RIG_TRACKING="repo" ;;
+      2) RIG_TRACKING="exclude" ;;
+      3) RIG_TRACKING="external"
+         ask "External path for .rig/ files?"
+         read -r -p "    Path: " EXTERNAL_RIG_DIR
+         if [[ -z "$EXTERNAL_RIG_DIR" ]]; then
+           error "External path cannot be empty."
+           exit 1
+         fi
+         ;;
+      *)
+        warn "Invalid choice — defaulting to 'In the repo'."
+        RIG_TRACKING="repo"
+        ;;
+    esac
+  else
+    RIG_TRACKING="external"
+  fi
+
+  # Resolve and validate the external path (if applicable)
+  if [[ "$RIG_TRACKING" == "external" ]]; then
+    # Expand ~ and resolve to absolute path
+    EXTERNAL_RIG_DIR="${EXTERNAL_RIG_DIR/#\~/$HOME}"
+    mkdir -p "$EXTERNAL_RIG_DIR" || { error "Cannot create directory: $EXTERNAL_RIG_DIR"; exit 1; }
+    EXTERNAL_RIG_DIR="$(cd "$EXTERNAL_RIG_DIR" && pwd)"
+    RIGPATH_FILE="$TARGET/.rigpath"
+    info "External .rig/ location: $EXTERNAL_RIG_DIR"
+  fi
+
+  echo ""
+
   # ── COMPONENT SELECTION ───────────────────────────────────────────────────
   echo "Which components do you want to install?"
   echo ""
@@ -353,12 +416,17 @@ if [[ "$DO_PROJECT" == true ]]; then
   INSTALL_PROJECT_BRIEF=true
 
   if [[ "$component_choice" == "b" ]]; then
+    # Show context-aware paths for .rig/ components
+    RIG_LABEL=".rig/"
+    if [[ "$RIG_TRACKING" == "external" ]]; then
+      RIG_LABEL="${EXTERNAL_RIG_DIR}/"
+    fi
     echo ""
     confirm "Install CLAUDE.md (project brain template)?" "y"     && INSTALL_CLAUDE_MD=true    || INSTALL_CLAUDE_MD=false
-    confirm "Install memory system (.rig/memory/, PROGRESS, ERRORS)?" "y" && INSTALL_MEMORY=true   || INSTALL_MEMORY=false
-    confirm "Install task lifecycle (.rig/tasks/backlog, active, done)?" "y" && INSTALL_TASKS=true  || INSTALL_TASKS=false
-    confirm "Install process workflows (.rig/processes/)?" "y"     && INSTALL_PROCESSES=true   || INSTALL_PROCESSES=false
-    confirm "Install rules (.rig/rules/)?" "y"                     && INSTALL_RULES=true        || INSTALL_RULES=false
+    confirm "Install memory system (${RIG_LABEL}memory/, PROGRESS, ERRORS)?" "y" && INSTALL_MEMORY=true   || INSTALL_MEMORY=false
+    confirm "Install task lifecycle (${RIG_LABEL}tasks/backlog, active, done)?" "y" && INSTALL_TASKS=true  || INSTALL_TASKS=false
+    confirm "Install process workflows (${RIG_LABEL}processes/)?" "y"  && INSTALL_PROCESSES=true   || INSTALL_PROCESSES=false
+    confirm "Install rules (${RIG_LABEL}rules/)?" "y"                  && INSTALL_RULES=true        || INSTALL_RULES=false
     confirm "Install Claude Code hooks (.claude/hooks/, settings.json)?" "y" && INSTALL_CLAUDE_HOOKS=true || INSTALL_CLAUDE_HOOKS=false
     confirm "Install slash commands (.claude/commands/)?" "y"      && INSTALL_COMMANDS=true    || INSTALL_COMMANDS=false
     confirm "Install git hooks (.husky/, .gitleaks.toml)?" "y"     && INSTALL_GIT_HOOKS=true   || INSTALL_GIT_HOOKS=false
@@ -370,6 +438,11 @@ if [[ "$DO_PROJECT" == true ]]; then
   echo ""
   info "Scaffolding into: $TARGET"
   info "Project name:     $PROJECT_NAME"
+  if [[ "$RIG_TRACKING" == "external" ]]; then
+    info ".rig/ location:   $EXTERNAL_RIG_DIR (external)"
+  elif [[ "$RIG_TRACKING" == "exclude" ]]; then
+    info ".rig/ tracking:   local only (.git/info/exclude)"
+  fi
   echo ""
 
   # ── FILE → COMPONENT MAPPING ──────────────────────────────────────────────
@@ -398,8 +471,16 @@ if [[ "$DO_PROJECT" == true ]]; then
       info "Component not selected — skipped: $rel"
       continue
     fi
-    dest_file="$TARGET/$rel"
-    copy_file "$src_file" "$dest_file" "$TARGET"
+
+    # Route .rig/ files to the external directory when applicable
+    if [[ "$RIG_TRACKING" == "external" && "$rel" == .rig/* ]]; then
+      rig_rel="${rel#.rig/}"
+      dest_file="$EXTERNAL_RIG_DIR/$rig_rel"
+      copy_file "$src_file" "$dest_file" "$EXTERNAL_RIG_DIR"
+    else
+      dest_file="$TARGET/$rel"
+      copy_file "$src_file" "$dest_file" "$TARGET"
+    fi
   done < <(find "$PROJECT_TEMPLATES" -type f -print0)
 
   # ── SUBSTITUTE PLACEHOLDERS ───────────────────────────────────────────────
@@ -418,6 +499,52 @@ if [[ "$DO_PROJECT" == true ]]; then
     ESCAPED_PATH="${TARGET_ABS//\//\\/}"
     sed_inplace "s/\\[REPO_ROOT\\]/${ESCAPED_PATH}/g" "$TARGET_SETTINGS"
     success "Substituted [REPO_ROOT] in .claude/settings.json → $TARGET_ABS"
+  fi
+
+  # ── EXTERNAL .rig/ — write .rigpath and update git excludes ──────────────
+  if [[ "$RIG_TRACKING" == "external" ]]; then
+    # Write the pointer file so hooks can resolve RIG_DIR at runtime
+    echo "$EXTERNAL_RIG_DIR" > "$RIGPATH_FILE"
+    success "Created .rigpath → $EXTERNAL_RIG_DIR"
+
+    # Exclude .rigpath from git tracking (per-clone, not shared via .gitignore)
+    GIT_EXCLUDE="$TARGET/.git/info/exclude"
+    if [[ -f "$GIT_EXCLUDE" ]]; then
+      if ! grep -qF ".rigpath" "$GIT_EXCLUDE"; then
+        echo ".rigpath" >> "$GIT_EXCLUDE"
+        success "Added .rigpath to .git/info/exclude"
+      else
+        info ".rigpath already in .git/info/exclude"
+      fi
+    else
+      warn ".git/info/exclude not found — add '.rigpath' to your .gitignore manually"
+    fi
+
+    # Update CLAUDE.md @imports to use absolute paths for the external .rig/ dir
+    TARGET_CLAUDE="$TARGET/CLAUDE.md"
+    if [[ -f "$TARGET_CLAUDE" ]]; then
+      ESCAPED_EXT="${EXTERNAL_RIG_DIR//\//\\/}"
+      sed_inplace "s|@\\.rig/|@${ESCAPED_EXT}/|g" "$TARGET_CLAUDE"
+      # Also update the context-loading paths in the prose
+      sed_inplace "s|\`.rig/memory/|\`${EXTERNAL_RIG_DIR}/memory/|g" "$TARGET_CLAUDE"
+      sed_inplace "s|\`.rig/tasks/|\`${EXTERNAL_RIG_DIR}/tasks/|g" "$TARGET_CLAUDE"
+      success "Updated CLAUDE.md to reference external .rig/ path"
+    fi
+  fi
+
+  # ── LOCAL-ONLY: add .rig/ to .git/info/exclude ───────────────────────────
+  if [[ "$RIG_TRACKING" == "exclude" ]]; then
+    GIT_EXCLUDE="$TARGET/.git/info/exclude"
+    if [[ -f "$GIT_EXCLUDE" ]]; then
+      if ! grep -qF ".rig/" "$GIT_EXCLUDE"; then
+        printf "\n# The Rig system files — local only, not shared with teammates\n.rig/\n" >> "$GIT_EXCLUDE"
+        success "Added .rig/ to .git/info/exclude (local only — teammates won't see it)"
+      else
+        info ".rig/ already in .git/info/exclude"
+      fi
+    else
+      warn ".git/info/exclude not found — add '.rig/' to your .gitignore manually"
+    fi
   fi
 
   # ── EXECUTABLE BITS ───────────────────────────────────────────────────────

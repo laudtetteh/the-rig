@@ -17,7 +17,17 @@ if [[ -z "$REPO" ]]; then
   exit 0  # Not in a git repo, nothing to do
 fi
 
-PROGRESS_FILE="$REPO/.rig/memory/PROGRESS.md"
+# ── Resolve RIG_DIR ───────────────────────────────────────────────────────────
+# Supports external .rig/ installations (see install.sh --rig-dir).
+# If .rigpath exists in the repo root, it contains the absolute path to the
+# .rig/ directory (which may be outside the repo). Otherwise default to $REPO/.rig.
+if [[ -f "$REPO/.rigpath" ]]; then
+  RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+else
+  RIG_DIR="$REPO/.rig"
+fi
+
+PROGRESS_FILE="$RIG_DIR/memory/PROGRESS.md"
 SESSION_LOG="/tmp/the-rig-session.log"
 
 # ── Session log ───────────────────────────────────────────────────────────────

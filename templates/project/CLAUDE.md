@@ -108,6 +108,10 @@ When starting a new session, read in this order:
 3. `.rig/memory/ERRORS.md` — known pitfalls
 4. `.rig/tasks/active/` — current in-flight task(s)
 
+> **External .rig/ note:** if `.rigpath` exists at the project root, all `.rig/`
+> paths above resolve to the external directory it points to. The installer
+> updates these paths automatically when the external tracking option is chosen.
+
 ---
 
 ## Imported rules

@@ -123,6 +123,47 @@ project's requirements. Common additions:
 
 ---
 
+## Keeping .rig/ invisible to teammates
+
+If you're using The Rig on a shared repo where teammates don't use it, you have
+two options to avoid `.rig/` showing up in their `git status`.
+
+### Option A — Local gitignore (simplest)
+
+The installer offers this as a tracking choice. It adds `.rig/` to
+`.git/info/exclude`, which is per-clone and never committed. Teammates don't see
+it; no `.gitignore` change is needed.
+
+To do it manually after install:
+
+```bash
+echo ".rig/" >> .git/info/exclude
+```
+
+### Option B — External directory
+
+Install `.rig/` to a path outside the repo entirely. Pass `--rig-dir` to the
+installer:
+
+```bash
+~/tools/the-rig/install.sh --project-only --rig-dir ~/.rig/projects/my-project
+```
+
+Or choose option 3 in the interactive tracking prompt. The installer will:
+
+1. Install all `.rig/` files to the external path
+2. Write a `.rigpath` file in the project root containing the external path
+3. Add `.rigpath` to `.git/info/exclude` automatically
+4. Update `CLAUDE.md`'s `@` imports and context-loading paths to use the
+   absolute external location
+5. Update the hooks (`pre-tool.sh`, `post-tool.sh`) to resolve `RIG_DIR` via
+   `.rigpath` at runtime — no hardcoded paths
+
+The project root stays clean. The agent finds its memory and rules via
+`.rigpath`. Teammates never see any of it.
+
+---
+
 ## Scaling to a team
 
 The Rig was designed for solo or small-team use. For larger teams:
@@ -132,7 +173,8 @@ is individual — don't share it. The `CLAUDE.md` global template should be the 
 across the team (standardized hard rules and working style).
 
 **Project layer**: Commit the project layer to the repo. Every team member gets the
-same rules and workflows.
+same rules and workflows. If some engineers don't use The Rig, use the local
+gitignore approach above.
 
 **Memory files**: `PROGRESS.md` and `ERRORS.md` are committed and shared — everyone
 sees the same build history and pitfall log. `CONTEXT_SNAPSHOT.md` is gitignored and
