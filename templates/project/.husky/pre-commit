@@ -1,15 +1,19 @@
 #!/bin/sh
 # pre-commit
 #
-# Scans staged files for secrets before they leave the machine.
-# Blocks the commit if any secrets are detected.
+# Two checks run on every commit:
 #
-# Requires gitleaks. Install: brew install gitleaks
-# Config: .gitleaks.toml in the repo root
+#   1. Secret scanning via gitleaks (requires install: brew install gitleaks)
+#   2. Debug artifact scanning — blocks commits containing leftover debug code
+#
+# Both checks scan staged files only.
+# To bypass in an emergency: git commit --no-verify
 #
 # NOTE: Git hooks run with a stripped PATH. Never assume `command -v` will
 # find a binary that works in your interactive shell. Always check known
 # install locations explicitly.
+
+# ── 1. Secret scanning ────────────────────────────────────────────────────────
 
 GITLEAKS_BIN=""
 
@@ -33,4 +37,83 @@ if [ -n "$GITLEAKS_BIN" ]; then
 else
   echo "WARNING: gitleaks not installed — secret scanning skipped."
   echo "Install it to protect yourself: brew install gitleaks"
+fi
+
+# ── 2. Debug artifact scanning ────────────────────────────────────────────────
+#
+# Blocks commits that contain leftover debug code.
+# Scans staged file content only — not the working tree.
+#
+# Built-in patterns cover the most common debug statements across languages.
+# Add project-specific patterns to .rig-debug-patterns (one grep-E pattern
+# per line, lines starting with # are ignored).
+#
+# To allow a specific line through: append  # rig-debug-ok  to that line.
+# To skip this check for one commit: git commit --no-verify
+
+# Built-in debug patterns (grep -E syntax, one per line)
+BUILTIN_PATTERNS="console\.log(
+debugger;
+var_dump(
+print_r(
+error_log(
+file_put_contents.*debug
+pdb\.set_trace(
+breakpoint(
+binding\.pry
+byebug
+System\.out\.println(
+dd(
+dump(.*=>>"
+
+# Merge with project-specific patterns if present
+ALL_PATTERNS="$BUILTIN_PATTERNS"
+if [ -f ".rig-debug-patterns" ]; then
+  EXTRA=$(grep -v '^#' .rig-debug-patterns | grep -v '^$')
+  if [ -n "$EXTRA" ]; then
+    ALL_PATTERNS="$ALL_PATTERNS
+$EXTRA"
+  fi
+fi
+
+# Build a single combined regex (patterns joined with |)
+COMBINED=$(printf '%s\n' "$ALL_PATTERNS" | grep -v '^$' | tr '\n' '|' | sed 's/|$//')
+
+if [ -z "$COMBINED" ]; then
+  exit 0
+fi
+
+# Scan staged text files
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
+FOUND=""
+
+for f in $STAGED_FILES; do
+  # Skip binary files
+  case "$f" in
+    *.png|*.jpg|*.jpeg|*.gif|*.ico|*.svg|*.woff|*.woff2|*.ttf|*.eot|\
+    *.pdf|*.zip|*.tar|*.gz|*.mp4|*.mp3|*.mov) continue ;;
+  esac
+
+  # Get the staged version of the file and scan it
+  hits=$(git show ":$f" 2>/dev/null \
+    | grep -nE "$COMBINED" \
+    | grep -v 'rig-debug-ok')
+
+  if [ -n "$hits" ]; then
+    FOUND="$FOUND
+  $f:
+$(printf '%s\n' "$hits" | head -5 | sed 's/^/    /')"
+  fi
+done
+
+if [ -n "$FOUND" ]; then
+  echo ""
+  echo "Debug artifact check blocked this commit."
+  echo "Remove or clean up the following before committing:"
+  echo "$FOUND"
+  echo ""
+  echo "  To allow a specific line:  append  # rig-debug-ok  to that source line"
+  echo "  To skip this check once:   git commit --no-verify"
+  echo ""
+  exit 1
 fi

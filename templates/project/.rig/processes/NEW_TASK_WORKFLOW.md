@@ -13,7 +13,19 @@
 
 ---
 
-## Step 0 — Confirm your working directory
+## Step 0 — GitHub issue first
+
+Before any code is written, a GitHub issue must exist and be linked in the task file.
+The `/task` wizard enforces this: it will not proceed to Part 2 without an issue number.
+If you are running this workflow without going through `/task`, stop and create the issue now.
+
+The issue number belongs in:
+- The task file's `**GitHub issue**: #[N]` field
+- Every commit message on this branch: `feat(scope): description [#N]`
+
+---
+
+## Step 1 — Confirm your working directory
 
 Before touching any file, identify the main repo root and confirm all edits will target it.
 

@@ -25,11 +25,20 @@ Ask the user the following. Collect all answers before moving to Part 2.
    the codebase (what service, module, or directory will this touch?).
 3. **Hard constraints?** Any deadline, off-limits paths, technology restrictions, or
    things that must not change?
+4. **GitHub issue number?** Every task must be linked to an issue before any code is
+   written — the number goes in the task file and every commit message on this branch.
+   - If the user provides a number (e.g. `#42`): note it and continue.
+   - If no issue exists yet: **stop here.** Say exactly:
+     > "Every task needs a GitHub issue before we start. Create one now and share
+     > the number — I'll wait. It goes in the task file and every commit."
+     Do not proceed to Part 2 until a real issue number is provided.
+   - Exception: if the project has no GitHub remote or the user explicitly says
+     "no issue tracking", note that in the task file and continue without a number.
 
-After collecting answers, confirm back:
+After collecting all answers, confirm back:
 
 > "Got it. You want to [restate task in one sentence], working in [area], with
-> [constraints or 'no hard constraints']. Let's configure how I'll operate."
+> [constraints or 'no hard constraints']. Issue: #[N]. Let's configure how I'll operate."
 
 ---
 

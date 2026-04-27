@@ -6,3 +6,7 @@ CONTEXT_SNAPSHOT.md
 # PROGRESS_archive.md holds older entries trimmed from PROGRESS.md.
 # Archive is disk-only: useful for manual reference but not loaded at session start.
 PROGRESS_archive.md
+
+# ERRORS_archive.md holds older entries trimmed from ERRORS.md.
+# Same pattern as PROGRESS_archive.md — local reference, never loaded at session start.
+ERRORS_archive.md
