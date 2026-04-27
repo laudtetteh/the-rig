@@ -36,6 +36,53 @@ fi
 # Comment out if too noisy.
 echo "[$(date +%H:%M:%S)] PRE  $TOOL" >> /tmp/the-rig-session.log
 
+# ── Guard: git commit and git push ───────────────────────────────────────────
+#
+# Prevents the agent from committing or pushing before the user has tested.
+#
+# git push  — blocked unconditionally. The user pushes from their own terminal
+#             after local testing. This ensures nothing reaches the remote
+#             until the user has validated the change.
+#
+# git commit — blocked until a sentinel file exists:
+#              $RIG_DIR/memory/.rig-commit-ok
+#              The agent creates this file only after the user explicitly
+#              confirms local testing is done (e.g. "ready to commit").
+#              post-tool.sh deletes it automatically after the commit lands.
+#              The file is gitignored via .rig/memory/.gitignore.
+#
+# In /ship: the agent creates the sentinel as part of Step 7, after the user
+# has already confirmed local testing at Step 5 and approved the commit
+# message at Step 6. The gate is satisfied in the normal /ship flow.
+#
+# Outside /ship: the gate fires whenever the agent tries to commit mid-task
+# without the user's explicit go-ahead.
+
+if [[ "$TOOL" == "Bash" ]]; then
+  # Parse the command string from the JSON input.
+  # python3 handles embedded quotes and escapes correctly.
+  BASH_CMD=$(python3 -c \
+    "import json,sys; print(json.load(sys.stdin).get('command',''))" \
+    <<< "$INPUT" 2>/dev/null || true)
+
+  # ── Gate git commit on sentinel file ───────────────────────────────────
+  COMMIT_OK="$RIG_DIR/memory/.rig-commit-ok"
+  if echo "$BASH_CMD" | grep -qE '\bgit\s+commit\b'; then
+    if [[ ! -f "$COMMIT_OK" ]]; then
+      echo "" >&2
+      echo "  Commit blocked by The Rig." >&2
+      echo "" >&2
+      echo "  I need your go-ahead before I commit. Here's how it works:" >&2
+      echo "    1. Test the changes in your terminal" >&2
+      echo "    2. Say one of: 'commit approved' · 'ship it' · 'lgtm' · 'go'" >&2
+      echo "       I'll create the authorization and immediately commit and push." >&2
+      echo "" >&2
+      echo "  (Or create it yourself: touch '${COMMIT_OK}')" >&2
+      exit 1
+    fi
+  fi
+fi
+
 # ── Block writes to protected paths ──────────────────────────────────────────
 if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" ]]; then
 

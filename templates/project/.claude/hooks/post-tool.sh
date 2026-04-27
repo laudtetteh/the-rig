@@ -61,6 +61,16 @@ if [[ "$TOOL" == "Bash" ]]; then
 
         echo "[$(date +%H:%M:%S)] PROGRESS stub: $COMMIT_HASH $COMMIT_MSG" >> "$SESSION_LOG"
       fi
+
+      # ── Clear commit-ok sentinel ────────────────────────────────────────
+      # The sentinel (.rig-commit-ok) authorises a single commit.
+      # Remove it immediately after the commit lands so the next commit
+      # requires a fresh authorisation.
+      COMMIT_OK="$RIG_DIR/memory/.rig-commit-ok"
+      if [[ -f "$COMMIT_OK" ]]; then
+        rm -f "$COMMIT_OK"
+        echo "[$(date +%H:%M:%S)] COMMIT-OK sentinel cleared after $COMMIT_HASH" >> "$SESSION_LOG"
+      fi
     fi
   fi
 fi
