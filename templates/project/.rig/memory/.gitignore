@@ -1,3 +1,8 @@
+# .rig-manifest is intentionally tracked and committed.
+# It records the SHA256 of each Rig-owned file at last install, enabling
+# the installer's Upgrade strategy to detect user customizations.
+# Do NOT add it to this file.
+
 # CONTEXT_SNAPSHOT.md is session state, not project history.
 # It may contain sensitive environment notes and in-flight decisions.
 # It lives on disk only — read at session start, never committed.

@@ -11,6 +11,27 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.4.0] — TBD
+
+### Added
+
+- **Versioned manifest + Upgrade strategy** (`install.sh`): new collision strategy option 5 — "Upgrade". On every install (any strategy), the installer now records the SHA256 of each Rig-owned file into `.rig/memory/.rig-manifest`. On upgrade with strategy 5: unmodified Rig-owned files are auto-updated; customized files show a diff and prompt before overwriting; user-owned files are always skipped. SHA256 unavailable gracefully falls back to `cmp -s` + prompt. Closes #69.
+- **`.rig/memory/.rig-manifest` template file**: committed to the repo (not gitignored). Includes a header comment explaining its purpose. `.rig/memory/.gitignore` has an explicit comment confirming the manifest is intentionally tracked.
+- **Commit gate with user trigger-phrase flow** (`pre-tool.sh`, `post-tool.sh`): agent pauses before any `git commit`, shows the proposed message, and asks for an explicit trigger phrase — "commit approved", "ship it", "lgtm", or "go". Agent creates `.rig-commit-ok` sentinel → commits → pushes. `post-tool.sh` auto-deletes the sentinel after the commit lands (one-shot authorisation). Closes #67.
+- **`.rig-commit-ok` sentinel**: added to `.rig/memory/.gitignore` with lifecycle documentation.
+
+### Changed
+
+- **`install.sh`**: `copy_file()` gains an optional 4th parameter `rel` (relative path) used for manifest tracking and `is_rig_owned()` classification. New helpers: `sha256_file()`, `is_rig_owned()`, `read_manifest_hash()`, `write_manifest_entry()`, `_copy_file_upgrade()`. `MANIFEST_FILE` global resolved after `RIG_TRACKING` decision. All project-layer copy calls now pass `$rel`.
+- **`templates/project/.rig/processes/SHIP_WORKFLOW.md`** Step 2.5: updated to use trigger-phrase language ("commit approved" / "ship it" / "lgtm" / "go").
+- **`templates/project/.claude/commands/ship.md`** Steps 5 and 7: Step 5 uses trigger-phrase language; Step 7 creates the `.rig-commit-ok` sentinel inline (user already confirmed at Steps 5 + 6).
+- **`templates/global/CLAUDE.md`** Hard Rule #11: rewritten to describe the full trigger-phrase protocol. Hard Rule count is now 12. Added compaction-warning instruction to Working style.
+- **`templates/project/.rig/processes/NEW_TASK_WORKFLOW.md`**: fixed duplicate Step 1 — worktree orientation gate is Step 1, Orient is Step 2; Steps 2–6 renumbered to 3–7.
+- **`docs/customizing.md`** Upgrade section: replaced stale "choose Merge" guidance with full Upgrade strategy documentation including manifest explanation, decision table, and manifest-aware customization guide.
+- **`docs/how-it-works.md`**: hard rule count updated to 12; hook section documents commit-gate sentinel flow; SHIP_WORKFLOW and NEW_TASK_WORKFLOW step summaries updated; `.rig-manifest` added to memory system section.
+
+---
+
 ## [1.3.0] — 2026-04-25
 
 ### Added
