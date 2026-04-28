@@ -53,7 +53,7 @@ Do not summarise these back to me unless asked.
 
 ---
 
-## Hard rules (non-negotiable)
+## Hard rules (non-negotiable) — 12 total
 
 1. **Never delete files without explicit permission.** Move to `_archive/` instead.
 2. **Never run destructive DB commands** (`DROP`, `TRUNCATE`, `DELETE` without `WHERE`)

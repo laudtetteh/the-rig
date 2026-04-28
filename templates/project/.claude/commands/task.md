@@ -152,6 +152,8 @@ Regardless of autonomy level:
 - Changes to The Rig's own `.rig/processes/`, `.rig/rules/`, hooks, or CLAUDE.md still require `/propose`.
 - Secrets and credentials are never written to files.
 - The pre-ship checklist (`/ship`) still runs before any PR is opened.
+- At task completion, any Rig workflow friction or gaps observed must be logged to
+  `.rig/memory/RIG_GAPS.md`. Use `/rig-gaps` to compile and submit them.
 
 ---
 
