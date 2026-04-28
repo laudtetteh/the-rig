@@ -63,6 +63,9 @@ sha256_file() {
 # Rig-owned:   .claude/hooks/, .claude/commands/, .rig/processes/, .husky/, .gitleaks.toml
 # User-owned:  CLAUDE.md, PROJECT_BRIEF.md, .rig/rules/, .rig/memory/*.md,
 #              .rig/tasks/, .github/
+#              Note: .rig/memory/RIG_GAPS.md is user-owned and committed to the project
+#              repo (not gitignored). It accumulates workflow feedback across sessions.
+#              It is never manifest-tracked and never overwritten by the Upgrade strategy.
 # Special:     .claude/settings.json (always smart-merged, not manifest-tracked)
 is_rig_owned() {
   local rel="$1"

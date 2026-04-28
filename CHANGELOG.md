@@ -11,6 +11,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.5.0] — 2026-04-27
+
+### Added
+
+- **`RIG_GAPS.md` template** (`templates/project/.rig/memory/RIG_GAPS.md`): self-improvement feedback log committed to every project repo. Captures workflow friction, bugs, missing features, and improvement ideas observed during real use. Accumulates across sessions and machines. Closes #72.
+- **`/rig-gaps` slash command** (`templates/project/.claude/commands/rig-gaps.md`): compiles unsubmitted gap entries from `RIG_GAPS.md`, cross-checks `ERRORS.md` for Rig-related issues not yet captured, formats a consolidated report with copy-paste submission instructions, and offers to mark entries as submitted. Closes #72.
+- **`/wrap` self-improvement check** (step 5): at session end, agent scans `ERRORS.md` for Rig-related friction and reflects on session pain points. Any gaps not already in `RIG_GAPS.md` are appended automatically. Closes #72.
+
+### Changed
+
+- **`templates/project/.claude/commands/wrap.md`**: added step 5 (self-improvement check) with full entry format and submission reminder; existing steps 5–7 renumbered to 6–8.
+- **`templates/project/.rig/processes/NEW_TASK_WORKFLOW.md`**: Step 7 (Wrap up) rewritten — adds plan-vs-reality audit before touching anything; structured `## Done notes` fields required (What was built / Deviations from plan / Actual files touched / Follow-ups opened); RIG_GAPS logging added as explicit step.
+- **`templates/project/.rig/processes/SHIP_WORKFLOW.md`**: Step 4 updated — task file accuracy check added; GitHub Issue closing comment required when scope changes; RIG_GAPS logging added. Step 5 updated — PR body must describe what was actually built, not the original plan.
+- **`templates/project/.rig/tasks/backlog/TASK_example.md`**: `## Done notes` section expanded with four structured fields to prevent restatement of plan.
+- **`templates/project/.rig/memory/.gitignore`**: added comment confirming `RIG_GAPS.md` is intentionally tracked and committed.
+
+---
+
 ## [1.4.0] — 2026-04-27
 
 ### Added

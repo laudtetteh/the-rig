@@ -106,5 +106,10 @@ updates at milestones, and flag any change that touches more than 5 files.
 ## Done notes
 
 > Filled in when the task is complete, before moving to `tasks/done/`.
+> This section records **what actually happened**, not what was planned.
+> `## Approach` stays as the original plan — the historical record of intent.
 
-[What was built. Any deviations from the original approach. Follow-up tasks opened.]
+**What was built:** [Specific description of actual implementation — files, behaviour, decisions]
+**Deviations from plan:** [Where approach or scope changed and why — write "none" if on plan]
+**Actual files touched:** [Any files not in `## Files likely affected`, or files that were NOT touched]
+**Follow-ups opened:** [Task files or issues created as a result — write "none" if none]

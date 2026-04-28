@@ -23,7 +23,7 @@ Claude will ask:
 - What's the one-sentence goal?
 - Any files that are off-limits or out of scope for this task?
 
-Then it creates the task file and follows `.rig/processes/NEW_TASK_WORKFLOW.md` from Step 1.
+Then it creates the task file and follows `.rig/processes/NEW_TASK_WORKFLOW.md` from Step 0.
 
 ## Notes
 

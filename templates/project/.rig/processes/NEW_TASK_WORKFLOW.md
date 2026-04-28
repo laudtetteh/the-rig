@@ -111,12 +111,33 @@ Before declaring done:
 
 In this order:
 
-1. Update the task file: change `**Status**` to `done`, fill in `## Done notes`
-2. Move the task file from `.rig/tasks/active/` → `.rig/tasks/done/`
-3. Update `.rig/memory/PROGRESS.md` with a one-line summary of what was built
-4. Log any new pitfalls or surprises in `.rig/memory/ERRORS.md`
-5. Commit with a conventional commit message referencing the task name and issue number
-6. Follow `SHIP_WORKFLOW.md` to open the PR
+1. **Audit plan vs. reality** before touching anything:
+   - Compare `## Approach` with what was actually implemented
+   - If scope changed, approach deviated, or unexpected files were touched — note it
+   - Do NOT rewrite `## Approach` (it's the historical plan); add deviations to `## Done notes`
+
+2. **Update the task file:**
+   - Change `**Status**` to `done`
+   - Fill in `## Done notes` with substance — not a restatement of the plan:
+     - **What was built:** actual implementation, specific files and behaviours
+     - **Deviations from plan:** where scope or approach changed and why
+     - **Actual files touched:** anything not in `## Files likely affected`
+     - **Follow-ups opened:** any new task files or issues created
+   - Update `**Updated**` date
+
+3. Move the task file from `.rig/tasks/active/` → `.rig/tasks/done/`
+
+4. Update `.rig/memory/PROGRESS.md` with a one-line summary of what was built
+
+5. Log any new pitfalls or surprises in `.rig/memory/ERRORS.md`
+
+6. Log any Rig workflow gaps or friction points in `.rig/memory/RIG_GAPS.md`
+   *(Was there anything about The Rig itself that slowed you down, was missing, or felt wrong?
+   Log it here — see `/rig-gaps` for the submission workflow.)*
+
+7. Commit with a conventional commit message referencing the task name and issue number
+
+8. Follow `SHIP_WORKFLOW.md` to open the PR
 
 > **Staging note:** Stage the task file **only after** it has been moved to `.rig/tasks/done/`.
 > Never commit a task file from `.rig/tasks/active/` — it creates a confusing history where

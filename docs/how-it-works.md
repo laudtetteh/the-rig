@@ -136,6 +136,13 @@ Three files, three purposes:
 - The most valuable file in the system — it's institutional memory
 - **Trim convention:** capped at 30 entries. `/wrap` moves older entries to `.rig/memory/ERRORS_archive.md` (gitignored, disk-only) when the cap is exceeded. Same pattern as PROGRESS.md.
 
+### .rig/memory/RIG_GAPS.md
+- Self-improvement feedback log — committed to every project repo
+- Captures workflow friction, bugs, missing features, and improvement ideas observed during real use
+- Appended automatically by `/wrap` (step 5) when the agent notices Rig-related friction
+- Submitted to The Rig dev session via `/rig-gaps` command; entries marked `[submitted]` after delivery
+- Accumulates across sessions and machines — the mechanism by which real-world use improves The Rig
+
 ### .rig/memory/.rig-manifest
 - Written by the installer on every install; committed to the repo
 - Records the SHA256 hash of each Rig-owned file at install time
@@ -159,7 +166,8 @@ Step 3: Confirm understanding — restate goal, files, risks. Wait for approval.
 Step 4: Plan — write numbered plan into task file. Wait for approval.
 Step 5: Implement — one step at a time, surface surprises
 Step 6: Verify — run tests, check acceptance criteria
-Step 7: Wrap up — move task, update PROGRESS, log ERRORS, commit
+Step 7: Wrap up — audit plan vs. reality; structured Done notes; move task; update PROGRESS;
+        log ERRORS; log RIG_GAPS; commit
 ```
 
 ### SHIP_WORKFLOW
@@ -169,8 +177,9 @@ Step 1:   Pre-ship checklist (AC, no debug code, no secrets, Docker verification
 Step 2:   Self-review — does this do ONLY what was asked?
 Step 2.5: Pause — ask user for trigger phrase ("commit approved" / "ship it" / "lgtm" / "go")
 Step 3:   Commit (conventional format, issue reference; sentinel flow via pre-tool.sh)
-Step 4:   Update memory (move task, PROGRESS, SNAPSHOT, ERRORS)
-Step 5:   Open PR (read .github/pull_request_template.md; labels at creation time)
+Step 4:   Update memory (verify task file accuracy; move task; PROGRESS; SNAPSHOT; ERRORS;
+          RIG_GAPS; close GitHub Issue with actual-scope comment)
+Step 5:   Open PR (body describes what was actually built; read template; labels at creation time)
 ```
 
 ### DEBUG_WORKFLOW
@@ -280,7 +289,7 @@ staged only from `.rig/tasks/done/` in a separate housekeeping commit.
 
 ## The command set
 
-Eight slash commands covering the full development lifecycle:
+Nine slash commands covering the full development lifecycle:
 
 ### Project bootstrap
 | Command | Triggers | Key behaviour |
@@ -303,7 +312,8 @@ Eight slash commands covering the full development lifecycle:
 | Command | Triggers | Key behaviour |
 |---|---|---|
 | `/propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
-| `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, trims if > 20 entries, surfaces next priority |
+| `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, runs self-improvement check (logs Rig gaps), trims if > 20 entries, surfaces next priority |
+| `/rig-gaps` | Self-improvement | Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats a report with submission instructions for The Rig dev session |
 | `/new-feature` | `NEW_TASK_WORKFLOW` | Original task entry point — creates task file, plans before coding, waits for approval |
 
 ---

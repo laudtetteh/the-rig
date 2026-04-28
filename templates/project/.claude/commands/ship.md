@@ -131,13 +131,32 @@ Report the commit hash on success.
 
 In this order:
 
-1. Move the task file: `.rig/tasks/active/TASK_[name].md` → `.rig/tasks/done/`
-2. Update `.rig/memory/PROGRESS.md` — add a full entry at the top (not a stub)
-3. Overwrite `.rig/memory/CONTEXT_SNAPSHOT.md` with current project state
+1. **Verify the task file reflects reality** before moving it:
+   - `## Done notes` must describe what was actually built — not a restatement of the plan
+   - Required fields: **What was built** / **Deviations from plan** / **Actual files touched** / **Follow-ups opened**
+   - If scope or approach changed during execution, capture it in `## Done notes`
+   - `## Approach` stays as the original plan (historical intent); deviations belong in `## Done notes`
+2. Move the task file: `.rig/tasks/active/TASK_[name].md` → `.rig/tasks/done/`
+3. Update `.rig/memory/PROGRESS.md` — add a full entry at the top (not a stub); if scope changed, the entry reflects the actual outcome
+4. Overwrite `.rig/memory/CONTEXT_SNAPSHOT.md` with current project state
+5. If anything surprised you, log it in `.rig/memory/ERRORS.md`
+6. If anything about The Rig's workflow was missing or felt wrong, log it in `.rig/memory/RIG_GAPS.md`
+7. **Post a closing comment on the GitHub Issue:**
+   ```bash
+   gh issue comment [N] --body "Implemented in PR #[M].
+
+   Actual scope: [one sentence on what was actually built]
+   Deviations: [any changes from the original issue description, or 'none']"
+   ```
+   This is required when scope changed; recommended always.
 
 ---
 
 ## Step 9 — Open the PR
+
+**The PR body must describe what was actually built — not the original plan.**
+If scope changed during implementation, note it explicitly. Reviewers read the PR
+description to understand what landed, not what was intended.
 
 Use the project's PR template if one exists at `.github/pull_request_template.md`.
 Read it, fill in every section, then:
@@ -165,4 +184,5 @@ Report the PR URL.
 - Labels (Step 3) must be verified against the actual repo — never assumed.
 - The local testing pause (Step 5) is non-negotiable regardless of autonomy level.
 - If the task has multiple commits, summarise all changes in the PR body.
-- The task file is moved to `.rig/tasks/done/` only after a successful commit.
+- The task file is moved to `.rig/tasks/done/` only after a successful commit (Step 8).
+- The PR body (Step 9) must reflect what was actually built — not the original plan.
