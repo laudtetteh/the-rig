@@ -29,7 +29,7 @@ The Rig solves this at three levels:
 │  Installed once per machine. Cross-project.                     │
 │                                                                 │
 │  ~/.claude/CLAUDE.md                                            │
-│    └─ Hard rules (11), working style, memory discipline,        │
+│    └─ Hard rules (12), working style, memory discipline,        │
 │       planning discipline, session workflow, git conventions,   │
 │       code quality defaults, skill trigger table                │
 │                                                                 │
@@ -145,12 +145,13 @@ Four workflow files that define step-by-step behaviour at each phase:
 ### NEW_TASK_WORKFLOW
 ```
 Step 0: GitHub issue first — /task wizard enforces this at intake time
-Step 1: Orient (read SNAPSHOT → PROGRESS if needed → ERRORS → task file)
-Step 2: Confirm understanding — restate goal, files, risks. Wait for approval.
-Step 3: Plan — write numbered plan into task file. Wait for approval.
-Step 4: Implement — one step at a time, surface surprises
-Step 5: Verify — run tests, check acceptance criteria
-Step 6: Wrap up — move task, update PROGRESS, log ERRORS, commit
+Step 1: Confirm working directory (main repo root, never a worktree path)
+Step 2: Orient (read SNAPSHOT → PROGRESS if needed → ERRORS → task file)
+Step 3: Confirm understanding — restate goal, files, risks. Wait for approval.
+Step 4: Plan — write numbered plan into task file. Wait for approval.
+Step 5: Implement — one step at a time, surface surprises
+Step 6: Verify — run tests, check acceptance criteria
+Step 7: Wrap up — move task, update PROGRESS, log ERRORS, commit
 ```
 
 ### SHIP_WORKFLOW
@@ -158,8 +159,8 @@ Step 6: Wrap up — move task, update PROGRESS, log ERRORS, commit
 Step 0:   Create GitHub issue FIRST — commit must reference [#N]
 Step 1:   Pre-ship checklist (AC, no debug code, no secrets, Docker verification)
 Step 2:   Self-review — does this do ONLY what was asked?
-Step 2.5: Pause — ask user to confirm local testing done (non-negotiable)
-Step 3:   Commit (conventional format, issue reference)
+Step 2.5: Pause — ask user for trigger phrase ("commit approved" / "ship it" / "lgtm" / "go")
+Step 3:   Commit (conventional format, issue reference; sentinel flow via pre-tool.sh)
 Step 4:   Update memory (move task, PROGRESS, SNAPSHOT, ERRORS)
 Step 5:   Open PR (read .github/pull_request_template.md; labels at creation time)
 ```
@@ -202,7 +203,11 @@ Every tool call
      │     Checks RIG_PROTECTED: blocks writes to governance files
      │     (RIG_DIR/processes/, RIG_DIR/rules/, .husky/, CLAUDE.md, .claude/hooks/)
      │     Checks BLOCKED_PATHS: blocks project-specific protected paths
-     │     Exit 1 (block) if match found
+     │     Gates git commit on $RIG_DIR/memory/.rig-commit-ok sentinel:
+     │       Blocked → agent shows commit message, asks for trigger phrase
+     │       ("commit approved" / "ship it" / "lgtm" / "go")
+     │       Agent creates sentinel → commit succeeds → post-tool.sh deletes it
+     │     Exit 1 (block) if any check fails
      │
      └─► post-tool.sh (PostToolUse)
            Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
@@ -212,6 +217,7 @@ Every tool call
              If commit detected:
                Read commit message + hash from git log
                Append dated stub to RIG_DIR/memory/PROGRESS.md (idempotent)
+               Delete $RIG_DIR/memory/.rig-commit-ok sentinel (one-shot auth)
 ```
 
 **Critical implementation note:** Tool names in Claude Code are `PascalCase`
