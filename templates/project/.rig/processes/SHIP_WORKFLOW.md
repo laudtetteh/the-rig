@@ -118,14 +118,39 @@ git commit -F /tmp/commit-msg.txt
 
 In this order:
 
-1. Move task file from `.rig/tasks/active/` → `.rig/tasks/done/`
-2. Update `.rig/memory/PROGRESS.md` — add entry at top with what shipped
-3. Overwrite `.rig/memory/CONTEXT_SNAPSHOT.md` — full current state, never delete
-4. If anything surprised you during the task, log it in `.rig/memory/ERRORS.md`
+1. **Verify the task file reflects reality** before moving it:
+   - `## Done notes` must describe what was actually built — not a restatement of the plan
+   - If scope or approach changed during execution, it must be captured here
+   - `## Approach` stays as the original plan (historical intent); deviations belong in `## Done notes`
+
+2. Move task file from `.rig/tasks/active/` → `.rig/tasks/done/`
+
+3. Update `.rig/memory/PROGRESS.md` — add entry at top with what actually shipped
+   (if scope changed from the plan, the PROGRESS entry reflects the actual outcome)
+
+4. Overwrite `.rig/memory/CONTEXT_SNAPSHOT.md` — full current state, never delete
+
+5. If anything surprised you, log it in `.rig/memory/ERRORS.md`
+
+6. If anything about The Rig's workflow was missing or felt wrong, log it in `.rig/memory/RIG_GAPS.md`
+
+7. **Post a closing comment on the GitHub Issue:**
+   ```bash
+   gh issue comment [N] --body "Implemented in PR #[M].
+
+   Actual scope: [one sentence on what was actually built]
+   Deviations: [any changes from the original issue description, or 'none']"
+   ```
+   This is especially important when scope changed — the issue description captures the original
+   intent; the comment captures what was actually delivered.
 
 ---
 
 ## Step 5 — Open the PR
+
+**The PR body must describe what was actually built — not the original plan.**
+If scope changed during implementation, the PR body should note it explicitly. Reviewers
+read the PR description to understand what landed, not what was intended.
 
 **First, check for a PR template:**
 

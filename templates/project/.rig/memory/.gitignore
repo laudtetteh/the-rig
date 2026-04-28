@@ -1,3 +1,7 @@
+# RIG_GAPS.md is intentionally tracked and committed.
+# It accumulates workflow friction signals across sessions and machines.
+# Do NOT add it to this file.
+
 # .rig-manifest is intentionally tracked and committed.
 # It records the SHA256 of each Rig-owned file at last install, enabling
 # the installer's Upgrade strategy to detect user customizations.
