@@ -64,9 +64,9 @@ The Rig has two layers that load in sequence at every session start:
 | Project brain | `templates/project/CLAUDE.md` | Project-specific identity, stack, conventions, off-limits paths |
 | Processes (4) | `templates/project/.rig/processes/` | Step-by-step workflows: new-task, ship, debug, post-merge |
 | Rules (4) | `templates/project/.rig/rules/` | Coding standards, git conventions, security rules, verification protocol |
-| Memory system | `templates/project/.rig/memory/` | PROGRESS log, ERRORS log, CONTEXT_SNAPSHOT (session state) |
+| Memory system | `templates/project/.rig/memory/` | PROGRESS log, ERRORS log, CONTEXT_SNAPSHOT (session state), RIG_GAPS (self-improvement feedback) |
 | Task lifecycle | `templates/project/.rig/tasks/` | Structured task files through backlog → active → done |
-| Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 8 slash commands |
+| Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 9 slash commands |
 | Git hooks | `templates/project/.husky/` | Secret scanning (gitleaks) + AI attribution trailer stripping |
 | GitHub templates | `templates/project/.github/` | PR template + 3 issue templates |
 | Installer | `install.sh` | Interactive setup script — handles both layers |
@@ -148,9 +148,10 @@ When you open Claude Code in a project using The Rig, the agent automatically re
 1. `~/.claude/CLAUDE.md` — who it is and how to behave
 2. `~/.your-ai-contexts/PROFILE.md` — who you are
 3. `./CLAUDE.md` — what this project is
-4. `./.rig/memory/PROGRESS.md` — where the project stands
-5. `./.rig/memory/ERRORS.md` — what to avoid
-6. `./.rig/tasks/active/` — what's currently in flight
+4. `./.rig/memory/CONTEXT_SNAPSHOT.md` — full current state (written at session end by `/wrap`); **if present, this is sufficient — the agent stops here**
+5. `./.rig/memory/PROGRESS.md` — build history; only loaded if snapshot is absent or stale
+6. `./.rig/memory/ERRORS.md` — what to avoid
+7. `./.rig/tasks/active/` — what's currently in flight
 
 No re-briefing. No repeating context. Every session picks up exactly where the last one left off.
 
@@ -179,7 +180,8 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 **Governance and housekeeping**
 ```
 /propose      →  submit a change to governance files for human approval before anything is touched
-/wrap         →  write CONTEXT_SNAPSHOT, ensure memory is current before closing the session
+/wrap         →  write CONTEXT_SNAPSHOT, ensure memory is current, log any Rig gaps before closing
+/rig-gaps     →  compile workflow friction from RIG_GAPS.md + ERRORS.md; format for submission to The Rig dev session
 ```
 
 ---
@@ -188,8 +190,8 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 
 | Hook | Trigger | What it prevents |
 |---|---|---|
-| `pre-tool.sh` | Before every Claude Code tool call | Writes to protected paths (`.env.production`, etc.) |
-| `post-tool.sh` | After every Claude Code tool call | PROGRESS.md being skipped after a commit |
+| `pre-tool.sh` | Before every Claude Code tool call | Writes to protected paths; blocks `git commit` until user gives explicit go-ahead |
+| `post-tool.sh` | After every Claude Code tool call | PROGRESS.md being skipped after a commit; clears commit sentinel after use |
 | `pre-commit` | Before every git commit | Secrets reaching the repository |
 | `commit-msg` + `post-commit` | On every git commit | AI attribution trailers (`Co-Authored-By: Claude`, etc.) in history |
 
