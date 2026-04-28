@@ -40,6 +40,85 @@ confirm() {
   [[ "$answer" =~ ^[Yy]$ ]]
 }
 
+# ── SHA256 helper ─────────────────────────────────────────────────────────────
+# Portable: prefers sha256sum (Linux/GNU), falls back to shasum -a 256 (macOS).
+# Returns empty string if neither is available.
+sha256_file() {
+  local file="$1"
+  [[ -f "$file" ]] || { echo ""; return; }
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  else
+    echo ""
+  fi
+}
+
+# ── Rig-owned file classification ─────────────────────────────────────────────
+# Returns 0 (true) if the file is owned by The Rig and should be tracked in the
+# manifest and overwritten by the Upgrade strategy.
+# Returns 1 (false) if it is user-customized and must be skipped in Upgrade mode.
+#
+# Rig-owned:   .claude/hooks/, .claude/commands/, .rig/processes/, .husky/, .gitleaks.toml
+# User-owned:  CLAUDE.md, PROJECT_BRIEF.md, .rig/rules/, .rig/memory/*.md,
+#              .rig/tasks/, .github/
+# Special:     .claude/settings.json (always smart-merged, not manifest-tracked)
+is_rig_owned() {
+  local rel="$1"
+  case "$rel" in
+    .claude/hooks/*|\
+    .claude/commands/*|\
+    .rig/processes/*|\
+    .husky/*|\
+    .gitleaks.toml)
+      return 0 ;;
+    *)
+      return 1 ;;
+  esac
+}
+
+# ── Manifest helpers ──────────────────────────────────────────────────────────
+# The manifest lives at $MANIFEST_FILE and records the SHA256 of each Rig-owned
+# file at the time it was last installed by the installer. Format per line:
+#   sha256hash  relative/path
+#
+# This allows the Upgrade strategy to distinguish:
+#   dest hash == manifest hash  → file unmodified since install → safe to overwrite
+#   dest hash != manifest hash  → user has customized the file  → prompt before overwriting
+#
+# The manifest is committed to the repo (not gitignored) so the baseline travels
+# with the project and any team member can run an Upgrade.
+
+MANIFEST_FILE=""  # set during project-layer install (after RIG_DIR is resolved)
+
+read_manifest_hash() {
+  # Returns the recorded hash for a given rel path, or empty string if not found.
+  local rel="$1"
+  [[ -f "$MANIFEST_FILE" ]] || { echo ""; return; }
+  grep "  ${rel}$" "$MANIFEST_FILE" 2>/dev/null | awk '{print $1}' | head -1
+}
+
+write_manifest_entry() {
+  # Upsert: remove any existing entry for $rel, then append the new hash.
+  local hash="$1"
+  local rel="$2"
+  [[ -z "$hash" || -z "$MANIFEST_FILE" ]] && return
+  mkdir -p "$(dirname "$MANIFEST_FILE")"
+  if [[ ! -f "$MANIFEST_FILE" ]]; then
+    {
+      echo "# The Rig manifest"
+      echo "# Records the SHA256 of each Rig-owned file at last install."
+      echo "# Used by the Upgrade strategy to detect user customizations."
+      echo "# Committed to the repo. Do not edit manually."
+    } > "$MANIFEST_FILE"
+  fi
+  local tmp; tmp="$(mktemp)"
+  grep -v "  ${rel}$" "$MANIFEST_FILE" > "$tmp" 2>/dev/null || true
+  echo "${hash}  ${rel}" >> "$tmp"
+  mv "$tmp" "$MANIFEST_FILE"
+}
+
 # ── Locate the script's own directory (works with symlinks) ───────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GLOBAL_TEMPLATES="$SCRIPT_DIR/templates/global"
@@ -113,8 +192,12 @@ echo "  1) Interactive  — ask me for each file"
 echo "  2) Skip         — keep all existing files, only install new ones"
 echo "  3) Overwrite    — replace everything (backs up originals to .rig-backup/)"
 echo "  4) Merge        — smart-merge .claude/settings.json; skip everything else"
+echo "  5) Upgrade      — update Rig-owned files (hooks, commands, processes, husky);"
+echo "                    skip user-owned files (CLAUDE.md, rules/, memory/, github/);"
+echo "                    prompt with diff if you've customized a Rig-owned file"
+echo "                    ── recommended for upgrading an existing install ──"
 echo ""
-read -r -p "$(echo -e "${BOLD}?${RESET} Choose a strategy [1/2/3/4] (default: 1): ")" strategy_input
+read -r -p "$(echo -e "${BOLD}?${RESET} Choose a strategy [1/2/3/4/5] (default: 1): ")" strategy_input
 strategy_input="${strategy_input:-1}"
 
 case "$strategy_input" in
@@ -122,6 +205,7 @@ case "$strategy_input" in
   2) COLLISION_STRATEGY="skip" ;;
   3) COLLISION_STRATEGY="overwrite" ;;
   4) COLLISION_STRATEGY="merge" ;;
+  5) COLLISION_STRATEGY="upgrade" ;;
   *)
     warn "Invalid choice — defaulting to Interactive."
     COLLISION_STRATEGY="interactive"
@@ -204,20 +288,28 @@ PYEOF
 }
 
 # ── COPY FILE (respects collision strategy) ───────────────────────────────────
-# copy_file <src> <dest> [base_dir]
-# base_dir is used for backup paths in overwrite mode.
+# copy_file <src> <dest> [base_dir] [rel]
+#
+# base_dir  used for backup paths in overwrite/upgrade mode
+# rel       relative path of this file (e.g. ".claude/hooks/pre-tool.sh")
+#           used for manifest tracking and is_rig_owned() classification
 copy_file() {
   local src="$1"
   local dest="$2"
   local base="${3:-}"
+  local rel="${4:-}"
   local dir
   dir="$(dirname "$dest")"
   mkdir -p "$dir"
 
   if [[ ! -f "$dest" ]]; then
-    # No collision — always copy
+    # No collision — always install
     cp "$src" "$dest"
     success "Created ${dest#${base}/}"
+    # Record in manifest whenever a Rig-owned file is freshly installed
+    if [[ -n "$rel" ]] && is_rig_owned "$rel"; then
+      write_manifest_entry "$(sha256_file "$dest")" "$rel"
+    fi
     return
   fi
 
@@ -227,6 +319,9 @@ copy_file() {
       if confirm "Overwrite existing: ${dest#${base}/}?"; then
         cp "$src" "$dest"
         success "Updated ${dest#${base}/}"
+        if [[ -n "$rel" ]] && is_rig_owned "$rel"; then
+          write_manifest_entry "$(sha256_file "$dest")" "$rel"
+        fi
       else
         info "Skipped ${dest#${base}/}"
       fi
@@ -238,6 +333,9 @@ copy_file() {
       if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
       cp "$src" "$dest"
       success "Overwrote ${dest#${base}/}"
+      if [[ -n "$rel" ]] && is_rig_owned "$rel"; then
+        write_manifest_entry "$(sha256_file "$dest")" "$rel"
+      fi
       ;;
     merge)
       # settings.json gets special treatment; everything else is skipped
@@ -255,7 +353,126 @@ copy_file() {
         info "Skipped (exists): ${dest#${base}/}"
       fi
       ;;
+    upgrade)
+      _copy_file_upgrade "$src" "$dest" "$base" "$rel"
+      ;;
   esac
+}
+
+# ── UPGRADE STRATEGY HANDLER ──────────────────────────────────────────────────
+# Separated for readability. Called by copy_file() when COLLISION_STRATEGY=upgrade.
+#
+# Decision tree for a file that already exists at $dest:
+#
+#   settings.json       → always smart-merge (same as "merge" strategy)
+#   user-owned file     → always skip (preserves customizations)
+#   Rig-owned file:
+#     dest == src       → already up to date, skip
+#     dest == manifest  → unmodified since install → overwrite silently (with backup)
+#     dest != manifest  → user has customized it  → show diff, prompt o/s/d
+#     no manifest entry → first upgrade run → overwrite silently (with backup)
+#
+# SHA256 unavailable: falls back to byte-level cmp(1). If files differ and
+# sha256 is absent, prompts without a diff (can't reliably detect customization).
+_copy_file_upgrade() {
+  local src="$1"
+  local dest="$2"
+  local base="${3:-}"
+  local rel="${4:-}"
+
+  # ── settings.json: always smart-merge ──────────────────────────────────────
+  if [[ "$(basename "$dest")" == "settings.json" && "$dest" == *".claude/settings.json" ]]; then
+    local tmp_merged
+    tmp_merged="$(mktemp /tmp/rig-settings-merged-XXXXXX.json)"
+    if merge_settings_json "$dest" "$src" "$tmp_merged"; then
+      cp "$tmp_merged" "$dest"
+      success "Merged .claude/settings.json"
+    else
+      info "Skipped settings.json (merge failed — see warning above)"
+    fi
+    rm -f "$tmp_merged"
+    return
+  fi
+
+  # ── User-owned files: always skip ──────────────────────────────────────────
+  if [[ -n "$rel" ]] && ! is_rig_owned "$rel"; then
+    info "Skipped (user-owned): ${rel}"
+    return
+  fi
+
+  # ── Rig-owned: manifest-aware handling ─────────────────────────────────────
+  local new_hash dest_hash manifest_hash
+  new_hash="$(sha256_file "$src")"
+  dest_hash="$(sha256_file "$dest")"
+
+  # Handle SHA256 unavailable: fall back to byte-level comparison
+  if [[ -z "$new_hash" ]]; then
+    if cmp -s "$src" "$dest"; then
+      info "Up to date: ${rel}"
+    else
+      warn "sha256 unavailable — cannot detect customizations in: ${rel}"
+      if confirm "Overwrite ${rel} with new version?" "y"; then
+        if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
+        cp "$src" "$dest"
+        success "Updated: ${rel}"
+      else
+        info "Skipped: ${rel}"
+      fi
+    fi
+    return
+  fi
+
+  # Already at the new version — nothing to do
+  if [[ "$dest_hash" == "$new_hash" ]]; then
+    info "Up to date: ${rel}"
+    return
+  fi
+
+  manifest_hash="$(read_manifest_hash "$rel")"
+
+  if [[ -z "$manifest_hash" || "$dest_hash" == "$manifest_hash" ]]; then
+    # No manifest entry (first upgrade) OR dest matches manifest (not customized).
+    # Safe to overwrite without prompting.
+    if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
+    cp "$src" "$dest"
+    success "Updated: ${rel}"
+    write_manifest_entry "$new_hash" "$rel"
+  else
+    # dest_hash differs from manifest_hash — user has customized this file.
+    # Show what changed and ask before overwriting.
+    echo ""
+    warn "Customized file detected: ${rel}"
+    echo "  Your version differs from what The Rig originally installed."
+    echo "  The new Rig version also modifies this file."
+    echo ""
+    local choice
+    while true; do
+      read -r -p "$(echo -e "  ${BOLD}?${RESET} (o)verwrite  (s)kip  (d)iff  [o/s/d]: ")" choice
+      case "${choice:-}" in
+        o|O)
+          if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
+          cp "$src" "$dest"
+          success "Updated (overwritten): ${rel}"
+          write_manifest_entry "$new_hash" "$rel"
+          break
+          ;;
+        s|S)
+          info "Skipped (kept your version): ${rel}"
+          break
+          ;;
+        d|D)
+          echo ""
+          echo "  ── diff: your version (a) → new Rig version (b) ──"
+          diff -u "$dest" "$src" | head -100 || true
+          echo "  ── end diff ──"
+          echo ""
+          ;;
+        *)
+          echo "  Please enter o, s, or d."
+          ;;
+      esac
+    done
+  fi
 }
 
 # ── GLOBAL LAYER ─────────────────────────────────────────────────────────────
@@ -392,6 +609,16 @@ if [[ "$DO_PROJECT" == true ]]; then
     info "External .rig/ location: $EXTERNAL_RIG_DIR"
   fi
 
+  # ── Manifest path ─────────────────────────────────────────────────────────
+  # Stored in .rig/memory/ so it lives alongside the other memory files.
+  # For external .rig/ installs, it follows .rig/ to the external directory.
+  # The manifest is committed to the repo (not gitignored) — see memory/.gitignore.
+  if [[ "$RIG_TRACKING" == "external" ]]; then
+    MANIFEST_FILE="$EXTERNAL_RIG_DIR/memory/.rig-manifest"
+  else
+    MANIFEST_FILE="$TARGET/.rig/memory/.rig-manifest"
+  fi
+
   echo ""
 
   # ── COMPONENT SELECTION ───────────────────────────────────────────────────
@@ -472,14 +699,16 @@ if [[ "$DO_PROJECT" == true ]]; then
       continue
     fi
 
-    # Route .rig/ files to the external directory when applicable
+    # Route .rig/ files to the external directory when applicable.
+    # Always pass $rel (the template-relative path) as the 4th arg so
+    # copy_file() can classify the file and update the manifest.
     if [[ "$RIG_TRACKING" == "external" && "$rel" == .rig/* ]]; then
       rig_rel="${rel#.rig/}"
       dest_file="$EXTERNAL_RIG_DIR/$rig_rel"
-      copy_file "$src_file" "$dest_file" "$EXTERNAL_RIG_DIR"
+      copy_file "$src_file" "$dest_file" "$EXTERNAL_RIG_DIR" "$rel"
     else
       dest_file="$TARGET/$rel"
-      copy_file "$src_file" "$dest_file" "$TARGET"
+      copy_file "$src_file" "$dest_file" "$TARGET" "$rel"
     fi
   done < <(find "$PROJECT_TEMPLATES" -type f -print0)
 

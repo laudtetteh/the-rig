@@ -136,6 +136,14 @@ Three files, three purposes:
 - The most valuable file in the system — it's institutional memory
 - **Trim convention:** capped at 30 entries. `/wrap` moves older entries to `.rig/memory/ERRORS_archive.md` (gitignored, disk-only) when the cap is exceeded. Same pattern as PROGRESS.md.
 
+### .rig/memory/.rig-manifest
+- Written by the installer on every install; committed to the repo
+- Records the SHA256 hash of each Rig-owned file at install time
+- Used by the **Upgrade** strategy to detect user customizations:
+  - Hash unchanged since install → safe to auto-update
+  - Hash changed → you've customized it → diff shown before overwrite
+- See `docs/customizing.md` for the full Upgrade strategy workflow
+
 ---
 
 ## The process system

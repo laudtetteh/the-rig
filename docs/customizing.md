@@ -256,14 +256,62 @@ When a new version of The Rig is released, pull the latest from the repo and re-
 the installer against your project:
 
 ```bash
-cd the-rig && git pull
+cd ~/tools/the-rig && git pull
 ./install.sh --project-only
 ```
 
-Choose **Merge** as the collision strategy. This will:
-- Add any new template files that don't exist yet
-- Smart-merge `.claude/settings.json` (new hooks added without overwriting yours)
-- Skip all existing files (your customizations are preserved)
+Choose **Upgrade (option 5)** as the collision strategy. This is the recommended
+strategy for all upgrades. It:
 
-After upgrading, review the CHANGELOG for any manual steps — some releases may
-require updating `.rig/rules/` or `.rig/processes/` files that the merge strategy skips.
+- **Auto-updates** Rig-owned files (hooks, commands, process workflows, husky hooks)
+  that you haven't modified since install — no prompts, no friction
+- **Prompts with a diff** for any Rig-owned file you've customized — you see exactly
+  what changed before deciding to overwrite or keep your version
+- **Skips** user-owned files entirely (`CLAUDE.md`, `.rig/rules/`, `.rig/memory/`,
+  `.rig/tasks/`, `.github/`) — your customizations are always preserved
+- **Smart-merges** `.claude/settings.json` — new hooks are added without duplicating
+  anything already present
+
+### How it works: the manifest
+
+The installer records the SHA256 hash of each Rig-owned file in
+`.rig/memory/.rig-manifest` on every install. This is committed to the repo.
+
+On upgrade, for each Rig-owned file:
+
+| Condition | What happens |
+|---|---|
+| Dest hash == new template hash | Already up to date — skipped |
+| Dest hash == manifest hash | Unmodified since install — overwritten silently (backup kept) |
+| Dest hash != manifest hash | You've customized it — diff shown, you choose: overwrite / skip |
+| No manifest entry | First upgrade (manifest didn't exist yet) — overwritten silently |
+
+Backups are written to `.rig-backup/<timestamp>/` before any overwrite, so nothing
+is ever lost.
+
+### Manifest-aware customization
+
+Files in the **Rig-owned** category that you commonly want to customize:
+
+| File | Customizable section |
+|---|---|
+| `.claude/hooks/pre-tool.sh` | `BLOCKED_PATHS` array (project-specific protected paths) |
+| `.claude/commands/ship.md` | Steps can be extended with project-specific checks |
+| `.rig/processes/*.md` | Steps can be extended; core gate logic should be preserved |
+| `.husky/filter-commit-message-inplace.sh` | Add patterns for other AI tools |
+
+The Upgrade strategy will detect changes to these files and prompt before overwriting.
+Your customizations are safe.
+
+### Choosing Merge vs Upgrade
+
+| Strategy | Use when |
+|---|---|
+| **Upgrade (5)** | Upgrading an existing project — recommended |
+| **Merge (4)** | You only want settings.json updated and nothing else touched |
+| **Overwrite (3)** | Resetting to a clean state (nukes all customizations, with backup) |
+| **Skip (2)** | Fresh install — only create files that don't exist yet |
+
+After upgrading, review the CHANGELOG for any manual steps — some releases may add
+new fields to `.rig/rules/` files or project `CLAUDE.md` that the Upgrade strategy
+skips (since those are user-owned).
