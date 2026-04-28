@@ -80,12 +80,12 @@ If any answer gives you pause, fix it before committing.
 **Stop. Do not commit yet.**
 
 Ask the user:
-> "Ready to commit. Have you tested the changes locally and confirmed they work
-> as expected?"
+> "Ready to commit. Test the changes locally, then say **'commit approved'**
+> (or 'ship it', 'lgtm', 'go') and I'll proceed."
 
-Wait for explicit confirmation. Do not proceed until the user says yes (or
-equivalent). This step is **non-negotiable** — it cannot be skipped regardless
-of autonomy level or how confident the agent is in the changes.
+Wait for one of those trigger phrases (or equivalent clear confirmation).
+This step is **non-negotiable** — it cannot be skipped regardless of autonomy
+level or how confident the agent is in the changes.
 
 ---
 

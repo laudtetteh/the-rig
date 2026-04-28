@@ -78,10 +78,10 @@ If any item cannot be confirmed, stop and resolve it before continuing.
 **Stop here.** Do not commit yet.
 
 Say to the user:
-> "Ready to commit. Have you tested the changes locally and confirmed they work
-> as expected?"
+> "Ready to commit. Test the changes locally, then say **'commit approved'**
+> (or 'ship it', 'lgtm', 'go') and I'll proceed."
 
-Wait for explicit confirmation ("yes", "looks good", "go ahead", etc.).
+Wait for one of those explicit trigger phrases (or equivalent clear confirmation).
 Do not proceed if the response is ambiguous. This step cannot be skipped
 regardless of autonomy level.
 
@@ -107,14 +107,21 @@ message is explicitly approved.
 
 ## Step 7 — Commit
 
-Write the approved commit message to `/tmp/ship-commit-msg.txt` and commit:
+The user confirmed local testing at Step 5 and approved the commit message at Step 6.
+That constitutes explicit go-ahead — create the commit sentinel, then commit:
 
 ```bash
+# Authorise the commit (pre-tool.sh requires this sentinel)
+touch "$(git rev-parse --show-toplevel)/.rig/memory/.rig-commit-ok" 2>/dev/null || \
+  touch "${RIG_DIR:-$(git rev-parse --show-toplevel)/.rig}/memory/.rig-commit-ok"
+
 cat > /tmp/ship-commit-msg.txt << 'EOF'
 [approved commit message]
 EOF
 git commit -F /tmp/ship-commit-msg.txt
 ```
+
+post-tool.sh deletes the sentinel automatically after the commit lands.
 
 Report the commit hash on success.
 

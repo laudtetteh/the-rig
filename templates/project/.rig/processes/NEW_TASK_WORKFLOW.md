@@ -45,7 +45,7 @@ git rev-parse --show-toplevel
 
 ---
 
-## Step 1 — Orient
+## Step 2 — Orient
 
 Read these files before anything else, in this order:
 
@@ -59,7 +59,7 @@ Do not invent a task file unilaterally.
 
 ---
 
-## Step 2 — Confirm understanding
+## Step 3 — Confirm understanding
 
 Before writing a plan, state back to the user in 2–3 sentences:
 
@@ -73,7 +73,7 @@ If you have a clarifying question, ask exactly one. Do not stack questions.
 
 ---
 
-## Step 3 — Plan
+## Step 4 — Plan
 
 Write a numbered implementation plan into the task file under `## Approach`.
 
@@ -86,7 +86,7 @@ Requirements for a valid plan:
 
 ---
 
-## Step 4 — Implement
+## Step 5 — Implement
 
 Work through the plan one step at a time.
 
@@ -97,7 +97,7 @@ Work through the plan one step at a time.
 
 ---
 
-## Step 5 — Verify
+## Step 6 — Verify
 
 Before declaring done:
 
@@ -107,7 +107,7 @@ Before declaring done:
 
 ---
 
-## Step 6 — Wrap up
+## Step 7 — Wrap up
 
 In this order:
 

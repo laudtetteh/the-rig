@@ -10,3 +10,8 @@ PROGRESS_archive.md
 # ERRORS_archive.md holds older entries trimmed from ERRORS.md.
 # Same pattern as PROGRESS_archive.md — local reference, never loaded at session start.
 ERRORS_archive.md
+
+# .rig-commit-ok is a one-shot sentinel that authorises a single git commit.
+# Created by the agent when the user gives explicit go-ahead ("commit approved", etc.).
+# Deleted automatically by post-tool.sh after the commit lands. Never committed.
+.rig-commit-ok

@@ -69,9 +69,13 @@ Do not summarise these back to me unless asked.
 8. **Never touch files outside the current task scope** unless explicitly asked.
 9. **Never make architectural decisions silently** — surface them for discussion first.
 10. **Never assume continuity from a prior session** — always re-read context files.
-11. **Never run `git commit` without first pausing to ask the user to confirm that
-    local testing is done.** Show the proposed commit message, then wait for explicit
-    go-ahead. This is non-negotiable regardless of autonomy level.
+11. **Never run `git commit` without the user's explicit go-ahead.** Before committing:
+    show the proposed commit message, then pause and say:
+    > "Ready to commit. Test locally, then say **'commit approved'** (or 'ship it',
+    > 'lgtm', 'go') and I'll commit and push immediately."
+    When the user says one of those trigger phrases, create `$RIG_DIR/memory/.rig-commit-ok`,
+    run `git commit`, then run `git push`. The sentinel is auto-deleted by post-tool.sh after
+    the commit lands. This pause is non-negotiable regardless of autonomy level.
 12. **Always work in the main repo, not the worktree.** Claude Code sessions run inside
     `.claude/worktrees/<name>/`. File edits made there are invisible to the user's git
     client. At the start of every session, identify the main repo root with
