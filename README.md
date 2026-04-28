@@ -119,9 +119,9 @@ The Rig stays in `~/tools/the-rig/`. Your project is clean.
 ### Dropping The Rig into an existing project
 
 ```bash
+cd ~/code/my-project
 ~/tools/the-rig/install.sh --project-only
-# Point it at your existing project directory
-# Choose collision strategy: Skip (safest) or Merge (.claude/settings.json only)
+# Choose Skip (2) — only installs files that don't exist yet, touches nothing else
 ```
 
 ---
@@ -129,9 +129,14 @@ The Rig stays in `~/tools/the-rig/`. Your project is clean.
 ### Upgrading
 
 ```bash
+# 1. Pull the latest Rig source
 cd ~/tools/the-rig && git pull
-./install.sh --project-only
-# Choose Merge — adds new files, preserves your customizations
+
+# 2. Run the installer from inside your project
+cd ~/code/my-project
+~/tools/the-rig/install.sh --project-only
+# Choose Upgrade (5) — updates Rig-owned files, detects your customizations,
+# skips user-owned files (CLAUDE.md, rules/, memory/, github/)
 ```
 
 ---
