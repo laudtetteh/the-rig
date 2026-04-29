@@ -1,6 +1,6 @@
 # Lessons learned
 
-Ten documented pitfalls from the LaudBot pilot — the failures that shaped The Rig.
+Thirteen documented pitfalls from the LaudBot pilot — the failures that shaped The Rig.
 
 Every component in this system exists because something went wrong without it. These are the incidents, in the order they were discovered.
 
@@ -114,7 +114,7 @@ Every component in this system exists because something went wrong without it. T
 
 ---
 
-## 11. Moving the project directory broke Claude Code hooks silently
+## 10. Moving the project directory broke Claude Code hooks silently
 
 **Symptom**: Pre-tool and post-tool hooks stopped firing after renaming or moving the project directory. No error was shown — file writes to protected paths went through without any block message.
 
@@ -132,7 +132,7 @@ Alternatively, edit `.claude/settings.json` directly and update the hook command
 
 ---
 
-## 10. useSearchParams() broke the standalone Next.js build
+## 11. useSearchParams() broke the standalone Next.js build
 
 **Symptom**: `next build` completed successfully in development. The production standalone build failed with a static generation error pointing to a page that used `useSearchParams()`.
 
@@ -141,3 +141,27 @@ Alternatively, edit `.claude/settings.json` directly and update the hook command
 **Fix**: Split the affected page into an inner component (which uses `useSearchParams`) and an outer page component that wraps the inner component in `<Suspense>`. The `<Suspense>` boundary tells Next.js that the inner component's rendering is deferred.
 
 **Watch for**: Any Next.js page in a standalone build that uses `useSearchParams`, `usePathname` with dynamic params, or any other hook that reads runtime URL state. The error only surfaces in production builds — test with `next build && next start`, not just `next dev`.
+
+---
+
+## 12. The Merge strategy silently left Rig-owned files stale on upgrade
+
+**Symptom**: After pulling a new version of The Rig and re-running the installer with Merge strategy, all the freshly updated hook scripts and slash commands were still the old versions. No error was shown — the installer simply skipped them because they already existed at the destination.
+
+**Root cause**: Merge strategy (`COLLISION_STRATEGY=merge`) is designed for initial drop-in installs: it skips any file that already exists and only smart-merges `settings.json`. This is correct behavior for a first install. But it's wrong for an upgrade — Rig-owned files like `pre-tool.sh`, `post-tool.sh`, and process files need to be updated when The Rig ships new versions.
+
+**Fix**: The installer now has a dedicated **Upgrade** strategy (option 5). It classifies every file as Rig-owned or user-owned. Rig-owned files (hooks, commands, processes, Husky scripts) are auto-updated when unmodified, or shown a diff with a prompt when customized. User-owned files (CLAUDE.md, rules/, memory/, tasks/, .github/) are always skipped. The Upgrade strategy records a SHA256 manifest at install time so it can detect your customizations on the next run.
+
+**Watch for**: Never use Merge strategy to upgrade an existing install — only use it for the initial drop-in. When upgrading, always choose Upgrade (5). See `docs/customizing.md` for the full upgrade workflow.
+
+---
+
+## 13. Task files and PRs described the plan rather than the actual outcome
+
+**Symptom**: A merged PR's description read like a planning document. The `## Done notes` section in the task file was either blank or restated the `## Approach` verbatim. Reviewers couldn't tell what actually shipped, and future sessions couldn't learn from scope changes that happened during implementation.
+
+**Root cause**: No explicit distinction was enforced between planning artifacts and outcome records. `## Approach` (the plan) and `## Done notes` (what happened) served the same purpose in practice — both ended up describing intent.
+
+**Fix**: `## Done notes` now has four required fields: **What was built** (specific implementation), **Deviations from plan** (where scope or approach changed and why), **Actual files touched** (anything not in the original plan), and **Follow-ups opened** (new tasks or issues created as a result). `NEW_TASK_WORKFLOW` Step 7 requires a plan-vs-reality audit before the task file is moved. `SHIP_WORKFLOW` Step 4 requires the same check, and Step 5 explicitly states the PR body must describe what was actually built.
+
+**Watch for**: Any `## Done notes` section that reads like a summary of `## Approach`. If they say the same thing, the done notes haven't been filled in properly. The PR body and the GitHub Issue closing comment have the same requirement — they capture the actual outcome, not the original intent.

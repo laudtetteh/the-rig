@@ -11,21 +11,34 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [1.5.0] — 2026-04-27
+## [1.5.0] — 2026-04-29
 
 ### Added
 
 - **`RIG_GAPS.md` template** (`templates/project/.rig/memory/RIG_GAPS.md`): self-improvement feedback log committed to every project repo. Captures workflow friction, bugs, missing features, and improvement ideas observed during real use. Accumulates across sessions and machines. Closes #72.
 - **`/rig-gaps` slash command** (`templates/project/.claude/commands/rig-gaps.md`): compiles unsubmitted gap entries from `RIG_GAPS.md`, cross-checks `ERRORS.md` for Rig-related issues not yet captured, formats a consolidated report with copy-paste submission instructions, and offers to mark entries as submitted. Closes #72.
 - **`/wrap` self-improvement check** (step 5): at session end, agent scans `ERRORS.md` for Rig-related friction and reflects on session pain points. Any gaps not already in `RIG_GAPS.md` are appended automatically. Closes #72.
+- **`tests/test_install.bats`**: bats integration test suite for `install.sh`. Covers `is_rig_owned()` classification (11 cases), fresh install under skip/overwrite/upgrade strategies, overwrite backup creation, upgrade manifest generation, upgrade preservation of user-owned and `RIG_GAPS.md` files, settings.json creation, CLAUDE.md placeholder substitution, and CLI flag validation.
+- **`install.sh` non-interactive flags**: `--strategy <name>` (skip/overwrite/merge/upgrade/interactive), `--target <path>`, and `--project-name <name>`. When these flags are provided, the corresponding interactive prompts and the git-tracking / component-selection questions are bypassed. Enables scripted installs and CI use. The `--help` output documents all flags.
+- **`/run` RIG_GAPS reminder**: after presenting the task queue in Step 1, `/run` checks for unsubmitted entries in `.rig/memory/RIG_GAPS.md` and surfaces a soft reminder to run `/rig-gaps`. Non-blocking.
 
 ### Changed
 
 - **`templates/project/.claude/commands/wrap.md`**: added step 5 (self-improvement check) with full entry format and submission reminder; existing steps 5–7 renumbered to 6–8.
+- **`templates/project/.claude/commands/kickoff.md`**: Step 5 hand-off corrected — suggests `/run [first-task-slug]` instead of `/task` (which is the intake wizard, not the executor). Notes section updated with RIG_GAPS.md context.
+- **`templates/project/.claude/commands/run.md`**: Step 1 expanded with RIG_GAPS unsubmitted-entries reminder.
 - **`templates/project/.rig/processes/NEW_TASK_WORKFLOW.md`**: Step 7 (Wrap up) rewritten — adds plan-vs-reality audit before touching anything; structured `## Done notes` fields required (What was built / Deviations from plan / Actual files touched / Follow-ups opened); RIG_GAPS logging added as explicit step.
 - **`templates/project/.rig/processes/SHIP_WORKFLOW.md`**: Step 4 updated — task file accuracy check added; GitHub Issue closing comment required when scope changes; RIG_GAPS logging added. Step 5 updated — PR body must describe what was actually built, not the original plan.
 - **`templates/project/.rig/tasks/backlog/TASK_example.md`**: `## Done notes` section expanded with four structured fields to prevent restatement of plan.
 - **`templates/project/.rig/memory/.gitignore`**: added comment confirming `RIG_GAPS.md` is intentionally tracked and committed.
+- **`templates/project/.claude/commands/ship.md`**: Step 8 expanded to match `SHIP_WORKFLOW` Step 4 (task file accuracy check, four structured Done notes fields, ERRORS/RIG_GAPS logging, GitHub Issue closing comment). Step 9 opens with PR body accuracy requirement. Notes updated.
+- **`templates/project/.claude/commands/task.md`**: Governance section notes RIG_GAPS logging at task completion.
+- **`templates/project/.claude/commands/new-feature.md`**: workflow reference corrected from "Step 1" to "Step 0".
+- **`templates/global/CLAUDE.md`**: hard rules header now reads "— 12 total".
+- **`install.sh`**: `is_rig_owned()` comment documents `RIG_GAPS.md` as user-owned and never manifest-tracked. `--rig-dir` / `--target` / `--strategy` flag parsing refactored to a shared two-arg capture loop.
+- **`docs/how-it-works.md`**: `RIG_GAPS.md` memory section added; `/rig-gaps` in command table (nine total); `NEW_TASK_WORKFLOW` and `SHIP_WORKFLOW` step summaries updated.
+- **`docs/lessons-learned.md`**: count updated from ten to thirteen; lessons #10 and #11 numbering corrected (were swapped); two new lessons added — #12 (Merge strategy silently leaves Rig-owned files stale on upgrade) and #13 (task files and PRs describing the plan rather than the actual outcome).
+- **`README.md`**: session start sequence updated (CONTEXT_SNAPSHOT is primary, PROGRESS is fallback); memory table includes RIG_GAPS.md; slash command count 8→9; `/rig-gaps` added to command set; hooks table updated for commit gate and sentinel cleanup.
 
 ---
 

@@ -163,8 +163,8 @@ After scaffolding is complete:
 > - [N] tasks are in `.rig/tasks/backlog/` — ordered by dependency
 > - GitHub issues #[X]–#[Y] are open and labelled
 >
-> Suggested first move: run `/task` and pick up `[first-task-slug]` — that's the
-> foundation everything else builds on.
+> Suggested first move: run `/run [first-task-slug]` — that's the foundation
+> everything else builds on.
 >
 > Anything to adjust before you start?"
 
@@ -179,3 +179,6 @@ After scaffolding is complete:
   priorities, split tasks, or add new ones freely as the project develops.
 - All governance rules apply during scaffolding. Protected paths, the `/propose`
   gate, and secret handling are all still active.
+- `.rig/memory/RIG_GAPS.md` ships with the project scaffold. As you build, the agent
+  logs workflow friction to it during `/wrap`. Use `/rig-gaps` to compile and submit
+  those entries to The Rig dev session for future improvements.

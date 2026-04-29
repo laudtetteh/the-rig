@@ -131,33 +131,49 @@ PROJECT_TEMPLATES="$SCRIPT_DIR/templates/project"
 DO_GLOBAL=true
 DO_PROJECT=true
 EXTERNAL_RIG_DIR=""   # set via --rig-dir <path>
+_FLAG_STRATEGY=""     # set via --strategy <name>  (skips interactive prompt)
+_FLAG_TARGET=""       # set via --target <path>    (skips interactive prompt)
+_FLAG_PROJECT_NAME="" # set via --project-name <n> (skips interactive prompt)
 
 for arg in "$@"; do
   case "$arg" in
     --global-only)  DO_PROJECT=false ;;
     --project-only) DO_GLOBAL=false ;;
-    --rig-dir)
-      # --rig-dir is handled below as a two-arg flag; skip here
+    --rig-dir|--strategy|--target|--project-name)
+      # two-arg flags; value captured in the loop below
       ;;
     --help|-h)
       echo "Usage: ./install.sh [--global-only | --project-only] [--rig-dir <path>] [--help]"
       echo ""
-      echo "  --global-only      Install ~/.claude/ layer only (CLAUDE.md + skills)"
-      echo "  --project-only     Scaffold project layer only (processes, rules, memory, etc.)"
-      echo "  --rig-dir <path>   Install .rig/ to an external directory outside the repo."
-      echo "                     A .rigpath pointer file is written to the project root."
-      echo "                     Useful for shared repos where teammates don't use The Rig."
-      echo "  (no flags)         Interactive — prompts for both"
+      echo "  --global-only         Install ~/.claude/ layer only (CLAUDE.md + skills)"
+      echo "  --project-only        Scaffold project layer only (processes, rules, memory, etc.)"
+      echo "  --rig-dir <path>      Install .rig/ to an external directory outside the repo."
+      echo "                        A .rigpath pointer file is written to the project root."
+      echo "                        Useful for shared repos where teammates don't use The Rig."
+      echo "  --strategy <name>     Set collision strategy non-interactively."
+      echo "                        Values: interactive | skip | overwrite | merge | upgrade"
+      echo "  --target <path>       Set target project directory non-interactively."
+      echo "  --project-name <name> Set project name non-interactively (used in CLAUDE.md)."
+      echo "  (no flags)            Interactive — prompts for both layers"
       exit 0
       ;;
   esac
 done
 
-# Capture --rig-dir value (two-argument flag)
+# Capture two-argument flag values
 args=("$@")
 for (( i=0; i<${#args[@]}; i++ )); do
   if [[ "${args[$i]}" == "--rig-dir" && $((i+1)) -lt ${#args[@]} ]]; then
     EXTERNAL_RIG_DIR="${args[$((i+1))]}"
+  fi
+  if [[ "${args[$i]}" == "--strategy" && $((i+1)) -lt ${#args[@]} ]]; then
+    _FLAG_STRATEGY="${args[$((i+1))]}"
+  fi
+  if [[ "${args[$i]}" == "--target" && $((i+1)) -lt ${#args[@]} ]]; then
+    _FLAG_TARGET="${args[$((i+1))]}"
+  fi
+  if [[ "${args[$i]}" == "--project-name" && $((i+1)) -lt ${#args[@]} ]]; then
+    _FLAG_PROJECT_NAME="${args[$((i+1))]}"
   fi
 done
 
@@ -189,31 +205,44 @@ echo ""
 #   overwrite    — replace all, back up originals to .rig-backup/
 #   merge        — smart-merge .claude/settings.json; skip everything else
 
-echo "How should I handle files that already exist at the destination?"
-echo ""
-echo "  1) Interactive  — ask me for each file"
-echo "  2) Skip         — keep all existing files, only install new ones"
-echo "  3) Overwrite    — replace everything (backs up originals to .rig-backup/)"
-echo "  4) Merge        — smart-merge .claude/settings.json; skip everything else"
-echo "  5) Upgrade      — update Rig-owned files (hooks, commands, processes, husky);"
-echo "                    skip user-owned files (CLAUDE.md, rules/, memory/, github/);"
-echo "                    prompt with diff if you've customized a Rig-owned file"
-echo "                    ── recommended for upgrading an existing install ──"
-echo ""
-read -r -p "$(echo -e "${BOLD}?${RESET} Choose a strategy [1/2/3/4/5] (default: 1): ")" strategy_input
-strategy_input="${strategy_input:-1}"
+if [[ -n "$_FLAG_STRATEGY" ]]; then
+  # Non-interactive: --strategy flag provided
+  case "$_FLAG_STRATEGY" in
+    interactive|skip|overwrite|merge|upgrade)
+      COLLISION_STRATEGY="$_FLAG_STRATEGY"
+      ;;
+    *)
+      warn "Unknown --strategy value '${_FLAG_STRATEGY}' — defaulting to Interactive."
+      COLLISION_STRATEGY="interactive"
+      ;;
+  esac
+else
+  echo "How should I handle files that already exist at the destination?"
+  echo ""
+  echo "  1) Interactive  — ask me for each file"
+  echo "  2) Skip         — keep all existing files, only install new ones"
+  echo "  3) Overwrite    — replace everything (backs up originals to .rig-backup/)"
+  echo "  4) Merge        — smart-merge .claude/settings.json; skip everything else"
+  echo "  5) Upgrade      — update Rig-owned files (hooks, commands, processes, husky);"
+  echo "                    skip user-owned files (CLAUDE.md, rules/, memory/, github/);"
+  echo "                    prompt with diff if you've customized a Rig-owned file"
+  echo "                    ── recommended for upgrading an existing install ──"
+  echo ""
+  read -r -p "$(echo -e "${BOLD}?${RESET} Choose a strategy [1/2/3/4/5] (default: 1): ")" strategy_input
+  strategy_input="${strategy_input:-1}"
 
-case "$strategy_input" in
-  1) COLLISION_STRATEGY="interactive" ;;
-  2) COLLISION_STRATEGY="skip" ;;
-  3) COLLISION_STRATEGY="overwrite" ;;
-  4) COLLISION_STRATEGY="merge" ;;
-  5) COLLISION_STRATEGY="upgrade" ;;
-  *)
-    warn "Invalid choice — defaulting to Interactive."
-    COLLISION_STRATEGY="interactive"
-    ;;
-esac
+  case "$strategy_input" in
+    1) COLLISION_STRATEGY="interactive" ;;
+    2) COLLISION_STRATEGY="skip" ;;
+    3) COLLISION_STRATEGY="overwrite" ;;
+    4) COLLISION_STRATEGY="merge" ;;
+    5) COLLISION_STRATEGY="upgrade" ;;
+    *)
+      warn "Invalid choice — defaulting to Interactive."
+      COLLISION_STRATEGY="interactive"
+      ;;
+  esac
+fi
 
 echo ""
 info "Collision strategy: ${COLLISION_STRATEGY}"
@@ -535,10 +564,14 @@ if [[ "$DO_PROJECT" == true ]]; then
   echo ""
 
   # Determine target directory
-  DEFAULT_TARGET="$(pwd)"
-  ask "Target project directory?"
-  read -r -p "    Path [${DEFAULT_TARGET}]: " TARGET_INPUT
-  TARGET="${TARGET_INPUT:-$DEFAULT_TARGET}"
+  if [[ -n "$_FLAG_TARGET" ]]; then
+    TARGET="$_FLAG_TARGET"
+  else
+    DEFAULT_TARGET="$(pwd)"
+    ask "Target project directory?"
+    read -r -p "    Path [${DEFAULT_TARGET}]: " TARGET_INPUT
+    TARGET="${TARGET_INPUT:-$DEFAULT_TARGET}"
+  fi
 
   if [[ ! -d "$TARGET" ]]; then
     error "Directory does not exist: $TARGET"
@@ -547,13 +580,21 @@ if [[ "$DO_PROJECT" == true ]]; then
 
   if [[ ! -d "$TARGET/.git" ]]; then
     warn "$TARGET does not appear to be a git repository."
-    if ! confirm "Continue anyway?"; then exit 0; fi
+    if [[ -n "$_FLAG_TARGET" ]]; then
+      warn "Continuing non-interactively (--target provided)."
+    elif ! confirm "Continue anyway?"; then
+      exit 0
+    fi
   fi
 
-  DEFAULT_PROJECT_NAME="$(basename "$TARGET")"
-  ask "Project name (used in CLAUDE.md)?"
-  read -r -p "    Name [${DEFAULT_PROJECT_NAME}]: " PROJECT_NAME_INPUT
-  PROJECT_NAME="${PROJECT_NAME_INPUT:-$DEFAULT_PROJECT_NAME}"
+  if [[ -n "$_FLAG_PROJECT_NAME" ]]; then
+    PROJECT_NAME="$_FLAG_PROJECT_NAME"
+  else
+    DEFAULT_PROJECT_NAME="$(basename "$TARGET")"
+    ask "Project name (used in CLAUDE.md)?"
+    read -r -p "    Name [${DEFAULT_PROJECT_NAME}]: " PROJECT_NAME_INPUT
+    PROJECT_NAME="${PROJECT_NAME_INPUT:-$DEFAULT_PROJECT_NAME}"
+  fi
 
   # Sanitize project name for safe sed substitution.
   # Strip characters that are sed metacharacters or shell-special in this context.
@@ -568,11 +609,16 @@ if [[ "$DO_PROJECT" == true ]]; then
 
   # ── GIT TRACKING FOR .rig/ ────────────────────────────────────────────────
   # How should .rig/ appear (or not appear) in git?
-  # Only asked in interactive mode; --rig-dir flag bypasses this.
+  # Bypassed when --rig-dir or --target is provided (defaults to "repo").
   RIG_TRACKING="repo"   # default: committed with the project
   RIGPATH_FILE=""       # absolute path to .rigpath (set if external or exclude mode)
 
-  if [[ -z "$EXTERNAL_RIG_DIR" ]]; then
+  if [[ -n "$EXTERNAL_RIG_DIR" ]]; then
+    # --rig-dir was provided; skip interactive prompt and go external.
+    RIG_TRACKING="external"
+  elif [[ -n "$_FLAG_TARGET" ]]; then
+    : # --target provided; skip prompt, keep RIG_TRACKING="repo" default.
+  else
     echo "How should .rig/ be tracked in git?"
     echo ""
     echo "  1) In the repo      — committed with the project (default, recommended for solo projects)"
@@ -598,8 +644,6 @@ if [[ "$DO_PROJECT" == true ]]; then
         RIG_TRACKING="repo"
         ;;
     esac
-  else
-    RIG_TRACKING="external"
   fi
 
   # Resolve and validate the external path (if applicable)
@@ -625,13 +669,18 @@ if [[ "$DO_PROJECT" == true ]]; then
   echo ""
 
   # ── COMPONENT SELECTION ───────────────────────────────────────────────────
-  echo "Which components do you want to install?"
-  echo ""
-  echo "  a) All (recommended)"
-  echo "  b) Let me choose"
-  echo ""
-  read -r -p "$(echo -e "${BOLD}?${RESET} Choose [a/b] (default: a): ")" component_choice
-  component_choice="${component_choice:-a}"
+  # When --target is provided, skip component selection and install everything.
+  if [[ -z "$_FLAG_TARGET" ]]; then
+    echo "Which components do you want to install?"
+    echo ""
+    echo "  a) All (recommended)"
+    echo "  b) Let me choose"
+    echo ""
+    read -r -p "$(echo -e "${BOLD}?${RESET} Choose [a/b] (default: a): ")" component_choice
+    component_choice="${component_choice:-a}"
+  else
+    component_choice="a"
+  fi
 
   # Component flags (all default to true)
   INSTALL_CLAUDE_MD=true

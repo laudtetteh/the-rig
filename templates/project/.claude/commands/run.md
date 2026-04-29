@@ -61,6 +61,15 @@ Present the queue:
 
 Wait for confirmation before executing anything.
 
+**RIG_GAPS check:** After presenting the queue and before executing, check
+`.rig/memory/RIG_GAPS.md` for entries that do not contain `[submitted`. If any
+exist, surface a brief note alongside the queue:
+
+> "📋 **[N] unsubmitted Rig gap(s)** in `.rig/memory/RIG_GAPS.md`. Run `/rig-gaps`
+> when you get a chance to compile and submit them to The Rig dev session."
+
+Do not block execution on this — it's a soft reminder only.
+
 ---
 
 ### Step 2 — Execute tasks in queue order
