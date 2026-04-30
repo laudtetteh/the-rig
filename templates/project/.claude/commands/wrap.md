@@ -13,7 +13,8 @@ Performs the session-end housekeeping that prevents state loss between sessions:
 5. **Self-improvement check** — scans for Rig workflow gaps and logs them to `.rig/memory/RIG_GAPS.md`
 6. **Trims `.rig/memory/ERRORS.md`** if it has grown beyond 30 entries (see Trim step below)
 7. Reports what's in `.rig/tasks/active/` so you know what's in flight
-8. Surfaces the next priority from `.rig/tasks/backlog/` and asks: "What's next?"
+8. **Suggests a session name** — derives a `/rename` command from this session's work (see Session naming step below)
+9. Surfaces the next priority from `.rig/tasks/backlog/` and asks: "What's next?"
 
 ## Usage
 
@@ -101,6 +102,53 @@ If the user confirms:
 4. Confirm: "`.rig/memory/ERRORS.md` trimmed to 30 entries. Archive: `.rig/memory/ERRORS_archive.md`"
 
 Never trim without confirmation. Never delete entries — only move them.
+
+---
+
+## Session naming step
+
+After reporting active tasks, derive a session name from this session's work and
+output it as a ready-to-run `/rename` command. Do **not** run it automatically —
+present it for the user to run or tweak.
+
+### How to derive the name
+
+1. Read `.rig/memory/PROGRESS.md`. Identify entries added or updated this session:
+   use today's date as the primary signal. If the session spans midnight or no
+   entries are dated today, use the most recent entries at the top of the file
+   that were clearly written during this session (new commits, PRs, task closures).
+
+2. For each meaningful unit of work (one PR merged, one task completed, one
+   significant fix shipped), extract:
+   - **type** — git commit type: `fix`, `feat`, `chore`, `refactor`, `devops`, `docs`, `test`
+   - **short-desc** — 3–6 words that identify the work at a glance
+   - **#N** — PR or issue number; omit if none
+
+3. Combine into pipe-separated segments:
+   ```
+   type short-desc #N | type short-desc #N | ...
+   ```
+   Keep the full string under ~100 characters. If it would exceed that, truncate
+   from the right — drop the least significant segments, not characters mid-word.
+
+### Examples
+
+```
+fix step accordion layout #184 | fix h3.steps remaining partials #186
+feat custom-permissions per-post levels #152 | fix picker regressions #150
+devops cypress ci speedup #170 | devops ci cleanup #171
+chore upgrade next to 14.2.1 | fix null user on profile fetch #88
+```
+
+### Output format
+
+Present it as:
+
+> **Suggested session name:**
+> `/rename fix step accordion layout #184 | fix h3.steps remaining partials #186`
+
+If nothing meaningful shipped this session (pure exploration, no PRs, no task
+completions), skip this step silently. Don't fabricate a name from vague activity.
 
 ---
 

@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Session naming step** (`/wrap` step 8, `/post-merge` step 7): at wrap/post-merge time, agent reads this session's PROGRESS.md entries, derives a pipe-separated `/rename` command in `type short-desc #N | ...` format, and presents it as a ready-to-run command. User runs or tweaks it; agent never fires `/rename` automatically. Heuristic: today's dated entries at the top of PROGRESS.md. If nothing meaningful shipped, step is silently skipped. Applies to both `/wrap` and `/post-merge` — the post-merge case is simpler (PR number is always known). Originated as a RIG_GAPS report from the 4Culture project.
+
 ---
 
 ## [1.5.0] — 2026-04-29

@@ -22,7 +22,8 @@ Follows `.rig/processes/POST_MERGE_WORKFLOW.md`:
 4. Overwrites `.rig/memory/CONTEXT_SNAPSHOT.md` with the current project state
 5. Checks `.rig/memory/ERRORS.md` — prompts you to log anything unexpected
 6. Makes a housekeeping commit if memory updates weren't included in the PR
-7. Surfaces the next priority and asks: **"What's next?"**
+7. **Suggests a session name** based on the merged PR (see below)
+8. Surfaces the next priority and asks: **"What's next?"**
 
 ---
 
@@ -34,6 +35,32 @@ Follows `.rig/processes/POST_MERGE_WORKFLOW.md`:
 
 Run this immediately after you merge (or are told a PR merged). Claude will ask
 which PR merged if it's not clear from context.
+
+---
+
+## Session naming step
+
+After the housekeeping commit (step 6), derive a `/rename` suggestion from the
+merged PR. Do **not** run it automatically — present it for the user to run or tweak.
+
+### Format
+
+```
+type short-desc #N | type short-desc #N | ...
+```
+
+- One segment per PR merged (you always know the PR number at this point)
+- If this session also included earlier commits or a prior PR, include those segments too
+- `type` matches the git commit type (`fix`, `feat`, `chore`, `refactor`, `devops`, `docs`, `test`)
+- `short-desc` is 3–6 words — enough to identify the work at a glance
+- Keep the full string under ~100 characters
+
+### Output
+
+> **Suggested session name:**
+> `/rename feat user-auth magic-link flow #91`
+
+If no meaningful work shipped (pure exploration, no merges), skip this step silently.
 
 ---
 
