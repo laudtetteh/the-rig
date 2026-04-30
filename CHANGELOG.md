@@ -9,6 +9,34 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [1.6.0] — 2026-04-30
+
+### Added
+
+- **Stop hook** (`templates/project/.claude/hooks/stop.sh`, wired as `"Stop"` event in `settings.json`): fires automatically when Claude Code's agent finishes its response (after each turn). Updates the `Last updated:` date in `CONTEXT_SNAPSHOT.md` (preserves the description — only the date changes) so the freshness signal stays accurate even when `/wrap` isn't run. Appends a `<!-- session-end YYYY-MM-DD HH:MM -->` boundary comment to `PROGRESS.md` — the heuristic in `/wrap` and `/post-merge` uses this to determine which entries belong to the current session. Idempotent: skips if a marker is already the last non-blank line. Documented in `docs/how-it-works.md` session lifecycle diagram and hook system section.
+- **Session naming step** (`/wrap` step 8, `/post-merge` step 7): at wrap/post-merge time, agent reads this session's PROGRESS.md entries, derives a pipe-separated `/rename` command in `type short-desc #N | ...` format, and presents it as a ready-to-run command. User runs or tweaks it; agent never fires `/rename` automatically. Heuristic uses `<!-- session-end -->` markers (from stop.sh) as the primary session boundary signal, with `Last updated:` timestamp as fallback — robust across multi-day and resumed sessions. If session is already named (tracked in CONTEXT_SNAPSHOT `Session name:` field), suggests appending new work rather than replacing. Agent updates `Session name:` in CONTEXT_SNAPSHOT after user confirms.
+- **`**Session name:**` field in CONTEXT_SNAPSHOT template**: allows /wrap and /post-merge to detect an existing session name and suggest appends on resume, avoiding accidental name replacement.
+
+### Changed
+
+- **`install.sh` — intent-first interactive flow**: the strategy question ("how do I handle file conflicts?") is replaced with an intent question ("What are you doing?"). Four intent options (First install / New project / Upgrade / Repair) each map to a pre-determined strategy and layer configuration; users no longer need to know what "merge" vs "upgrade" means. A fifth option (Custom) exposes the full strategy menu for power users. The "merge" strategy is retired from the visible menu but kept internally and accessible via `--strategy merge` for scripting and backward compatibility. Closes #73.
+- **`install.sh` — component selection removed from main flow**: component selection is only shown for Custom (intent 5). All other intents install everything — no partial install prompts. Closes #73.
+- **`install.sh` — default intent is "New project" (2)**: most runs are project scaffolding; First install (1) is for true first-timers who haven't set up the global layer yet. Closes #73.
+- **`/wrap` session naming heuristic**: primary signal upgraded to `<!-- session-end -->` markers in PROGRESS.md (written by stop.sh); `Last updated:` timestamp now used as fallback. Makes boundary detection reliable regardless of agent memory between steps. Closes #74.
+- **`/wrap` and `/post-merge` session naming**: both commands now check CONTEXT_SNAPSHOT for an existing `Session name:` and suggest appending rather than replacing when one is found.
+- **`POST_MERGE_WORKFLOW.md`**: added session naming (new Step 7) and RIG_GAPS check to Step 5. Step 8 is now "Surface what's next". Command file and process file are now in sync. Closes #74.
+- **`/post-merge` command**: step summary updated to include RIG_GAPS; session naming section updated to use session-end markers as primary boundary signal (consistent with `/wrap`). Closes #74.
+- **`/kickoff` Step 0**: fixed wrong template path reference — now embeds the `PROJECT_BRIEF.md` template inline rather than referencing a path that doesn't exist in deployed projects. Closes #74.
+- **`/new-feature` notes**: fixed incorrect cross-reference from `SHIP_WORKFLOW` to `NEW_TASK_WORKFLOW` for the GitHub issue requirement. Closes #74.
+- **`PROGRESS.md` template**: added documentation for `<!-- session-end -->` boundary markers written by stop.sh. Closes #74.
+- **`docs/how-it-works.md`**: updated session lifecycle diagram to show stop.sh behavior (fires after every agent turn); updated hook system section to document stop.sh; updated POST_MERGE_WORKFLOW summary to 8 steps including session naming; updated `/wrap` command table entry. Closes #74.
+- **`README.md`**: added stop.sh note to session lifecycle section; added stop.sh row to hooks table. Closes #74.
+- **`docs/customizing.md`**: Upgrade section updated to reflect intent-based menu (option 3 = Upgrade); strategy table replaced with intent table showing internal strategy mapping.
+
+---
+
 ### Added
 
 - **Stop hook** (`templates/project/.claude/hooks/stop.sh`, wired as `"Stop"` event in `settings.json`): fires automatically when Claude Code's agent finishes its response (after each turn). Updates the `Last updated:` date in `CONTEXT_SNAPSHOT.md` (preserves the description — only the date changes) so the freshness signal stays accurate even when `/wrap` isn't run. Appends a `<!-- session-end YYYY-MM-DD HH:MM -->` boundary comment to `PROGRESS.md` — the heuristic in `/wrap` and `/post-merge` uses this to determine which entries belong to the current session. Idempotent: skips if a marker is already the last non-blank line. Documented in `docs/how-it-works.md` session lifecycle diagram and hook system section.
