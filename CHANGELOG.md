@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [1.7.0] — 2026-04-30
+
 ### Added
 
 - **`/doc-feature` slash command** (`templates/project/.claude/commands/doc-feature.md`): research a named feature end-to-end and produce a structured doc in `docs/features/`. Traces entry points, render logic, data model, business rules, and gotchas. Guards against duplicates — redirects to `/refresh-feature-doc` if the slug already exists. Updates `docs/features/README.md` index automatically.
