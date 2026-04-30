@@ -155,6 +155,8 @@ When you open Claude Code in a project using The Rig, the agent automatically re
 
 No re-briefing. No repeating context. Every session picks up exactly where the last one left off.
 
+**At session end**, `stop.sh` fires automatically (Claude Code's Stop event): it updates the `Last updated:` timestamp in `CONTEXT_SNAPSHOT.md` and appends a `<!-- session-end -->` boundary marker to `PROGRESS.md`. Run `/wrap` before closing Claude Code for a full snapshot — `stop.sh` is a lightweight safety net, not a replacement.
+
 ---
 
 ## The command set

@@ -63,10 +63,15 @@ This file is **gitignored** — it lives on disk only, read at session start.
 
 ---
 
-## Step 5 — Check ERRORS.md
+## Step 5 — Check ERRORS.md and RIG_GAPS.md
 
-If anything unexpected happened during the task or the merge process, log it now.
-Do not defer — the detail is freshest immediately after the work.
+If anything unexpected happened during the task or the merge process, log it in
+`.rig/memory/ERRORS.md` now. Do not defer — the detail is freshest immediately
+after the work.
+
+If anything about The Rig's workflow felt wrong, was missing, or slowed you down
+during this task, log it in `.rig/memory/RIG_GAPS.md`. Use `/rig-gaps` to compile
+and submit those entries to The Rig dev session.
 
 ---
 
@@ -85,7 +90,53 @@ git push -u origin chore/post-merge-[N]
 
 ---
 
-## Step 7 — Surface what's next
+## Step 7 — Suggest a session name
+
+After the housekeeping commit, derive a `/rename` suggestion from this session's work.
+Do **not** run it automatically — present it for the user to run or tweak.
+
+### How to determine what belongs to this session
+
+1. **Look for `<!-- session-end -->` markers in `.rig/memory/PROGRESS.md`.**
+   Entries between the most recent marker and the top of the file belong to this session.
+2. If no markers exist, read the `**Last updated:**` line from `.rig/memory/CONTEXT_SNAPSHOT.md`
+   and collect entries added since that date.
+
+### Check for an existing session name
+
+Read the `**Session name:**` field from `.rig/memory/CONTEXT_SNAPSHOT.md`.
+
+- **If blank / absent:** suggest a fresh name covering this session's work.
+- **If already set:** suggest **appending** the merged PR to the existing name rather
+  than replacing it:
+
+  > **Session already named:** `feat dashboard ui #49`
+  > **Merged this run:** PR #51 (fix null user on profile fetch)
+  > **Updated suggestion:** `/rename feat dashboard ui #49 | fix null user profile fetch #51`
+
+### Format
+
+```
+type short-desc #N | type short-desc #N | ...
+```
+
+- `type` matches the git commit type (`fix`, `feat`, `chore`, `refactor`, `devops`, `docs`, `test`)
+- `short-desc` — 3–6 words; enough to identify the work at a glance
+- Keep the full string under ~100 characters
+
+### Output
+
+> **Suggested session name:**
+> `/rename feat user-auth magic-link flow #91`
+
+After the user runs `/rename`, **update the `**Session name:**` field in
+`.rig/memory/CONTEXT_SNAPSHOT.md`** to match.
+
+If no meaningful work shipped (pure housekeeping, no PRs), skip this step silently.
+
+---
+
+## Step 8 — Surface what's next
 
 Read the updated `.rig/memory/CONTEXT_SNAPSHOT.md` and state the next priority.
 Ask the user: **"What's next?"**

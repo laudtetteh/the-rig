@@ -27,6 +27,6 @@ Then it creates the task file and follows `.rig/processes/NEW_TASK_WORKFLOW.md` 
 
 ## Notes
 
-- A GitHub issue must be created before any code is written (Step 0 of SHIP_WORKFLOW)
+- A GitHub issue must be created before any code is written (Step 0 of NEW_TASK_WORKFLOW)
 - The task file is not staged until it has been moved to `.rig/tasks/done/`
 - If a task file already exists in `.rig/tasks/active/`, ask whether to resume it instead

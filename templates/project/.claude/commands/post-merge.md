@@ -20,7 +20,7 @@ Follows `.rig/processes/POST_MERGE_WORKFLOW.md`:
 2. Adds an entry at the top of `.rig/memory/PROGRESS.md` for the merged PR
 3. Moves the task file from `.rig/tasks/active/` → `.rig/tasks/done/`; marks `**Status**` as `done`
 4. Overwrites `.rig/memory/CONTEXT_SNAPSHOT.md` with the current project state
-5. Checks `.rig/memory/ERRORS.md` — prompts you to log anything unexpected
+5. Checks `.rig/memory/ERRORS.md` and `.rig/memory/RIG_GAPS.md` — prompts you to log anything unexpected or any workflow friction observed
 6. Makes a housekeeping commit if memory updates weren't included in the PR
 7. **Suggests a session name** based on the merged PR (see below)
 8. Surfaces the next priority and asks: **"What's next?"**
@@ -43,6 +43,15 @@ which PR merged if it's not clear from context.
 After the housekeeping commit (step 6), derive a `/rename` suggestion. The merged
 PR number is always known here, which makes this the most reliable naming signal
 in the system. Do **not** run it automatically — present it for the user to run or tweak.
+
+### How to determine what belongs to this session
+
+Use the same boundary logic as `/wrap`:
+
+1. Look for `<!-- session-end -->` markers in `.rig/memory/PROGRESS.md`. Entries
+   above the most recent marker belong to this session.
+2. If no markers exist, use the `**Last updated:**` date from CONTEXT_SNAPSHOT as
+   the boundary and collect entries added since that date.
 
 ### Check for an existing session name
 

@@ -117,7 +117,7 @@ Read the context profile above silently. No summary unless asked.
 5. Wait for go-ahead
 
 ### Ending a session
-1. Run `/wrap` — writes CONTEXT_SNAPSHOT, ensures PROGRESS is current
+1. Run `/wrap` — writes CONTEXT_SNAPSHOT, ensures PROGRESS is current, suggests a session name
 2. Ask: "What's next?"
 
 ---
