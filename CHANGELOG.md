@@ -9,6 +9,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`/doc-feature` slash command** (`templates/project/.claude/commands/doc-feature.md`): research a named feature end-to-end and produce a structured doc in `docs/features/`. Traces entry points, render logic, data model, business rules, and gotchas. Guards against duplicates — redirects to `/refresh-feature-doc` if the slug already exists. Updates `docs/features/README.md` index automatically.
+- **`/refresh-feature-doc` slash command** (`templates/project/.claude/commands/refresh-feature-doc.md`): re-verify every claim in an existing feature doc against current code. Corrects stale paths and line numbers, flags removed fields, and logs any actual bugs found (not just doc inaccuracies) to `ERRORS.md`. Intended to run after any PR that touches a documented feature.
+- **`docs/features/README.md` template** (`templates/project/docs/features/README.md`): scaffolded index for all feature docs. Imported by the project `CLAUDE.md` via `@docs/features/README.md` so every session knows the feature doc system exists and is loaded. Starts with a placeholder row that `/doc-feature` replaces on first use.
+- **Feature documentation section in project `CLAUDE.md`**: adds `@docs/features/README.md` import and a 3-point guide (when to read, when to refresh, when to create) so every session knows the system exists and when to engage it. Originated as a project-level pattern in the 4Culture pilot.
+
+### Changed
+
+- **`templates/project/CLAUDE.md`**: repo structure tree updated to show `docs/features/` directory.
+- **`docs/how-it-works.md`**: command count updated from 9 to 11; "Feature documentation" command group added to the command table.
+- **`README.md`**: "What's included" table updated; command set section adds "Feature knowledge" group with `/doc-feature` and `/refresh-feature-doc`.
+
 ---
 
 ## [1.6.0] — 2026-04-30

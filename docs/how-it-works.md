@@ -308,7 +308,7 @@ staged only from `.rig/tasks/done/` in a separate housekeeping commit.
 
 ## The command set
 
-Nine slash commands covering the full development lifecycle:
+Eleven slash commands covering the full development lifecycle:
 
 ### Project bootstrap
 | Command | Triggers | Key behaviour |
@@ -326,6 +326,12 @@ Nine slash commands covering the full development lifecycle:
 |---|---|---|
 | `/ship` | `SHIP_WORKFLOW` | Sequential 9-step hard gate: task confirm → issue → labels → checklist → local test pause → commit approval → commit → housekeeping → PR |
 | `/debug` | `DEBUG_WORKFLOW` | Hypothesis before code, mandatory ERRORS.md entry |
+
+### Feature documentation
+| Command | Triggers | Key behaviour |
+|---|---|---|
+| `/doc-feature` | Research + write | Traces a named feature end-to-end (entry point → data layer → render logic) and produces a structured doc in `docs/features/`. Guards against duplicates; updates the README index. |
+| `/refresh-feature-doc` | Re-verify + update | Re-reads every claim in an existing feature doc against current code; corrects stale paths/line numbers; logs bugs found to `ERRORS.md`. Run after any PR that touches a documented feature. |
 
 ### Governance and housekeeping
 | Command | Triggers | Key behaviour |

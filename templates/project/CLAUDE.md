@@ -40,7 +40,9 @@
 │   ├── processes/    # Agent workflow files
 │   ├── rules/        # Coding standards, git conventions, security, verification
 │   └── tasks/        # active/, backlog/, done/
-├── docs/             # Architecture, decisions, PRD
+├── docs/
+│   ├── features/     # Feature docs (README.md index + one .md per feature)
+│   └── [other docs]  # Architecture, decisions, PRD
 ├── CLAUDE.md         # This file
 └── README.md
 ```
@@ -111,6 +113,21 @@ When starting a new session, read in this order:
 > **External .rig/ note:** if `.rigpath` exists at the project root, all `.rig/`
 > paths above resolve to the external directory it points to. The installer
 > updates these paths automatically when the external tracking option is chosen.
+
+---
+
+## Feature documentation
+
+End-to-end traces for business-critical features live in `docs/features/`.
+
+- **Before touching code** that overlaps with a documented feature, read the
+  relevant doc — it captures the full chain, data model, business rules, and gotchas
+- **After any PR** that changes a documented feature's logic, run
+  `/refresh-feature-doc <feature>` to keep the doc current
+- **To document a new feature**, run `/doc-feature <feature name>` immediately
+  after researching it — capture the knowledge while it's fresh
+
+@docs/features/README.md
 
 ---
 
