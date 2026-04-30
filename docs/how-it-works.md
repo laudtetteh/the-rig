@@ -100,14 +100,21 @@ CLAUDE.md instructs: read ./.rig/tasks/active/
      ▼
 Agent is oriented. Hooks are live. Ready to work.
      │
-     │  During the session:
-     │  ├─ pre-tool.sh runs before every tool call
-     │  └─ post-tool.sh runs after every tool call
+     │  During the session (repeats every turn):
+     │  ├─ pre-tool.sh  runs before every tool call
+     │  ├─ post-tool.sh runs after every tool call
+     │  └─ stop.sh      runs after the agent's final message each turn
+     │       Updates "Last updated:" date in CONTEXT_SNAPSHOT.md
+     │       Appends <!-- session-end YYYY-MM-DD HH:MM --> to PROGRESS.md
+     │       (lightweight; idempotent — safe to run after every response)
      │
      ▼
-/wrap — session end
+/wrap — run manually before closing Claude Code
      │  Writes .rig/memory/CONTEXT_SNAPSHOT.md (full current state)
-     │  Ensures .rig/memory/PROGRESS.md is current; trims if > 20 entries
+     │  Expands PROGRESS.md stubs; trims if > 20 entries
+     │  Logs ERRORS.md and RIG_GAPS.md entries
+     │  Trims ERRORS.md if > 30 entries
+     │  Suggests session name (derives /rename from session-end markers)
      └─ Surfaces next priority
 ```
 
@@ -127,6 +134,7 @@ Three files, three purposes:
 ### .rig/memory/PROGRESS.md
 - Append-only build log, one entry per meaningful unit of work
 - Auto-stubbed by `post-tool.sh` after every git commit — stub exists even if the agent forgets
+- `stop.sh` appends `<!-- session-end YYYY-MM-DD HH:MM -->` boundary markers automatically; `/wrap` and `/post-merge` use these to identify which entries belong to the current session when suggesting a session name
 - Most recent entry at the top
 - **Trim convention:** capped at 20 entries. `/wrap` moves older entries to `.rig/memory/PROGRESS_archive.md` (gitignored, disk-only) when the cap is exceeded. Keeps session startup cost low indefinitely.
 
@@ -198,9 +206,10 @@ Step 1: Pull latest main
 Step 2: Update PROGRESS.md
 Step 3: Move task file active/ → done/
 Step 4: Overwrite CONTEXT_SNAPSHOT.md
-Step 5: Check ERRORS.md
+Step 5: Check ERRORS.md and RIG_GAPS.md
 Step 6: Housekeeping commit (if needed)
-Step 7: Surface next priority — ask "What's next?"
+Step 7: Suggest session name (derives /rename from session work)
+Step 8: Surface next priority — ask "What's next?"
 ```
 
 ---
@@ -235,6 +244,16 @@ Every tool call
                Read commit message + hash from git log
                Append dated stub to RIG_DIR/memory/PROGRESS.md (idempotent)
                Delete $RIG_DIR/memory/.rig-commit-ok sentinel (one-shot auth)
+
+Agent finishes response
+     │
+     └─► stop.sh (Stop event)
+           Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
+           If CONTEXT_SNAPSHOT.md exists and has "Last updated:" line:
+             Update the date (preserve description text)
+           If PROGRESS.md exists:
+             Append <!-- session-end YYYY-MM-DD HH:MM --> boundary marker
+             (idempotent: skips if last non-blank line is already a marker)
 ```
 
 **Critical implementation note:** Tool names in Claude Code are `PascalCase`
@@ -312,7 +331,7 @@ Nine slash commands covering the full development lifecycle:
 | Command | Triggers | Key behaviour |
 |---|---|---|
 | `/propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
-| `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, runs self-improvement check (logs Rig gaps), trims if > 20 entries, surfaces next priority |
+| `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, runs self-improvement check (logs Rig gaps), trims PROGRESS/ERRORS, suggests session name via `/rename`, surfaces next priority |
 | `/rig-gaps` | Self-improvement | Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats a report with submission instructions for The Rig dev session |
 | `/new-feature` | `NEW_TASK_WORKFLOW` | Original task entry point — creates task file, plans before coding, waits for approval |
 

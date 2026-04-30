@@ -28,7 +28,48 @@ it from the template and ask you to fill it in, then stop and wait.
 
 Look for `PROJECT_BRIEF.md` in the repo root.
 
-**If missing:** Create it from `templates/project/PROJECT_BRIEF.md`. Tell the user:
+**If missing:** Create a blank `PROJECT_BRIEF.md` in the repo root using this template:
+
+```markdown
+# Project Brief
+
+## Project name
+[Name]
+
+## One-liner
+[What it does in one sentence]
+
+## Problem / solution
+[What problem does this solve? What's the solution?]
+
+## Primary users
+[Who will use this?]
+
+## MVP features
+- [Feature 1]
+- [Feature 2]
+- [Feature 3]
+
+## Out of scope (v1)
+- [What's explicitly NOT in the first version]
+
+## Stack
+- **Backend**: [e.g. FastAPI / Python 3.12]
+- **Frontend**: [e.g. Next.js / TypeScript]
+- **Database**: [e.g. PostgreSQL]
+- **Infra**: [e.g. Docker + GitHub Actions]
+
+## Constraints
+- [Any deadlines, budget limits, must-use technologies, or hard requirements]
+
+## Success metrics
+- [How will you know the MVP succeeded?]
+
+## Open questions
+- [Anything still undecided]
+```
+
+Tell the user:
 
 > "I've created `PROJECT_BRIEF.md` in the repo root. Fill it in and run `/kickoff`
 > again when it's ready. The more specific you are, the better the scaffold."

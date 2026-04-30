@@ -114,16 +114,24 @@ present it for the user to run or tweak.
 ### How to determine "this session's work"
 
 **Do not use today's date** — it breaks for sessions that span midnight or are
-resumed days later. Instead:
+resumed days later. Use this priority order:
 
-1. Read the `**Last updated:**` line from `.rig/memory/CONTEXT_SNAPSHOT.md`
-   (the version written at the *start* of this /wrap, before step 1 overwrote it —
-   use the date you read at session start, or infer from PROGRESS.md entry ordering).
-2. Collect PROGRESS.md entries that were added **since** that last-updated date.
-   These represent everything that happened in this wrap cycle, regardless of
-   whether it spans one day or several.
-3. If CONTEXT_SNAPSHOT did not exist (first ever /wrap), use all entries at the
-   top of PROGRESS.md until you reach entries clearly from a prior session.
+1. **`<!-- session-end -->` markers in PROGRESS.md** (most reliable)
+   The `stop.sh` hook appends `<!-- session-end YYYY-MM-DD HH:MM -->` automatically
+   when the agent finishes each response. Look for the most recent such marker:
+   - Entries **above** the most recent marker belong to this session.
+   - Entries **below** it belong to prior sessions.
+
+2. **`Last updated:` field in the previous CONTEXT_SNAPSHOT** (fallback)
+   If no session-end marker exists (e.g. stop.sh wasn't wired yet, or this is the
+   first /wrap on a new install), read the `**Last updated:**` field from the snapshot
+   you noted at session start (before step 1 overwrote it). Collect PROGRESS.md
+   entries added since that date.
+
+3. **Infer from PROGRESS.md ordering** (last resort)
+   If neither signal exists, take the entries at the top of PROGRESS.md that are
+   clearly from this session's conversation, and stop when you reach entries from
+   a prior session.
 
 ### Check for an existing session name
 

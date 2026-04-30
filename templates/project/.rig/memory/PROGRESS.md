@@ -8,6 +8,12 @@
 > When `/wrap` detects more than 20 entries, it moves the oldest to
 > `memory/PROGRESS_archive.md` (gitignored — disk only, never committed).
 > This keeps session startup cost low while preserving full history locally.
+>
+> **Session-end markers:** `<!-- session-end YYYY-MM-DD HH:MM -->` comments are
+> automatically appended by the `stop.sh` hook when the agent finishes a response.
+> These are invisible in rendered Markdown and are used by `/wrap` and `/post-merge`
+> to determine which PROGRESS entries belong to the current session when suggesting
+> a session name. Do not remove them manually.
 
 ---
 
