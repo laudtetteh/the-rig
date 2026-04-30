@@ -111,25 +111,42 @@ After reporting active tasks, derive a session name from this session's work and
 output it as a ready-to-run `/rename` command. Do **not** run it automatically —
 present it for the user to run or tweak.
 
-### How to derive the name
+### How to determine "this session's work"
 
-1. Read `.rig/memory/PROGRESS.md`. Identify entries added or updated this session:
-   use today's date as the primary signal. If the session spans midnight or no
-   entries are dated today, use the most recent entries at the top of the file
-   that were clearly written during this session (new commits, PRs, task closures).
+**Do not use today's date** — it breaks for sessions that span midnight or are
+resumed days later. Instead:
 
-2. For each meaningful unit of work (one PR merged, one task completed, one
-   significant fix shipped), extract:
-   - **type** — git commit type: `fix`, `feat`, `chore`, `refactor`, `devops`, `docs`, `test`
-   - **short-desc** — 3–6 words that identify the work at a glance
-   - **#N** — PR or issue number; omit if none
+1. Read the `**Last updated:**` line from `.rig/memory/CONTEXT_SNAPSHOT.md`
+   (the version written at the *start* of this /wrap, before step 1 overwrote it —
+   use the date you read at session start, or infer from PROGRESS.md entry ordering).
+2. Collect PROGRESS.md entries that were added **since** that last-updated date.
+   These represent everything that happened in this wrap cycle, regardless of
+   whether it spans one day or several.
+3. If CONTEXT_SNAPSHOT did not exist (first ever /wrap), use all entries at the
+   top of PROGRESS.md until you reach entries clearly from a prior session.
 
-3. Combine into pipe-separated segments:
-   ```
-   type short-desc #N | type short-desc #N | ...
-   ```
-   Keep the full string under ~100 characters. If it would exceed that, truncate
-   from the right — drop the least significant segments, not characters mid-word.
+### Check for an existing session name
+
+Read the `**Session name:**` field from CONTEXT_SNAPSHOT.md (the previous
+snapshot, before this /wrap rewrites it).
+
+- **If blank / absent:** suggest a fresh `/rename` covering all this session's work.
+- **If already set:** the session was named in a prior /wrap or by the user directly.
+  Suggest **appending** new work to the existing name rather than replacing it:
+
+  > **Session already named:** `fix step accordion layout #184`
+  > **New work this wrap:** `feat custom-permissions #152`
+  > **Updated suggestion:** `/rename fix step accordion layout #184 | feat custom-permissions #152`
+
+### Build the name
+
+For each meaningful unit of work (PR merged, task completed, significant fix shipped):
+- **type** — git commit type: `fix`, `feat`, `chore`, `refactor`, `devops`, `docs`, `test`
+- **short-desc** — 3–6 words that identify the work at a glance
+- **#N** — PR or issue number; omit if none
+
+Combine with ` | `. Keep under ~100 characters — truncate from the right by
+dropping whole segments, never mid-word.
 
 ### Examples
 
@@ -140,15 +157,17 @@ devops cypress ci speedup #170 | devops ci cleanup #171
 chore upgrade next to 14.2.1 | fix null user on profile fetch #88
 ```
 
-### Output format
-
-Present it as:
+### Output
 
 > **Suggested session name:**
 > `/rename fix step accordion layout #184 | fix h3.steps remaining partials #186`
 
-If nothing meaningful shipped this session (pure exploration, no PRs, no task
-completions), skip this step silently. Don't fabricate a name from vague activity.
+After the user runs `/rename`, **update the `**Session name:**` field in
+`.rig/memory/CONTEXT_SNAPSHOT.md`** to match. This is how future /wrap calls
+detect an existing name and suggest appends instead of replacements.
+
+If nothing meaningful shipped this session (pure exploration, no PRs, no
+completions), skip this step silently.
 
 ---
 

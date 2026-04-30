@@ -11,7 +11,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Session naming step** (`/wrap` step 8, `/post-merge` step 7): at wrap/post-merge time, agent reads this session's PROGRESS.md entries, derives a pipe-separated `/rename` command in `type short-desc #N | ...` format, and presents it as a ready-to-run command. User runs or tweaks it; agent never fires `/rename` automatically. Heuristic: today's dated entries at the top of PROGRESS.md. If nothing meaningful shipped, step is silently skipped. Applies to both `/wrap` and `/post-merge` — the post-merge case is simpler (PR number is always known). Originated as a RIG_GAPS report from the 4Culture project.
+- **Session naming step** (`/wrap` step 8, `/post-merge` step 7): at wrap/post-merge time, agent reads this session's PROGRESS.md entries, derives a pipe-separated `/rename` command in `type short-desc #N | ...` format, and presents it as a ready-to-run command. User runs or tweaks it; agent never fires `/rename` automatically. Heuristic uses CONTEXT_SNAPSHOT `Last updated:` timestamp (not today's date) — robust across multi-day and resumed sessions. If session is already named (tracked in CONTEXT_SNAPSHOT `Session name:` field), suggests appending new work rather than replacing. Agent updates `Session name:` in CONTEXT_SNAPSHOT after user confirms. Originated as a RIG_GAPS report from the 4Culture project.
+- **`**Session name:**` field in CONTEXT_SNAPSHOT template**: allows /wrap and /post-merge to detect an existing session name and suggest appends on resume, avoiding accidental name replacement.
+
+### Changed
+
+- **`install.sh` — intent-first interactive flow**: the strategy question ("how do I handle file conflicts?") is replaced with an intent question ("What are you doing?"). Four intent options (First install / New project / Upgrade / Repair) each map to a pre-determined strategy and layer configuration; users no longer need to know what "merge" vs "upgrade" means. A fifth option (Custom) exposes the full strategy menu for power users. The "merge" strategy is retired from the visible menu but kept internally and accessible via `--strategy merge` for scripting and backward compatibility.
+- **`install.sh` — component selection removed from main flow**: component selection is only shown for Custom (intent 5). All other intents install everything — no partial install prompts.
+- **`install.sh` — default intent is "New project" (2)**: most runs are project scaffolding; First install (1) is for true first-timers who haven't set up the global layer yet.
+- **`/wrap` session naming heuristic**: changed from "today's dated entries" to "entries since last CONTEXT_SNAPSHOT update" — correctly captures multi-day sessions and sessions resumed after midnight without missing prior-day work.
+- **`/wrap` and `/post-merge` session naming**: both commands now check CONTEXT_SNAPSHOT for an existing `Session name:` and suggest appending rather than replacing when one is found.
+- **`docs/customizing.md`** Upgrade section: updated to reflect intent-based menu (option 3 = Upgrade); strategy table replaced with intent table showing internal strategy mapping.
+- **`README.md`** quickstart and upgrade steps: updated to reference intent menu options instead of strategy numbers.
 
 ---
 

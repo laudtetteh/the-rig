@@ -40,8 +40,21 @@ which PR merged if it's not clear from context.
 
 ## Session naming step
 
-After the housekeeping commit (step 6), derive a `/rename` suggestion from the
-merged PR. Do **not** run it automatically — present it for the user to run or tweak.
+After the housekeeping commit (step 6), derive a `/rename` suggestion. The merged
+PR number is always known here, which makes this the most reliable naming signal
+in the system. Do **not** run it automatically — present it for the user to run or tweak.
+
+### Check for an existing session name
+
+Read the `**Session name:**` field from `.rig/memory/CONTEXT_SNAPSHOT.md`.
+
+- **If blank / absent:** suggest a name based on the merged PR (and any other
+  PRs or tasks completed this session).
+- **If already set:** suggest **appending** the merged PR to the existing name:
+
+  > **Session already named:** `feat dashboard ui #49`
+  > **Merged this run:** PR #51 (fix null user on profile fetch)
+  > **Updated suggestion:** `/rename feat dashboard ui #49 | fix null user profile fetch #51`
 
 ### Format
 
@@ -49,8 +62,6 @@ merged PR. Do **not** run it automatically — present it for the user to run or
 type short-desc #N | type short-desc #N | ...
 ```
 
-- One segment per PR merged (you always know the PR number at this point)
-- If this session also included earlier commits or a prior PR, include those segments too
 - `type` matches the git commit type (`fix`, `feat`, `chore`, `refactor`, `devops`, `docs`, `test`)
 - `short-desc` is 3–6 words — enough to identify the work at a glance
 - Keep the full string under ~100 characters
@@ -59,6 +70,10 @@ type short-desc #N | type short-desc #N | ...
 
 > **Suggested session name:**
 > `/rename feat user-auth magic-link flow #91`
+
+After the user runs `/rename`, **update the `**Session name:**` field in
+`.rig/memory/CONTEXT_SNAPSHOT.md`** to match. This lets subsequent /wrap or
+/post-merge calls detect the existing name and suggest appends correctly.
 
 If no meaningful work shipped (pure exploration, no merges), skip this step silently.
 

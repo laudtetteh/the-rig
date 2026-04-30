@@ -143,18 +143,28 @@ for arg in "$@"; do
       # two-arg flags; value captured in the loop below
       ;;
     --help|-h)
-      echo "Usage: ./install.sh [--global-only | --project-only] [--rig-dir <path>] [--help]"
+      echo "Usage: ./install.sh [options]"
       echo ""
+      echo "Interactive (no flags): prompts 'What are you doing?' and guides from there."
+      echo ""
+      echo "Layer flags (override the intent menu):"
       echo "  --global-only         Install ~/.claude/ layer only (CLAUDE.md + skills)"
-      echo "  --project-only        Scaffold project layer only (processes, rules, memory, etc.)"
-      echo "  --rig-dir <path>      Install .rig/ to an external directory outside the repo."
-      echo "                        A .rigpath pointer file is written to the project root."
+      echo "  --project-only        Scaffold project layer only"
+      echo ""
+      echo "Non-interactive flags (bypass all prompts — useful for scripting and CI):"
+      echo "  --strategy <name>     Set strategy directly."
+      echo "                        Values: merge | skip | overwrite | upgrade | interactive"
+      echo "                        merge    — new/drop-in install (safe default; smart-merges settings.json)"
+      echo "                        skip     — only install files that don't exist yet"
+      echo "                        upgrade  — update Rig-owned files; preserve user-owned"
+      echo "                        overwrite — replace everything; back up originals"
+      echo "  --target <path>       Set target project directory."
+      echo "  --project-name <name> Set project name (used in CLAUDE.md substitution)."
+      echo ""
+      echo "Other:"
+      echo "  --rig-dir <path>      Install .rig/ to an external path outside the repo."
+      echo "                        Writes a .rigpath pointer file at the project root."
       echo "                        Useful for shared repos where teammates don't use The Rig."
-      echo "  --strategy <name>     Set collision strategy non-interactively."
-      echo "                        Values: interactive | skip | overwrite | merge | upgrade"
-      echo "  --target <path>       Set target project directory non-interactively."
-      echo "  --project-name <name> Set project name non-interactively (used in CLAUDE.md)."
-      echo "  (no flags)            Interactive — prompts for both layers"
       exit 0
       ;;
   esac
@@ -196,56 +206,118 @@ bold "║         The Rig — Installer          ║"
 bold "╚══════════════════════════════════════╝"
 echo ""
 
-# ── COLLISION STRATEGY ───────────────────────────────────────────────────────
-# Ask once upfront. Applied consistently to every file copy.
+# ── INSTALL INTENT ────────────────────────────────────────────────────────────
+# Ask what the user is trying to do, then derive strategy and layer flags from
+# that intent. Users shouldn't need to know what "merge" vs "upgrade" means.
 #
-# STRATEGY values:
-#   interactive  — ask per file (original behaviour)
-#   skip         — keep existing, only create new files
-#   overwrite    — replace all, back up originals to .rig-backup/
-#   merge        — smart-merge .claude/settings.json; skip everything else
+# Internal COLLISION_STRATEGY values (not user-visible in the main flow):
+#   merge        — smart-merge settings.json; skip everything else
+#                  used for: fresh install and drop-in (safe default)
+#   upgrade      — update Rig-owned files; preserve user-owned files
+#                  used for: upgrading an existing install
+#   overwrite    — replace all Rig-owned files; back up originals
+#                  used for: repair/reset
+#   interactive  — ask per file (Custom path only)
+#   skip         — skip all existing files (Custom path, or --strategy flag)
+#
+# The "merge" strategy name is kept internally for backward compat with
+# --strategy merge. It is not shown in the intent menu.
+#
+# _SKIP_COMPONENT_SELECTION: set to true for intents 1–4 (install all components).
+# Component selection is only shown for intent 5 (Custom).
+_SKIP_COMPONENT_SELECTION=false
 
 if [[ -n "$_FLAG_STRATEGY" ]]; then
-  # Non-interactive: --strategy flag provided
+  # Non-interactive: --strategy flag bypasses the intent menu entirely.
   case "$_FLAG_STRATEGY" in
     interactive|skip|overwrite|merge|upgrade)
       COLLISION_STRATEGY="$_FLAG_STRATEGY"
       ;;
     *)
-      warn "Unknown --strategy value '${_FLAG_STRATEGY}' — defaulting to Interactive."
+      warn "Unknown --strategy value '${_FLAG_STRATEGY}' — defaulting to interactive."
       COLLISION_STRATEGY="interactive"
       ;;
   esac
+  _SKIP_COMPONENT_SELECTION=true
 else
-  echo "How should I handle files that already exist at the destination?"
+  echo "What are you doing?"
   echo ""
-  echo "  1) Interactive  — ask me for each file"
-  echo "  2) Skip         — keep all existing files, only install new ones"
-  echo "  3) Overwrite    — replace everything (backs up originals to .rig-backup/)"
-  echo "  4) Merge        — smart-merge .claude/settings.json; skip everything else"
-  echo "  5) Upgrade      — update Rig-owned files (hooks, commands, processes, husky);"
-  echo "                    skip user-owned files (CLAUDE.md, rules/, memory/, github/);"
-  echo "                    prompt with diff if you've customized a Rig-owned file"
-  echo "                    ── recommended for upgrading an existing install ──"
+  echo "  1) First install  — set up The Rig on this machine for the first time"
+  echo "                      (installs global layer + scaffolds a project)"
+  echo "  2) New project    — scaffold The Rig into a project"
+  echo "                      (global layer already installed)"
+  echo "  3) Upgrade        — update The Rig in a project that already has it"
+  echo "                      (updates hooks, commands, and processes; preserves your files)"
+  echo "  4) Repair         — overwrite all Rig-owned files and start fresh"
+  echo "                      (backs up originals to .rig-backup/)"
+  echo "  5) Custom         — full control over layers, strategy, and components"
   echo ""
-  read -r -p "$(echo -e "${BOLD}?${RESET} Choose a strategy [1/2/3/4/5] (default: 1): ")" strategy_input
-  strategy_input="${strategy_input:-1}"
+  read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3/4/5] (default: 2): ")" intent_input
+  intent_input="${intent_input:-2}"
 
-  case "$strategy_input" in
-    1) COLLISION_STRATEGY="interactive" ;;
-    2) COLLISION_STRATEGY="skip" ;;
-    3) COLLISION_STRATEGY="overwrite" ;;
-    4) COLLISION_STRATEGY="merge" ;;
-    5) COLLISION_STRATEGY="upgrade" ;;
+  case "$intent_input" in
+    1)
+      # First install: global layer + project scaffold, skip existing files.
+      # --global-only / --project-only flags still override if provided.
+      [[ "$DO_PROJECT" == true ]] && DO_GLOBAL=true
+      COLLISION_STRATEGY="merge"
+      _SKIP_COMPONENT_SELECTION=true
+      ;;
+    2)
+      # New project or drop-in: project layer only, preserve anything existing,
+      # smart-merge settings.json so existing Claude Code commands aren't lost.
+      DO_GLOBAL=false
+      COLLISION_STRATEGY="merge"
+      _SKIP_COMPONENT_SELECTION=true
+      ;;
+    3)
+      # Upgrade: project layer only, update Rig-owned files, preserve yours.
+      DO_GLOBAL=false
+      COLLISION_STRATEGY="upgrade"
+      _SKIP_COMPONENT_SELECTION=true
+      ;;
+    4)
+      # Repair: project layer only, overwrite all Rig-owned files.
+      DO_GLOBAL=false
+      COLLISION_STRATEGY="overwrite"
+      _SKIP_COMPONENT_SELECTION=true
+      ;;
+    5)
+      # Custom: full interactive flow — strategy and component selection both shown.
+      echo ""
+      echo "Collision strategy:"
+      echo "  1) Interactive  — ask me for each file"
+      echo "  2) Skip         — keep all existing files, only install new ones"
+      echo "  3) Overwrite    — replace everything (backs up originals to .rig-backup/)"
+      echo "  4) Merge        — smart-merge .claude/settings.json; skip everything else"
+      echo "  5) Upgrade      — update Rig-owned files; skip user-owned; diff on custom"
+      echo ""
+      read -r -p "$(echo -e "${BOLD}?${RESET} Choose strategy [1/2/3/4/5] (default: 2): ")" strategy_input
+      strategy_input="${strategy_input:-2}"
+      case "$strategy_input" in
+        1) COLLISION_STRATEGY="interactive" ;;
+        2) COLLISION_STRATEGY="skip" ;;
+        3) COLLISION_STRATEGY="overwrite" ;;
+        4) COLLISION_STRATEGY="merge" ;;
+        5) COLLISION_STRATEGY="upgrade" ;;
+        *)
+          warn "Invalid choice — defaulting to Skip."
+          COLLISION_STRATEGY="skip"
+          ;;
+      esac
+      _SKIP_COMPONENT_SELECTION=false
+      ;;
     *)
-      warn "Invalid choice — defaulting to Interactive."
-      COLLISION_STRATEGY="interactive"
+      warn "Invalid choice — defaulting to New project (2)."
+      DO_GLOBAL=false
+      COLLISION_STRATEGY="merge"
+      _SKIP_COMPONENT_SELECTION=true
       ;;
   esac
 fi
 
 echo ""
-info "Collision strategy: ${COLLISION_STRATEGY}"
+info "Strategy: ${COLLISION_STRATEGY}"
 echo ""
 
 # ── BACKUP HELPER ─────────────────────────────────────────────────────────────
@@ -669,8 +741,11 @@ if [[ "$DO_PROJECT" == true ]]; then
   echo ""
 
   # ── COMPONENT SELECTION ───────────────────────────────────────────────────
-  # When --target is provided, skip component selection and install everything.
-  if [[ -z "$_FLAG_TARGET" ]]; then
+  # Skipped for intents 1–4 and when --target flag is provided.
+  # Only shown for Custom (intent 5) when the user hasn't bypassed interactivity.
+  if [[ "$_SKIP_COMPONENT_SELECTION" == true || -n "$_FLAG_TARGET" ]]; then
+    component_choice="a"
+  else
     echo "Which components do you want to install?"
     echo ""
     echo "  a) All (recommended)"
@@ -678,8 +753,6 @@ if [[ "$DO_PROJECT" == true ]]; then
     echo ""
     read -r -p "$(echo -e "${BOLD}?${RESET} Choose [a/b] (default: a): ")" component_choice
     component_choice="${component_choice:-a}"
-  else
-    component_choice="a"
   fi
 
   # Component flags (all default to true)

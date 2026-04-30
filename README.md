@@ -105,7 +105,7 @@ git init
 
 # Run the installer from your permanent Rig location
 ~/tools/the-rig/install.sh --project-only
-# When prompted, point it at ~/code/my-project
+# Choose: 2) New project
 
 # Then open Claude Code in your project and run /kickoff
 # /kickoff reads PROJECT_BRIEF.md, confirms the project shape,
@@ -121,7 +121,7 @@ The Rig stays in `~/tools/the-rig/`. Your project is clean.
 ```bash
 cd ~/code/my-project
 ~/tools/the-rig/install.sh --project-only
-# Choose Skip (2) — only installs files that don't exist yet, touches nothing else
+# Choose: 2) New project — preserves all existing files, smart-merges settings.json
 ```
 
 ---
@@ -135,7 +135,7 @@ cd ~/tools/the-rig && git pull
 # 2. Run the installer from inside your project
 cd ~/code/my-project
 ~/tools/the-rig/install.sh --project-only
-# Choose Upgrade (5) — updates Rig-owned files, detects your customizations,
+# Choose: 3) Upgrade — updates Rig-owned files, detects your customizations,
 # skips user-owned files (CLAUDE.md, rules/, memory/, github/)
 ```
 

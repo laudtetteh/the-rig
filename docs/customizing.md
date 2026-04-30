@@ -260,8 +260,8 @@ cd ~/tools/the-rig && git pull
 ./install.sh --project-only
 ```
 
-Choose **Upgrade (option 5)** as the collision strategy. This is the recommended
-strategy for all upgrades. It:
+Choose **Upgrade (option 3)** from the intent menu. This is the recommended
+path for all upgrades. It:
 
 - **Auto-updates** Rig-owned files (hooks, commands, process workflows, husky hooks)
   that you haven't modified since install — no prompts, no friction
@@ -303,15 +303,23 @@ Files in the **Rig-owned** category that you commonly want to customize:
 The Upgrade strategy will detect changes to these files and prompt before overwriting.
 Your customizations are safe.
 
-### Choosing Merge vs Upgrade
+### Choosing the right intent
 
-| Strategy | Use when |
-|---|---|
-| **Upgrade (5)** | Upgrading an existing project — recommended |
-| **Merge (4)** | You only want settings.json updated and nothing else touched |
-| **Overwrite (3)** | Resetting to a clean state (nukes all customizations, with backup) |
-| **Skip (2)** | Fresh install — only create files that don't exist yet |
+The installer asks "What are you doing?" and derives the right strategy from your
+answer. You don't need to think about strategy names:
+
+| Intent | Use when | Underlying strategy |
+|---|---|---|
+| **1) First install** | Setting up The Rig on a new machine | merge (global + project) |
+| **2) New project** | Scaffolding into a new or existing project | merge (project only) |
+| **3) Upgrade** | Updating an existing Rig install — recommended | upgrade (project only) |
+| **4) Repair** | Resetting Rig-owned files to a clean state | overwrite (project only) |
+| **5) Custom** | Full control over strategy and components | you choose |
+
+For scripting and CI, the `--strategy` flag accepts the internal strategy name
+directly (merge / skip / overwrite / upgrade / interactive), bypassing the intent
+menu entirely.
 
 After upgrading, review the CHANGELOG for any manual steps — some releases may add
-new fields to `.rig/rules/` files or project `CLAUDE.md` that the Upgrade strategy
+new fields to `.rig/rules/` files or project `CLAUDE.md` that the Upgrade intent
 skips (since those are user-owned).
