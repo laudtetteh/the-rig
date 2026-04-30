@@ -21,6 +21,16 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash [REPO_ROOT]/.claude/hooks/stop.sh"
+          }
+        ]
+      }
     ]
   }
 }

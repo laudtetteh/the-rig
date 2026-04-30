@@ -192,6 +192,7 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 |---|---|---|
 | `pre-tool.sh` | Before every Claude Code tool call | Writes to protected paths; blocks `git commit` until user gives explicit go-ahead |
 | `post-tool.sh` | After every Claude Code tool call | PROGRESS.md being skipped after a commit; clears commit sentinel after use |
+| `stop.sh` | When the agent finishes its final response | CONTEXT_SNAPSHOT going stale — updates `Last updated:` and appends a session-end boundary to PROGRESS.md without requiring `/wrap` |
 | `pre-commit` | Before every git commit | Secrets reaching the repository |
 | `commit-msg` + `post-commit` | On every git commit | AI attribution trailers (`Co-Authored-By: Claude`, etc.) in history |
 
