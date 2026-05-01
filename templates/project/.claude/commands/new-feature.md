@@ -1,32 +1,23 @@
 # Command: /new-feature
 
-Trigger this command to kick off a new feature task end-to-end.
+> **Deprecated.** Use `/task` instead.
+>
+> `/task` is the primary entry point for all new work. It runs the same
+> `NEW_TASK_WORKFLOW` as this command but adds the intake wizard — autonomy
+> level, check-in frequency, and risk tolerance — so your operating mode is
+> configured and persisted in the task file from the start.
+>
+> `/new-feature` is kept for backward compatibility. If you run it, the agent
+> will redirect you to `/task` automatically.
 
-## What this does
+---
 
-Follows `.rig/processes/NEW_TASK_WORKFLOW.md` from the beginning:
+When this command is triggered, say:
 
-1. Asks you for the feature name and one-sentence goal
-2. Creates a task file in `.rig/tasks/backlog/` using the task template
-3. Confirms the goal and files to touch
-4. Writes the implementation plan into the task file under `## Approach`
-5. Waits for your approval before writing any code
+> "This command is deprecated. `/task` does everything `/new-feature` does, plus
+> it captures your autonomy level, check-in preference, and risk tolerance so
+> every session on this task behaves consistently.
+>
+> Run `/task` to start the intake wizard."
 
-## Usage
-
-```
-/new-feature
-```
-
-Claude will ask:
-- What's the feature name?
-- What's the one-sentence goal?
-- Any files that are off-limits or out of scope for this task?
-
-Then it creates the task file and follows `.rig/processes/NEW_TASK_WORKFLOW.md` from Step 0.
-
-## Notes
-
-- A GitHub issue must be created before any code is written (Step 0 of NEW_TASK_WORKFLOW)
-- The task file is not staged until it has been moved to `.rig/tasks/done/`
-- If a task file already exists in `.rig/tasks/active/`, ask whether to resume it instead
+Do not proceed with the old workflow. Redirect only.
