@@ -9,12 +9,14 @@ Performs the session-end housekeeping that prevents state loss between sessions:
 1. Writes (overwrites) `.rig/memory/CONTEXT_SNAPSHOT.md` with full current project state
 2. Ensures `.rig/memory/PROGRESS.md` is up to date — expands any auto-stubbed entries
 3. **Trims `.rig/memory/PROGRESS.md`** if it has grown beyond 20 entries (see Trim step below)
-4. Checks `.rig/memory/ERRORS.md` — prompts you to log anything unexpected from this session
-5. **Self-improvement check** — scans for Rig workflow gaps and logs them to `.rig/memory/RIG_GAPS.md`
-6. **Trims `.rig/memory/ERRORS.md`** if it has grown beyond 30 entries (see Trim step below)
-7. Reports what's in `.rig/tasks/active/` so you know what's in flight
-8. **Suggests a session name** — derives a `/rename` command from this session's work (see Session naming step below)
-9. Surfaces the next priority from `.rig/tasks/backlog/` and asks: "What's next?"
+4. **Prunes stale session-end markers** from `PROGRESS.md` (see Marker prune step below)
+5. Checks `.rig/memory/ERRORS.md` — prompts you to log anything unexpected from this session
+6. **Self-improvement check** — scans for Rig workflow gaps and logs them to `.rig/memory/RIG_GAPS.md`
+7. **Trims `.rig/memory/ERRORS.md`** if it has grown beyond 30 entries (see Trim step below)
+8. Reports what's in `.rig/tasks/active/` so you know what's in flight
+9. **Suggests a session name** — derives a `/rename` command from this session's work (see Session naming step below)
+10. Surfaces the next priority from `.rig/tasks/backlog/` and asks: "What's next?"
+11. **Cleans up housekeeping flags** — deletes `.rig/memory/.wrap-needed` if present
 
 ## Usage
 
@@ -48,6 +50,25 @@ If the user confirms:
 4. Confirm: "`.rig/memory/PROGRESS.md` trimmed to 20 entries. Archive: `.rig/memory/PROGRESS_archive.md`"
 
 Never trim without confirmation. Never delete entries — only move them.
+
+---
+
+## Marker prune step — PROGRESS.md session-end markers
+
+`stop.sh` appends `<!-- session-end YYYY-MM-DD HH:MM -->` after every agent turn.
+Over time these accumulate in PROGRESS.md without bound — they are not covered by
+the `## ` header trim above.
+
+After the PROGRESS.md trim step, remove all but the **most recent** session-end
+marker from PROGRESS.md:
+
+1. Find all lines matching `<!-- session-end`
+2. Keep the last one (most recent)
+3. Delete all earlier ones in-place
+4. Log: "Pruned [N] stale session-end markers from PROGRESS.md" — only if N > 0
+
+This is automatic — no user confirmation needed (these are housekeeping comments,
+not content).
 
 ---
 
@@ -176,6 +197,22 @@ detect an existing name and suggest appends instead of replacements.
 
 If nothing meaningful shipped this session (pure exploration, no PRs, no
 completions), skip this step silently.
+
+---
+
+## Flag cleanup (step 11)
+
+After suggesting a session name and before asking "What's next?", delete the
+`.wrap-needed` flag file if it exists:
+
+```bash
+rm -f "$(git rev-parse --show-toplevel)/.rig/memory/.wrap-needed" 2>/dev/null || true
+```
+
+(Resolve via `.rigpath` if present.) Log to session log: "`.wrap-needed` cleared."
+
+This signals to `stop.sh` that `/wrap` has run and no flag should be written until
+the next commit creates new unexpanded stubs.
 
 ---
 
