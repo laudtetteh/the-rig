@@ -50,6 +50,16 @@ Do not summarise these back to me unless asked.
 - **When you see a compaction warning** (e.g. "8% until auto-compact"), run `/wrap`
   immediately — before the next tool call. Compaction destroys in-flight context.
   A timely `/wrap` means the next session can resume cleanly.
+- **Gate freeform change requests through `/task`.** Before acting on any user
+  request that reads like a change request, apply this scope check:
+  - **Proceed directly** if the change is a one-liner or touches a single known file
+    and can be verified in under 5 minutes. Offer to log it as a task file afterward.
+  - **Redirect to `/task`** if the change is likely to touch more than 2–3 files,
+    requires a GitHub issue, or would take more than one exchange to complete. Say:
+    > "This looks like a task worth tracking. Does it have an issue number I can
+    > reference — or should I open a `/task` intake?"
+    Wait for the user's response before touching any code.
+  - **Never proceed** on a multi-file change request without an issue number.
 
 ---
 
