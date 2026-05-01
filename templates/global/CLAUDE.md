@@ -26,6 +26,19 @@ At the start of any session, silently read in this order:
 6. `./.rig/memory/ERRORS.md` (if present)
 7. `./.rig/tasks/active/` (if present) — understand the current task
 
+**After reading context, check for pending housekeeping flags before starting any work:**
+
+- If `.rig/memory/.wrap-needed` exists: say exactly —
+  > "⚠️ The last session ended without running `/wrap`. CONTEXT_SNAPSHOT.md may be
+  > stale and PROGRESS.md has unexpanded entries. Run `/wrap` now to capture session
+  > state before we start new work — or say 'skip wrap' to proceed anyway."
+  Wait for the user's response before continuing.
+
+- If `.rig/memory/.post-merge-pending` exists: say exactly —
+  > "⚠️ A merge landed since `/post-merge` was last run. Memory may not reflect the
+  > merged state. Run `/post-merge` now — or say 'skip post-merge' to proceed anyway."
+  Wait for the user's response before continuing.
+
 Do not summarise these back to me unless asked.
 
 ---

@@ -88,6 +88,20 @@ If no meaningful work shipped (pure exploration, no merges), skip this step sile
 
 ---
 
+## Flag cleanup
+
+After step 8 ("What's next?"), delete the `.post-merge-pending` flag file if it exists:
+
+```bash
+rm -f "$(git rev-parse --show-toplevel)/.rig/memory/.post-merge-pending" 2>/dev/null || true
+```
+
+(Resolve via `.rigpath` if present.) This flag is written by `.husky/post-merge` after
+every merge and is detected at the next session start. Cleaning it up here confirms
+that `/post-merge` ran successfully.
+
+---
+
 ## Notes
 
 - `CONTEXT_SNAPSHOT.md` is the most important output — it's what orients the next

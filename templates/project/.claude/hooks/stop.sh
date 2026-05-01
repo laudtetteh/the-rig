@@ -11,6 +11,8 @@
 #      (preserves the description — only the YYYY-MM-DD changes)
 #   2. Appends a session-end comment to PROGRESS.md so the session naming
 #      heuristic in /wrap and /post-merge knows where this session ends
+#   3. Writes .wrap-needed if PROGRESS.md has unexpanded auto-stubs,
+#      signalling that /wrap should be run before the next session starts
 #
 # What it does NOT do:
 #   - Write a full CONTEXT_SNAPSHOT (that's /wrap's job)
@@ -32,6 +34,7 @@ fi
 
 SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
 PROGRESS="$RIG_DIR/memory/PROGRESS.md"
+WRAP_NEEDED="$RIG_DIR/memory/.wrap-needed"
 SESSION_LOG="/tmp/the-rig-session.log"
 NOW=$(date +%Y-%m-%d)
 NOW_FULL=$(date "+%Y-%m-%d %H:%M")
@@ -70,6 +73,23 @@ if [[ -f "$PROGRESS" ]]; then
     echo "[$(date +%H:%M:%S)] STOP: session-end marker already present — skipped" \
       >> "$SESSION_LOG"
   fi
+fi
+
+# ── Write .wrap-needed flag if unexpanded auto-stubs exist ────────────────────
+# post-tool.sh auto-stubs PROGRESS.md after every git commit with a line:
+#   "_Auto-logged by post-tool hook. Expand this entry during wrap-up._"
+# /wrap expands those stubs and removes that marker text.
+# If stubs are still present, /wrap hasn't run since the last commit.
+# The next session will read this flag and prompt the user to run /wrap first.
+if [[ -f "$PROGRESS" ]] && grep -q "Auto-logged by post-tool hook" "$PROGRESS"; then
+  touch "$WRAP_NEEDED"
+  echo "[$(date +%H:%M:%S)] STOP: .wrap-needed written (unexpanded stubs found)" \
+    >> "$SESSION_LOG"
+elif [[ ! -f "$SNAPSHOT" ]] && [[ -f "$PROGRESS" ]]; then
+  # No snapshot at all — /wrap has never been run in this project
+  touch "$WRAP_NEEDED"
+  echo "[$(date +%H:%M:%S)] STOP: .wrap-needed written (no CONTEXT_SNAPSHOT.md)" \
+    >> "$SESSION_LOG"
 fi
 
 exit 0

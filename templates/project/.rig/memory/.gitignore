@@ -24,3 +24,13 @@ ERRORS_archive.md
 # Created by the agent when the user gives explicit go-ahead ("commit approved", etc.).
 # Deleted automatically by post-tool.sh after the commit lands. Never committed.
 .rig-commit-ok
+
+# .wrap-needed is written by stop.sh when unexpanded PROGRESS.md auto-stubs exist,
+# signalling that /wrap should be run before the next session starts.
+# Deleted by /wrap when it completes successfully. Never committed.
+.wrap-needed
+
+# .post-merge-pending is written by .husky/post-merge after a merge completes,
+# signalling that /post-merge should be run before starting new work.
+# Deleted by /post-merge when it completes successfully. Never committed.
+.post-merge-pending
