@@ -339,7 +339,7 @@ Eleven slash commands covering the full development lifecycle:
 | `/propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
 | `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, runs self-improvement check (logs Rig gaps), trims PROGRESS/ERRORS, suggests session name via `/rename`, surfaces next priority |
 | `/rig-gaps` | Self-improvement | Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats a report with submission instructions for The Rig dev session |
-| `/new-feature` | `NEW_TASK_WORKFLOW` | Original task entry point — creates task file, plans before coding, waits for approval |
+| `/new-feature` | *(deprecated)* | Redirects to `/task`. Kept for backward compatibility only. |
 
 ---
 
