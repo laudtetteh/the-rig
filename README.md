@@ -142,6 +142,44 @@ cd ~/code/my-project
 
 ---
 
+### Setting up on a new machine
+
+When you move to a new machine or re-clone a project that already has The Rig installed:
+
+```bash
+# 1. Clone The Rig itself (to a permanent location)
+git clone https://github.com/laudtetteh/the-rig.git ~/tools/the-rig
+
+# 2. Install the global layer on the new machine
+cd ~/tools/the-rig
+./install.sh --global-only
+
+# 3. Fill in your personal profile (machine-local — not committed)
+$EDITOR ~/.your-ai-contexts/PROFILE.md
+
+# 4. Clone your project
+git clone <your-project-url> ~/code/my-project
+cd ~/code/my-project
+
+# 5. Re-run the project installer to wire hooks and restore the local layer
+~/tools/the-rig/install.sh --project-only
+# Choose: 1) First install
+```
+
+**Why step 5 is required:** several Rig files are gitignored and don't travel with
+the repo (`CONTEXT_SNAPSHOT.md`, `PROGRESS_archive.md`, `ERRORS_archive.md`, flag
+files). The hooks also need their executable bits set. Step 5 restores all of this.
+
+> **External `.rig/` note:** if you use an external `.rig/` directory (`.rigpath`
+> points outside the repo), the external directory doesn't clone with the project.
+> You'll need to manually restore or re-create it on the new machine. See
+> `docs/customizing.md` → "Keeping .rig/ invisible to teammates" for the full
+> external directory setup.
+
+See `docs/troubleshooting.md` for common issues after a re-clone.
+
+---
+
 ## How it works at session start
 
 When you open Claude Code in a project using The Rig, the agent automatically reads (in order):
