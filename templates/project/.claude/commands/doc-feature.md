@@ -173,6 +173,18 @@ Things that have caused or could cause bugs, surprises, or confusion.
 
 ---
 
+## Related features
+
+Features that interact with, depend on, or are commonly confused with this one.
+
+| Feature | Doc | Relationship |
+|---|---|---|
+| [Feature name] | [slug.md](slug.md) | [e.g. "shares the same data model", "called by this feature", "commonly confused with"] |
+
+*(Delete this section if no meaningful relationships exist.)*
+
+---
+
 ## Last verified against
 
 Commit: [hash or branch]
