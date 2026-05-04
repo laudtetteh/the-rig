@@ -53,7 +53,7 @@ The Rig solves this at three levels:
 │  .rig/                  ← The Rig system files                   │
 │  .rig/processes/        ← step-by-step workflows                │
 │  .rig/rules/            ← coding/git/security/verification      │
-│  .rig/memory/           ← PROGRESS + ERRORS + SNAPSHOT          │
+│  .rig/memory/           ← PROGRESS + ERRORS + DECISIONS + SNAPSHOT│
 │  .rig/tasks/            ← backlog → active → done lifecycle     │
 │  .claude/               ← hooks + slash commands                │
 │  .husky/                ← git hooks                             │
@@ -94,6 +94,10 @@ CLAUDE.md instructs: read ./.rig/memory/ERRORS.md
      │  Known pitfalls to avoid
      │
      ▼
+CLAUDE.md instructs: skim ./.rig/memory/DECISIONS.md
+     │  Significant architectural and process decisions (skim only)
+     │
+     ▼
 CLAUDE.md instructs: read ./.rig/tasks/active/
      │  What task is currently in flight
      │
@@ -122,7 +126,7 @@ Agent is oriented. Hooks are live. Ready to work.
 
 ## The memory system
 
-Three files, three purposes:
+Six files, six purposes:
 
 ### .rig/memory/CONTEXT_SNAPSHOT.md
 - **The primary orientation file** — written at session end via `/wrap`
