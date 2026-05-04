@@ -162,9 +162,23 @@ Or choose option 3 in the interactive tracking prompt. The installer will:
 The project root stays clean. The agent finds its memory and rules via
 `.rigpath`. Teammates never see any of it.
 
+> ⚠️ **Re-clone warning:** when you clone the project on a new machine, the
+> external `.rig/` directory doesn't travel with it. You must manually restore
+> the external directory on the new machine — either by re-running the installer
+> with `--rig-dir` pointing to the same path, or by copying it from a backup.
+> See `docs/troubleshooting.md` → "CONTEXT_SNAPSHOT.md is missing after a re-clone"
+> for the full recovery steps.
+
 ---
 
 ## Scaling to a team
+
+> **Single-session assumption:** The Rig is designed around one active Claude Code
+> session at a time per project. Running two sessions simultaneously against the same
+> repo is untested — hooks write to shared files (`PROGRESS.md`, the session log)
+> without locking, so concurrent sessions can produce race conditions in PROGRESS.md
+> auto-stubs. For team use, each engineer should work in their own branch with their
+> own active task file.
 
 The Rig was designed for solo or small-team use. For larger teams:
 
