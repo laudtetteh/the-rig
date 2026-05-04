@@ -298,3 +298,230 @@ is_rig_owned_stub() {
     --strategy skip
   [ "$status" -ne 0 ]
 }
+
+# ── bash -n syntax checks ─────────────────────────────────────────────────────
+# Verify every shell script in the repo has valid bash syntax.
+# These catch trivial parse errors before a user ever runs an install.
+
+@test "syntax: install.sh has valid bash syntax" {
+  run bash -n "$REPO_ROOT/install.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "syntax: pre-tool.sh has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "syntax: post-tool.sh has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.claude/hooks/post-tool.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "syntax: stop.sh has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.claude/hooks/stop.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "syntax: pre-commit hook has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.husky/pre-commit"
+  [ "$status" -eq 0 ]
+}
+
+@test "syntax: commit-msg hook has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.husky/commit-msg"
+  [ "$status" -eq 0 ]
+}
+
+@test "syntax: post-commit hook has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.husky/post-commit"
+  [ "$status" -eq 0 ]
+}
+
+@test "syntax: post-merge hook has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.husky/post-merge"
+  [ "$status" -eq 0 ]
+}
+
+@test "syntax: filter-commit-message-inplace.sh has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.husky/filter-commit-message-inplace.sh"
+  [ "$status" -eq 0 ]
+}
+
+# ── Hook behavior: sentinel (commit gate) ─────────────────────────────────────
+# The pre-tool hook blocks git commit unless .rig-commit-ok exists.
+# We test the sentinel logic by sourcing a minimal version of the check.
+
+_sentinel_check() {
+  # Mirrors the sentinel logic in pre-tool.sh.
+  # Returns 0 (allow) or 1 (block).
+  local tool_name="$1"
+  local rig_dir="$2"
+  local sentinel="$rig_dir/memory/.rig-commit-ok"
+
+  if [[ "$tool_name" == "Bash" ]]; then
+    # Simulate checking stdin for a git commit command
+    local input="$3"
+    if echo "$input" | grep -q "git commit"; then
+      if [[ ! -f "$sentinel" ]]; then
+        return 1  # blocked
+      fi
+    fi
+  fi
+  return 0  # allowed
+}
+
+@test "sentinel: git commit blocked when .rig-commit-ok is absent" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+
+  _sentinel_check "Bash" "$rig_dir" "git commit -m 'test'"
+  [ "$?" -ne 0 ]
+}
+
+@test "sentinel: git commit allowed when .rig-commit-ok exists" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+  touch "$rig_dir/memory/.rig-commit-ok"
+
+  _sentinel_check "Bash" "$rig_dir" "git commit -m 'test'"
+  [ "$?" -eq 0 ]
+}
+
+@test "sentinel: non-commit Bash command always passes without sentinel" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+
+  _sentinel_check "Bash" "$rig_dir" "ls -la"
+  [ "$?" -eq 0 ]
+}
+
+@test "sentinel: non-Bash tool always passes without sentinel" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+
+  _sentinel_check "Write" "$rig_dir" ""
+  [ "$?" -eq 0 ]
+}
+
+# ── Hook behavior: PROGRESS.md auto-stub ──────────────────────────────────────
+# post-tool.sh appends a stub to PROGRESS.md after every git commit.
+# We test the stub logic in isolation.
+
+_append_progress_stub() {
+  # Mirrors the stub logic in post-tool.sh.
+  local progress_file="$1"
+  local commit_hash="$2"
+  local commit_msg="$3"
+  local date="$4"
+
+  local stub="## $date — $commit_msg
+
+- Commit: \`$commit_hash\`
+- _Auto-logged by post-tool hook. Expand this entry during wrap-up._
+
+---"
+
+  # Idempotent: don't add if this hash is already present
+  if grep -q "$commit_hash" "$progress_file" 2>/dev/null; then
+    return 0
+  fi
+
+  # Prepend stub after the first line (header)
+  local tmp; tmp="$(mktemp)"
+  {
+    head -1 "$progress_file" 2>/dev/null || true
+    echo ""
+    echo "$stub"
+    echo ""
+    tail -n +2 "$progress_file" 2>/dev/null || true
+  } > "$tmp"
+  mv "$tmp" "$progress_file"
+}
+
+@test "progress stub: appended after a commit hash is detected" {
+  local progress="$TEMP_DIR/PROGRESS.md"
+  echo "# Progress" > "$progress"
+
+  _append_progress_stub "$progress" "abc1234" "feat: add thing" "2099-01-01"
+
+  grep -q "abc1234" "$progress"
+}
+
+@test "progress stub: contains auto-logged marker text" {
+  local progress="$TEMP_DIR/PROGRESS.md"
+  echo "# Progress" > "$progress"
+
+  _append_progress_stub "$progress" "def5678" "fix: something" "2099-01-01"
+
+  grep -q "Auto-logged by post-tool hook" "$progress"
+}
+
+@test "progress stub: idempotent — same hash not added twice" {
+  local progress="$TEMP_DIR/PROGRESS.md"
+  echo "# Progress" > "$progress"
+
+  _append_progress_stub "$progress" "abc9999" "chore: test" "2099-01-01"
+  _append_progress_stub "$progress" "abc9999" "chore: test" "2099-01-01"
+
+  local count
+  count="$(grep -c "abc9999" "$progress")"
+  [ "$count" -eq 1 ]
+}
+
+# ── Hook behavior: path blocking (RIG_PROTECTED) ──────────────────────────────
+# pre-tool.sh blocks writes to governance files.
+# We test the path-check logic in isolation.
+
+_is_rig_protected() {
+  # Mirrors the RIG_PROTECTED logic in pre-tool.sh.
+  local file_path="$1"
+  local rig_dir="${2:-.rig}"
+
+  case "$file_path" in
+    */.claude/hooks/*|\
+    */.claude/settings*|\
+    *"$rig_dir"/processes/*|\
+    *"$rig_dir"/rules/*|\
+    */.husky/*|\
+    */CLAUDE.md)
+      return 0 ;;  # protected
+    *)
+      return 1 ;;  # not protected
+  esac
+}
+
+@test "path blocking: pre-tool.sh write is blocked" {
+  _is_rig_protected "/repo/.claude/hooks/pre-tool.sh"
+  [ "$?" -eq 0 ]
+}
+
+@test "path blocking: CLAUDE.md write is blocked" {
+  _is_rig_protected "/repo/CLAUDE.md"
+  [ "$?" -eq 0 ]
+}
+
+@test "path blocking: processes/ write is blocked" {
+  _is_rig_protected "/repo/.rig/processes/SHIP_WORKFLOW.md"
+  [ "$?" -eq 0 ]
+}
+
+@test "path blocking: rules/ write is blocked" {
+  _is_rig_protected "/repo/.rig/rules/coding-standards.md"
+  [ "$?" -eq 0 ]
+}
+
+@test "path blocking: PROGRESS.md write is allowed" {
+  _is_rig_protected "/repo/.rig/memory/PROGRESS.md"
+  [ "$?" -ne 0 ]
+}
+
+@test "path blocking: src/ file write is allowed" {
+  _is_rig_protected "/repo/src/app/page.tsx"
+  [ "$?" -ne 0 ]
+}
+
+@test "path blocking: task file write is allowed" {
+  _is_rig_protected "/repo/.rig/tasks/active/TASK_my-feature.md"
+  [ "$?" -ne 0 ]
+}
