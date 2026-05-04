@@ -7,6 +7,10 @@ Run this any time you've traced through 5+ files to understand how something
 works — capture the knowledge while it's fresh so future sessions don't repeat
 the same archaeology.
 
+> **Tip:** If you haven't already, run `/recon <feature>` first. It sweeps PR
+> history and commit messages so you understand how the feature evolved before
+> you document its current state.
+
 ---
 
 ## Usage

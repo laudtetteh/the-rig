@@ -182,6 +182,7 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 
 **Feature knowledge**
 ```
+/recon [topic]               →  sweep PR history + commits + codebase for a keyword; synthesize an evolution timeline
 /doc-feature [name]          →  research a feature end-to-end; produce a structured doc in docs/features/
 /refresh-feature-doc [name]  →  re-verify an existing feature doc against current code; correct stale claims
 ```
