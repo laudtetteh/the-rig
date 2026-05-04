@@ -144,6 +144,12 @@ Three files, three purposes:
 - The most valuable file in the system — it's institutional memory
 - **Trim convention:** capped at 30 entries. `/wrap` moves older entries to `.rig/memory/ERRORS_archive.md` (gitignored, disk-only) when the cap is exceeded. Same pattern as PROGRESS.md.
 
+### .rig/memory/DECISIONS.md
+- Structured log of significant architectural, product, and process decisions
+- Format per entry: Context → Decision → Rejected → Rationale → Consequences
+- Committed (unlike CONTEXT_SNAPSHOT) — decisions are project history, not session state
+- Skimmed at session start; the agent logs to it when a non-obvious choice is made
+
 ### .rig/memory/RIG_GAPS.md
 - Self-improvement feedback log — committed to every project repo
 - Captures workflow friction, bugs, missing features, and improvement ideas observed during real use

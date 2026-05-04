@@ -228,15 +228,15 @@ Common alternatives: `trufflehog`, `git-secrets`, `detect-secrets`.
 
 ---
 
-## Adding a decisions log
+## The decisions log
 
-The memory system has `PROGRESS.md` (what shipped) and `ERRORS.md` (what went wrong),
-but not a structured decisions log. If your project benefits from explicit decision
-records, add `.rig/memory/DECISIONS.md`:
+`.rig/memory/DECISIONS.md` is included in the default scaffold. The agent logs to it
+when a significant architectural, product, or process decision is made — especially
+one that closes off alternatives or would surprise a future reader.
+
+Format per entry:
 
 ```markdown
-# Decisions log
-
 ## [YYYY-MM-DD] — [Short title]
 
 **Context**: Why this decision needed to be made
@@ -246,7 +246,8 @@ records, add `.rig/memory/DECISIONS.md`:
 **Consequences**: What this decision implies going forward
 ```
 
-Reference it in the project `CLAUDE.md` context-loading sequence.
+Unlike `CONTEXT_SNAPSHOT.md`, this file is committed — decisions are project history.
+The project `CLAUDE.md` context-loading sequence already references it.
 
 ---
 
