@@ -102,6 +102,9 @@ Do not summarise these back to me unless asked.
 - At the start of each session, check `.rig/memory/PROGRESS.md` and `.rig/memory/ERRORS.md`.
 - After completing meaningful work, update `.rig/memory/PROGRESS.md`.
 - When you hit an error or unexpected edge case, log it in `.rig/memory/ERRORS.md`.
+- When a significant architectural, product, or process decision is made — especially
+  one that closes off alternatives or would surprise a future reader — log it in
+  `.rig/memory/DECISIONS.md`.
 - Before ending a session or when approaching a context limit, run `/wrap` to write
   `.rig/memory/CONTEXT_SNAPSHOT.md`. Never delete it — always overwrite.
 - Never assume continuity from a prior session — always re-read context files.

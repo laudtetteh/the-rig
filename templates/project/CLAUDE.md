@@ -108,7 +108,8 @@ When starting a new session, read in this order:
 2. `.rig/memory/PROGRESS.md` — only if `CONTEXT_SNAPSHOT.md` is absent or more than one
    session old. Load the most recent entries only (last 20 `##` sections).
 3. `.rig/memory/ERRORS.md` — known pitfalls
-4. `.rig/tasks/active/` — current in-flight task(s)
+4. `.rig/memory/DECISIONS.md` — architectural and process decisions (skim only)
+5. `.rig/tasks/active/` — current in-flight task(s)
 
 > **External .rig/ note:** if `.rigpath` exists at the project root, all `.rig/`
 > paths above resolve to the external directory it points to. The installer
