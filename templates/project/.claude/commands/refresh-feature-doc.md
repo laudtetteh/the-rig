@@ -51,6 +51,10 @@ For each claim in the doc, re-read the referenced file and line range:
 - **Business rules** — verify each rule is still enforced in the code; flag any
   that were removed or changed
 - **Gotchas** — verify each gotcha still applies; remove ones that were fixed
+- **Related features table** — if the doc has a `## Related features` section,
+  check that every linked doc still exists (`docs/features/<slug>.md`). Remove
+  rows pointing to deleted docs. Add rows for any new features that now interact
+  with this one.
 
 Mark anything you can't fully verify with `<!-- TODO: verify -->`.
 
