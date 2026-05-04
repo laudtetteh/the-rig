@@ -223,7 +223,7 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 
 - [How it works](docs/how-it-works.md) — architecture deep-dive with diagrams
 - [Key decisions](docs/decisions.md) — design rationale and tradeoffs
-- [Lessons learned](docs/lessons-learned.md) — 10 documented pitfalls from the pilot
+- [Lessons learned](docs/lessons-learned.md) — 13 documented pitfalls from the pilot
 - [Customizing](docs/customizing.md) — adapting The Rig for your stack
 
 ---
