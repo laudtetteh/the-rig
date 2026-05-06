@@ -11,6 +11,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.8.1] — 2026-05-06
+
+### Fixed
+
+- **pre-commit hook — grep pattern escaping** (`templates/project/.husky/pre-commit`): debug patterns like `console\.log(` used unescaped `(` in grep -E syntax, causing `empty (sub)expression` errors that blocked all commits. All parentheses in BUILTIN_PATTERNS are now escaped (`\(`). Closes gap found during 4Culture upgrade.
+- **pre-commit hook — hook file self-scan** (`templates/project/.husky/pre-commit`): the script scanned its own source file (`.husky/pre-commit`) and flagged `debugger;` and `byebug` in the BUILTIN_PATTERNS definition as debug artifacts. Hooks directory (`.husky/*`, `.claude/hooks/*`) is now excluded from the staged file scan. Closes gap found during 4Culture upgrade.
+- **pre-commit hook — Husky `sh -e` compatibility** (`templates/project/.husky/pre-commit`): Husky runs hooks with `sh -e`. When `grep` finds no debug matches (exit 1), `sh -e` aborted the hook, falsely failing every commit. Added `|| true` after the grep call to prevent the false failure. Closes gap found during 4Culture upgrade.
+
+---
+
 ## [1.8.0] — 2026-05-06
 
 ### Added
