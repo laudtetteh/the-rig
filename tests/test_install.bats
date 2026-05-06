@@ -83,33 +83,33 @@ is_rig_owned_stub() {
 }
 
 @test "is_rig_owned: CLAUDE.md is user-owned" {
-  is_rig_owned_stub "CLAUDE.md"
-  [ "$?" -ne 0 ]
+  run is_rig_owned_stub "CLAUDE.md"
+  [ "$status" -ne 0 ]
 }
 
 @test "is_rig_owned: rules file is user-owned" {
-  is_rig_owned_stub ".rig/rules/coding-standards.md"
-  [ "$?" -ne 0 ]
+  run is_rig_owned_stub ".rig/rules/coding-standards.md"
+  [ "$status" -ne 0 ]
 }
 
 @test "is_rig_owned: memory file is user-owned" {
-  is_rig_owned_stub ".rig/memory/PROGRESS.md"
-  [ "$?" -ne 0 ]
+  run is_rig_owned_stub ".rig/memory/PROGRESS.md"
+  [ "$status" -ne 0 ]
 }
 
 @test "is_rig_owned: RIG_GAPS.md is user-owned (never overwritten)" {
-  is_rig_owned_stub ".rig/memory/RIG_GAPS.md"
-  [ "$?" -ne 0 ]
+  run is_rig_owned_stub ".rig/memory/RIG_GAPS.md"
+  [ "$status" -ne 0 ]
 }
 
 @test "is_rig_owned: task file is user-owned" {
-  is_rig_owned_stub ".rig/tasks/backlog/TASK_example.md"
-  [ "$?" -ne 0 ]
+  run is_rig_owned_stub ".rig/tasks/backlog/TASK_example.md"
+  [ "$status" -ne 0 ]
 }
 
 @test "is_rig_owned: GitHub template is user-owned" {
-  is_rig_owned_stub ".github/PULL_REQUEST_TEMPLATE.md"
-  [ "$?" -ne 0 ]
+  run is_rig_owned_stub ".github/PULL_REQUEST_TEMPLATE.md"
+  [ "$status" -ne 0 ]
 }
 
 # ── Fresh install — skip strategy ─────────────────────────────────────────────
@@ -375,8 +375,8 @@ _sentinel_check() {
   local rig_dir="$TEMP_DIR/rig"
   mkdir -p "$rig_dir/memory"
 
-  _sentinel_check "Bash" "$rig_dir" "git commit -m 'test'"
-  [ "$?" -ne 0 ]
+  run _sentinel_check "Bash" "$rig_dir" "git commit -m 'test'"
+  [ "$status" -ne 0 ]
 }
 
 @test "sentinel: git commit allowed when .rig-commit-ok exists" {
@@ -512,16 +512,16 @@ _is_rig_protected() {
 }
 
 @test "path blocking: PROGRESS.md write is allowed" {
-  _is_rig_protected "/repo/.rig/memory/PROGRESS.md"
-  [ "$?" -ne 0 ]
+  run _is_rig_protected "/repo/.rig/memory/PROGRESS.md"
+  [ "$status" -ne 0 ]
 }
 
 @test "path blocking: src/ file write is allowed" {
-  _is_rig_protected "/repo/src/app/page.tsx"
-  [ "$?" -ne 0 ]
+  run _is_rig_protected "/repo/src/app/page.tsx"
+  [ "$status" -ne 0 ]
 }
 
 @test "path blocking: task file write is allowed" {
-  _is_rig_protected "/repo/.rig/tasks/active/TASK_my-feature.md"
-  [ "$?" -ne 0 ]
+  run _is_rig_protected "/repo/.rig/tasks/active/TASK_my-feature.md"
+  [ "$status" -ne 0 ]
 }
