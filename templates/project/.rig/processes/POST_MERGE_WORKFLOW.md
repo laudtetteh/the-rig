@@ -78,15 +78,39 @@ and submit those entries to The Rig dev session.
 ## Step 6 — Housekeeping commit
 
 If `.rig/memory/PROGRESS.md` updates and the task file move were not already committed
-as part of the PR:
+as part of the PR, commit them now.
+
+**First, read the `## Git workflow convention` field from the project `CLAUDE.md`.**
+It will be one of:
+
+- `housekeeping: direct-push` — commit and push directly to `main` (default)
+- `housekeeping: pr-required` — create a short-lived branch and open a PR
+
+### If `direct-push` (default)
+
+```bash
+git add .rig/memory/PROGRESS.md .rig/tasks/done/TASK_[name].md
+git commit -m "chore: post-merge housekeeping for PR #N"
+git push origin main
+```
+
+No branch, no PR. Done.
+
+### If `pr-required`
 
 ```bash
 git checkout -b chore/post-merge-[N]
 git add .rig/memory/PROGRESS.md .rig/tasks/done/TASK_[name].md
 git commit -m "chore: post-merge housekeeping for PR #N"
 git push -u origin chore/post-merge-[N]
-# Then open a small PR or push directly per your team's convention
+gh pr create --title "chore: post-merge housekeeping for PR #N" \
+  --body "Memory updates and task file move for merged PR #N." \
+  --label "type: chore" --base main
 ```
+
+### If no changes to commit
+
+If PROGRESS.md and the task file were already part of the PR, skip this step entirely.
 
 ---
 
