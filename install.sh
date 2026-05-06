@@ -952,10 +952,11 @@ if [[ "$DO_PROJECT" == true ]]; then
       _stealth_exclude ".claude/"
       _stealth_exclude ".github/"
       _stealth_exclude ".gitleaks.toml"
+      _stealth_exclude "docs/features/README.md"
       # .rigpath is already excluded by the external-mode block above
     else
       warn ".git/info/exclude not found — stealth exclusions could not be applied."
-      warn "Add manually: CLAUDE.md, PROJECT_BRIEF.md, .claude/, .github/, .gitleaks.toml, .rigpath"
+      warn "Add manually: CLAUDE.md, PROJECT_BRIEF.md, .claude/, .github/, .gitleaks.toml, docs/features/README.md, .rigpath"
     fi
 
     # Copy .husky/ hook scripts directly to .git/hooks/ (Husky-free, per-clone)

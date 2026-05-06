@@ -201,7 +201,7 @@ What stealth mode does in a single pass:
 1. Installs `.rig/` to an external path (default: `~/.rig/projects/<project-name>/`)
 2. Writes `.rigpath` and adds it to `.git/info/exclude`
 3. Adds all other Rig artifacts to `.git/info/exclude`:
-   `CLAUDE.md`, `PROJECT_BRIEF.md`, `.claude/`, `.github/`, `.gitleaks.toml`
+   `CLAUDE.md`, `PROJECT_BRIEF.md`, `.claude/`, `.github/`, `.gitleaks.toml`, `docs/features/README.md`
 4. Copies git hooks directly to `.git/hooks/` (no Husky required — `.git/hooks/`
    is never committed and invisible to teammates)
 
