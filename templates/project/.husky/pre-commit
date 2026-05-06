@@ -88,10 +88,11 @@ STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
 FOUND=""
 
 for f in $STAGED_FILES; do
-  # Skip binary files
+  # Skip binary files and hook files (which contain the patterns as definitions)
   case "$f" in
     *.png|*.jpg|*.jpeg|*.gif|*.ico|*.svg|*.woff|*.woff2|*.ttf|*.eot|\
     *.pdf|*.zip|*.tar|*.gz|*.mp4|*.mp3|*.mov) continue ;;
+    .husky/*|.claude/hooks/*) continue ;;
   esac
 
   # Get the staged version of the file and scan it
