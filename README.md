@@ -44,7 +44,7 @@ The Rig has two layers that load in sequence at every session start:
 │  .rig/              ← The Rig system files                       │
 │  .rig/processes/    ← new-task, ship, debug, post-merge flows   │
 │  .rig/rules/        ← coding standards, git, security, verify   │
-│  .rig/memory/       ← PROGRESS, ERRORS, CONTEXT_SNAPSHOT        │
+│  .rig/memory/       ← PROGRESS, ERRORS, DECISIONS, SNAPSHOT      │
 │  .rig/tasks/        ← active / backlog / done lifecycle         │
 │  .claude/           ← hook wiring + slash commands              │
 │  .husky/            ← secret scanning + AI trailer stripping    │
@@ -64,9 +64,9 @@ The Rig has two layers that load in sequence at every session start:
 | Project brain | `templates/project/CLAUDE.md` | Project-specific identity, stack, conventions, off-limits paths |
 | Processes (4) | `templates/project/.rig/processes/` | Step-by-step workflows: new-task, ship, debug, post-merge |
 | Rules (4) | `templates/project/.rig/rules/` | Coding standards, git conventions, security rules, verification protocol |
-| Memory system | `templates/project/.rig/memory/` | PROGRESS log, ERRORS log, CONTEXT_SNAPSHOT (session state), RIG_GAPS (self-improvement feedback) |
+| Memory system | `templates/project/.rig/memory/` | PROGRESS log, ERRORS log, DECISIONS log, CONTEXT_SNAPSHOT (session state), RIG_GAPS (self-improvement feedback) |
 | Task lifecycle | `templates/project/.rig/tasks/` | Structured task files through backlog → active → done |
-| Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 11 slash commands |
+| Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 12 slash commands |
 | Feature docs | `templates/project/docs/features/` | README index + `/doc-feature` and `/refresh-feature-doc` commands for capturing and maintaining business-critical feature knowledge |
 | Git hooks | `templates/project/.husky/` | Secret scanning (gitleaks) + AI attribution trailer stripping |
 | GitHub templates | `templates/project/.github/` | PR template + 3 issue templates |
