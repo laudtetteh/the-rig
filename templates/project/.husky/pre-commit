@@ -52,19 +52,19 @@ fi
 # To skip this check for one commit: git commit --no-verify
 
 # Built-in debug patterns (grep -E syntax, one per line)
-BUILTIN_PATTERNS="console\.log(
+BUILTIN_PATTERNS="console\.log\(
 debugger;
-var_dump(
-print_r(
-error_log(
+var_dump\(
+print_r\(
+error_log\(
 file_put_contents.*debug
-pdb\.set_trace(
-breakpoint(
+pdb\.set_trace\(
+breakpoint\(
 binding\.pry
 byebug
-System\.out\.println(
-dd(
-dump(.*=>>"
+System\.out\.println\(
+dd\(
+dump\(.*=>>"
 
 # Merge with project-specific patterns if present
 ALL_PATTERNS="$BUILTIN_PATTERNS"
