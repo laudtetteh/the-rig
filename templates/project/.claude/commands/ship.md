@@ -168,7 +168,7 @@ EOF
 gh pr create \
   --title "type(scope): description" \
   --body-file /tmp/ship-pr-body.md \
-  --base main \
+  --base [BASE_BRANCH] \
   --label "type: [type]" \
   --label "area: [area]"
 ```

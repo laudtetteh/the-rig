@@ -72,6 +72,17 @@
 
 ---
 
+## Base branch
+
+The repository's main integration branch. All PRs target this branch.
+`/post-merge`, `/ship`, and related workflows read this field.
+
+```
+base-branch: [BASE_BRANCH]
+```
+
+---
+
 ## Git workflow convention
 
 Controls how `/post-merge` handles housekeeping commits (PROGRESS.md updates,
@@ -83,7 +94,7 @@ housekeeping: direct-push
 
 | Value | Behaviour |
 |---|---|
-| `direct-push` | Commits and pushes directly to `main`. No branch, no PR. Default for solo projects. |
+| `direct-push` | Commits and pushes directly to `[BASE_BRANCH]`. No branch, no PR. Default for solo projects. |
 | `pr-required` | Creates a short-lived `chore/post-merge-[N]` branch and opens a PR. Use when your team requires PRs for all changes. |
 
 Change this value to match your project's branching convention.
