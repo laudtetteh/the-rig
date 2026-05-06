@@ -190,6 +190,28 @@ The project root stays clean. The agent finds its memory and rules via
 > See `docs/troubleshooting.md` → "CONTEXT_SNAPSHOT.md is missing after a re-clone"
 > for the full recovery steps.
 
+### Option C — Stealth mode (zero traces in git)
+
+For multi-contributor repos where teammates must never see any Rig files — not
+even in `git status` — choose **option 4 (Stealth)** in the installer's tracking
+prompt.
+
+What stealth mode does in a single pass:
+
+1. Installs `.rig/` to an external path (default: `~/.rig/projects/<project-name>/`)
+2. Writes `.rigpath` and adds it to `.git/info/exclude`
+3. Adds all other Rig artifacts to `.git/info/exclude`:
+   `CLAUDE.md`, `PROJECT_BRIEF.md`, `.claude/`, `.github/`, `.gitleaks.toml`
+4. Copies git hooks directly to `.git/hooks/` (no Husky required — `.git/hooks/`
+   is never committed and invisible to teammates)
+
+Claude Code still reads `.claude/settings.json` from disk at session start — it
+just isn't tracked by git.
+
+**Important:** stealth files live on disk only. When you clone the project on a new
+machine, re-run the installer with option 4 to restore them. The `.git/info/exclude`
+entries and `.git/hooks/` scripts are per-clone and must be set up on each machine.
+
 ---
 
 ## Scaling to a team

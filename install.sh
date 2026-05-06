@@ -696,8 +696,11 @@ if [[ "$DO_PROJECT" == true ]]; then
     echo "  1) In the repo      — committed with the project (default, recommended for solo projects)"
     echo "  2) Local only       — added to .git/info/exclude; invisible to teammates, no .gitignore change"
     echo "  3) External         — install .rig/ to a path outside this repo entirely"
+    echo "  4) Stealth          — zero Rig traces in git: all Rig files excluded or external;"
+    echo "                        git hooks go to .git/hooks/ (no Husky required)"
+    echo "                        Use for multi-contributor repos where teammates must not see Rig files."
     echo ""
-    read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3] (default: 1): ")" rig_tracking_input
+    read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3/4] (default: 1): ")" rig_tracking_input
     rig_tracking_input="${rig_tracking_input:-1}"
 
     case "$rig_tracking_input" in
@@ -711,6 +714,15 @@ if [[ "$DO_PROJECT" == true ]]; then
            exit 1
          fi
          ;;
+      4) RIG_TRACKING="stealth"
+         # Default the external .rig/ path — user can override
+         _STEALTH_DEFAULT_RIG="${HOME}/.rig/projects/${PROJECT_NAME}"
+         echo ""
+         echo "  Stealth mode: all Rig artifacts will be excluded from git tracking."
+         echo "  .rig/ files will be stored outside this repo."
+         read -r -p "$(echo -e "  ${BOLD}?${RESET} External .rig/ path (default: ${_STEALTH_DEFAULT_RIG}): ")" EXTERNAL_RIG_DIR
+         EXTERNAL_RIG_DIR="${EXTERNAL_RIG_DIR:-$_STEALTH_DEFAULT_RIG}"
+         ;;
       *)
         warn "Invalid choice — defaulting to 'In the repo'."
         RIG_TRACKING="repo"
@@ -719,7 +731,7 @@ if [[ "$DO_PROJECT" == true ]]; then
   fi
 
   # Resolve and validate the external path (if applicable)
-  if [[ "$RIG_TRACKING" == "external" ]]; then
+  if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
     # Expand ~ and resolve to absolute path
     EXTERNAL_RIG_DIR="${EXTERNAL_RIG_DIR/#\~/$HOME}"
     mkdir -p "$EXTERNAL_RIG_DIR" || { error "Cannot create directory: $EXTERNAL_RIG_DIR"; exit 1; }
@@ -732,7 +744,7 @@ if [[ "$DO_PROJECT" == true ]]; then
   # Stored in .rig/memory/ so it lives alongside the other memory files.
   # For external .rig/ installs, it follows .rig/ to the external directory.
   # The manifest is committed to the repo (not gitignored) — see memory/.gitignore.
-  if [[ "$RIG_TRACKING" == "external" ]]; then
+  if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
     MANIFEST_FILE="$EXTERNAL_RIG_DIR/memory/.rig-manifest"
   else
     MANIFEST_FILE="$TARGET/.rig/memory/.rig-manifest"
@@ -794,6 +806,8 @@ if [[ "$DO_PROJECT" == true ]]; then
     info ".rig/ location:   $EXTERNAL_RIG_DIR (external)"
   elif [[ "$RIG_TRACKING" == "exclude" ]]; then
     info ".rig/ tracking:   local only (.git/info/exclude)"
+  elif [[ "$RIG_TRACKING" == "stealth" ]]; then
+    info ".rig/ location:   $EXTERNAL_RIG_DIR (stealth — all Rig files excluded from git)"
   fi
   echo ""
 
@@ -825,9 +839,13 @@ if [[ "$DO_PROJECT" == true ]]; then
     fi
 
     # Route .rig/ files to the external directory when applicable.
+    # In stealth mode: skip .husky/ entirely (hooks go to .git/hooks/ later).
     # Always pass $rel (the template-relative path) as the 4th arg so
     # copy_file() can classify the file and update the manifest.
-    if [[ "$RIG_TRACKING" == "external" && "$rel" == .rig/* ]]; then
+    if [[ "$RIG_TRACKING" == "stealth" && "$rel" == .husky/* ]]; then
+      info "Stealth mode — deferring to .git/hooks/: $rel"
+      continue
+    elif [[ ( "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ) && "$rel" == .rig/* ]]; then
       rig_rel="${rel#.rig/}"
       dest_file="$EXTERNAL_RIG_DIR/$rig_rel"
       copy_file "$src_file" "$dest_file" "$EXTERNAL_RIG_DIR" "$rel"
@@ -856,7 +874,7 @@ if [[ "$DO_PROJECT" == true ]]; then
   fi
 
   # ── EXTERNAL .rig/ — write .rigpath and update git excludes ──────────────
-  if [[ "$RIG_TRACKING" == "external" ]]; then
+  if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
     # Write the pointer file so hooks can resolve RIG_DIR at runtime
     echo "$EXTERNAL_RIG_DIR" > "$RIGPATH_FILE"
     success "Created .rigpath → $EXTERNAL_RIG_DIR"
@@ -901,6 +919,53 @@ if [[ "$DO_PROJECT" == true ]]; then
     fi
   fi
 
+  # ── STEALTH MODE: exclude all Rig artifacts + wire hooks to .git/hooks/ ──
+  if [[ "$RIG_TRACKING" == "stealth" ]]; then
+    GIT_EXCLUDE="$TARGET/.git/info/exclude"
+    if [[ -f "$GIT_EXCLUDE" ]]; then
+      # Helper: append entry only if not already present
+      _stealth_exclude() {
+        local entry="$1"
+        if ! grep -qF "$entry" "$GIT_EXCLUDE"; then
+          echo "$entry" >> "$GIT_EXCLUDE"
+          success "Stealth: excluded $entry from git"
+        else
+          info "Stealth: $entry already in .git/info/exclude"
+        fi
+      }
+
+      printf "\n# The Rig — stealth mode: all Rig artifacts excluded from git tracking\n" >> "$GIT_EXCLUDE"
+      _stealth_exclude "CLAUDE.md"
+      _stealth_exclude "PROJECT_BRIEF.md"
+      _stealth_exclude ".claude/"
+      _stealth_exclude ".github/"
+      _stealth_exclude ".gitleaks.toml"
+      # .rigpath is already excluded by the external-mode block above
+    else
+      warn ".git/info/exclude not found — stealth exclusions could not be applied."
+      warn "Add manually: CLAUDE.md, PROJECT_BRIEF.md, .claude/, .github/, .gitleaks.toml, .rigpath"
+    fi
+
+    # Copy .husky/ hook scripts directly to .git/hooks/ (Husky-free, per-clone)
+    GIT_HOOKS_DIR="$TARGET/.git/hooks"
+    HUSKY_SRC="$PROJECT_TEMPLATES/.husky"
+    if [[ -d "$HUSKY_SRC" && -d "$GIT_HOOKS_DIR" ]]; then
+      for hook_src in "$HUSKY_SRC"/pre-commit "$HUSKY_SRC"/commit-msg \
+                      "$HUSKY_SRC"/post-commit "$HUSKY_SRC"/post-merge \
+                      "$HUSKY_SRC"/filter-commit-message-inplace.sh; do
+        hook_name="$(basename "$hook_src")"
+        hook_dest="$GIT_HOOKS_DIR/$hook_name"
+        if [[ -f "$hook_src" ]]; then
+          cp "$hook_src" "$hook_dest"
+          chmod +x "$hook_dest"
+          success "Stealth: installed $hook_name → .git/hooks/"
+        fi
+      done
+    else
+      warn "Stealth: .git/hooks/ not found — git hooks were not installed."
+    fi
+  fi
+
   # ── EXECUTABLE BITS ───────────────────────────────────────────────────────
   HUSKY_DIR="$TARGET/.husky"
   CLAUDE_HOOKS_DIR="$TARGET/.claude/hooks"
@@ -916,7 +981,8 @@ if [[ "$DO_PROJECT" == true ]]; then
   fi
 
   # ── HUSKY INITIALIZATION ──────────────────────────────────────────────────
-  if [[ "$INSTALL_GIT_HOOKS" == true ]]; then
+  # Skipped in stealth mode — hooks are already wired to .git/hooks/ above.
+  if [[ "$INSTALL_GIT_HOOKS" == true && "$RIG_TRACKING" != "stealth" ]]; then
     if [[ -f "$TARGET/package.json" ]]; then
       echo ""
       info "package.json detected."
