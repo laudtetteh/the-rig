@@ -96,9 +96,10 @@ for f in $STAGED_FILES; do
   esac
 
   # Get the staged version of the file and scan it
+  # || true: grep exits 1 on no match; sh -e (used by Husky) treats that as failure
   hits=$(git show ":$f" 2>/dev/null \
     | grep -nE "$COMBINED" \
-    | grep -v 'rig-debug-ok')
+    | grep -v 'rig-debug-ok' || true)
 
   if [ -n "$hits" ]; then
     FOUND="$FOUND
