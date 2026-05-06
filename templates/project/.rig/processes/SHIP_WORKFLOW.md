@@ -89,7 +89,28 @@ level or how confident the agent is in the changes.
 
 ---
 
-## Step 3 — Commit
+## Step 3 — Branch safety check
+
+Before committing, verify you are on a suitable branch:
+
+```bash
+git branch --show-current
+git status --short
+```
+
+**If you are on `main` or `master`:** do not commit. Say:
+> "You're on `main` — I can't commit directly here. Which branch should I use?
+> I can create `feat/[slug]` off main, or use an existing branch."
+Wait for the user's answer before proceeding.
+
+**If you are on any other branch:** proceed. Briefly confirm: `"Branch: [name] — looks good."`
+
+**If there are untracked or modified files outside the task scope** (shown by `git status`):
+surface them and ask whether to stage, stash, or ignore before continuing.
+
+---
+
+## Step 4 — Commit
 
 Use conventional commit format:
 
@@ -114,7 +135,7 @@ git commit -F /tmp/commit-msg.txt
 
 ---
 
-## Step 4 — Update memory
+## Step 5 — Update memory
 
 In this order:
 
@@ -146,7 +167,7 @@ In this order:
 
 ---
 
-## Step 5 — Open the PR
+## Step 6 — Open the PR
 
 **The PR body must describe what was actually built — not the original plan.**
 If scope changed during implementation, the PR body should note it explicitly. Reviewers
@@ -190,7 +211,7 @@ gh pr create --title "..." --body-file /tmp/pr-body.md --base main \
 
 ---
 
-## Step 6 — Housekeeping commit (if needed)
+## Step 7 — Housekeeping commit (if needed)
 
 If the memory updates and task file move were not included in the implementation commit,
 make a follow-up housekeeping commit on the same branch:

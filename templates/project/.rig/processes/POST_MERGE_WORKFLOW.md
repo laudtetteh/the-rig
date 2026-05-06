@@ -12,13 +12,31 @@
 
 ---
 
-## Step 1 — Pull latest main
+## Step 1 — Verify state and pull latest main
+
+First, snapshot current state:
+
+```bash
+git branch --show-current
+git status --short
+```
+
+If the working tree is not clean, surface the uncommitted changes and resolve them
+before continuing (stash, commit, or discard — ask the user).
+
+Then pull:
 
 ```bash
 git checkout main && git pull origin main
 ```
 
-Confirm the expected commit is at HEAD before proceeding.
+Confirm the expected merge commit is at HEAD:
+
+```bash
+git log --oneline -3
+```
+
+State the HEAD commit. If it doesn't match the expected merge, stop and flag it.
 
 ---
 
