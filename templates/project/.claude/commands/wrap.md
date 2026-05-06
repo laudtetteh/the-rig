@@ -24,6 +24,28 @@ Performs the session-end housekeeping that prevents state loss between sessions:
 /wrap
 ```
 
+## Git state check — run first, before anything else
+
+Before writing any files, run:
+
+```bash
+git branch --show-current
+git status --short
+git log --oneline -3
+```
+
+Report the results briefly:
+
+> "Branch: `feat/my-feature` | 2 uncommitted changes | Last commit: `abc1234 feat: add thing`"
+
+**If there are uncommitted changes to non-Rig files:** surface them explicitly.
+The user may have forgotten to commit something before ending the session. Ask:
+> "There are uncommitted changes to `[files]`. Should I include them in a commit
+> before wrapping, or proceed with wrap as-is?"
+Wait for the answer before continuing.
+
+**If the repo is clean:** note it and proceed directly.
+
 Run this:
 - Before closing Claude Code for the day
 - When the conversation is getting long and you want a clean handoff point

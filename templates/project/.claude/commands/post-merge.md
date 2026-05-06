@@ -36,6 +36,26 @@ Follows `.rig/processes/POST_MERGE_WORKFLOW.md`:
 Run this immediately after you merge (or are told a PR merged). Claude will ask
 which PR merged if it's not clear from context.
 
+## Git state check — run first, before anything else
+
+Before touching any files, verify the repo is in a known-good state:
+
+```bash
+git branch --show-current
+git status --short
+git log --oneline -3
+```
+
+Report briefly:
+
+> "Branch: `main` | Clean working tree | HEAD: `abc1234 feat: merged PR #N`"
+
+**If the working tree is not clean:** surface any uncommitted changes and ask
+the user whether to stash, commit, or discard them before proceeding.
+
+**If not on `main`:** note the current branch. The POST_MERGE_WORKFLOW Step 1
+will `git checkout main && git pull`, but flag it now so the user is aware.
+
 ---
 
 ## Session naming step
