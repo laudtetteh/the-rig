@@ -129,5 +129,6 @@ that `/post-merge` ran successfully.
   full instead, which is slower and less precise.
 - If `.rig/tasks/active/` is empty when `/post-merge` runs (task was already moved),
   Claude will note it and skip the move step.
-- The housekeeping commit is on a short-lived branch — open a small PR or push
-  directly per your project's convention.
+- **Housekeeping commit convention** is controlled by `## Git workflow convention` in
+  the project `CLAUDE.md`. Default is `direct-push` (no branch, no PR). Change to
+  `pr-required` for repos that require PRs for all changes to main.

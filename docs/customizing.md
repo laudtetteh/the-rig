@@ -61,6 +61,27 @@ Don't modify it directly — use `/propose` instead.
 
 ---
 
+## Configuring the housekeeping commit convention
+
+By default, `/post-merge` commits memory updates directly to `main` — no branch,
+no PR. For repos that require a PR for every change, set `pr-required` in the
+project `CLAUDE.md`:
+
+```markdown
+## Git workflow convention
+
+housekeeping: pr-required
+```
+
+| Value | Behaviour |
+|---|---|
+| `direct-push` | Commits and pushes directly to `main`. Default. |
+| `pr-required` | Creates `chore/post-merge-[N]` branch and opens a small PR. |
+
+Change this once per project and `/post-merge` respects it every time.
+
+---
+
 ## Adjusting the intake wizard defaults
 
 `/task` defaults to **Medium autonomy / Normal check-ins / Balanced risk**. If your
