@@ -8,6 +8,7 @@
 #   ./install.sh --global-only    # Install global layer only (~/.claude/)
 #   ./install.sh --project-only   # Scaffold project layer only
 #   ./install.sh --help           # Show usage
+#   ./install.sh --version        # Print version and exit
 #
 # Requirements: bash 3.2+, coreutils (cp, mkdir, chmod, sed)
 # Optional: gitleaks (for secret scanning), npm/npx (for Husky)
@@ -73,6 +74,7 @@ is_rig_owned() {
     .claude/hooks/*|\
     .claude/commands/*|\
     .rig/processes/*|\
+    .rig/VERSION|\
     .husky/*|\
     .gitleaks.toml)
       return 0 ;;
@@ -142,6 +144,15 @@ for arg in "$@"; do
     --rig-dir|--strategy|--target|--project-name)
       # two-arg flags; value captured in the loop below
       ;;
+    --version|-v)
+      VERSION_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/VERSION"
+      if [[ -f "$VERSION_FILE" ]]; then
+        echo "The Rig v$(cat "$VERSION_FILE")"
+      else
+        echo "The Rig (VERSION file not found)"
+      fi
+      exit 0
+      ;;
     --help|-h)
       echo "Usage: ./install.sh [options]"
       echo ""
@@ -165,6 +176,7 @@ for arg in "$@"; do
       echo "  --rig-dir <path>      Install .rig/ to an external path outside the repo."
       echo "                        Writes a .rigpath pointer file at the project root."
       echo "                        Useful for shared repos where teammates don't use The Rig."
+      echo "  --version, -v         Print The Rig version and exit."
       exit 0
       ;;
   esac
