@@ -11,6 +11,32 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.8.0] — 2026-05-06
+
+### Added
+
+- **VERSION file** (`VERSION`, `templates/project/.rig/VERSION`): machine-readable version string at the repo root and in every installed project's `.rig/` directory. `cat .rig/VERSION` shows the installed Rig version instantly. `.rig/VERSION` is manifest-tracked so upgrades auto-update it. Closes #106.
+- **`install.sh --version` flag**: prints `The Rig v<version>` and exits. Useful for scripts and debugging. Closes #106.
+- **Stealth install mode** (`install.sh` tracking option 4): zero Rig traces in git for multi-contributor repos. Installs `.rig/` to an external path, adds all Rig artifacts (including `CLAUDE.md`, `.claude/`, `.github/`, `.gitleaks.toml`) to `.git/info/exclude`, and copies hooks directly to `.git/hooks/` — no Husky required. Teammates never see any Rig files. Closes #99.
+- **Configurable housekeeping commit convention** (`templates/project/CLAUDE.md` `## Git workflow convention` section): controls how `/post-merge` handles memory-update commits. `housekeeping: direct-push` (default) commits directly to `main`; `housekeeping: pr-required` creates a short-lived branch and opens a PR. Documented in `docs/customizing.md`. Closes #98.
+- **Branch safety check in `/ship`** (`SHIP_WORKFLOW.md` Step 3): blocks the ship workflow if on `main` or `master` and asks which branch to use. Prevents accidental commits directly to the default branch. Closes #97.
+- **Git state checks in `/wrap` and `/post-merge`**: both commands verify the working tree and current branch before touching any files. Uncommitted changes are surfaced and resolved before proceeding. Closes #97.
+- **`DECISIONS.md` template** (`templates/project/.rig/memory/DECISIONS.md`): committed memory file for architectural, product, and process decisions. Scaffolded with the per-entry format (Context / Decision / Rejected / Rationale / Consequences). Referenced in project `CLAUDE.md` context-loading sequence. Closes #78.
+
+### Changed
+
+- **`/post-merge`** (`POST_MERGE_WORKFLOW.md`, `commands/post-merge.md`): Step 1 now verifies state before pulling; Step 6 branches on `housekeeping: direct-push | pr-required` from project `CLAUDE.md`. Git state check section added to command file. Closes #98.
+- **`docs/customizing.md`**: added "Option C — Stealth mode" section, housekeeping commit convention section, and DECISIONS.md section. Closes #96, #99.
+- **`docs/how-it-works.md`**: "Three files, three purposes" updated to "Six files, six purposes"; DECISIONS.md subsection added; session lifecycle diagram updated. Closes #96.
+- **`README.md`**: command count updated; DECISIONS added to memory file listing. Closes #96.
+- **`is_rig_owned()`**: `.rig/VERSION` added to the list of Rig-owned files so upgrades auto-update the version marker. Closes #106.
+
+### Fixed
+
+- **bats tests** (`tests/test_install.bats`): 11 pre-existing test failures fixed by using the `run` helper for commands expected to exit non-zero, then checking `$status` instead of `$?`. Affected tests: `is_rig_owned` user-owned cases (6), sentinel-blocked cases (1), path-blocking allowed cases (3). All 51 tests now pass. Closes #104.
+
+---
+
 ## [1.7.0] — 2026-04-30
 
 ### Added
