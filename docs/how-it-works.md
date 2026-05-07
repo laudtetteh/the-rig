@@ -118,7 +118,7 @@ Agent is oriented. Hooks are live. Ready to work.
      │  Expands PROGRESS.md stubs; trims if > 20 entries
      │  Logs ERRORS.md and RIG_GAPS.md entries
      │  Trims ERRORS.md if > 30 entries
-     │  Suggests session name (derives /rename from session-end markers)
+     │  Suggests session name (derives name from session-end markers)
      └─ Surfaces next priority
 ```
 
@@ -218,7 +218,7 @@ Step 3: Move task file active/ → done/
 Step 4: Overwrite CONTEXT_SNAPSHOT.md
 Step 5: Check ERRORS.md and RIG_GAPS.md
 Step 6: Housekeeping commit (if needed)
-Step 7: Suggest session name (derives /rename from session work)
+Step 7: Suggest session name (derives name from session work)
 Step 8: Surface next priority — ask "What's next?"
 ```
 
@@ -349,7 +349,7 @@ Thirteen slash commands covering the full development lifecycle:
 |---|---|---|
 | `/post-merge` | `POST_MERGE_WORKFLOW` | Post-merge hygiene: pull base branch, update PROGRESS, move task file, housekeeping commit, suggest session name, surface next priority |
 | `/propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
-| `/rename` | Session naming | Derives a session name from current PROGRESS entries and presents it as a ready-to-run suggestion — callable at any time, not just at wrap |
+| `/session-name` | Session naming | Derives a session name from current PROGRESS entries and presents it as a suggestion — callable at any time, not just at wrap |
 | `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, runs self-improvement check (logs Rig gaps), trims PROGRESS/ERRORS, suggests session name, surfaces next priority |
 | `/rig-gaps` | Self-improvement | Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats a report with submission instructions for The Rig dev session |
 | `/new-feature` | *(deprecated)* | Redirects to `/task`. Kept for backward compatibility only. |

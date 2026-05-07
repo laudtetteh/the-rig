@@ -1,4 +1,4 @@
-# Command: /rename
+# Command: /session-name
 
 Derive a session name from work completed so far and present it as a ready-to-run
 suggestion. Can be run at any point in the session — not just at wrap time.
@@ -21,7 +21,7 @@ without triggering a full wrap or post-merge cycle.
 ## Usage
 
 ```
-/rename
+/session-name
 ```
 
 No arguments. Run it whenever you want to name or re-name the current session.
@@ -48,7 +48,7 @@ Read the `**Session name:**` field from `.rig/memory/CONTEXT_SNAPSHOT.md`.
 
   > **Session already named:** `feat dashboard ui #49`
   > **New work this session:** PR #51 (fix null user on profile fetch)
-  > **Updated suggestion:** `/rename feat dashboard ui #49 | fix null user profile fetch #51`
+  > **Updated suggestion:** `feat dashboard ui #49 | fix null user profile fetch #51`
 
 ### 3 — Derive the name
 
@@ -65,16 +65,20 @@ type short-desc #N | type short-desc #N | ...
 
 ### 4 — Present the suggestion
 
-Output:
+Output the name as plain text:
 
 > **Suggested session name:**
-> `/rename feat user-auth magic-link flow #91`
+> `feat user-auth magic-link flow #91`
 
-Do **not** run `/rename` automatically. Present it for the user to confirm, copy, or tweak.
+Then invite the user to apply it:
+
+> To apply: run `/session-name` again with the name as argument, or say "use that name".
+
+Do **not** run anything automatically. Present it for the user to confirm, copy, or tweak.
 
 ### 5 — After confirmation
 
-When the user runs the suggested `/rename` command (or confirms the name in any form),
+When the user confirms the name (or runs `/session-name` with a name argument),
 update the `**Session name:**` field in `.rig/memory/CONTEXT_SNAPSHOT.md` to match.
 
 ---
@@ -85,3 +89,5 @@ update the `**Session name:**` field in `.rig/memory/CONTEXT_SNAPSHOT.md` to mat
   say so and skip the suggestion.
 - If CONTEXT_SNAPSHOT.md doesn't exist, note that `/wrap` should be run first to
   create it — or offer to derive a name from PROGRESS.md alone.
+- **Why not `/rename`?** Claude Code has a built-in `/rename` command that renames
+  the conversation. This command was renamed to `/session-name` to avoid the conflict.

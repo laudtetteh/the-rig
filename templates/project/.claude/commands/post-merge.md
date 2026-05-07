@@ -22,7 +22,7 @@ Follows `.rig/processes/POST_MERGE_WORKFLOW.md`:
 4. Overwrites `.rig/memory/CONTEXT_SNAPSHOT.md` with the current project state
 5. Checks `.rig/memory/ERRORS.md` and `.rig/memory/RIG_GAPS.md` — prompts you to log anything unexpected or any workflow friction observed
 6. Makes a housekeeping commit if memory updates weren't included in the PR
-7. **Suggests a session name** based on the merged PR (see below)
+7. **Suggests a session name** based on the merged PR via `/session-name` logic (see below)
 8. Surfaces the next priority and asks: **"What's next?"**
 
 ---
@@ -60,9 +60,10 @@ will `git checkout [BASE_BRANCH] && git pull`, but flag it now so the user is aw
 
 ## Session naming step
 
-After the housekeeping commit (step 6), derive a `/rename` suggestion. The merged
-PR number is always known here, which makes this the most reliable naming signal
-in the system. Do **not** run it automatically — present it for the user to run or tweak.
+After the housekeeping commit (step 6), derive a session name suggestion using the
+same logic as `/session-name`. The merged PR number is always known here, which
+makes this the most reliable naming signal in the system. Do **not** apply it
+automatically — present it for the user to confirm or tweak.
 
 ### How to determine what belongs to this session
 
@@ -83,7 +84,7 @@ Read the `**Session name:**` field from `.rig/memory/CONTEXT_SNAPSHOT.md`.
 
   > **Session already named:** `feat dashboard ui #49`
   > **Merged this run:** PR #51 (fix null user on profile fetch)
-  > **Updated suggestion:** `/rename feat dashboard ui #49 | fix null user profile fetch #51`
+  > **Updated suggestion:** `feat dashboard ui #49 | fix null user profile fetch #51`
 
 ### Format
 
@@ -98,9 +99,13 @@ type short-desc #N | type short-desc #N | ...
 ### Output
 
 > **Suggested session name:**
-> `/rename feat user-auth magic-link flow #91`
+> `feat user-auth magic-link flow #91`
 
-After the user runs `/rename`, **update the `**Session name:**` field in
+Then invite the user to apply it:
+
+> To apply: run `/session-name` or say "use that name".
+
+After the user confirms, **update the `**Session name:**` field in
 `.rig/memory/CONTEXT_SNAPSHOT.md`** to match. This lets subsequent /wrap or
 /post-merge calls detect the existing name and suggest appends correctly.
 
