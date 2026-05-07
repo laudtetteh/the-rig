@@ -152,6 +152,8 @@ Alternatively, edit `.claude/settings.json` directly and update the hook command
 
 **Fix**: The installer now has a dedicated **Upgrade** strategy (option 5). It classifies every file as Rig-owned or user-owned. Rig-owned files (hooks, commands, processes, Husky scripts) are auto-updated when unmodified, or shown a diff with a prompt when customized. User-owned files (CLAUDE.md, rules/, memory/, tasks/, .github/) are always skipped. The Upgrade strategy records a SHA256 manifest at install time so it can detect your customizations on the next run.
 
+The manifest was later extended (v1.10.0) to track **all** files — not just Rig-owned ones. This means the Upgrade strategy can now also detect customizations to user-owned files and protect them, rather than silently skipping all of them. The overwrite strategy received the same manifest-awareness: it warns before touching any user-customized file.
+
 **Watch for**: Never use Merge strategy to upgrade an existing install — only use it for the initial drop-in. When upgrading, always choose Upgrade (5). See `docs/customizing.md` for the full upgrade workflow.
 
 ---
