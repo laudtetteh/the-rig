@@ -1,8 +1,8 @@
 #!/bin/sh
 # post-commit
 #
-# Re-applies trailer stripping after the commit lands.
-# Some git clients (and `git commit --trailer`) re-inject trailers after
+# Re-applies tool footer removal after the commit lands.
+# Some git clients (and `git commit --trailer`) re-inject footers after
 # the commit-msg hook has already run. This hook catches and amends them away.
 #
 # Amends the commit in-place only if the message actually changed.
