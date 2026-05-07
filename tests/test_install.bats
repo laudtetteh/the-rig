@@ -247,6 +247,45 @@ is_rig_owned_stub() {
   grep -q "My Custom Gap" "$TEST_PROJECT/.rig/memory/RIG_GAPS.md"
 }
 
+@test "upgrade strategy: manifest tracks user-owned files after install" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  # CLAUDE.md is user-owned but should now appear in the manifest
+  [ -f "$TEST_PROJECT/.rig/memory/.rig-manifest" ]
+  grep -q "CLAUDE.md" "$TEST_PROJECT/.rig/memory/.rig-manifest"
+}
+
+@test "upgrade strategy: preserves user-modified user-owned file (non-interactive)" {
+  # Install to establish manifest baseline for user-owned files
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  # User modifies CLAUDE.md — hash now differs from manifest
+  echo "MY BESPOKE PROJECT CONFIG" >> "$TEST_PROJECT/CLAUDE.md"
+
+  # Upgrade non-interactive: customized user-owned file must be skipped
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  grep -q "MY BESPOKE PROJECT CONFIG" "$TEST_PROJECT/CLAUDE.md"
+}
+
+@test "overwrite strategy: skips user-modified user-owned file in non-interactive mode" {
+  # First install establishes manifest
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  # User modifies CLAUDE.md
+  echo "MY CUSTOM OVERWRITE CONTENT" >> "$TEST_PROJECT/CLAUDE.md"
+
+  # Overwrite non-interactive: confirm() defaults to "n", so customized file is skipped
+  run_installer --strategy overwrite
+  [ "$status" -eq 0 ]
+
+  grep -q "MY CUSTOM OVERWRITE CONTENT" "$TEST_PROJECT/CLAUDE.md"
+}
+
 # ── settings.json merge ───────────────────────────────────────────────────────
 
 @test "merge strategy: creates settings.json when absent" {

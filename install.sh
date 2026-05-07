@@ -36,6 +36,11 @@ confirm() {
   local default="${2:-n}"
   local prompt
   if [[ "$default" == "y" ]]; then prompt="[Y/n]"; else prompt="[y/N]"; fi
+  # Non-interactive (CI / piped stdin): accept the default without prompting.
+  if [[ ! -t 0 ]]; then
+    [[ "$default" =~ ^[Yy]$ ]]
+    return
+  fi
   read -r -p "$(echo -e "${BOLD}?${RESET} ${msg} ${prompt} ")" answer
   answer="${answer:-$default}"
   [[ "$answer" =~ ^[Yy]$ ]]
@@ -57,16 +62,18 @@ sha256_file() {
 }
 
 # ── Rig-owned file classification ─────────────────────────────────────────────
-# Returns 0 (true) if the file is owned by The Rig and should be tracked in the
-# manifest and overwritten by the Upgrade strategy.
-# Returns 1 (false) if it is user-customized and must be skipped in Upgrade mode.
+# Returns 0 (true) if the file is infrastructure owned by The Rig (hooks, commands,
+# processes). Used in overwrite mode to gate the user-modification warning — Rig-owned
+# files are always overwritten silently; user-owned files prompt if customized.
+# Returns 1 (false) for user-owned files (CLAUDE.md, rules, memory, tasks, github).
+#
+# NOTE: The manifest now tracks ALL files (not just Rig-owned), so the Upgrade
+# strategy applies manifest-aware logic uniformly. is_rig_owned() is used for
+# messaging/warning decisions only, not as a skip gate.
 #
 # Rig-owned:   .claude/hooks/, .claude/commands/, .rig/processes/, .husky/, .gitleaks.toml
 # User-owned:  CLAUDE.md, PROJECT_BRIEF.md, .rig/rules/, .rig/memory/*.md,
 #              .rig/tasks/, .github/
-#              Note: .rig/memory/RIG_GAPS.md is user-owned and committed to the project
-#              repo (not gitignored). It accumulates workflow feedback across sessions.
-#              It is never manifest-tracked and never overwritten by the Upgrade strategy.
 # Special:     .claude/settings.json (always smart-merged, not manifest-tracked)
 is_rig_owned() {
   local rel="$1"
@@ -168,7 +175,7 @@ for arg in "$@"; do
       echo "                        Values: merge | skip | overwrite | upgrade | interactive"
       echo "                        merge    — new/drop-in install (safe default; smart-merges settings.json)"
       echo "                        skip     — only install files that don't exist yet"
-      echo "                        upgrade  — update Rig-owned files; preserve user-owned"
+      echo "                        upgrade  — auto-update unmodified Rig files; prompt on customized; skip user-owned"
       echo "                        overwrite — replace everything; back up originals"
       echo "  --target <path>       Set target project directory."
       echo "  --project-name <name> Set project name (used in CLAUDE.md substitution)."
@@ -428,8 +435,10 @@ copy_file() {
     # No collision — always install
     cp "$src" "$dest"
     success "Created ${dest#${base}/}"
-    # Record in manifest whenever a Rig-owned file is freshly installed
-    if [[ -n "$rel" ]] && is_rig_owned "$rel"; then
+    # Record ALL files in the manifest (not just Rig-owned) so the Upgrade
+    # strategy can later detect whether any file has been customized.
+    # settings.json is excluded — it's always smart-merged, not hash-tracked.
+    if [[ -n "$rel" && "$(basename "$rel")" != "settings.json" ]]; then
       write_manifest_entry "$(sha256_file "$dest")" "$rel"
     fi
     return
@@ -441,7 +450,7 @@ copy_file() {
       if confirm "Overwrite existing: ${dest#${base}/}?"; then
         cp "$src" "$dest"
         success "Updated ${dest#${base}/}"
-        if [[ -n "$rel" ]] && is_rig_owned "$rel"; then
+        if [[ -n "$rel" && "$(basename "$rel")" != "settings.json" ]]; then
           write_manifest_entry "$(sha256_file "$dest")" "$rel"
         fi
       else
@@ -452,10 +461,29 @@ copy_file() {
       info "Skipped (exists): ${dest#${base}/}"
       ;;
     overwrite)
+      # For user-owned files that have been customized since install:
+      # warn and require confirmation before overwriting.
+      if [[ -n "$rel" ]] && ! is_rig_owned "$rel" && [[ "$(basename "$rel")" != "settings.json" ]]; then
+        local _dest_hash _manifest_hash _src_hash
+        _dest_hash="$(sha256_file "$dest")"
+        _src_hash="$(sha256_file "$src")"
+        _manifest_hash="$(read_manifest_hash "$rel")"
+        if [[ -n "$_manifest_hash" && "$_dest_hash" != "$_manifest_hash" && "$_dest_hash" != "$_src_hash" ]]; then
+          echo ""
+          warn "User-modified file: ${rel}"
+          echo "  Your version differs from what The Rig originally installed."
+          echo "  A backup will be saved to .rig-backup/ before overwriting."
+          echo ""
+          if ! confirm "Overwrite ${rel} with the new template?" "n"; then
+            info "Skipped (kept your version): ${rel}"
+            return
+          fi
+        fi
+      fi
       if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
       cp "$src" "$dest"
       success "Overwrote ${dest#${base}/}"
-      if [[ -n "$rel" ]] && is_rig_owned "$rel"; then
+      if [[ -n "$rel" && "$(basename "$rel")" != "settings.json" ]]; then
         write_manifest_entry "$(sha256_file "$dest")" "$rel"
       fi
       ;;
@@ -487,12 +515,15 @@ copy_file() {
 # Decision tree for a file that already exists at $dest:
 #
 #   settings.json       → always smart-merge (same as "merge" strategy)
-#   user-owned file     → always skip (preserves customizations)
-#   Rig-owned file:
+#   All other files (both Rig-owned and user-owned):
 #     dest == src       → already up to date, skip
 #     dest == manifest  → unmodified since install → overwrite silently (with backup)
 #     dest != manifest  → user has customized it  → show diff, prompt o/s/d
 #     no manifest entry → first upgrade run → overwrite silently (with backup)
+#
+# The manifest now tracks all files (not just Rig-owned), so a user-owned file
+# like CLAUDE.md that was never customized will be updated automatically, while
+# one the user has edited will prompt for review — the same logic for both.
 #
 # SHA256 unavailable: falls back to byte-level cmp(1). If files differ and
 # sha256 is absent, prompts without a diff (can't reliably detect customization).
@@ -516,13 +547,7 @@ _copy_file_upgrade() {
     return
   fi
 
-  # ── User-owned files: always skip ──────────────────────────────────────────
-  if [[ -n "$rel" ]] && ! is_rig_owned "$rel"; then
-    info "Skipped (user-owned): ${rel}"
-    return
-  fi
-
-  # ── Rig-owned: manifest-aware handling ─────────────────────────────────────
+  # ── Manifest-aware handling (applies to all files) ─────────────────────────
   local new_hash dest_hash manifest_hash
   new_hash="$(sha256_file "$src")"
   dest_hash="$(sha256_file "$dest")"
@@ -720,6 +745,7 @@ if [[ "$DO_PROJECT" == true ]]; then
       _DETECTED_BASE="$(git -C "$TARGET" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')" || true
     fi
     _DEFAULT_BASE="${_DETECTED_BASE:-main}"
+    # Only prompt when stdin is a TTY (skip in non-interactive/CI contexts).
     if [[ -t 0 ]]; then
       ask "What is the base branch for this repo?"
       read -r -p "    Branch [${_DEFAULT_BASE}]: " _BASE_INPUT
