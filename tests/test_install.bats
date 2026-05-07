@@ -177,6 +177,23 @@ is_rig_owned_stub() {
   [ "$backup_count" -gt 0 ]
 }
 
+@test "overwrite strategy in stealth mode: backs up to external rig dir, not project" {
+  local rig_ext="$TEMP_DIR/rig-external"
+  mkdir -p "$TEST_PROJECT/.claude/hooks"
+  echo "STALE" > "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+
+  run_installer --strategy overwrite --tracking stealth --rig-dir "$rig_ext"
+  [ "$status" -eq 0 ]
+
+  # Backup must land in the external rig dir
+  local backup_count
+  backup_count="$(find "$rig_ext/backups" -name "pre-tool.sh" 2>/dev/null | wc -l | tr -d ' ')"
+  [ "$backup_count" -gt 0 ]
+
+  # No backup traces in the project repo
+  [ ! -d "$TEST_PROJECT/.rig-backup" ]
+}
+
 # ── Upgrade strategy ──────────────────────────────────────────────────────────
 
 @test "upgrade strategy: creates manifest on fresh install" {

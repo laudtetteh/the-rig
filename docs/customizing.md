@@ -362,8 +362,12 @@ When a new version of The Rig is released, pull the latest from the repo and re-
 the installer against your project:
 
 ```bash
+# 1. Pull the latest Rig source
 cd ~/tools/the-rig && git pull
-./install.sh --project-only
+
+# 2. Run the installer from inside your project
+cd ~/code/my-project
+~/tools/the-rig/install.sh --project-only
 ```
 
 Choose **Upgrade (option 3)** from the intent menu. This is the recommended
@@ -392,8 +396,10 @@ On upgrade, for each Rig-owned file:
 | Dest hash != manifest hash | You've customized it — diff shown, you choose: overwrite / skip |
 | No manifest entry | First upgrade (manifest didn't exist yet) — overwritten silently |
 
-Backups are written to `.rig-backup/<timestamp>/` before any overwrite, so nothing
-is ever lost.
+Backups are written to `.rig-backup/<timestamp>/` in the project root before any
+overwrite. In stealth or external tracking mode, backups go to
+`$EXTERNAL_RIG_DIR/backups/<timestamp>/` instead — so they never surface in the
+project's git status. Nothing is ever lost.
 
 ### Manifest-aware customization
 
