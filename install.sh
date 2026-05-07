@@ -169,7 +169,7 @@ for arg in "$@"; do
       echo "                        merge    — new/drop-in install (safe default; smart-merges settings.json)"
       echo "                        skip     — only install files that don't exist yet"
       echo "                        upgrade  — update Rig-owned files; preserve user-owned"
-      echo "                        overwrite — replace everything; back up originals"
+      echo "                        overwrite — reset Rig-owned files to factory state; back up originals; user-owned files preserved"
       echo "  --target <path>       Set target project directory."
       echo "  --project-name <name> Set project name (used in CLAUDE.md substitution)."
       echo "  --base-branch <name>  Set base branch name (default: main). Substituted into"
@@ -266,8 +266,9 @@ else
   echo "                      (global layer already installed)"
   echo "  3) Upgrade        — update The Rig in a project that already has it"
   echo "                      (updates hooks, commands, and processes; preserves your files)"
-  echo "  4) Repair         — overwrite all Rig-owned files and start fresh"
-  echo "                      (backs up originals to .rig-backup/)"
+  echo "  4) Repair         — reset all Rig-owned files (hooks, commands, processes) to factory state"
+  echo "                      Backs up originals to .rig-backup/. Your CLAUDE.md, rules,"
+  echo "                      and memory files are never touched."
   echo "  5) Custom         — full control over layers, strategy, and components"
   echo ""
   read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3/4/5] (default: 2): ")" intent_input
@@ -306,7 +307,7 @@ else
       echo "Collision strategy:"
       echo "  1) Interactive  — ask me for each file"
       echo "  2) Skip         — keep all existing files, only install new ones"
-      echo "  3) Overwrite    — replace everything (backs up originals to .rig-backup/)"
+      echo "  3) Overwrite    — reset Rig-owned files to factory (backs up originals; user-owned preserved)"
       echo "  4) Merge        — smart-merge .claude/settings.json; skip everything else"
       echo "  5) Upgrade      — update Rig-owned files; skip user-owned; diff on custom"
       echo ""
@@ -452,6 +453,13 @@ copy_file() {
       info "Skipped (exists): ${dest#${base}/}"
       ;;
     overwrite)
+      # User-owned files are never overwritten even in Repair/overwrite mode.
+      # Repair is for resetting Rig infrastructure (hooks, commands, processes) —
+      # not for destroying project-specific customizations (CLAUDE.md, rules, memory).
+      if [[ -n "$rel" ]] && ! is_rig_owned "$rel"; then
+        info "Skipped (user-owned): ${rel}"
+        return
+      fi
       if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
       cp "$src" "$dest"
       success "Overwrote ${dest#${base}/}"
@@ -567,6 +575,12 @@ _copy_file_upgrade() {
     echo "  Your version differs from what The Rig originally installed."
     echo "  The new Rig version also modifies this file."
     echo ""
+    # Non-interactive (CI / piped stdin): skip without prompting.
+    if [[ ! -t 0 ]]; then
+      info "Non-interactive mode — skipping customized file: ${rel}"
+      info "Run the installer interactively to review and update this file."
+      return
+    fi
     local choice
     while true; do
       read -r -p "$(echo -e "  ${BOLD}?${RESET} (o)verwrite  (s)kip  (d)iff  [o/s/d]: ")" choice
@@ -681,9 +695,13 @@ if [[ "$DO_PROJECT" == true ]]; then
     PROJECT_NAME="$_FLAG_PROJECT_NAME"
   else
     DEFAULT_PROJECT_NAME="$(basename "$TARGET")"
-    ask "Project name (used in CLAUDE.md)?"
-    read -r -p "    Name [${DEFAULT_PROJECT_NAME}]: " PROJECT_NAME_INPUT
-    PROJECT_NAME="${PROJECT_NAME_INPUT:-$DEFAULT_PROJECT_NAME}"
+    if [[ -t 0 ]]; then
+      ask "Project name (used in CLAUDE.md)?"
+      read -r -p "    Name [${DEFAULT_PROJECT_NAME}]: " PROJECT_NAME_INPUT
+      PROJECT_NAME="${PROJECT_NAME_INPUT:-$DEFAULT_PROJECT_NAME}"
+    else
+      PROJECT_NAME="$DEFAULT_PROJECT_NAME"
+    fi
   fi
 
   # Sanitize project name for safe sed substitution.
@@ -706,12 +724,19 @@ if [[ "$DO_PROJECT" == true ]]; then
     # Try to auto-detect from git
     _DETECTED_BASE=""
     if command -v git >/dev/null 2>&1 && git -C "$TARGET" rev-parse --git-dir >/dev/null 2>&1; then
-      _DETECTED_BASE="$(git -C "$TARGET" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')"
+      # git symbolic-ref exits 128 when there's no remote; pipefail would propagate that.
+      # Use || true to absorb the failure — _DETECTED_BASE stays empty if no remote exists.
+      _DETECTED_BASE="$(git -C "$TARGET" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')" || true
     fi
     _DEFAULT_BASE="${_DETECTED_BASE:-main}"
-    ask "What is the base branch for this repo?"
-    read -r -p "    Branch [${_DEFAULT_BASE}]: " _BASE_INPUT
-    BASE_BRANCH="${_BASE_INPUT:-$_DEFAULT_BASE}"
+    # Only prompt when stdin is a TTY (skip in non-interactive/CI contexts).
+    if [[ -t 0 ]]; then
+      ask "What is the base branch for this repo?"
+      read -r -p "    Branch [${_DEFAULT_BASE}]: " _BASE_INPUT
+      BASE_BRANCH="${_BASE_INPUT:-$_DEFAULT_BASE}"
+    else
+      BASE_BRANCH="$_DEFAULT_BASE"
+    fi
   fi
   # Sanitize: letters, digits, hyphens, underscores, dots only
   BASE_BRANCH="$(echo "$BASE_BRANCH" | tr -dc 'A-Za-z0-9._-')"

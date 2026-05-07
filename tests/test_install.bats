@@ -49,6 +49,7 @@ is_rig_owned_stub() {
     .claude/hooks/*|\
     .claude/commands/*|\
     .rig/processes/*|\
+    .rig/VERSION|\
     .husky/*|\
     .gitleaks.toml)
       return 0 ;;
@@ -174,6 +175,27 @@ is_rig_owned_stub() {
   local backup_count
   backup_count="$(find "$TEST_PROJECT/.rig-backup" -name "pre-tool.sh" | wc -l | tr -d ' ')"
   [ "$backup_count" -gt 0 ]
+}
+
+@test "overwrite strategy: never overwrites user-owned files (CLAUDE.md)" {
+  # Pre-populate CLAUDE.md with custom content
+  echo "MY CUSTOM PROJECT BRAIN" > "$TEST_PROJECT/CLAUDE.md"
+
+  run_installer --strategy overwrite
+  [ "$status" -eq 0 ]
+
+  # CLAUDE.md must still contain our custom content — not the template
+  grep -q "MY CUSTOM PROJECT BRAIN" "$TEST_PROJECT/CLAUDE.md"
+}
+
+@test "overwrite strategy: never overwrites user-owned rules files" {
+  mkdir -p "$TEST_PROJECT/.rig/rules"
+  echo "MY CUSTOM RULES" > "$TEST_PROJECT/.rig/rules/coding-standards.md"
+
+  run_installer --strategy overwrite
+  [ "$status" -eq 0 ]
+
+  grep -q "MY CUSTOM RULES" "$TEST_PROJECT/.rig/rules/coding-standards.md"
 }
 
 # ── Upgrade strategy ──────────────────────────────────────────────────────────
