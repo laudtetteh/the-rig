@@ -607,3 +607,29 @@ _is_rig_protected() {
   [ "$status" -eq 0 ]
   [ ! -f "$rig_dir/install.sh" ]
 }
+
+# ── Stealth mode: Husky conflict detection ────────────────────────────────────
+
+@test "stealth mode: warns when .husky/ exists in target project" {
+  local rig_external="$TEMP_DIR/rig-ext"
+  mkdir -p "$rig_external" "$TEST_PROJECT/.husky"
+  touch "$TEST_PROJECT/.husky/pre-commit"
+
+  run bash "$INSTALLER" --project-only --strategy skip \
+    <<< "$(printf '%s\n4\n%s\n' "$TEST_PROJECT" "$rig_external")"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".husky/ detected"* ]]
+}
+
+@test "--skip-git-hooks: skips .git/hooks/ writes in stealth mode" {
+  local rig_external="$TEMP_DIR/rig-ext"
+  mkdir -p "$rig_external"
+
+  run bash "$INSTALLER" --project-only --strategy skip --skip-git-hooks \
+    <<< "$(printf '%s\n4\n%s\n' "$TEST_PROJECT" "$rig_external")"
+
+  [ "$status" -eq 0 ]
+  [ ! -f "$TEST_PROJECT/.git/hooks/commit-msg" ]
+  [[ "$output" == *"--skip-git-hooks set"* ]]
+}
