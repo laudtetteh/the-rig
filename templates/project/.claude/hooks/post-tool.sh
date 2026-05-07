@@ -73,6 +73,23 @@ if [[ "$TOOL" == "Bash" ]]; then
       fi
     fi
   fi
+
+  # ── Branch naming convention check ───────────────────────────────────────
+  # After any Bash call that creates a new branch, warn if the name doesn't
+  # follow the project's naming conventions. Warning only — the branch already
+  # exists at this point. Agent should relay the warning to the user.
+  if echo "$RESULT" | grep -qE "Switched to a new branch '"; then
+    BRANCH_NAME=$(echo "$RESULT" \
+      | grep -oE "Switched to a new branch '[^']+'" \
+      | sed "s/Switched to a new branch '//;s/'$//")
+    VALID_BRANCH_PATTERN="^(feat|fix|chore|refactor|docs|test|perf|devops|style)/"
+    if [[ -n "$BRANCH_NAME" ]] && ! echo "$BRANCH_NAME" | grep -qE "$VALID_BRANCH_PATTERN"; then
+      echo "⚠️  Branch '$BRANCH_NAME' doesn't follow naming conventions."
+      echo "   Expected prefix: feat/ fix/ chore/ refactor/ docs/ test/ perf/ devops/ style/"
+      echo "   To rename: git branch -m '$BRANCH_NAME' '<type>/$BRANCH_NAME'"
+      echo "[$(date +%H:%M:%S)] BRANCH-WARN: '$BRANCH_NAME' — non-conventional name" >> "$SESSION_LOG"
+    fi
+  fi
 fi
 
 exit 0

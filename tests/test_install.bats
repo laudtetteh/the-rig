@@ -673,3 +673,142 @@ _is_rig_protected() {
   [ -f "$TEST_PROJECT/.rig/memory/PROGRESS.md" ]
   [ ! -f "$TEST_PROJECT/.rigpath" ]
 }
+
+# ── Gap 4: stop.sh writes .wrap-needed on 2+ commits ─────────────────────────
+
+@test "stop.sh: writes .wrap-needed when session log has 2+ commits" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local rig_dir="$TEST_PROJECT/.rig"
+  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
+  local session_log="$TEMP_DIR/test-session.log"
+  local wrap_needed="$rig_dir/memory/.wrap-needed"
+
+  # Provide a snapshot so the "no snapshot" trigger doesn't fire first,
+  # and ensure PROGRESS.md has no stubs (skip install creates none).
+  # Together these isolate to the 2+ commits path.
+  printf '**Last updated:** 2026-01-01 — test snapshot\n' \
+    > "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+
+  # Simulate two commits having been logged this session
+  printf '[10:00:00] PROGRESS stub: abc1234 feat(x): first commit [#1]\n' >> "$session_log"
+  printf '[10:01:00] PROGRESS stub: def5678 feat(x): second commit [#1]\n' >> "$session_log"
+
+  rm -f "$wrap_needed"
+
+  # Run stop.sh from inside the test project so git rev-parse resolves correctly
+  ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$stop_hook" )
+
+  [ -f "$wrap_needed" ]
+}
+
+@test "stop.sh: does not write .wrap-needed when session has fewer than 2 commits" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local rig_dir="$TEST_PROJECT/.rig"
+  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
+  local session_log="$TEMP_DIR/test-session.log"
+  local wrap_needed="$rig_dir/memory/.wrap-needed"
+
+  # Same isolation: snapshot present, no stubs, only 1 commit in session log
+  printf '**Last updated:** 2026-01-01 — test snapshot\n' \
+    > "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+
+  printf '[10:00:00] PROGRESS stub: abc1234 feat(x): first commit [#1]\n' >> "$session_log"
+
+  rm -f "$wrap_needed"
+
+  ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$stop_hook" )
+
+  [ ! -f "$wrap_needed" ]
+}
+
+# ── Gap 5: commit-msg validates Conventional Commits format ───────────────────
+
+@test "commit-msg: rejects non-conventional commit message" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  # Overwrite CLAUDE.md with minimal content; hook only reads issue-tracking
+  printf 'issue-tracking: none\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  printf 'fixed stuff\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Conventional Commits"* ]]
+}
+
+@test "commit-msg: accepts valid conventional commit message" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  printf 'issue-tracking: none\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  printf 'feat(auth): add login flow\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -eq 0 ]
+}
+
+@test "commit-msg: rejects message missing issue ref when issue-tracking: github" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  # Overwrite with controlled minimal content so first grep match is github
+  printf 'issue-tracking: github\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  printf 'feat(auth): add login flow\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"issue reference"* ]]
+}
+
+@test "commit-msg: accepts message with [#N] issue ref when issue-tracking: github" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  printf 'issue-tracking: github\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  printf 'feat(auth): add login flow [#42]\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -eq 0 ]
+}
+
+@test "commit-msg: skips validation for merge commits" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  printf 'issue-tracking: github\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  printf "Merge branch 'feat/foo' into main\n" > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -eq 0 ]
+}
+
+@test "commit-msg: bypass with SKIP_COMMIT_VALIDATION=1" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  printf 'this is not conventional\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && SKIP_COMMIT_VALIDATION=1 sh '$hook' '$msg_file'"
+  [ "$status" -eq 0 ]
+}
