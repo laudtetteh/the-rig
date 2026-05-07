@@ -141,18 +141,19 @@ PROJECT_TEMPLATES="$SCRIPT_DIR/templates/project"
 DO_GLOBAL=true
 DO_PROJECT=true
 EXTERNAL_RIG_DIR=""   # set via --rig-dir <path>
-_FLAG_STRATEGY=""     # set via --strategy <name>  (skips interactive prompt)
-_FLAG_TARGET=""       # set via --target <path>    (skips interactive prompt)
-_FLAG_PROJECT_NAME="" # set via --project-name <n> (skips interactive prompt)
-_FLAG_BASE_BRANCH=""  # set via --base-branch <n>  (skips interactive prompt)
-SKIP_GIT_HOOKS=false  # set via --skip-git-hooks   (stealth: skip .git/hooks/ writes)
+_FLAG_STRATEGY=""     # set via --strategy <name>   (skips interactive prompt)
+_FLAG_TARGET=""       # set via --target <path>     (skips interactive prompt)
+_FLAG_PROJECT_NAME="" # set via --project-name <n>  (skips interactive prompt)
+_FLAG_BASE_BRANCH=""  # set via --base-branch <n>   (skips interactive prompt)
+_FLAG_TRACKING=""     # set via --tracking <mode>   (skips tracking prompt; orthogonal to --target)
+SKIP_GIT_HOOKS=false  # set via --skip-git-hooks    (stealth: skip .git/hooks/ writes)
 
 for arg in "$@"; do
   case "$arg" in
     --global-only)      DO_PROJECT=false ;;
     --project-only)     DO_GLOBAL=false ;;
     --skip-git-hooks)   SKIP_GIT_HOOKS=true ;;
-    --rig-dir|--strategy|--target|--project-name|--base-branch)
+    --rig-dir|--strategy|--target|--project-name|--base-branch|--tracking)
       # two-arg flags; value captured in the loop below
       ;;
     --version|-v)
@@ -184,6 +185,13 @@ for arg in "$@"; do
       echo "  --project-name <name> Set project name (used in CLAUDE.md substitution)."
       echo "  --base-branch <name>  Set base branch name (default: main). Substituted into"
       echo "                        workflow examples and CLAUDE.md base-branch field."
+      echo "  --tracking <mode>     Set .rig/ tracking mode without a prompt."
+      echo "                        Values: repo | local | external | stealth"
+      echo "                        repo     — .rig/ committed with the project (default)"
+      echo "                        local    — .rig/ in .git/info/exclude; invisible to teammates"
+      echo "                        external — .rig/ outside the repo (requires --rig-dir)"
+      echo "                        stealth  — zero Rig traces; hooks go to .git/hooks/"
+      echo "                        Orthogonal to --target: both can be used together."
       echo ""
       echo "Other:"
       echo "  --rig-dir <path>      Install .rig/ to an external path outside the repo."
@@ -215,6 +223,9 @@ for (( i=0; i<${#args[@]}; i++ )); do
   fi
   if [[ "${args[$i]}" == "--base-branch" && $((i+1)) -lt ${#args[@]} ]]; then
     _FLAG_BASE_BRANCH="${args[$((i+1))]}"
+  fi
+  if [[ "${args[$i]}" == "--tracking" && $((i+1)) -lt ${#args[@]} ]]; then
+    _FLAG_TRACKING="${args[$((i+1))]}"
   fi
 done
 
@@ -785,15 +796,41 @@ if [[ "$DO_PROJECT" == true ]]; then
 
   # ── GIT TRACKING FOR .rig/ ────────────────────────────────────────────────
   # How should .rig/ appear (or not appear) in git?
-  # Bypassed when --rig-dir or --target is provided (defaults to "repo").
+  # --tracking flag takes precedence; --rig-dir alone implies external (backward-compat).
+  # When neither is set, show the interactive prompt — including when --target is provided.
   RIG_TRACKING="repo"   # default: committed with the project
-  RIGPATH_FILE=""       # absolute path to .rigpath (set if external or exclude mode)
+  RIGPATH_FILE=""       # absolute path to .rigpath (set if external or stealth mode)
 
-  if [[ -n "$EXTERNAL_RIG_DIR" ]]; then
-    # --rig-dir was provided; skip interactive prompt and go external.
+  if [[ -n "$_FLAG_TRACKING" ]]; then
+    # --tracking flag: validate and apply without prompting
+    case "$_FLAG_TRACKING" in
+      repo)
+        RIG_TRACKING="repo"
+        ;;
+      local)
+        RIG_TRACKING="exclude"
+        ;;
+      external)
+        if [[ -z "$EXTERNAL_RIG_DIR" ]]; then
+          error "--tracking external requires --rig-dir <path>"
+          exit 1
+        fi
+        RIG_TRACKING="external"
+        ;;
+      stealth)
+        RIG_TRACKING="stealth"
+        if [[ -z "$EXTERNAL_RIG_DIR" ]]; then
+          EXTERNAL_RIG_DIR="${HOME}/.rig/projects/${PROJECT_NAME}"
+        fi
+        ;;
+      *)
+        error "Invalid --tracking value '${_FLAG_TRACKING}'. Valid: repo, local, external, stealth"
+        exit 1
+        ;;
+    esac
+  elif [[ -n "$EXTERNAL_RIG_DIR" ]]; then
+    # --rig-dir was provided (without --tracking): backward-compatible external mode.
     RIG_TRACKING="external"
-  elif [[ -n "$_FLAG_TARGET" ]]; then
-    : # --target provided; skip prompt, keep RIG_TRACKING="repo" default.
   else
     echo "How should .rig/ be tracked in git?"
     echo ""
@@ -804,7 +841,7 @@ if [[ "$DO_PROJECT" == true ]]; then
     echo "                        git hooks go to .git/hooks/ (no Husky required)"
     echo "                        Use for multi-contributor repos where teammates must not see Rig files."
     echo ""
-    read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3/4] (default: 1): ")" rig_tracking_input
+    read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3/4] (default: 1): ")" rig_tracking_input || true
     rig_tracking_input="${rig_tracking_input:-1}"
 
     case "$rig_tracking_input" in
@@ -812,7 +849,7 @@ if [[ "$DO_PROJECT" == true ]]; then
       2) RIG_TRACKING="exclude" ;;
       3) RIG_TRACKING="external"
          ask "External path for .rig/ files?"
-         read -r -p "    Path: " EXTERNAL_RIG_DIR
+         read -r -p "    Path: " EXTERNAL_RIG_DIR || true
          if [[ -z "$EXTERNAL_RIG_DIR" ]]; then
            error "External path cannot be empty."
            exit 1
@@ -824,7 +861,7 @@ if [[ "$DO_PROJECT" == true ]]; then
          echo ""
          echo "  Stealth mode: all Rig artifacts will be excluded from git tracking."
          echo "  .rig/ files will be stored outside this repo."
-         read -r -p "$(echo -e "  ${BOLD}?${RESET} External .rig/ path (default: ${_STEALTH_DEFAULT_RIG}): ")" EXTERNAL_RIG_DIR
+         read -r -p "$(echo -e "  ${BOLD}?${RESET} External .rig/ path (default: ${_STEALTH_DEFAULT_RIG}): ")" EXTERNAL_RIG_DIR || true
          EXTERNAL_RIG_DIR="${EXTERNAL_RIG_DIR:-$_STEALTH_DEFAULT_RIG}"
          ;;
       *)
