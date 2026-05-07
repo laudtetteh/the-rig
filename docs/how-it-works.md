@@ -316,6 +316,79 @@ staged only from `.rig/tasks/done/` in a separate housekeeping commit.
 
 ---
 
+## Context and token management
+
+The Rig is designed to work within a bounded context budget across long sessions
+and many tasks. This section documents what loads, when it loads, and what keeps
+the budget in check.
+
+### What loads at session start (always)
+
+These files are injected by Claude Code unconditionally via `@` import or direct
+load — the agent cannot skip them:
+
+| Source | Typical size | Notes |
+|---|---|---|
+| `~/.claude/CLAUDE.md` (global) | ~10 KB | Hard rules, working style, conventions |
+| Project `CLAUDE.md` | ~6 KB | Stack, structure, off-limits |
+| `.rig/rules/` (4 files, via `@`) | ~11 KB | Coding standards, git, security, verification |
+| `docs/features/README.md` (via `@`) | ~1 KB | Feature index |
+| `CONTEXT_SNAPSHOT.md` | ~2 KB | Session state — the most important gate |
+
+**Session-start baseline: ~30 KB (~7,000 tokens).** Well within Claude's usable window.
+
+### What loads on demand (not at startup)
+
+These are read only when a command is invoked or a workflow is followed:
+
+| File | Size | When |
+|---|---|---|
+| `ship.md` | ~10 KB | `/ship` command |
+| `wrap.md` | ~11 KB | `/wrap` command |
+| `SHIP_WORKFLOW.md` | ~10 KB | When `/ship` directs agent to follow it |
+| `NEW_TASK_WORKFLOW.md` | ~6 KB | When starting a new task |
+| Active task file | ~1–3 KB | One per active task |
+| `PROGRESS.md` | variable | Only if CONTEXT_SNAPSHOT is absent or stale |
+| `ERRORS.md` | variable | Only if CONTEXT_SNAPSHOT is absent or stale |
+
+### The CONTEXT_SNAPSHOT gate
+
+The most important token-management mechanism. When `CONTEXT_SNAPSHOT.md` exists
+and is current, the agent is instructed to stop reading context — it skips PROGRESS.md,
+ERRORS.md, and deeper history entirely. This keeps repeat sessions cheap.
+
+The `/wrap` command writes the snapshot at session end. **Running `/wrap` before
+ending a session is the single most effective way to keep future sessions lean.**
+
+### Trim limits
+
+`PROGRESS.md` and `ERRORS.md` grow over time. The `/wrap` command enforces limits:
+
+- `PROGRESS.md` → trimmed to 20 entries; older entries moved to `PROGRESS_archive.md`
+- `ERRORS.md` → trimmed to 30 entries; older entries moved to `ERRORS_archive.md`
+
+Archive files are gitignored (history preserved locally, not loaded at session start).
+
+A full `PROGRESS.md` at the 20-entry limit is ~4,000–6,000 tokens. A full `ERRORS.md`
+at 30 entries is ~3,000–5,000 tokens. Both are well within budget even when stacked.
+
+**Important:** the trim only runs when `/wrap` is invoked — it is not automatic.
+Projects that skip `/wrap` regularly will see these files grow without bound.
+
+### What actually drives context growth
+
+The dominant cost is not Rig files — it's **tool call accumulation** mid-session.
+Every `Read`, `Edit`, `Bash`, and `Grep` result stays in context for the rest of the
+session. A task with 40 tool calls, averaging 1 KB of output each, adds ~40 KB
+(~10,000 tokens) beyond the baseline. This is normal and expected — it is why
+Claude Code auto-compacts around 80–90% of the context window.
+
+The Rig's design assumption is that a well-structured session (clear task file, current
+CONTEXT_SNAPSHOT, invoked commands only as needed) will consume the context window in
+proportion to the complexity of the work — not because of Rig overhead.
+
+---
+
 ## The command set
 
 Thirteen slash commands covering the full development lifecycle:

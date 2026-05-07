@@ -39,10 +39,17 @@ Wait for the user to confirm this is the right task before continuing.
 
 ## Step 2 — Confirm the GitHub issue
 
+First, read `issue-tracking:` from `CLAUDE.md`.
+
+**If `issue-tracking: none`:** skip this step entirely — proceed to Step 3.
+
+**If `issue-tracking: github`** (or field absent — default):
+
 Read the task file's `**GitHub issue**:` field.
 
 - If it contains a real issue number (e.g. `#12`): state it and proceed.
-- If it is empty or still a placeholder: **stop.**
+- If it is `N/A (issue-tracking: none)`: proceed — the project setting was already applied.
+- If it is empty or a placeholder: **stop.**
   Say: "No GitHub issue linked. Per SHIP_WORKFLOW Step 0, the issue must exist
   before committing. Create the issue first, then update the task file."
 
@@ -57,7 +64,7 @@ strip the YAML frontmatter (lines starting with `---`, `name:`, `about:`, `title
 `labels:`, `assignees:`), and use the remaining content as the issue body. **Never
 use a freeform issue body when an issue template exists.**
 
-Do not proceed to Step 3 until a valid issue number is confirmed.
+Do not proceed to Step 3 until a valid issue number is confirmed (or `issue-tracking: none` is set).
 
 ---
 

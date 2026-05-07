@@ -101,6 +101,40 @@ Change this value to match your project's branching convention.
 
 ---
 
+## Project settings
+
+These fields are read by slash commands and workflow files. Set them once and every
+future session inherits them — no need to re-state preferences in chat.
+
+```
+issue-tracking: github
+```
+
+| Value | Behaviour |
+|---|---|
+| `github` | GitHub issues are required before any code is written. `/task` blocks until an issue number is provided. Issue number goes in every commit. `gh` CLI is used for all PR/issue operations. |
+| `none` | No issue tracker in use. Issue number requirement is skipped in `/task`, `/ship`, and commit messages. Use for personal projects, prototypes, or non-GitHub repos. |
+
+```
+secret-scanner: gitleaks
+```
+
+| Value | Behaviour |
+|---|---|
+| `gitleaks` | `gitleaks --staged` runs on every commit. Requires `gitleaks` to be installed. |
+| `none` | Secret scanning disabled. Remove or comment out the gitleaks block in `.husky/pre-commit`. |
+
+```
+commit-cleanup: yes
+```
+
+| Value | Behaviour |
+|---|---|
+| `yes` | Auto-injected tool footers (`Co-Authored-By: Claude`, `Made-with-Claude`, etc.) are stripped from commit messages by the `commit-msg` and `post-commit` hooks. |
+| `no` | Footers are kept. Comment out or remove `.husky/commit-msg` and `.husky/post-commit` to disable the stripping. |
+
+---
+
 ## Off-limits — never touch without explicit instruction
 
 - `.husky/` — git hooks are stable; do not modify
