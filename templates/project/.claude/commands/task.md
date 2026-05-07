@@ -130,6 +130,9 @@ Wait for explicit go-ahead before proceeding.
 - Present the implementation plan and wait for explicit approval.
 - Before each file write, state what you're about to do and why. Wait for "ok" or "go".
 - After each file write, show a summary of what changed.
+- **Branch creation:** always confirm which base branch to branch off before running
+  `git checkout -b`. Read `base-branch:` from `CLAUDE.md`; present it and wait for
+  the user to confirm or specify a different base.
 
 **Medium (Supervised)**
 - Present the implementation plan and wait for explicit approval.
@@ -137,6 +140,7 @@ Wait for explicit go-ahead before proceeding.
 - Narrate progress at milestones (plan → implementation → tests → PR-ready).
 - Pause if: an unexpected file needs changing, a dependency must be added, a decision
   branches into two reasonable approaches.
+- **Branch creation:** confirm the base branch before running `git checkout -b`.
 
 **High (Autonomous)**
 - Present the implementation plan; wait for approval (one pause only).
@@ -144,6 +148,8 @@ Wait for explicit go-ahead before proceeding.
 - Only pause for irreversible actions: DB migrations, deleting files, force pushes,
   publishing to external services.
 - Log all decisions in `## Prompt history` of the task file.
+- **Branch creation:** read `base-branch:` from `CLAUDE.md`, state the base you're
+  using ("Creating `[branch-name]` off `[BASE]`"), then branch immediately — no wait.
 
 ### Governance always applies
 
