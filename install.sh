@@ -363,13 +363,19 @@ info "Strategy: ${COLLISION_STRATEGY}"
 echo ""
 
 # ── BACKUP HELPER ─────────────────────────────────────────────────────────────
-# Used by overwrite strategy. Backs up to <target>/.rig-backup/<timestamp>/
+# Used by overwrite strategy. In stealth/external mode, backs up to
+# $EXTERNAL_RIG_DIR/backups/<timestamp>/ so no traces land in the project repo.
+# Otherwise backs up to <target>/.rig-backup/<timestamp>/
 BACKUP_DIR=""
 BACKUP_TS="$(date +%Y%m%d_%H%M%S)"
 
 init_backup_dir() {
   local base="$1"
-  BACKUP_DIR="${base}/.rig-backup/${BACKUP_TS}"
+  if [[ ( "$RIG_TRACKING" == "stealth" || "$RIG_TRACKING" == "external" ) && -n "$EXTERNAL_RIG_DIR" ]]; then
+    BACKUP_DIR="${EXTERNAL_RIG_DIR}/backups/${BACKUP_TS}"
+  else
+    BACKUP_DIR="${base}/.rig-backup/${BACKUP_TS}"
+  fi
   mkdir -p "$BACKUP_DIR"
 }
 
@@ -1102,6 +1108,7 @@ if [[ "$DO_PROJECT" == true ]]; then
       _stealth_exclude ".github/"
       _stealth_exclude ".gitleaks.toml"
       _stealth_exclude "docs/features/README.md"
+      _stealth_exclude ".rig-backup/"
       # .rigpath is already excluded by the external-mode block above
     else
       warn ".git/info/exclude not found — stealth exclusions could not be applied."
@@ -1183,7 +1190,7 @@ if [[ "$DO_PROJECT" == true ]]; then
   # ── BACKUP REPORT ─────────────────────────────────────────────────────────
   if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
     echo ""
-    info "Originals backed up to: ${BACKUP_DIR#$TARGET/}"
+    info "Originals backed up to: $BACKUP_DIR"
   fi
 
   echo ""
