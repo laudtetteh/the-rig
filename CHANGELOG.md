@@ -11,6 +11,25 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.9.0] — 2026-05-06
+
+### Added
+
+- **GitHub Actions CI** (`.github/workflows/ci.yml`): runs the full bats test suite on every push to `main` and every PR. Catches install.sh regressions before they merge. Closes #114.
+- **Issue template detection in `/ship` and `SHIP_WORKFLOW`** (`templates/project/.claude/commands/ship.md`, `templates/project/.rig/processes/SHIP_WORKFLOW.md`): Step 0/Step 2 now guide the agent to check `.github/ISSUE_TEMPLATE/`, select the appropriate template (`feature.md`, `bug.md`, etc.), strip YAML frontmatter, and use the body. Never use freeform issue bodies when templates exist. Closes #116.
+
+### Changed
+
+- **PR template detection now a hard gate** (`ship.md` Step 9, `SHIP_WORKFLOW.md` Step 6): checks all three common paths (`pull_request_template.md`, `PULL_REQUEST_TEMPLATE.md`, root-level). Language changed from advisory ("use it if one exists") to directive ("you MUST use it — never write freeform when a template is present"). Closes #116.
+
+### Fixed
+
+- **`overwrite` strategy now preserves user-owned files** (`install.sh`): the "Repair" option (intent 4 / `--strategy overwrite`) previously overwrote user-owned files (CLAUDE.md, rules, memory) in addition to Rig-owned files. "Repair" now resets only Rig infrastructure (hooks, commands, processes) — CLAUDE.md, rules, and memory files are never touched. Intent description updated to make this explicit. Closes #115.
+- **`git symbolic-ref` exit-128 propagation** (`install.sh`): `git symbolic-ref` exits 128 when no remote origin exists (fresh repos, test environments). With `set -euo pipefail`, this propagated through the base-branch detection subshell and killed the installer with exit code 128. Fixed with `|| true`. All 53 bats tests now pass in non-interactive mode.
+- **Non-interactive TTY guards on all `read` prompts** (`install.sh`): the base-branch prompt, project-name prompt, and upgrade customization dialog all blocked when stdin was not a TTY (CI, scripted installs, bats tests). All three now check `[[ -t 0 ]]` and fall back to auto-detected defaults in non-interactive contexts. Closes #115.
+
+---
+
 ## [1.8.1] — 2026-05-06
 
 ### Fixed

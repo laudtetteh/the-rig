@@ -71,6 +71,7 @@ The Rig has two layers that load in sequence at every session start:
 | Git hooks | `templates/project/.husky/` | Secret scanning (gitleaks) + AI attribution trailer stripping |
 | GitHub templates | `templates/project/.github/` | PR template + 3 issue templates |
 | Installer | `install.sh` | Interactive setup script — handles both layers |
+| CI | `.github/workflows/ci.yml` | Runs bats test suite on every push and PR |
 
 ---
 
@@ -138,6 +139,9 @@ cd ~/code/my-project
 ~/tools/the-rig/install.sh --project-only
 # Choose: 3) Upgrade — updates Rig-owned files, detects your customizations,
 # skips user-owned files (CLAUDE.md, rules/, memory/, github/)
+#
+# If hooks or commands are broken: 4) Repair resets Rig-owned files to factory
+# state while always preserving CLAUDE.md, rules, and memory files.
 ```
 
 ---
