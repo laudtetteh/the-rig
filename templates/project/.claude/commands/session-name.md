@@ -26,6 +26,11 @@ without triggering a full wrap or post-merge cycle.
 
 No arguments. Run it whenever you want to name or re-name the current session.
 
+> **RIG_DIR resolution (stealth mode):** Before reading `.rig/memory/PROGRESS.md` or
+> `.rig/memory/CONTEXT_SNAPSHOT.md`, resolve where `.rig/` actually lives. If `.rigpath`
+> exists at the project root, read it — it contains the absolute path to the external
+> `.rig/` directory. Substitute `$RIG_DIR` for `.rig/` in every step below.
+
 ---
 
 ## Steps

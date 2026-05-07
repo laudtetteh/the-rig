@@ -18,6 +18,19 @@ Follows `.rig/processes/DEBUG_WORKFLOW.md`:
 /debug
 ```
 
+> **RIG_DIR resolution (stealth mode):** Before writing to `.rig/memory/ERRORS.md`
+> or reading process files, resolve where `.rig/` actually lives. If `.rigpath` exists
+> at the project root, read it — it contains the absolute path to the external `.rig/` directory.
+>
+> ```bash
+> REPO=$(git rev-parse --show-toplevel)
+> if [[ -f "$REPO/.rigpath" ]]; then
+>   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+> else
+>   RIG_DIR="$REPO/.rig"
+> fi
+> ```
+
 Claude will ask:
 - What are you seeing?
 - What did you expect to happen?

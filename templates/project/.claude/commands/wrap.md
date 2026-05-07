@@ -24,6 +24,21 @@ Performs the session-end housekeeping that prevents state loss between sessions:
 /wrap
 ```
 
+> **RIG_DIR resolution (stealth mode):** Before reading or writing any `.rig/` path,
+> resolve where `.rig/` actually lives. If `.rigpath` exists at the project root, read
+> it — it contains the absolute path to the external `.rig/` directory.
+>
+> ```bash
+> REPO=$(git rev-parse --show-toplevel)
+> if [[ -f "$REPO/.rigpath" ]]; then
+>   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+> else
+>   RIG_DIR="$REPO/.rig"
+> fi
+> ```
+>
+> Substitute `$RIG_DIR` for `.rig/` in every step below.
+
 ## Git state check — run first, before anything else
 
 Before writing any files, run:

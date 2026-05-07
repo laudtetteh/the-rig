@@ -10,6 +10,20 @@ issues for the first milestone.
 Use `/task` for day-to-day work on an established project. Use `/kickoff` once, at
 the start, before there's anything to `/task` on.
 
+> **RIG_DIR resolution (stealth mode):** Before creating any task or memory files,
+> resolve where `.rig/` actually lives. If `.rigpath` exists at the project root, read
+> it — it contains the absolute path to the external `.rig/` directory. Substitute
+> `$RIG_DIR` for `.rig/` in every step below.
+>
+> ```bash
+> REPO=$(git rev-parse --show-toplevel)
+> if [[ -f "$REPO/.rigpath" ]]; then
+>   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+> else
+>   RIG_DIR="$REPO/.rig"
+> fi
+> ```
+
 ---
 
 ## Before running /kickoff

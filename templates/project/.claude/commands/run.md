@@ -23,6 +23,21 @@ start working through them.
 /run [task-slug]  # run a specific task only (e.g. /run feat-user-auth)
 ```
 
+> **RIG_DIR resolution (stealth mode):** Before reading the task backlog or writing
+> any `.rig/` path, resolve where `.rig/` actually lives. If `.rigpath` exists at the
+> project root, read it — it contains the absolute path to the external `.rig/` directory.
+>
+> ```bash
+> REPO=$(git rev-parse --show-toplevel)
+> if [[ -f "$REPO/.rigpath" ]]; then
+>   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+> else
+>   RIG_DIR="$REPO/.rig"
+> fi
+> ```
+>
+> Substitute `$RIG_DIR` for `.rig/` in every step below.
+
 ---
 
 ## Execution flow

@@ -16,6 +16,11 @@ The Rig itself — formatted for submission to The Rig dev session.
 /rig-gaps
 ```
 
+> **RIG_DIR resolution (stealth mode):** Before reading any `.rig/` path, resolve
+> where `.rig/` actually lives. If `.rigpath` exists at the project root, read it —
+> it contains the absolute path to the external `.rig/` directory. Substitute `$RIG_DIR`
+> for `.rig/` throughout.
+
 Run this:
 - When you want to report accumulated feedback to The Rig developer
 - Before a major project milestone (so gaps get fixed before the next phase)

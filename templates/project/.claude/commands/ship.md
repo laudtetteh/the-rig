@@ -6,6 +6,21 @@ This is a **sequential hard gate** — each step must be completed and confirmed
 before the next one executes. Do not skip steps, combine steps, or proceed past
 a failure without surfacing it.
 
+> **RIG_DIR resolution (stealth mode):** Before reading or writing any `.rig/` path,
+> resolve where `.rig/` actually lives. If `.rigpath` exists at the project root, read
+> it — it contains the absolute path to the external `.rig/` directory.
+>
+> ```bash
+> REPO=$(git rev-parse --show-toplevel)
+> if [[ -f "$REPO/.rigpath" ]]; then
+>   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+> else
+>   RIG_DIR="$REPO/.rig"
+> fi
+> ```
+>
+> Substitute `$RIG_DIR` for `.rig/` in every step below.
+
 ---
 
 ## Step 1 — Identify the task
