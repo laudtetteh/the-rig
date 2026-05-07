@@ -565,3 +565,45 @@ _is_rig_protected() {
   run _is_rig_protected "/repo/.rig/tasks/active/TASK_my-feature.md"
   [ "$status" -ne 0 ]
 }
+
+# ── Self-install detector ─────────────────────────────────────────────────────
+
+@test "self-install detector: skips cleanup when install.sh is git-tracked" {
+  local rig_dir="$TEMP_DIR/rig-self"
+  mkdir -p "$rig_dir"
+  cp "$INSTALLER" "$rig_dir/install.sh"
+  cp -r "$REPO_ROOT/templates" "$rig_dir/templates"
+  git -C "$rig_dir" init -q
+  git -C "$rig_dir" config user.email "test@test.com"
+  git -C "$rig_dir" config user.name "Test"
+  git -C "$rig_dir" add install.sh
+  git -C "$rig_dir" commit -q -m "init"
+
+  run bash "$rig_dir/install.sh" --project-only \
+    --target "$rig_dir" \
+    --project-name "TestProject" \
+    --strategy skip
+
+  [ "$status" -eq 0 ]
+  [ -f "$rig_dir/install.sh" ]
+  [[ "$output" != *"run from inside the target"* ]]
+}
+
+@test "self-install detector: offers cleanup when install.sh is not git-tracked" {
+  local rig_dir="$TEMP_DIR/rig-self"
+  mkdir -p "$rig_dir"
+  cp "$INSTALLER" "$rig_dir/install.sh"
+  cp -r "$REPO_ROOT/templates" "$rig_dir/templates"
+  git -C "$rig_dir" init -q
+  git -C "$rig_dir" config user.email "test@test.com"
+  git -C "$rig_dir" config user.name "Test"
+  # install.sh intentionally not committed — artifact scenario
+
+  run bash "$rig_dir/install.sh" --project-only \
+    --target "$rig_dir" \
+    --project-name "TestProject" \
+    --strategy skip
+
+  [ "$status" -eq 0 ]
+  [ ! -f "$rig_dir/install.sh" ]
+}
