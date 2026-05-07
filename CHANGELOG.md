@@ -11,6 +11,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.11.0] — 2026-05-07
+
+### Added
+
+- **`--tracking` flag** (`install.sh`): new `--tracking repo|local|external|stealth` flag sets tracking mode non-interactively. `--target` and `--tracking` are now orthogonal — `--target` sets the install path only and no longer suppresses the tracking prompt. For fully non-interactive stealth installs: `./install.sh --target <path> --tracking stealth`. `read || true` guards EOF on all tracking prompt `read` calls for CI use. Closes #142.
+
+- **`--skip-git-hooks` flag** (`install.sh`): new flag for stealth mode that skips writing to `.git/hooks/` entirely. Useful when the target project manages hooks via Husky or another tool and the user wants to wire Rig hooks manually. Closes #141.
+
+### Fixed
+
+- **Stealth mode silently conflicts with existing Husky setup** (`install.sh`): when stealth mode is chosen for a project with a `.husky/` directory, the installer now warns that Rig hooks written to `.git/hooks/` may be overwritten if `npm install` or `prepare` re-runs `husky install`. Warning includes the `--skip-git-hooks` opt-out. Closes #141.
+
+- **Self-install detector deletes committed source files** (`install.sh`): when `install.sh` is run with the target directory equal to the directory containing `install.sh` (i.e. inside The Rig's own repo), the cleanup prompt was firing and offering to delete `install.sh`, `templates/`, `docs/`, `CHANGELOG.md`, etc. — the actual project files. Fixed by checking `git ls-files --error-unmatch install.sh` before entering the cleanup block: if `install.sh` is a committed file in the repo, cleanup is silently skipped. Closes #143.
+
+---
+
 ## [1.10.1] — 2026-05-06
 
 ### Fixed
@@ -83,7 +99,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - **pre-commit hook — grep pattern escaping** (`templates/project/.husky/pre-commit`): debug patterns like `console\.log(` used unescaped `(` in grep -E syntax, causing `empty (sub)expression` errors that blocked all commits. All parentheses in BUILTIN_PATTERNS are now escaped (`\(`). Closes gap found during 4Culture upgrade.
-- **pre-commit hook — hook file self-scan** (`templates/project/.husky/pre-commit`): the script scanned its own source file (`.husky/pre-commit`) and flagged `debugger;` and `byebug` in the BUILTIN_PATTERNS definition as debug artifacts. Hooks directory (`.husky/*`, `.claude/hooks/*`) is now excluded from the staged file scan. Closes gap found during 4Culture upgrade.
+- **pre-commit hook — hook file self-scan** (`templates/project/.husky/pre-commit`): the script scanned its own source file (`.husky/pre-commit`) and flagged `debugger;` and `byebug` in the BUILTIN_PATTERNS definition as debug artifacts. Hooks directory (`.husky/*`, `.claude/hooks/*`) is now excluded from the staged file scan. Closes gap found during 4Culture upgrade. # rig-debug-ok
 - **pre-commit hook — Husky `sh -e` compatibility** (`templates/project/.husky/pre-commit`): Husky runs hooks with `sh -e`. When `grep` finds no debug matches (exit 1), `sh -e` aborted the hook, falsely failing every commit. Added `|| true` after the grep call to prevent the false failure. Closes gap found during 4Culture upgrade.
 
 ---
