@@ -134,8 +134,9 @@ If PROGRESS.md and the task file were already part of the PR, skip this step ent
 
 ## Step 7 — Suggest a session name
 
-After the housekeeping commit, derive a `/rename` suggestion from this session's work.
-Do **not** run it automatically — present it for the user to run or tweak.
+After the housekeeping commit, derive a session name from this session's work using
+the same logic as `/session-name`. Do **not** apply it automatically — present it
+for the user to confirm or tweak.
 
 ### How to determine what belongs to this session
 
@@ -154,7 +155,7 @@ Read the `**Session name:**` field from `.rig/memory/CONTEXT_SNAPSHOT.md`.
 
   > **Session already named:** `feat dashboard ui #49`
   > **Merged this run:** PR #51 (fix null user on profile fetch)
-  > **Updated suggestion:** `/rename feat dashboard ui #49 | fix null user profile fetch #51`
+  > **Updated suggestion:** `feat dashboard ui #49 | fix null user profile fetch #51`
 
 ### Format
 
@@ -169,9 +170,13 @@ type short-desc #N | type short-desc #N | ...
 ### Output
 
 > **Suggested session name:**
-> `/rename feat user-auth magic-link flow #91`
+> `feat user-auth magic-link flow #91`
 
-After the user runs `/rename`, **update the `**Session name:**` field in
+Then invite the user to apply it:
+
+> To apply: run `/session-name` or say "use that name".
+
+After the user confirms, **update the `**Session name:**` field in
 `.rig/memory/CONTEXT_SNAPSHOT.md`** to match.
 
 If no meaningful work shipped (pure housekeeping, no PRs), skip this step silently.

@@ -233,7 +233,7 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 ```
 /post-merge   →  post-merge hygiene: pull main, update memory, move task file, housekeeping commit
 /propose      →  submit a change to governance files for human approval before anything is touched
-/rename       →  derive a session name from current work and present it as a ready-to-run suggestion
+/session-name →  derive a session name from current work and present it as a suggestion
 /wrap         →  write CONTEXT_SNAPSHOT, ensure memory is current, log any Rig gaps before closing
 /rig-gaps     →  compile workflow friction from RIG_GAPS.md + ERRORS.md; format for submission to The Rig dev session
 ```

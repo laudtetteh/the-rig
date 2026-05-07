@@ -14,7 +14,7 @@ Performs the session-end housekeeping that prevents state loss between sessions:
 6. **Self-improvement check** — scans for Rig workflow gaps and logs them to `.rig/memory/RIG_GAPS.md`
 7. **Trims `.rig/memory/ERRORS.md`** if it has grown beyond 30 entries (see Trim step below)
 8. Reports what's in `.rig/tasks/active/` so you know what's in flight
-9. **Suggests a session name** — derives a `/rename` command from this session's work (see Session naming step below)
+9. **Suggests a session name** — derives a name from this session's work via `/session-name` logic (see Session naming step below)
 10. Surfaces the next priority from `.rig/tasks/backlog/` and asks: "What's next?"
 11. **Cleans up housekeeping flags** — deletes `.rig/memory/.wrap-needed` if present
 
@@ -151,8 +151,8 @@ Never trim without confirmation. Never delete entries — only move them.
 ## Session naming step
 
 After reporting active tasks, derive a session name from this session's work and
-output it as a ready-to-run `/rename` command. Do **not** run it automatically —
-present it for the user to run or tweak.
+output it as a suggestion. Do **not** apply it automatically — present it for
+the user to confirm or tweak.
 
 ### How to determine "this session's work"
 
@@ -181,13 +181,13 @@ resumed days later. Use this priority order:
 Read the `**Session name:**` field from CONTEXT_SNAPSHOT.md (the previous
 snapshot, before this /wrap rewrites it).
 
-- **If blank / absent:** suggest a fresh `/rename` covering all this session's work.
+- **If blank / absent:** suggest a fresh session name covering all this session's work.
 - **If already set:** the session was named in a prior /wrap or by the user directly.
   Suggest **appending** new work to the existing name rather than replacing it:
 
   > **Session already named:** `fix step accordion layout #184`
   > **New work this wrap:** `feat custom-permissions #152`
-  > **Updated suggestion:** `/rename fix step accordion layout #184 | feat custom-permissions #152`
+  > **Updated suggestion:** `fix step accordion layout #184 | feat custom-permissions #152`
 
 ### Build the name
 
@@ -211,9 +211,13 @@ chore upgrade next to 14.2.1 | fix null user on profile fetch #88
 ### Output
 
 > **Suggested session name:**
-> `/rename fix step accordion layout #184 | fix h3.steps remaining partials #186`
+> `fix step accordion layout #184 | fix h3.steps remaining partials #186`
 
-After the user runs `/rename`, **update the `**Session name:**` field in
+Then invite the user to apply it:
+
+> To apply this name, run `/session-name` or say "use that name".
+
+After the user confirms, **update the `**Session name:**` field in
 `.rig/memory/CONTEXT_SNAPSHOT.md`** to match. This is how future /wrap calls
 detect an existing name and suggest appends instead of replacements.
 

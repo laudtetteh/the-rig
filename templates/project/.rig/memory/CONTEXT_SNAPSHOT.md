@@ -28,7 +28,7 @@ At session end (or before an anticipated context reset), overwrite this file wit
 
 ```markdown
 **Last updated:** [YYYY-MM-DD] — [session description, e.g. "after merging PR #12"]
-**Session name:** [the current /rename value, or blank if unnamed]
+**Session name:** [set by /session-name, or blank if unnamed]
 
 ---
 
