@@ -15,6 +15,11 @@
 
 ## Step 0 — GitHub issue first
 
+**Read `issue-tracking:` from `CLAUDE.md` before proceeding.**
+
+- **If `issue-tracking: none`:** skip this step. No issue number is required in the task file or commit messages. Continue to Step 1.
+- **If `issue-tracking: github`** (or field absent — default): follow the full step below.
+
 Before any code is written, a GitHub issue must exist and be linked in the task file.
 The `/task` wizard enforces this: it will not proceed to Part 2 without an issue number.
 If you are running this workflow without going through `/task`, stop and create the issue now.

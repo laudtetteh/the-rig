@@ -68,11 +68,12 @@ Do not summarise these back to me unless asked.
   - **Proceed directly** if the change is a one-liner or touches a single known file
     and can be verified in under 5 minutes. Offer to log it as a task file afterward.
   - **Redirect to `/task`** if the change is likely to touch more than 2–3 files,
-    requires a GitHub issue, or would take more than one exchange to complete. Say:
-    > "This looks like a task worth tracking. Does it have an issue number I can
-    > reference — or should I open a `/task` intake?"
+    or would take more than one exchange to complete. Say:
+    > "This looks like a task worth tracking. Should I open a `/task` intake?"
     Wait for the user's response before touching any code.
-  - **Never proceed** on a multi-file change request without an issue number.
+  - **If `issue-tracking: github`** (the default): never proceed on a multi-file change
+    without an issue number. If `issue-tracking: none` is set in the project `CLAUDE.md`:
+    proceed without one — but still redirect through `/task` for scope tracking.
 
 ---
 
@@ -159,7 +160,7 @@ Body: explain WHY, not what. The diff shows what.
 Types: `feat` | `fix` | `refactor` | `test` | `docs` | `chore` | `style` | `perf` | `devops`
 
 Max subject line: 72 characters.
-Always reference the GitHub issue number (`[#N]`) when one exists.
+Reference the GitHub issue number (`[#N]`) when one exists and `issue-tracking: github` is set.
 Never commit directly to `main` or `master`.
 
 ---

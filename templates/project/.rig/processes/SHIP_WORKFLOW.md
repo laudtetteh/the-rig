@@ -14,6 +14,11 @@
 
 ## Step 0 — Create the GitHub issue first
 
+**Read `issue-tracking:` from `CLAUDE.md` before proceeding.**
+
+- **If `issue-tracking: none`:** skip this entire step. Issue numbers are not required in commit messages. Continue to Step 1.
+- **If `issue-tracking: github`** (or field absent — default): follow the full step below.
+
 **Before writing any code, create the GitHub issue.**
 
 The commit message must reference the issue number: `feat(scope): description [#N]`.
