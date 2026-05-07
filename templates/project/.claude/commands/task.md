@@ -7,6 +7,20 @@ you want built *and* how you want the agent to behave while building it.
 The wizard output is written into the task file. Every future session that loads that
 file will inherit the same operating mode — no need to re-configure.
 
+> **RIG_DIR resolution (stealth mode):** Before creating any task file, resolve where
+> `.rig/` actually lives. If `.rigpath` exists at the project root, read it — it
+> contains the absolute path to the external `.rig/` directory. Substitute that path
+> for `.rig/` in every step below.
+>
+> ```bash
+> REPO=$(git rev-parse --show-toplevel)
+> if [[ -f "$REPO/.rigpath" ]]; then
+>   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+> else
+>   RIG_DIR="$REPO/.rig"
+> fi
+> ```
+
 ---
 
 ## Intake wizard

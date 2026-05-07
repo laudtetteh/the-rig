@@ -36,6 +36,21 @@ Follows `.rig/processes/POST_MERGE_WORKFLOW.md`:
 Run this immediately after you merge (or are told a PR merged). Claude will ask
 which PR merged if it's not clear from context.
 
+> **RIG_DIR resolution (stealth mode):** Before reading or writing any `.rig/` path,
+> resolve where `.rig/` actually lives. If `.rigpath` exists at the project root, read
+> it — it contains the absolute path to the external `.rig/` directory.
+>
+> ```bash
+> REPO=$(git rev-parse --show-toplevel)
+> if [[ -f "$REPO/.rigpath" ]]; then
+>   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+> else
+>   RIG_DIR="$REPO/.rig"
+> fi
+> ```
+>
+> Substitute `$RIG_DIR` for `.rig/` in every step below.
+
 ## Git state check — run first, before anything else
 
 Before touching any files, verify the repo is in a known-good state:
