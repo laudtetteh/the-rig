@@ -334,7 +334,7 @@ Thirteen slash commands covering the full development lifecycle:
 ### Ship and debug
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/ship` | `SHIP_WORKFLOW` | Sequential 9-step hard gate: task confirm → issue → labels → checklist → local test pause → commit approval → commit → housekeeping → PR |
+| `/ship` | `SHIP_WORKFLOW` | Sequential 9-step hard gate: task confirm → issue (with template detection) → labels → checklist → local test pause → commit approval → commit → housekeeping → PR (with template detection) |
 | `/debug` | `DEBUG_WORKFLOW` | Hypothesis before code, mandatory ERRORS.md entry |
 
 ### Feature knowledge
