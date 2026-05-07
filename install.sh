@@ -107,8 +107,9 @@ MANIFEST_FILE=""  # set during project-layer install (after RIG_DIR is resolved)
 read_manifest_hash() {
   # Returns the recorded hash for a given rel path, or empty string if not found.
   local rel="$1"
-  [[ -f "$MANIFEST_FILE" ]] || { echo ""; return; }
-  grep "  ${rel}$" "$MANIFEST_FILE" 2>/dev/null | awk '{print $1}' | head -1
+  [[ -f "$MANIFEST_FILE" ]] || { echo ""; return 0; }
+  # grep exits 1 when no match; suppress it so set -eo pipefail doesn't kill the installer.
+  grep "  ${rel}$" "$MANIFEST_FILE" 2>/dev/null | awk '{print $1}' | head -1 || true
 }
 
 write_manifest_entry() {
@@ -577,9 +578,23 @@ _copy_file_upgrade() {
 
   manifest_hash="$(read_manifest_hash "$rel")"
 
-  if [[ -z "$manifest_hash" || "$dest_hash" == "$manifest_hash" ]]; then
-    # No manifest entry (first upgrade) OR dest matches manifest (not customized).
-    # Safe to overwrite without prompting.
+  if [[ -z "$manifest_hash" ]]; then
+    # No manifest entry. Two cases:
+    #   Rig-owned:  first upgrade before manifest tracking existed → safe to overwrite.
+    #   User-owned: never tracked (e.g. CLAUDE.md, PROJECT_BRIEF.md, memory files).
+    #               We can't tell if the user customized it, so skip safely.
+    if is_rig_owned "$rel"; then
+      if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
+      cp "$src" "$dest"
+      success "Updated: ${rel}"
+      write_manifest_entry "$new_hash" "$rel"
+    else
+      info "Skipped (user-owned, no prior manifest entry): ${rel}"
+      # Record the current hash so future upgrades can detect customizations.
+      write_manifest_entry "$dest_hash" "$rel"
+    fi
+  elif [[ "$dest_hash" == "$manifest_hash" ]]; then
+    # Matches manifest → unmodified since install. Safe to overwrite.
     if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
     cp "$src" "$dest"
     success "Updated: ${rel}"

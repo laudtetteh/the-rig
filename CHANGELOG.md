@@ -11,6 +11,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.10.1] — 2026-05-06
+
+### Fixed
+
+- **Upgrade installer crash on projects missing manifest entries** (`install.sh`): `read_manifest_hash` used `grep | awk | head` — when grep found no match it exited 1, which propagated through `pipefail` and killed the installer under `set -euo pipefail`. All files not yet in the manifest (user-owned files on a first upgrade from pre-1.10.0) would crash the install. Fixed by appending `|| true` to suppress the grep no-match exit code.
+
+- **Upgrade silently overwrote user-owned files** (`install.sh`): When a file had no manifest entry (i.e. was installed before manifest tracking was extended to all files in v1.10.0), `_copy_file_upgrade` treated it as "unmodified since install — safe to overwrite." This caused `CLAUDE.md`, `PROJECT_BRIEF.md`, and all `.rig/memory/*.md` files to be silently overwritten on upgrade. Fixed by splitting the empty-manifest case: Rig-owned files (hooks, commands, processes) are still auto-updated; user-owned files are skipped safely and their current hash is recorded so future upgrades can detect real customizations.
+
+---
+
 ## [1.10.0] — 2026-05-06
 
 ### Added
