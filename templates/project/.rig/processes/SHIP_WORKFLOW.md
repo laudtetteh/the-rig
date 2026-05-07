@@ -20,6 +20,18 @@ The commit message must reference the issue number: `feat(scope): description [#
 If you create the issue after the commit, you cannot reference it honestly — the
 number belongs in the commit, not as a retroactive edit.
 
+**Check for issue templates first:**
+
+```bash
+ls .github/ISSUE_TEMPLATE/ 2>/dev/null
+```
+
+If templates exist, choose the appropriate one based on the type of work
+(`feature.md` for new features, `bug.md` for fixes, `chore.md` for maintenance).
+Strip the YAML frontmatter (everything between the `---` delimiters at the top)
+and use the template body as your issue body. **Never use a freeform issue body
+when a project issue template exists.**
+
 **First, verify the labels you need exist:**
 
 ```bash
@@ -38,6 +50,9 @@ gh label create "type: chore" --color "#e4e669" --description "Tooling and maint
 Then create the issue:
 
 ```bash
+cat > /tmp/issue-body.md << 'EOF'
+[filled-in template body, or freeform if no template exists]
+EOF
 gh issue create --title "..." --body-file /tmp/issue-body.md --label "type: feat"
 ```
 
@@ -173,17 +188,23 @@ In this order:
 If scope changed during implementation, the PR body should note it explicitly. Reviewers
 read the PR description to understand what landed, not what was intended.
 
-**First, check for a PR template:**
+**Template detection — this is a hard gate:**
 
 ```bash
-cat .github/pull_request_template.md 2>/dev/null
+# Check all common PR template paths
+cat .github/pull_request_template.md 2>/dev/null || \
+cat .github/PULL_REQUEST_TEMPLATE.md 2>/dev/null || \
+cat PULL_REQUEST_TEMPLATE.md 2>/dev/null
 ```
 
-If a template exists, fill in **every section** of it. Do not skip sections or
-leave placeholders. If no template exists, use this default:
+**If a template is found: you MUST use it. Never write a freeform PR body when a
+project template exists.** Fill in every section — do not leave placeholders, skip
+sections, or collapse multiple sections into one. If a section doesn't apply, write
+"N/A" or delete it.
 
-```bash
-cat > /tmp/pr-body.md << 'EOF'
+If no template exists, use this fallback:
+
+```
 ## Summary
 
 ## Changes
@@ -195,12 +216,14 @@ Closes #N
 ## Test plan
 
 ## Notes
-EOF
 ```
 
 Then create the PR:
 
 ```bash
+cat > /tmp/pr-body.md << 'EOF'
+[filled-in template or fallback]
+EOF
 gh pr create --title "..." --body-file /tmp/pr-body.md --base [BASE_BRANCH] \
   --label "type: [type]" --label "area: [area]"
 ```

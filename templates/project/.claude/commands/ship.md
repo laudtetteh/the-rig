@@ -31,6 +31,17 @@ Read the task file's `**GitHub issue**:` field.
   Say: "No GitHub issue linked. Per SHIP_WORKFLOW Step 0, the issue must exist
   before committing. Create the issue first, then update the task file."
 
+If you need to create an issue now, check for issue templates first:
+
+```bash
+ls .github/ISSUE_TEMPLATE/ 2>/dev/null
+```
+
+If templates exist, select the appropriate one (`feature.md`, `bug.md`, etc.),
+strip the YAML frontmatter (lines starting with `---`, `name:`, `about:`, `title:`,
+`labels:`, `assignees:`), and use the remaining content as the issue body. **Never
+use a freeform issue body when an issue template exists.**
+
 Do not proceed to Step 3 until a valid issue number is confirmed.
 
 ---
@@ -158,12 +169,40 @@ In this order:
 If scope changed during implementation, note it explicitly. Reviewers read the PR
 description to understand what landed, not what was intended.
 
-Use the project's PR template if one exists at `.github/pull_request_template.md`.
-Read it, fill in every section, then:
+**Template detection — this is a hard gate:**
+
+```bash
+# Check both common paths (GitHub accepts both)
+cat .github/pull_request_template.md 2>/dev/null || \
+cat .github/PULL_REQUEST_TEMPLATE.md 2>/dev/null || \
+cat PULL_REQUEST_TEMPLATE.md 2>/dev/null || echo ""
+```
+
+**If a PR template is found: you MUST use it. Do not write a freeform PR body.**
+Fill in every section of the template — do not leave placeholders, skip sections,
+or collapse multiple sections into one. If a section does not apply, write "N/A"
+or delete it. Never silently ignore the template.
+
+If no template exists, use this fallback:
+```
+## Summary
+
+## Changes
+-
+
+## Closes
+Closes #N
+
+## Test plan
+
+## Notes
+```
+
+Then create the PR:
 
 ```bash
 cat > /tmp/ship-pr-body.md << 'EOF'
-[filled-in PR template]
+[filled-in template or fallback]
 EOF
 gh pr create \
   --title "type(scope): description" \
