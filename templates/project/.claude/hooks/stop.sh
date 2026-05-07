@@ -35,7 +35,8 @@ fi
 SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
 PROGRESS="$RIG_DIR/memory/PROGRESS.md"
 WRAP_NEEDED="$RIG_DIR/memory/.wrap-needed"
-SESSION_LOG="/tmp/the-rig-session.log"
+# Allow tests to inject a custom session log path via RIG_SESSION_LOG env var.
+SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session.log}"
 NOW=$(date +%Y-%m-%d)
 NOW_FULL=$(date "+%Y-%m-%d %H:%M")
 
@@ -90,6 +91,20 @@ elif [[ ! -f "$SNAPSHOT" ]] && [[ -f "$PROGRESS" ]]; then
   touch "$WRAP_NEEDED"
   echo "[$(date +%H:%M:%S)] STOP: .wrap-needed written (no CONTEXT_SNAPSHOT.md)" \
     >> "$SESSION_LOG"
+fi
+
+# ── Write .wrap-needed if 2+ commits landed this session ──────────────────────
+# Even if stubs are expanded, 2+ commits means enough context has accumulated
+# to warrant capturing it. The session log records one "PROGRESS stub:" entry
+# per commit (written by post-tool.sh). If the flag is already set from above,
+# skip — no need to write it twice.
+if [[ ! -f "$WRAP_NEEDED" ]]; then
+  SESSION_COMMIT_COUNT=$(grep -c "PROGRESS stub:" "$SESSION_LOG" 2>/dev/null || echo 0)
+  if [[ "$SESSION_COMMIT_COUNT" -ge 2 ]]; then
+    touch "$WRAP_NEEDED"
+    echo "[$(date +%H:%M:%S)] STOP: .wrap-needed written (${SESSION_COMMIT_COUNT} commits this session — wrap recommended)" \
+      >> "$SESSION_LOG"
+  fi
 fi
 
 exit 0

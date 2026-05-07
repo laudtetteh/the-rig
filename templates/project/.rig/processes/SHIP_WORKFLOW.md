@@ -95,12 +95,17 @@ If any answer gives you pause, fix it before committing.
 
 ---
 
-## Step 2.5 — Pause for local testing
+## Step 2.5 — Checklist confirmation + pause for local testing
 
-**Stop. Do not commit yet.**
+**Before presenting this prompt, confirm you have worked through the Step 1 checklist.**
+Do not jump here from Step 0 or mid-implementation — the checklist is not optional.
+
+If you skipped Step 1 for any reason: run through it now before continuing.
+
+Then stop. Do not commit yet.
 
 Ask the user:
-> "Ready to commit. Test the changes locally, then say **'commit approved'**
+> "Pre-ship checklist complete. Test the changes locally, then say **'commit approved'**
 > (or 'ship it', 'lgtm', 'go') and I'll proceed."
 
 Wait for one of those trigger phrases (or equivalent clear confirmation).

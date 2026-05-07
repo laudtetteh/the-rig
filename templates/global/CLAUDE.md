@@ -63,17 +63,21 @@ Do not summarise these back to me unless asked.
 - **When you see a compaction warning** (e.g. "8% until auto-compact"), run `/wrap`
   immediately — before the next tool call. Compaction destroys in-flight context.
   A timely `/wrap` means the next session can resume cleanly.
-- **Gate freeform change requests through `/task`.** Before acting on any user
-  request that reads like a change request, apply this scope check:
+- **Gate freeform change requests through `/task`.** This check fires **before
+  the first Write, Edit, or Bash tool call** of any new request — not as a reminder
+  afterward. Read the user's message, apply the scope check, then act:
   - **Proceed directly** if the change is a one-liner or touches a single known file
     and can be verified in under 5 minutes. Offer to log it as a task file afterward.
-  - **Redirect to `/task`** if the change is likely to touch more than 2–3 files,
-    or would take more than one exchange to complete. Say:
+  - **Redirect to `/task`** if the request uses language like "add", "implement",
+    "build", "fix", "refactor", "clean up", "update X to handle Y" — and the scope
+    likely touches more than 2–3 files or takes more than one exchange to complete.
+    Say exactly:
     > "This looks like a task worth tracking. Should I open a `/task` intake?"
-    Wait for the user's response before touching any code.
-  - **If `issue-tracking: github`** (the default): never proceed on a multi-file change
-    without an issue number. If `issue-tracking: none` is set in the project `CLAUDE.md`:
-    proceed without one — but still redirect through `/task` for scope tracking.
+    **Wait for the user's response. Do not invoke any tool until they answer.**
+  - **If `issue-tracking: github`** (the default): never invoke a Write, Edit, or
+    Bash tool on a multi-file change without a linked issue number. If
+    `issue-tracking: none` is set in the project `CLAUDE.md`: proceed without one —
+    but still redirect through `/task` for scope tracking.
 
 ---
 
@@ -93,8 +97,12 @@ Do not summarise these back to me unless asked.
 8. **Never touch files outside the current task scope** unless explicitly asked.
 9. **Never make architectural decisions silently** — surface them for discussion first.
 10. **Never assume continuity from a prior session** — always re-read context files.
-11. **Never run `git commit` without the user's explicit go-ahead.** Before committing:
-    show the proposed commit message, then pause and say:
+11. **Never run `git commit` without the pre-ship checklist AND the user's explicit
+    go-ahead.** Before presenting the commit prompt:
+    (a) Confirm you have worked through the SHIP_WORKFLOW.md Step 1 checklist: no debug
+        statements, no commented-out code, no hardcoded secrets, error cases handled.
+        If you cannot confirm this, work through the list now — do not skip to the gate.
+    (b) Show the proposed commit message, then pause and say:
     > "Ready to commit. Test locally, then say **'commit approved'** (or 'ship it',
     > 'lgtm', 'go') and I'll commit and push immediately."
     When the user says one of those trigger phrases, create `$RIG_DIR/memory/.rig-commit-ok`,

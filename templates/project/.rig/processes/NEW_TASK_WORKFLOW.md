@@ -24,6 +24,16 @@ Before any code is written, a GitHub issue must exist and be linked in the task 
 The `/task` wizard enforces this: it will not proceed to Part 2 without an issue number.
 If you are running this workflow without going through `/task`, stop and create the issue now.
 
+**Issue validation — required before Step 1.** Open the task file and find the
+`**GitHub issue**: #[N]` field. Apply these rules:
+- If the field is empty, `N/A`, `TBD`, or absent: **stop. Do not proceed to Step 1.**
+  Either run `/task` to create a proper intake, or create the GitHub issue manually
+  and update the field before continuing. A task without a linked issue cannot be activated.
+- If the field contains a valid issue number (e.g. `#42`): proceed.
+
+This check applies whether the task was opened via `/task`, picked from the backlog
+manually, or resumed from `.rig/tasks/active/`.
+
 The issue number belongs in:
 - The task file's `**GitHub issue**: #[N]` field
 - Every commit message on this branch: `feat(scope): description [#N]`

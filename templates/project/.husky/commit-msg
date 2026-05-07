@@ -1,24 +1,75 @@
 #!/bin/sh
 # commit-msg
 #
-# Strips auto-injected tool footers from commit messages before they are
-# written to the repository — keeps history clean and human-authored in tone.
-# Remove this hook if you want tool footers (Co-Authored-By, Made-with-Claude, etc.)
-# to remain in your commit history.
+# 1. Strips auto-injected tool footers (Co-Authored-By, Made-with-Claude, etc.)
+#    to keep history clean and human-authored in tone.
+# 2. Validates Conventional Commits subject-line format.
+# 3. If issue-tracking: github (the default), requires a GitHub issue reference
+#    ([#N] or (#N)) in the subject line.
 #
-# Delegates to filter-commit-message-inplace.sh for the actual filtering.
-# Falls back to inline grep if the filter script is not present.
+# To disable format validation: set SKIP_COMMIT_VALIDATION=1 before committing.
+# To disable footer stripping: remove or comment out the filter block below.
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+COMMIT_MSG_FILE="$1"
 FILTER="${ROOT}/.husky/filter-commit-message-inplace.sh"
 
+# ── Step 1: Strip tool-injected footers ──────────────────────────────────────
 if [ -f "$FILTER" ]; then
-  sh "$FILTER" "$1"
+  sh "$FILTER" "$COMMIT_MSG_FILE"
 else
-  # Inline fallback — strips the most common trailer patterns
-  FILE="$1"
   tmp=$(mktemp) || exit 1
-  grep -viE '^[[:space:]]*(co-authored-by|signed-off-by|reviewed-by|acked-by|tested-by|helped-by|on-behalf-of|made-with)[[:space:]]*:' "$FILE" \
+  grep -viE '^[[:space:]]*(co-authored-by|signed-off-by|reviewed-by|acked-by|tested-by|helped-by|on-behalf-of|made-with)[[:space:]]*:' "$COMMIT_MSG_FILE" \
     | sed 's/\r$//' > "$tmp"
-  mv "$tmp" "$FILE"
+  mv "$tmp" "$COMMIT_MSG_FILE"
 fi
+
+# ── Step 2: Validate Conventional Commits format ─────────────────────────────
+[ "${SKIP_COMMIT_VALIDATION:-0}" = "1" ] && exit 0
+
+SUBJECT=$(head -1 "$COMMIT_MSG_FILE" | sed 's/\r//')
+
+# Skip validation for auto-generated commit types
+case "$SUBJECT" in
+  "Merge "* | "Revert "* | "fixup! "* | "squash! "* | "Initial commit"*)
+    exit 0 ;;
+esac
+
+VALID_TYPES="feat|fix|chore|refactor|docs|test|perf|devops|style"
+if ! echo "$SUBJECT" | grep -qE "^($VALID_TYPES)(\(.+\))?: .+"; then
+  echo ""
+  echo "ERROR: Commit message does not follow Conventional Commits format."
+  echo "  Expected: type(scope): description"
+  echo "  Types:    feat | fix | chore | refactor | docs | test | perf | devops | style"
+  echo "  Got:      $SUBJECT"
+  echo ""
+  echo "  To bypass: SKIP_COMMIT_VALIDATION=1 git commit ..."
+  echo ""
+  exit 1
+fi
+
+# ── Step 3: Require issue reference if issue-tracking: github ────────────────
+CLAUDE_MD="${ROOT}/CLAUDE.md"
+ISSUE_TRACKING=""
+if [ -f "$CLAUDE_MD" ]; then
+  ISSUE_TRACKING=$(grep "^issue-tracking:" "$CLAUDE_MD" | awk '{print $2}' | tr -d '[:space:]' | head -1)
+fi
+# Default to github if not set
+: "${ISSUE_TRACKING:=github}"
+
+if [ "$ISSUE_TRACKING" = "github" ]; then
+  # Accept both [#N] (convention) and (#N) (GitHub squash-merge auto-format)
+  if ! echo "$SUBJECT" | grep -qE '(\[#[0-9]+\]|\(#[0-9]+\))'; then
+    echo ""
+    echo "ERROR: Commit message must include a GitHub issue reference."
+    echo "  Expected: type(scope): description [#N]"
+    echo "  Got:      $SUBJECT"
+    echo "  Create the issue first, then reference it: gh issue create ..."
+    echo ""
+    echo "  To bypass: SKIP_COMMIT_VALIDATION=1 git commit ..."
+    echo ""
+    exit 1
+  fi
+fi
+
+exit 0
