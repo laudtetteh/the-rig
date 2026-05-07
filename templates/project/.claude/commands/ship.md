@@ -82,6 +82,52 @@ continuing.
 
 ---
 
+## Step 3.5 — Branch check
+
+Verify the repo is in a clean state before committing.
+
+```bash
+git branch --show-current
+git status --short
+```
+
+**If on `main` or `master`:** stop — you cannot commit directly here. Ask:
+> "You're on `main`. Which branch should this go on? I can create `[type/slug]` off `[BASE]`."
+Wait for the user's answer. Before creating the branch, run the stale-main check below.
+
+**Read the configured base branch:**
+```bash
+BASE=$(grep "^base-branch:" CLAUDE.md 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+BASE="${BASE:-main}"
+```
+
+**Stale-main check — run before creating a new branch or opening a PR:**
+```bash
+git fetch origin "$BASE" --quiet 2>/dev/null || true
+AHEAD=$(git rev-list HEAD..origin/"$BASE" --count 2>/dev/null || echo 0)
+```
+
+If `AHEAD > 0`, the base branch has new commits your branch doesn't have:
+
+- **Low/Medium autonomy:**
+  > "`origin/$BASE` is $AHEAD commit(s) ahead. Rebase before opening the PR? [yes / no]"
+  If yes: `git rebase origin/"$BASE"`. Fix any conflicts before proceeding.
+
+- **High autonomy:** auto-rebase silently:
+  ```bash
+  git rebase origin/"$BASE"
+  ```
+  Note the rebase in your next message.
+
+If `git fetch` fails (no network, no remote configured): skip and note it.
+
+**Branch creation — Low/Medium autonomy only:**
+If creating a new branch right now, confirm the base before running `git checkout -b`:
+> "I'll create `[branch-name]` off `$BASE`. Is that the right base?"
+Wait for confirmation. High autonomy: state the base and proceed immediately.
+
+---
+
 ## Step 4 — Pre-ship checklist
 
 Work through the following. Report the result of each check:
@@ -231,12 +277,29 @@ Report the PR URL.
 
 ---
 
+## Post-batch audit (after every group of related PRs)
+
+After the last PR in a batch of 2+ related changes opens (or merges), run this checklist:
+
+- [ ] Tests pass on main
+- [ ] CLI help text matches new behavior
+- [ ] `README.md` and `docs/how-it-works.md` reflect any new commands or behavior
+- [ ] `CHANGELOG.md` has entries for all PRs in the batch
+- [ ] Inline comments are consistent with what the code actually does
+- [ ] Run `/wrap` to write `CONTEXT_SNAPSHOT.md` before starting the next group
+
+This is not needed after every single commit — it's a batch-level checkpoint.
+See `SHIP_WORKFLOW.md` Post-batch audit for full details.
+
+---
+
 ## Notes
 
 - Steps 1–6 are **gates** — any failure stops the sequence entirely.
 - The GitHub issue (Step 2) must exist before `/ship` is run, not after.
 - Labels (Step 3) must be verified against the actual repo — never assumed.
 - The local testing pause (Step 5) is non-negotiable regardless of autonomy level.
+- The branch check (Step 3.5) is also a gate — never commit directly to main.
 - If the task has multiple commits, summarise all changes in the PR body.
 - The task file is moved to `.rig/tasks/done/` only after a successful commit (Step 8).
 - The PR body (Step 9) must reflect what was actually built — not the original plan.

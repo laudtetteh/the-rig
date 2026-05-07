@@ -43,6 +43,22 @@ git rev-parse --show-toplevel
 - All `git` commands must target the main repo: `git -C <repo-root> <command>`
 - Never create branches, commits, or files inside the `.claude/worktrees/` path
 
+### 1a — Stale-main pre-check (before creating any branch)
+
+Before creating a new branch for this task, verify main hasn't advanced since your last pull:
+
+```bash
+BASE=$(grep "^base-branch:" CLAUDE.md 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+BASE="${BASE:-main}"
+git fetch origin "$BASE" --quiet 2>/dev/null || true
+AHEAD=$(git rev-list HEAD..origin/"$BASE" --count 2>/dev/null || echo 0)
+```
+
+**If AHEAD > 0:** main has new commits. Pull before branching — otherwise the new branch
+diverges from current main and may re-introduce already-merged code.
+
+For the full protocol (what to do at each autonomy level), see `SHIP_WORKFLOW.md` Step 3b.
+
 ---
 
 ## Step 2 — Orient

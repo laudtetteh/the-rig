@@ -113,15 +113,66 @@ git branch --show-current
 git status --short
 ```
 
-**If you are on `main` or `master`:** do not commit. Say:
-> "You're on `main` — I can't commit directly here. Which branch should I use?
-> I can create `feat/[slug]` off main, or use an existing branch."
-Wait for the user's answer before proceeding.
-
-**If you are on any other branch:** proceed. Briefly confirm: `"Branch: [name] — looks good."`
+**If you are on `main` or `master`:** do not commit. You need a feature branch —
+see Step 3c below for how to create one safely.
 
 **If there are untracked or modified files outside the task scope** (shown by `git status`):
 surface them and ask whether to stage, stash, or ignore before continuing.
+
+---
+
+### 3a — Read the configured base branch
+
+Read the `base-branch:` field from `CLAUDE.md` in the project root.
+If absent, default to `main`.
+
+```bash
+BASE=$(grep "^base-branch:" CLAUDE.md 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+BASE="${BASE:-main}"
+```
+
+---
+
+### 3b — Stale-main check (run before creating any new branch)
+
+```bash
+git fetch origin "$BASE" --quiet 2>/dev/null || true
+AHEAD=$(git rev-list HEAD..origin/"$BASE" --count 2>/dev/null || echo 0)
+```
+
+**If AHEAD > 0:**
+
+- **Low/Medium autonomy** — warn and pause:
+  > "`origin/$BASE` is $AHEAD commit(s) ahead of your current position.
+  > Rebase onto the latest before branching? [yes / no — branch anyway]"
+  Wait for the user's answer. If yes: `git checkout "$BASE" && git pull`.
+
+- **High autonomy** — auto-update and note it:
+  ```bash
+  git checkout "$BASE" && git pull
+  ```
+  > "Pulled latest $BASE ($AHEAD new commit(s)) before branching."
+
+**If AHEAD == 0:** already up to date — proceed silently.
+
+> If `git fetch` fails (no network, no remote): skip the check and proceed.
+> Note: "Stale-main check skipped — fetch failed."
+
+---
+
+### 3c — Confirm base branch before creating a new branch
+
+**Only applies when creating a new branch** (i.e., you are on `main` or creating a fresh branch
+for this task). Skip this step if you are already on a suitable feature branch.
+
+- **Low/Medium autonomy** — ask before branching:
+  > "I'll create `[branch-name]` off `$BASE`. Is that the right base?
+  > [yes / specify a different base]"
+  Wait for confirmation. Do not run `git checkout -b` until confirmed.
+
+- **High autonomy** — surface and proceed:
+  > "Creating `[branch-name]` off `$BASE`."
+  Run `git checkout -b [branch-name]` without waiting.
 
 ---
 
@@ -245,3 +296,25 @@ git commit -m "chore: post-task housekeeping [#N]"
 ```
 
 This commit goes on the same PR branch before the PR is merged.
+
+---
+
+## Post-batch audit
+
+Run this checklist after every group of related PRs merges — not after every single commit.
+Trigger: the last PR in a batch of 2+ related changes lands on main, or any single PR
+touched multiple systems (e.g. both install.sh and command files).
+
+**Checklist:**
+
+- [ ] **Tests pass** — all bats/unit/integration tests green on main after the merge
+- [ ] **CLI help text accurate** — any new behavior is reflected in `--help` output and flag descriptions
+- [ ] **Docs updated** — `README.md`, `docs/how-it-works.md`, and feature docs reflect new commands or changed behavior
+- [ ] **CHANGELOG.md updated** — entries present for all PRs in the batch
+- [ ] **Comments consistent** — inline code comments match what the code actually does (stale comments are technical debt)
+- [ ] **CONTEXT_SNAPSHOT and PROGRESS current** — run `/wrap` to lock in the batch's state before starting the next group
+
+**Log the result:** a brief line in `.rig/memory/PROGRESS.md` is sufficient —
+e.g. "Post-batch audit passed — batch: PRs #117, #122, #124, #126"
+
+If anything fails the checklist, fix it before starting the next task group.
