@@ -11,6 +11,44 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.10.0] — 2026-05-06
+
+### Added
+
+- **Configurable project settings** (`templates/project/CLAUDE.md` `## Project settings` block): five fields now control Rig behavior per project without touching command files — `issue-tracking: github | none`, `secret-scanner: gitleaks | none`, `commit-cleanup: yes | no`, `base-branch:` (existing), `housekeeping:` (existing). Setting `issue-tracking: none` disables the GitHub issue gate across `/task`, `/ship`, `SHIP_WORKFLOW`, and `NEW_TASK_WORKFLOW`. Closes #134.
+
+- **Branch confirmation based on autonomy level** (`ship.md` Step 3.5, `task.md`, `SHIP_WORKFLOW.md` Step 3c): before `git checkout -b`, Low/Medium autonomy confirms the base branch with the user; High autonomy reads `base-branch:` from `CLAUDE.md`, states it, and proceeds immediately. Closes #127.
+
+- **Stale-main detection before branching** (`NEW_TASK_WORKFLOW.md` Step 1a, `SHIP_WORKFLOW.md` Step 3b, `ship.md` Step 3.5): `git fetch` + `rev-list` check before any new branch is created. If the base branch has advanced, Low/Medium prompts to rebase; High autonomy auto-rebases. Prevents the "working from outdated main" problem when multiple PRs are open simultaneously. Closes #128.
+
+- **Mandatory post-batch audit** (`SHIP_WORKFLOW.md`, `ship.md`): after every group of related PRs, a checklist ensures tests pass, CLI help text is accurate, docs are updated, CHANGELOG has entries, inline comments are consistent, and CONTEXT_SNAPSHOT is current. Closes #129.
+
+- **ERRORS.md archive breadcrumb** (`wrap.md`): after trimming entries to the archive, a compact stub comment is appended to the active file listing the archived topics/categories. Provides a grep-able index into the archive without loading it. Prevents archive blindness. Closes #136.
+
+- **Check-before-log for ERRORS.md** (`wrap.md`): new explicit ERRORS.md logging step instructs the agent to search both the active file and `ERRORS_archive.md` before creating any new entry — update existing entries on recurrence rather than duplicating them. Prevents the same pitfall from being re-logged after a trim, which would hide that it is a *recurring* problem. Closes #136.
+
+- **Context and token management documentation** (`docs/how-it-works.md`): new section documenting session-start baseline (~7K tokens from measured template sizes), the CONTEXT_SNAPSHOT gate, trim limit rationale, and the honest note that tool call accumulation (not Rig files) is the dominant cost driver.
+
+- **Project settings documentation** (`docs/how-it-works.md`, `docs/customizing.md`): new sections covering all five configurable CLAUDE.md fields with options and effects. `docs/customizing.md` gains a quick-reference table at the top.
+
+### Changed
+
+- **`/rename` renamed to `/session-name`** (`templates/project/.claude/commands/session-name.md`): Claude Code has a built-in `/rename` command that renames the conversation window. The custom command was shadowing it, causing confusing behavior. Renamed to `/session-name`; all references in `wrap.md`, `post-merge.md`, `POST_MERGE_WORKFLOW.md`, `CONTEXT_SNAPSHOT.md`, `docs/how-it-works.md`, and `README.md` updated. Closes #121.
+
+- **Manifest tracking extended to all files** (`install.sh`): the SHA256 manifest previously tracked only Rig-owned files. Now tracks all installed files. The Upgrade strategy can detect user customizations to any file (not just hooks/commands/processes) and protect them. The overwrite strategy received the same manifest-awareness: it warns and prompts before touching any user-customized file. Closes #118.
+
+- **`--strategy upgrade` help text** (`install.sh`): updated from the stale "update Rig-owned files; preserve user-owned" to the accurate "auto-update unmodified Rig files; prompt on customized; skip user-owned".
+
+- **Commit-msg hook language** (`templates/project/.husky/commit-msg`, `templates/project/.husky/post-commit`, `README.md`, `docs/customizing.md`): "AI attribution trailer stripping" reframed as "auto-injected tool footer removal". The hook strips footers inserted automatically by AI coding tools — not intentional credits. `docs/customizing.md` section rewritten to explain the default and when to disable it. Closes #132.
+
+- **Two-layer architecture diagram** (`docs/how-it-works.md`): replaced with a three-box layout showing `~/tools/the-rig/` (the installer/repo) as the origin that produces both the global and project layers. Previous diagram omitted the installer entirely.
+
+### Fixed
+
+- **RIG_DIR resolution in all command files** (`templates/project/.claude/commands/`): all nine command files now include the `.rigpath` resolution block (`REPO=$(git rev-parse --show-toplevel); if [[ -f "$REPO/.rigpath" ]]; then RIG_DIR=...`). Commands that read or write `.rig/` paths now work correctly in stealth mode. Closes #125.
+
+---
+
 ## [1.9.0] — 2026-05-06
 
 ### Added
