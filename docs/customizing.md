@@ -4,6 +4,26 @@ How to adapt The Rig for your stack, team size, and workflow preferences.
 
 ---
 
+## Project settings (quick reference)
+
+The fastest way to configure The Rig for a project is the `## Project settings` block
+in the project `CLAUDE.md`. Set these once and every session inherits them:
+
+```
+base-branch: main          # integration branch all PRs target
+housekeeping: direct-push  # direct-push | pr-required (how /post-merge commits)
+issue-tracking: github     # github | none (skip issue gate for personal/prototype repos)
+secret-scanner: gitleaks   # gitleaks | none
+commit-cleanup: yes        # yes | no (strip auto-injected tool footers from commits)
+```
+
+**`issue-tracking: none`** is the most common override for non-GitHub or personal projects.
+It disables the issue-number requirement in `/task`, `/ship`, and commit messages.
+
+For deeper customization of individual components, see the sections below.
+
+---
+
 ## What to customize vs. what to leave alone
 
 | Component | Customize | Leave alone |

@@ -23,47 +23,53 @@ The Rig solves this at three levels:
 
 ## Two-layer architecture
 
+Three locations work together. The installer repo produces the other two:
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  GLOBAL LAYER  (~/.claude/)                                     │
-│  Installed once per machine. Cross-project.                     │
+│  THE INSTALLER  (~/tools/the-rig/)                              │
+│  Cloned once. Run install.sh to produce the two layers below.   │
 │                                                                 │
-│  ~/.claude/CLAUDE.md                                            │
-│    └─ Hard rules (12), working style, memory discipline,        │
-│       planning discipline, session workflow, git conventions,   │
-│       code quality defaults, skill trigger table                │
+│  ~/tools/the-rig/install.sh    ← interactive setup script      │
+│  ~/tools/the-rig/templates/    ← source files for both layers   │
+│  ~/tools/the-rig/VERSION       ← current Rig version            │
 │                                                                 │
-│  ~/.claude/skills/                                              │
-│    ├─ debug.md          ← "why is this broken"                  │
-│    ├─ code-review.md    ← "review this"                         │
-│    ├─ refactor.md       ← "refactor this to…"                   │
-│    ├─ write-tests.md    ← "write tests for…"                    │
-│    └─ explain.md        ← "explain this to me"                  │
-│                                                                 │
-│  ~/.your-ai-contexts/PROFILE.md                                 │
-│    └─ Personal/professional context — role, stack, projects,    │
-│       working style preferences                                 │
-└────────────────────────────┬────────────────────────────────────┘
-                             │ auto-loaded by Claude Code
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  PROJECT LAYER  (per-repo, version-controlled)                  │
-│                                                                 │
-│  CLAUDE.md              ← project identity + @.rig/rules/ imports│
-│  .rig/                  ← The Rig system files                   │
-│  .rig/processes/        ← step-by-step workflows                │
-│  .rig/rules/            ← coding/git/security/verification      │
-│  .rig/memory/           ← PROGRESS + ERRORS + DECISIONS + SNAPSHOT│
-│  .rig/tasks/            ← backlog → active → done lifecycle     │
-│  .claude/               ← hooks + slash commands                │
-│  .husky/                ← git hooks                             │
-│  .github/               ← PR + issue templates                  │
-└─────────────────────────────────────────────────────────────────┘
+│  To upgrade: cd ~/tools/the-rig && git pull                     │
+│  Then re-run install.sh with --strategy upgrade                 │
+└───────────────┬─────────────────────────┬───────────────────────┘
+                │ installs global layer    │ installs project layer
+                ▼                         ▼
+┌──────────────────────────┐  ┌───────────────────────────────────┐
+│  GLOBAL LAYER            │  │  PROJECT LAYER                    │
+│  (~/.claude/)            │  │  (per-repo, version-controlled)   │
+│  Once per machine.       │  │  Once per project.                │
+│                          │  │                                   │
+│  ~/.claude/CLAUDE.md     │  │  CLAUDE.md       ← project brain  │
+│    └─ Hard rules (12),   │  │  .rig/           ← Rig system     │
+│       working style,     │  │  .rig/processes/ ← workflows      │
+│       memory discipline, │  │  .rig/rules/     ← standards      │
+│       planning, git,     │  │  .rig/memory/    ← PROGRESS +     │
+│       code quality,      │  │                    ERRORS +        │
+│       skill trigger table│  │                    SNAPSHOT        │
+│                          │  │  .rig/tasks/     ← backlog/active/│
+│  ~/.claude/skills/       │  │                    done            │
+│    ├─ debug.md           │  │  .claude/        ← hooks +        │
+│    ├─ code-review.md     │  │                    commands        │
+│    ├─ refactor.md        │  │  .husky/         ← git hooks      │
+│    ├─ write-tests.md     │  │  .github/        ← PR + issue     │
+│    └─ explain.md         │  │                    templates       │
+│                          │  └───────────────────────────────────┘
+│  ~/.your-ai-contexts/    │
+│    PROFILE.md            │
+│    └─ Personal context   │
+│       (path configurable)│
+└──────────────────────────┘
 ```
 
 The global layer is loaded first, automatically, by Claude Code. It provides
 universal context. The project layer is read during orientation and provides
-project-specific context.
+project-specific context. The installer repo never runs during a session — it
+only runs when you install or upgrade.
 
 ---
 
@@ -407,7 +413,7 @@ Thirteen slash commands covering the full development lifecycle:
 ### Ship and debug
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/ship` | `SHIP_WORKFLOW` | Sequential 9-step hard gate: task confirm → issue (with template detection) → labels → checklist → local test pause → commit approval → commit → housekeeping → PR (with template detection) |
+| `/ship` | `SHIP_WORKFLOW` | Sequential hard gate: task confirm → issue (with template detection) → labels → branch/stale-main check → checklist → local test pause → commit approval → commit → housekeeping → PR (with template detection) |
 | `/debug` | `DEBUG_WORKFLOW` | Hypothesis before code, mandatory ERRORS.md entry |
 
 ### Feature knowledge
@@ -445,3 +451,30 @@ tasks without interruption at High autonomy, pausing between tasks at Medium and
 
 Governance (protected paths, `/propose` gate, pre-ship checklist) applies at all
 autonomy levels. "High Autonomous" means fewer interruptions, not fewer safeguards.
+
+---
+
+## Project settings
+
+Several Rig behaviors are configurable per project via fields in the project `CLAUDE.md`.
+These sit alongside the existing `base-branch:` and `housekeeping:` fields:
+
+| Field | Default | Options | What it controls |
+|---|---|---|---|
+| `base-branch:` | `main` | Any branch name | The integration branch all PRs target |
+| `housekeeping:` | `direct-push` | `direct-push` \| `pr-required` | How `/post-merge` handles memory-update commits |
+| `issue-tracking:` | `github` | `github` \| `none` | Whether GitHub issues are required before code; skips issue gate if `none` |
+| `secret-scanner:` | `gitleaks` | `gitleaks` \| `none` | Secret scanning on commit; disabling requires editing `.husky/pre-commit` |
+| `commit-cleanup:` | `yes` | `yes` \| `no` | Whether auto-injected tool footers are stripped from commit messages |
+
+The `issue-tracking: none` setting is the most impactful: it disables the issue-number
+gate in `/task`, `/ship`, `SHIP_WORKFLOW`, and `NEW_TASK_WORKFLOW`. Use it for personal
+projects, prototypes, or repos that don't use GitHub issues.
+
+Branch creation behavior is also parameterized by autonomy level:
+- **Low/Medium**: always confirm the base branch before `git checkout -b`
+- **High**: reads `base-branch:` from `CLAUDE.md`, states the base, and branches immediately
+
+A stale-main check (`git fetch` + `rev-list` comparison) runs before any new branch is
+created. If the base branch has advanced, Low/Medium autonomy prompts to rebase; High
+autonomy rebases automatically.

@@ -10,7 +10,7 @@ Performs the session-end housekeeping that prevents state loss between sessions:
 2. Ensures `.rig/memory/PROGRESS.md` is up to date — expands any auto-stubbed entries
 3. **Trims `.rig/memory/PROGRESS.md`** if it has grown beyond 20 entries (see Trim step below)
 4. **Prunes stale session-end markers** from `PROGRESS.md` (see Marker prune step below)
-5. Checks `.rig/memory/ERRORS.md` — prompts you to log anything unexpected from this session
+5. Checks `.rig/memory/ERRORS.md` — prompts you to log anything unexpected; **checks archive before logging** to prevent duplicate entries (see ERRORS.md logging step below)
 6. **Self-improvement check** — scans for Rig workflow gaps and logs them to `.rig/memory/RIG_GAPS.md`
 7. **Trims `.rig/memory/ERRORS.md`** if it has grown beyond 30 entries (see Trim step below)
 8. Reports what's in `.rig/tasks/active/` so you know what's in flight
@@ -84,7 +84,12 @@ If the user confirms:
 1. Identify the oldest entries (bottom of the file, since entries are newest-first)
 2. Prepend them to `.rig/memory/PROGRESS_archive.md` (create if absent)
 3. Remove them from `.rig/memory/PROGRESS.md`, leaving the 20 most recent entries
-4. Confirm: "`.rig/memory/PROGRESS.md` trimmed to 20 entries. Archive: `.rig/memory/PROGRESS_archive.md`"
+4. **Append a trim stub** at the bottom of the trimmed `PROGRESS.md`:
+   ```
+   <!-- archived YYYY-MM-DD: [N] entries moved to PROGRESS_archive.md. Topics: [3–6 word comma-separated summary of what was archived, e.g. "CI setup, manifest tracking, stealth mode, command rename"] -->
+   ```
+   This lets future sessions know what history exists in the archive without loading it.
+5. Confirm: "`.rig/memory/PROGRESS.md` trimmed to 20 entries. Archive: `.rig/memory/PROGRESS_archive.md`"
 
 Never trim without confirmation. Never delete entries — only move them.
 
@@ -140,6 +145,29 @@ If there is nothing to log, skip silently — do not mention this step.
 
 ---
 
+## ERRORS.md logging step
+
+Ask: "Did anything unexpected, buggy, or footgun-worthy happen this session that isn't
+already documented?"
+
+If yes, **before creating a new entry**:
+
+1. Search the active `.rig/memory/ERRORS.md` for a similar entry (keyword match is enough).
+2. If `ERRORS_archive.md` exists, do a quick search there too:
+   ```bash
+   grep -i "[keyword]" "$RIG_DIR/memory/ERRORS_archive.md" 2>/dev/null | head -5
+   ```
+3. **If a matching entry exists** (in either file): update or append to it rather than
+   creating a duplicate. Note the recurrence date. Duplicates dilute the pitfall log.
+4. **If genuinely new**: add a new `## ` entry at the top of `ERRORS.md`.
+
+> **Why check the archive?** Entries trimmed past the 30-entry limit move to
+> `ERRORS_archive.md` and are never loaded at session start. Without this check,
+> the same pitfall can be re-logged repeatedly across trims, losing the signal that
+> this is a *recurring* problem rather than an isolated one.
+
+---
+
 ## Trim step — ERRORS.md
 
 After checking `.rig/memory/ERRORS.md`, count the number of `## ` entry headers in the file.
@@ -157,7 +185,13 @@ If the user confirms:
 1. Identify the oldest entries (bottom of the file, since entries are newest-first)
 2. Prepend them to `.rig/memory/ERRORS_archive.md` (create if absent)
 3. Remove them from `.rig/memory/ERRORS.md`, leaving the 30 most recent entries
-4. Confirm: "`.rig/memory/ERRORS.md` trimmed to 30 entries. Archive: `.rig/memory/ERRORS_archive.md`"
+4. **Append a trim stub** at the bottom of the trimmed `ERRORS.md`:
+   ```
+   <!-- archived YYYY-MM-DD: [N] entries moved to ERRORS_archive.md. Categories: [3–6 word comma-separated summary, e.g. "bats non-interactive, gitleaks path, Husky sh-e, worktree writes"] -->
+   ```
+   This lets the agent grep for a category keyword without loading the archive, and
+   signals to the ERRORS.md logging step that the archive should be checked.
+5. Confirm: "`.rig/memory/ERRORS.md` trimmed to 30 entries. Archive: `.rig/memory/ERRORS_archive.md`"
 
 Never trim without confirmation. Never delete entries — only move them.
 
