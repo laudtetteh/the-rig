@@ -201,7 +201,7 @@ EOF
 Then create the PR:
 
 ```bash
-gh pr create --title "..." --body-file /tmp/pr-body.md --base main \
+gh pr create --title "..." --body-file /tmp/pr-body.md --base [BASE_BRANCH] \
   --label "type: [type]" --label "area: [area]"
 ```
 

@@ -61,9 +61,32 @@ Don't modify it directly — use `/propose` instead.
 
 ---
 
+## Configuring the base branch
+
+The installer prompts for the base branch name and substitutes it throughout
+all workflow files. If you need to change it after install, update the
+`## Base branch` section in your project `CLAUDE.md`:
+
+```markdown
+## Base branch
+
+base-branch: integration
+```
+
+Then manually update `git checkout [BASE_BRANCH]` references in:
+- `.rig/processes/POST_MERGE_WORKFLOW.md`
+- `.rig/processes/SHIP_WORKFLOW.md`
+- `.claude/commands/ship.md`
+- `.claude/commands/post-merge.md`
+
+To auto-detect, the installer reads `git symbolic-ref refs/remotes/origin/HEAD`
+and offers it as the default.
+
+---
+
 ## Configuring the housekeeping commit convention
 
-By default, `/post-merge` commits memory updates directly to `main` — no branch,
+By default, `/post-merge` commits memory updates directly to the base branch — no branch,
 no PR. For repos that require a PR for every change, set `pr-required` in the
 project `CLAUDE.md`:
 
@@ -75,7 +98,7 @@ housekeeping: pr-required
 
 | Value | Behaviour |
 |---|---|
-| `direct-push` | Commits and pushes directly to `main`. Default. |
+| `direct-push` | Commits and pushes directly to the base branch. Default. |
 | `pr-required` | Creates `chore/post-merge-[N]` branch and opens a small PR. |
 
 Change this once per project and `/post-merge` respects it every time.

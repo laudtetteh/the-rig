@@ -48,13 +48,13 @@ git log --oneline -3
 
 Report briefly:
 
-> "Branch: `main` | Clean working tree | HEAD: `abc1234 feat: merged PR #N`"
+> "Branch: `[BASE_BRANCH]` | Clean working tree | HEAD: `abc1234 feat: merged PR #N`"
 
 **If the working tree is not clean:** surface any uncommitted changes and ask
 the user whether to stash, commit, or discard them before proceeding.
 
-**If not on `main`:** note the current branch. The POST_MERGE_WORKFLOW Step 1
-will `git checkout main && git pull`, but flag it now so the user is aware.
+**If not on `[BASE_BRANCH]`:** note the current branch. The POST_MERGE_WORKFLOW Step 1
+will `git checkout [BASE_BRANCH] && git pull`, but flag it now so the user is aware.
 
 ---
 

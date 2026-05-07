@@ -1,6 +1,6 @@
 # POST_MERGE_WORKFLOW
 
-> Run this immediately after a PR is merged to main.
+> Run this immediately after a PR is merged to [BASE_BRANCH].
 > Takes about 5 minutes. Keeps the system clean for the next session.
 
 ---
@@ -8,11 +8,11 @@
 ## When to follow this workflow
 
 - After the user says "merged" or confirms a PR has landed
-- After any PR merges to main, regardless of size
+- After any PR merges to [BASE_BRANCH], regardless of size
 
 ---
 
-## Step 1 — Verify state and pull latest main
+## Step 1 — Verify state and pull latest [BASE_BRANCH]
 
 First, snapshot current state:
 
@@ -27,7 +27,7 @@ before continuing (stash, commit, or discard — ask the user).
 Then pull:
 
 ```bash
-git checkout main && git pull origin main
+git checkout [BASE_BRANCH] && git pull origin [BASE_BRANCH]
 ```
 
 Confirm the expected merge commit is at HEAD:
@@ -58,7 +58,7 @@ Add an entry at the **top** of `.rig/memory/PROGRESS.md` (below the header):
 
 1. Move the completed task file: `.rig/tasks/active/TASK_[name].md` → `.rig/tasks/done/TASK_[name].md`
 2. Update its `**Status**` field to `done`
-3. Verify `.rig/tasks/active/` is clean — only `.gitkeep` should remain if all tasks are done
+3. Verify `.rig/tasks/active/` is clean — only `.gitkeep` should re[BASE_BRANCH] if all tasks are done
 
 ---
 
@@ -101,7 +101,7 @@ as part of the PR, commit them now.
 **First, read the `## Git workflow convention` field from the project `CLAUDE.md`.**
 It will be one of:
 
-- `housekeeping: direct-push` — commit and push directly to `main` (default)
+- `housekeeping: direct-push` — commit and push directly to `[BASE_BRANCH]` (default)
 - `housekeeping: pr-required` — create a short-lived branch and open a PR
 
 ### If `direct-push` (default)
@@ -109,7 +109,7 @@ It will be one of:
 ```bash
 git add .rig/memory/PROGRESS.md .rig/tasks/done/TASK_[name].md
 git commit -m "chore: post-merge housekeeping for PR #N"
-git push origin main
+git push origin [BASE_BRANCH]
 ```
 
 No branch, no PR. Done.
@@ -123,7 +123,7 @@ git commit -m "chore: post-merge housekeeping for PR #N"
 git push -u origin chore/post-merge-[N]
 gh pr create --title "chore: post-merge housekeeping for PR #N" \
   --body "Memory updates and task file move for merged PR #N." \
-  --label "type: chore" --base main
+  --label "type: chore" --base [BASE_BRANCH]
 ```
 
 ### If no changes to commit

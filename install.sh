@@ -136,12 +136,13 @@ EXTERNAL_RIG_DIR=""   # set via --rig-dir <path>
 _FLAG_STRATEGY=""     # set via --strategy <name>  (skips interactive prompt)
 _FLAG_TARGET=""       # set via --target <path>    (skips interactive prompt)
 _FLAG_PROJECT_NAME="" # set via --project-name <n> (skips interactive prompt)
+_FLAG_BASE_BRANCH=""  # set via --base-branch <n>  (skips interactive prompt)
 
 for arg in "$@"; do
   case "$arg" in
     --global-only)  DO_PROJECT=false ;;
     --project-only) DO_GLOBAL=false ;;
-    --rig-dir|--strategy|--target|--project-name)
+    --rig-dir|--strategy|--target|--project-name|--base-branch)
       # two-arg flags; value captured in the loop below
       ;;
     --version|-v)
@@ -171,6 +172,8 @@ for arg in "$@"; do
       echo "                        overwrite — replace everything; back up originals"
       echo "  --target <path>       Set target project directory."
       echo "  --project-name <name> Set project name (used in CLAUDE.md substitution)."
+      echo "  --base-branch <name>  Set base branch name (default: main). Substituted into"
+      echo "                        workflow examples and CLAUDE.md base-branch field."
       echo ""
       echo "Other:"
       echo "  --rig-dir <path>      Install .rig/ to an external path outside the repo."
@@ -196,6 +199,9 @@ for (( i=0; i<${#args[@]}; i++ )); do
   fi
   if [[ "${args[$i]}" == "--project-name" && $((i+1)) -lt ${#args[@]} ]]; then
     _FLAG_PROJECT_NAME="${args[$((i+1))]}"
+  fi
+  if [[ "${args[$i]}" == "--base-branch" && $((i+1)) -lt ${#args[@]} ]]; then
+    _FLAG_BASE_BRANCH="${args[$((i+1))]}"
   fi
 done
 
@@ -691,6 +697,31 @@ if [[ "$DO_PROJECT" == true ]]; then
 
   echo ""
 
+  # ── BASE BRANCH ──────────────────────────────────────────────────────────────
+  # The main integration branch for this repo (main, master, integration, etc.).
+  # Substituted into workflow examples in CLAUDE.md, processes, and commands.
+  if [[ -n "$_FLAG_BASE_BRANCH" ]]; then
+    BASE_BRANCH="$_FLAG_BASE_BRANCH"
+  else
+    # Try to auto-detect from git
+    _DETECTED_BASE=""
+    if command -v git >/dev/null 2>&1 && git -C "$TARGET" rev-parse --git-dir >/dev/null 2>&1; then
+      _DETECTED_BASE="$(git -C "$TARGET" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')"
+    fi
+    _DEFAULT_BASE="${_DETECTED_BASE:-main}"
+    ask "What is the base branch for this repo?"
+    read -r -p "    Branch [${_DEFAULT_BASE}]: " _BASE_INPUT
+    BASE_BRANCH="${_BASE_INPUT:-$_DEFAULT_BASE}"
+  fi
+  # Sanitize: letters, digits, hyphens, underscores, dots only
+  BASE_BRANCH="$(echo "$BASE_BRANCH" | tr -dc 'A-Za-z0-9._-')"
+  if [[ -z "$BASE_BRANCH" ]]; then
+    BASE_BRANCH="main"
+    warn "Invalid base branch name — defaulting to 'main'"
+  fi
+  info "Base branch: $BASE_BRANCH"
+  echo ""
+
   # ── GIT TRACKING FOR .rig/ ────────────────────────────────────────────────
   # How should .rig/ appear (or not appear) in git?
   # Bypassed when --rig-dir or --target is provided (defaults to "repo").
@@ -884,6 +915,26 @@ if [[ "$DO_PROJECT" == true ]]; then
     sed_inplace "s/\\[REPO_ROOT\\]/${ESCAPED_PATH}/g" "$TARGET_SETTINGS"
     success "Substituted [REPO_ROOT] in .claude/settings.json → $TARGET_ABS"
   fi
+
+  # Substitute [BASE_BRANCH] in CLAUDE.md, commands, and process files.
+  # Covers both inline (.claude/commands/) and external (.rig/processes/) paths.
+  _BASE_ESC="${BASE_BRANCH//\//\\/}"
+  _subst_base_branch() {
+    local f="$1"
+    [[ -f "$f" ]] || return 0
+    sed_inplace "s/\\[BASE_BRANCH\\]/${_BASE_ESC}/g" "$f"
+  }
+  _subst_base_branch "$TARGET/CLAUDE.md"
+  _subst_base_branch "$TARGET/.claude/commands/ship.md"
+  _subst_base_branch "$TARGET/.claude/commands/post-merge.md"
+  # .rig/processes/ may be in-repo or external
+  _TARGET_RIG_DIR="$TARGET/.rig"
+  if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
+    _TARGET_RIG_DIR="$EXTERNAL_RIG_DIR"
+  fi
+  _subst_base_branch "$_TARGET_RIG_DIR/processes/POST_MERGE_WORKFLOW.md"
+  _subst_base_branch "$_TARGET_RIG_DIR/processes/SHIP_WORKFLOW.md"
+  success "Substituted [BASE_BRANCH] → $BASE_BRANCH in workflow files"
 
   # ── EXTERNAL .rig/ — write .rigpath and update git excludes ──────────────
   if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
