@@ -11,6 +11,30 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.12.0] — 2026-05-07
+
+### Added
+
+- **Conventional Commits validation in `commit-msg` hook** (`templates/project/.husky/commit-msg`): after stripping auto-injected tool footers, the hook now validates that the commit subject matches the Conventional Commits format (`type(scope): description`). Valid types: `feat`, `fix`, `chore`, `refactor`, `docs`, `test`, `perf`, `devops`, `style`. Merge, revert, fixup, and squash commits are exempted. `SKIP_COMMIT_VALIDATION=1` env var bypasses validation. Also requires a GitHub issue reference (`[#N]` or `(#N)`) when `issue-tracking: github` is set in `CLAUDE.md`. Closes #149.
+
+- **Branch naming convention check in `post-tool.sh`** (`templates/project/.claude/hooks/post-tool.sh`): after any `git checkout -b` call, the hook now inspects the new branch name and warns if it doesn't match the `type/` prefix convention (`feat/`, `fix/`, `chore/`, etc.). Advisory only — does not block the checkout. Closes #149.
+
+- **Proactive `.wrap-needed` on 2+ commits** (`templates/project/.claude/hooks/stop.sh`): `stop.sh` now writes `.wrap-needed` when 2 or more commits land in a session, even if auto-stubs have already been expanded. Ensures `/wrap` is prompted after productive sessions regardless of stub state. `RIG_SESSION_LOG` is now injectable via env var for test isolation. Closes #149.
+
+- **Issue number validation in `NEW_TASK_WORKFLOW.md`**: the workflow now validates that a task file's `**GitHub issue**: #[N]` field is populated before Step 1 can proceed. Applies whether the task was opened via `/task`, picked from the backlog, or resumed from `active/`. Closes #149.
+
+- **Pre-ship checklist gate in `SHIP_WORKFLOW.md` and global `CLAUDE.md`**: Step 2.5 of `SHIP_WORKFLOW.md` is now named "Checklist confirmation + pause for local testing" and requires explicit confirmation that the Step 1 checklist has been worked through before the commit prompt is presented. Hard Rule #11 in the global `CLAUDE.md` template updated to match. Closes #149.
+
+- **Scope-gate fires before first tool call** (`templates/global/CLAUDE.md`): the freeform change-request gate now explicitly requires the agent to wait for a user response before invoking any `Write`, `Edit`, or `Bash` tool. Trigger-word list added for clarity. Closes #149.
+
+### Fixed
+
+- **Stealth/external upgrade writes `.rig-backup/` to the project root** (`install.sh`): `init_backup_dir()` was always creating `.rig-backup/<timestamp>/` in the target project regardless of tracking mode. In stealth and external mode, backups are now redirected to `$EXTERNAL_RIG_DIR/backups/<timestamp>/` — zero traces left in the project. Also added `.rig-backup/` to the stealth `.git/info/exclude` block as a safety net. Closes #148.
+
+- **Upgrade docs showed wrong working directory** (`docs/customizing.md`): the upgrade snippet showed `./install.sh --project-only` run from the project directory — wrong. Corrected to the two-step form: `cd ~/tools/the-rig && ./install.sh --project-only --target <project-path> --strategy upgrade`. Backup location note updated to reflect stealth-mode path. Closes #148.
+
+---
+
 ## [1.11.0] — 2026-05-07
 
 ### Added
