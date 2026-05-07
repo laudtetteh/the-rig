@@ -633,3 +633,26 @@ _is_rig_protected() {
   [ ! -f "$TEST_PROJECT/.git/hooks/commit-msg" ]
   [[ "$output" == *"--skip-git-hooks set"* ]]
 }
+
+# ── --tracking flag ───────────────────────────────────────────────────────────
+
+@test "--tracking stealth: installs without prompting when used with --target" {
+  local rig_ext="$TEMP_DIR/rig-external"
+  run_installer --strategy skip --tracking stealth --rig-dir "$rig_ext"
+  [ "$status" -eq 0 ]
+  [ -f "$rig_ext/memory/PROGRESS.md" ]
+  [ ! -f "$TEST_PROJECT/.rig/memory/PROGRESS.md" ]
+}
+
+@test "--tracking: invalid value exits non-zero with error message" {
+  run_installer --strategy skip --tracking bogus
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid --tracking"* ]]
+}
+
+@test "--target without --tracking still defaults to repo tracking" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_PROJECT/.rig/memory/PROGRESS.md" ]
+  [ ! -f "$TEST_PROJECT/.rigpath" ]
+}
