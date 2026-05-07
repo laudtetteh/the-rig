@@ -145,11 +145,13 @@ _FLAG_STRATEGY=""     # set via --strategy <name>  (skips interactive prompt)
 _FLAG_TARGET=""       # set via --target <path>    (skips interactive prompt)
 _FLAG_PROJECT_NAME="" # set via --project-name <n> (skips interactive prompt)
 _FLAG_BASE_BRANCH=""  # set via --base-branch <n>  (skips interactive prompt)
+SKIP_GIT_HOOKS=false  # set via --skip-git-hooks   (stealth: skip .git/hooks/ writes)
 
 for arg in "$@"; do
   case "$arg" in
-    --global-only)  DO_PROJECT=false ;;
-    --project-only) DO_GLOBAL=false ;;
+    --global-only)      DO_PROJECT=false ;;
+    --project-only)     DO_GLOBAL=false ;;
+    --skip-git-hooks)   SKIP_GIT_HOOKS=true ;;
     --rig-dir|--strategy|--target|--project-name|--base-branch)
       # two-arg flags; value captured in the loop below
       ;;
@@ -187,6 +189,9 @@ for arg in "$@"; do
       echo "  --rig-dir <path>      Install .rig/ to an external path outside the repo."
       echo "                        Writes a .rigpath pointer file at the project root."
       echo "                        Useful for shared repos where teammates don't use The Rig."
+      echo "  --skip-git-hooks      Stealth mode only: skip writing hooks to .git/hooks/."
+      echo "                        Use when the project already manages git hooks via Husky"
+      echo "                        or another tool and you want to avoid the conflict."
       echo "  --version, -v         Print The Rig version and exit."
       exit 0
       ;;
@@ -1069,20 +1074,31 @@ if [[ "$DO_PROJECT" == true ]]; then
     # Copy .husky/ hook scripts directly to .git/hooks/ (Husky-free, per-clone)
     GIT_HOOKS_DIR="$TARGET/.git/hooks"
     HUSKY_SRC="$PROJECT_TEMPLATES/.husky"
-    if [[ -d "$HUSKY_SRC" && -d "$GIT_HOOKS_DIR" ]]; then
-      for hook_src in "$HUSKY_SRC"/pre-commit "$HUSKY_SRC"/commit-msg \
-                      "$HUSKY_SRC"/post-commit "$HUSKY_SRC"/post-merge \
-                      "$HUSKY_SRC"/filter-commit-message-inplace.sh; do
-        hook_name="$(basename "$hook_src")"
-        hook_dest="$GIT_HOOKS_DIR/$hook_name"
-        if [[ -f "$hook_src" ]]; then
-          cp "$hook_src" "$hook_dest"
-          chmod +x "$hook_dest"
-          success "Stealth: installed $hook_name → .git/hooks/"
-        fi
-      done
+    if [[ "$SKIP_GIT_HOOKS" == true ]]; then
+      info "Stealth: --skip-git-hooks set — skipping .git/hooks/ writes."
     else
-      warn "Stealth: .git/hooks/ not found — git hooks were not installed."
+      # Warn when the target project already manages hooks via Husky — the Rig
+      # hooks written here may be overwritten silently by 'npm install'/'prepare'.
+      if [[ -d "$TARGET/.husky" ]]; then
+        warn "Stealth: .husky/ detected — project already manages git hooks."
+        warn "  Rig hooks written to .git/hooks/ may be overwritten by 'npm install' or 'prepare'."
+        warn "  Re-run with --skip-git-hooks to skip .git/hooks/ writes."
+      fi
+      if [[ -d "$HUSKY_SRC" && -d "$GIT_HOOKS_DIR" ]]; then
+        for hook_src in "$HUSKY_SRC"/pre-commit "$HUSKY_SRC"/commit-msg \
+                        "$HUSKY_SRC"/post-commit "$HUSKY_SRC"/post-merge \
+                        "$HUSKY_SRC"/filter-commit-message-inplace.sh; do
+          hook_name="$(basename "$hook_src")"
+          hook_dest="$GIT_HOOKS_DIR/$hook_name"
+          if [[ -f "$hook_src" ]]; then
+            cp "$hook_src" "$hook_dest"
+            chmod +x "$hook_dest"
+            success "Stealth: installed $hook_name → .git/hooks/"
+          fi
+        done
+      else
+        warn "Stealth: .git/hooks/ not found — git hooks were not installed."
+      fi
     fi
   fi
 
