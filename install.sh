@@ -567,6 +567,12 @@ _copy_file_upgrade() {
     echo "  Your version differs from what The Rig originally installed."
     echo "  The new Rig version also modifies this file."
     echo ""
+    # Non-interactive (CI / piped stdin): skip without prompting.
+    if [[ ! -t 0 ]]; then
+      info "Non-interactive mode — skipping customized file: ${rel}"
+      info "Run the installer interactively to review and update this file."
+      return
+    fi
     local choice
     while true; do
       read -r -p "$(echo -e "  ${BOLD}?${RESET} (o)verwrite  (s)kip  (d)iff  [o/s/d]: ")" choice
@@ -681,9 +687,13 @@ if [[ "$DO_PROJECT" == true ]]; then
     PROJECT_NAME="$_FLAG_PROJECT_NAME"
   else
     DEFAULT_PROJECT_NAME="$(basename "$TARGET")"
-    ask "Project name (used in CLAUDE.md)?"
-    read -r -p "    Name [${DEFAULT_PROJECT_NAME}]: " PROJECT_NAME_INPUT
-    PROJECT_NAME="${PROJECT_NAME_INPUT:-$DEFAULT_PROJECT_NAME}"
+    if [[ -t 0 ]]; then
+      ask "Project name (used in CLAUDE.md)?"
+      read -r -p "    Name [${DEFAULT_PROJECT_NAME}]: " PROJECT_NAME_INPUT
+      PROJECT_NAME="${PROJECT_NAME_INPUT:-$DEFAULT_PROJECT_NAME}"
+    else
+      PROJECT_NAME="$DEFAULT_PROJECT_NAME"
+    fi
   fi
 
   # Sanitize project name for safe sed substitution.
@@ -706,12 +716,17 @@ if [[ "$DO_PROJECT" == true ]]; then
     # Try to auto-detect from git
     _DETECTED_BASE=""
     if command -v git >/dev/null 2>&1 && git -C "$TARGET" rev-parse --git-dir >/dev/null 2>&1; then
-      _DETECTED_BASE="$(git -C "$TARGET" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')"
+      # git symbolic-ref exits 128 when there's no remote; pipefail would propagate that.
+      _DETECTED_BASE="$(git -C "$TARGET" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')" || true
     fi
     _DEFAULT_BASE="${_DETECTED_BASE:-main}"
-    ask "What is the base branch for this repo?"
-    read -r -p "    Branch [${_DEFAULT_BASE}]: " _BASE_INPUT
-    BASE_BRANCH="${_BASE_INPUT:-$_DEFAULT_BASE}"
+    if [[ -t 0 ]]; then
+      ask "What is the base branch for this repo?"
+      read -r -p "    Branch [${_DEFAULT_BASE}]: " _BASE_INPUT
+      BASE_BRANCH="${_BASE_INPUT:-$_DEFAULT_BASE}"
+    else
+      BASE_BRANCH="$_DEFAULT_BASE"
+    fi
   fi
   # Sanitize: letters, digits, hyphens, underscores, dots only
   BASE_BRANCH="$(echo "$BASE_BRANCH" | tr -dc 'A-Za-z0-9._-')"
