@@ -318,7 +318,7 @@ staged only from `.rig/tasks/done/` in a separate housekeeping commit.
 
 ## The command set
 
-Twelve slash commands covering the full development lifecycle:
+Thirteen slash commands covering the full development lifecycle:
 
 ### Project bootstrap
 | Command | Triggers | Key behaviour |
@@ -347,8 +347,10 @@ Twelve slash commands covering the full development lifecycle:
 ### Governance and housekeeping
 | Command | Triggers | Key behaviour |
 |---|---|---|
+| `/post-merge` | `POST_MERGE_WORKFLOW` | Post-merge hygiene: pull base branch, update PROGRESS, move task file, housekeeping commit, suggest session name, surface next priority |
 | `/propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
-| `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, runs self-improvement check (logs Rig gaps), trims PROGRESS/ERRORS, suggests session name via `/rename`, surfaces next priority |
+| `/rename` | Session naming | Derives a session name from current PROGRESS entries and presents it as a ready-to-run suggestion — callable at any time, not just at wrap |
+| `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, runs self-improvement check (logs Rig gaps), trims PROGRESS/ERRORS, suggests session name, surfaces next priority |
 | `/rig-gaps` | Self-improvement | Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats a report with submission instructions for The Rig dev session |
 | `/new-feature` | *(deprecated)* | Redirects to `/task`. Kept for backward compatibility only. |
 

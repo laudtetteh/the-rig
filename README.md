@@ -66,7 +66,7 @@ The Rig has two layers that load in sequence at every session start:
 | Rules (4) | `templates/project/.rig/rules/` | Coding standards, git conventions, security rules, verification protocol |
 | Memory system | `templates/project/.rig/memory/` | PROGRESS log, ERRORS log, DECISIONS log, CONTEXT_SNAPSHOT (session state), RIG_GAPS (self-improvement feedback) |
 | Task lifecycle | `templates/project/.rig/tasks/` | Structured task files through backlog → active → done |
-| Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 12 slash commands |
+| Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 13 slash commands |
 | Feature docs | `templates/project/docs/features/` | README index + `/doc-feature` and `/refresh-feature-doc` commands for capturing and maintaining business-critical feature knowledge |
 | Git hooks | `templates/project/.husky/` | Secret scanning (gitleaks) + AI attribution trailer stripping |
 | GitHub templates | `templates/project/.github/` | PR template + 3 issue templates |
@@ -227,7 +227,9 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 
 **Governance and housekeeping**
 ```
+/post-merge   →  post-merge hygiene: pull main, update memory, move task file, housekeeping commit
 /propose      →  submit a change to governance files for human approval before anything is touched
+/rename       →  derive a session name from current work and present it as a ready-to-run suggestion
 /wrap         →  write CONTEXT_SNAPSHOT, ensure memory is current, log any Rig gaps before closing
 /rig-gaps     →  compile workflow friction from RIG_GAPS.md + ERRORS.md; format for submission to The Rig dev session
 ```
@@ -269,9 +271,11 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 
 ## Origin
 
-The Rig was designed and refined entirely within a single project — [LaudBot](https://github.com/laudtetteh/laudbot), an AI-powered interactive resume. It grew organically as each session revealed a new failure mode. Every component exists because something went wrong without it.
+The Rig grew organically out of real project work, starting with [LaudBot](https://github.com/laudtetteh/laudbot) — an AI-powered interactive resume where each session revealed a new failure mode and prompted a new layer of scaffolding. Every component exists because something went wrong without it.
 
-The LaudBot repo history — 100+ PRs, clean conventional commits, linked issues, documented architecture — is the proof of concept.
+It was subsequently piloted on [4Culture.org](https://4culture.org), a shared-repo WordPress platform with multiple contributors. That engagement surface stealth mode, the housekeeping commit convention, and several robustness improvements to the hook system.
+
+The LaudBot repo history — 100+ PRs, clean conventional commits, linked issues, documented architecture — is the original proof of concept.
 
 ---
 
