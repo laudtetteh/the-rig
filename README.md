@@ -47,7 +47,7 @@ The Rig has two layers that load in sequence at every session start:
 │  .rig/memory/       ← PROGRESS, ERRORS, DECISIONS, SNAPSHOT      │
 │  .rig/tasks/        ← active / backlog / done lifecycle         │
 │  .claude/           ← hook wiring + slash commands              │
-│  .husky/            ← secret scanning + AI trailer stripping    │
+│  .husky/            ← secret scanning + tool footer cleanup     │
 │  .github/           ← PR template + issue templates             │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -68,7 +68,7 @@ The Rig has two layers that load in sequence at every session start:
 | Task lifecycle | `templates/project/.rig/tasks/` | Structured task files through backlog → active → done |
 | Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 13 slash commands |
 | Feature docs | `templates/project/docs/features/` | README index + `/doc-feature` and `/refresh-feature-doc` commands for capturing and maintaining business-critical feature knowledge |
-| Git hooks | `templates/project/.husky/` | Secret scanning (gitleaks) + AI attribution trailer stripping |
+| Git hooks | `templates/project/.husky/` | Secret scanning (gitleaks) + auto-injected tool footer removal |
 | GitHub templates | `templates/project/.github/` | PR template + 3 issue templates |
 | Installer | `install.sh` | Interactive setup script — handles both layers |
 | CI | `.github/workflows/ci.yml` | Runs bats test suite on every push and PR |
@@ -248,7 +248,7 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 | `post-tool.sh` | After every Claude Code tool call | PROGRESS.md being skipped after a commit; clears commit sentinel after use |
 | `stop.sh` | When the agent finishes its final response | CONTEXT_SNAPSHOT going stale — updates `Last updated:` and appends a session-end boundary to PROGRESS.md without requiring `/wrap` |
 | `pre-commit` | Before every git commit | Secrets reaching the repository |
-| `commit-msg` + `post-commit` | On every git commit | AI attribution trailers (`Co-Authored-By: Claude`, etc.) in history |
+| `commit-msg` + `post-commit` | On every git commit | Auto-injected tool footers (`Co-Authored-By: Claude`, `Made-with-Claude`, etc.) from embedding in commit messages — keeps history clean |
 
 ---
 

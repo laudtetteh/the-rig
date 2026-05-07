@@ -1,8 +1,10 @@
 #!/bin/sh
 # commit-msg
 #
-# Strips AI-generated attribution trailers from the commit message
-# before it is written to the repository.
+# Strips auto-injected tool footers from commit messages before they are
+# written to the repository — keeps history clean and human-authored in tone.
+# Remove this hook if you want tool footers (Co-Authored-By, Made-with-Claude, etc.)
+# to remain in your commit history.
 #
 # Delegates to filter-commit-message-inplace.sh for the actual filtering.
 # Falls back to inline grep if the filter script is not present.

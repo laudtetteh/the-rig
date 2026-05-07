@@ -288,11 +288,16 @@ via `prepare` script in `package.json`.
 
 ---
 
-## Disabling the AI trailer stripping
+## Keeping tool attribution footers in commits
 
-If you want co-author credits to appear in your history (e.g., you're building a team
-project where attribution matters), comment out or remove the `commit-msg` and
-`post-commit` hooks from `.husky/`.
+By default, The Rig strips auto-injected footers (`Co-Authored-By: Claude`,
+`Made-with-Claude`, etc.) from commit messages. These lines are inserted automatically
+by AI coding tools — The Rig removes them so commit messages stay clean and reflect
+what the human author wrote.
+
+If you want these footers to remain (e.g. your team has a policy of crediting AI tools
+in commit history), comment out or remove the `commit-msg` and `post-commit` hooks
+from `.husky/`.
 
 The `pre-commit` (gitleaks) is independent and unaffected.
 
