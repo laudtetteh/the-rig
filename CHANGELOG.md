@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [1.13.0] — 2026-05-09
+
 ### Added
 - `GLOBAL_MANIFEST_FILE` (`~/.claude/.rig-global-manifest`) tracks SHA256 of installed global files
 - `_copy_global_file_upgrade()` — manifest-aware upgrade handler for global layer files
