@@ -443,7 +443,7 @@ Fourteen slash commands covering the full development lifecycle:
 | Command | Triggers | Key behaviour |
 |---|---|---|
 | `/post-merge` | `POST_MERGE_WORKFLOW` | Post-merge hygiene: pull base branch, update PROGRESS, move task file, housekeeping commit, suggest session name, surface next priority |
-| `/propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
+| `/rig-propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
 | `/session-name` | Session naming | Derives a session name from current PROGRESS entries and presents it as a suggestion — callable at any time, not just at wrap |
 | `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, runs self-improvement check (logs Rig gaps), trims PROGRESS/ERRORS, suggests session name, surfaces next priority |
 | `/rig-gaps` | Self-improvement | Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats a report with submission instructions for The Rig dev session |
@@ -466,7 +466,7 @@ The configuration is written to `## Operating mode` in the task file and persist
 across sessions. `/run` reads the stored mode and executes accordingly — chaining
 tasks without interruption at High autonomy, pausing between tasks at Medium and Low.
 
-Governance (protected paths, `/propose` gate, pre-ship checklist) applies at all
+Governance (protected paths, `/rig-propose` gate, pre-ship checklist) applies at all
 autonomy levels. "High Autonomous" means fewer interruptions, not fewer safeguards.
 
 ---

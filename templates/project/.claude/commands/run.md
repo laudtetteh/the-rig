@@ -180,7 +180,7 @@ If the queue is exhausted, always surface to the user regardless of autonomy lev
 Regardless of autonomy level, all of the following always apply:
 
 - Pre-tool hooks run on every file write. Governance files remain protected.
-- Changes to The Rig's own processes, rules, hooks, or CLAUDE.md require `/propose`.
+- Changes to The Rig's own processes, rules, hooks, or CLAUDE.md require `/rig-propose`.
 - The pre-ship checklist (`/ship`) must pass before any PR is opened.
 - Secrets and credentials are never written to files.
 - Irreversible actions always require explicit confirmation — even at High autonomy.

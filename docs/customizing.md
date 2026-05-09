@@ -77,7 +77,7 @@ Keep entries specific enough to not accidentally block legitimate paths.
 
 The `RIG_PROTECTED` block above `BLOCKED_PATHS` protects The Rig's own governance files
 (`.rig/processes/`, `.rig/rules/`, `.husky/`, `CLAUDE.md`, `.claude/hooks/`).
-Don't modify it directly — use `/propose` instead.
+Don't modify it directly — use `/rig-propose` instead.
 
 ---
 
@@ -141,14 +141,14 @@ preferred settings.
 
 ---
 
-## Configuring protected paths for /propose
+## Configuring protected paths for /rig-propose
 
-The governance gate in `/propose` mirrors the `RIG_PROTECTED` list in `pre-tool.sh`.
+The governance gate in `/rig-propose` mirrors the `RIG_PROTECTED` list in `pre-tool.sh`.
 If you add new governance files that should require a proposal before modification,
 add them to both places:
 
 1. `pre-tool.sh` → `RIG_PROTECTED` array
-2. `commands/propose.md` → "When to use it" section
+2. `commands/rig-propose.md` → "When to use it" section
 
 ---
 

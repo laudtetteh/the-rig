@@ -91,10 +91,10 @@ if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" ]]; then
 
   # ── THE RIG'S OWN GOVERNANCE FILES (self-protection) ─────────────────────
   # The agent must not rewrite the rules it is supposed to follow.
-  # These paths are protected unconditionally — even after a /propose approval.
+  # These paths are protected unconditionally — even after a /rig-propose approval.
   #
   # APPROVED CHANGE FLOW:
-  #   1. Run /propose — agent writes proposal to /tmp/rig-proposal-[name].md
+  #   1. Run /rig-propose — agent writes proposal to /tmp/rig-proposal-[name].md
   #      and shows the exact before/after diff.
   #   2. Review and approve the proposal in chat.
   #   3. The agent cannot apply the change itself (this block stops it).
@@ -119,7 +119,7 @@ if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" ]]; then
     if [[ "$PATH_ARG" == *"$protected"* ]]; then
       echo "Blocked: '$PATH_ARG' is a The Rig governance file." >&2
       echo "The agent must not modify its own rules directly." >&2
-      echo "Use /propose to stage a change for human review, or edit manually." >&2
+      echo "Use /rig-propose to stage a change for human review, or edit manually." >&2
       exit 1
     fi
   done
