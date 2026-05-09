@@ -333,6 +333,45 @@ is_rig_owned_stub() {
   [ "$status" -ne 0 ]
 }
 
+@test "merge strategy: does not duplicate hooks when settings.json already has Rig hooks" {
+  # First install populates settings.json with the Rig hooks.
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  # Second install via merge should not add duplicate entries.
+  run_installer --strategy merge
+  [ "$status" -eq 0 ]
+  local hook_count
+  hook_count=$(python3 -c "
+import json, sys
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+events = s.get('hooks', {})
+total = sum(len(v) for v in events.values())
+print(total)
+")
+  # Should have exactly one entry per hook event (PreToolUse, PostToolUse, Stop = 3 total)
+  [ "$hook_count" -eq 3 ]
+}
+
+@test "upgrade strategy: does not duplicate hooks when settings.json already has Rig hooks" {
+  # First install populates settings.json with the Rig hooks.
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  # Upgrade should not add duplicate entries.
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  local hook_count
+  hook_count=$(python3 -c "
+import json, sys
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+events = s.get('hooks', {})
+total = sum(len(v) for v in events.values())
+print(total)
+")
+  [ "$hook_count" -eq 3 ]
+}
+
 # ── CLI flag validation ───────────────────────────────────────────────────────
 
 @test "--strategy with invalid value warns and falls back to interactive" {
@@ -810,5 +849,30 @@ _is_rig_protected() {
 
   printf 'this is not conventional\n' > "$msg_file"
   run bash -c "cd '$TEST_PROJECT' && SKIP_COMMIT_VALIDATION=1 sh '$hook' '$msg_file'"
+  [ "$status" -eq 0 ]
+}
+
+# ── pre-commit: .rig-debug-scan-exclude path exclusions ──────────────────────
+
+@test "pre-commit: .rig-debug-scan-exclude skips matched paths" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/pre-commit"
+
+  # Stage a file containing a debug artifact
+  mkdir -p "$TEST_PROJECT/vendor"
+  printf 'console.log("test");\n' > "$TEST_PROJECT/vendor/debug.js" # rig-debug-ok
+  git -C "$TEST_PROJECT" add vendor/debug.js
+
+  # Without exclusion the hook blocks
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook'"
+  [ "$status" -ne 0 ]
+
+  # Add the path to .rig-debug-scan-exclude
+  printf 'vendor/*\n' > "$TEST_PROJECT/.rig-debug-scan-exclude"
+
+  # With exclusion the hook passes
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook'"
   [ "$status" -eq 0 ]
 }
