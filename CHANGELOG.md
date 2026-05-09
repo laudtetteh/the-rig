@@ -9,6 +9,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **`/propose` renamed to `/rig-propose`** (`templates/project/.claude/commands/propose.md` → `rig-propose.md`): aligns with the `rig-` prefix convention used by `/rig-gaps` and `/rig-upgrade`. All cross-file references updated: `pre-tool.sh`, `kickoff.md`, `run.md`, `task.md`, `docs/how-it-works.md`, `docs/customizing.md`, `README.md`. Closes #163.
+
 ---
 
 ## [1.13.0] — 2026-05-09

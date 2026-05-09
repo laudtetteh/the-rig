@@ -232,7 +232,7 @@ After scaffolding is complete:
   the existing `CLAUDE.md` and `.rig/tasks/` first.
 - The task backlog generated here is a starting point, not a contract. Adjust
   priorities, split tasks, or add new ones freely as the project develops.
-- All governance rules apply during scaffolding. Protected paths, the `/propose`
+- All governance rules apply during scaffolding. Protected paths, the `/rig-propose`
   gate, and secret handling are all still active.
 - `.rig/memory/RIG_GAPS.md` ships with the project scaffold. As you build, the agent
   logs workflow friction to it during `/wrap`. Use `/rig-gaps` to compile and submit

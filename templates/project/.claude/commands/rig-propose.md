@@ -1,4 +1,4 @@
-# Command: /propose
+# Command: /rig-propose
 
 Use this command when you believe a change to The Rig's governance files would
 improve the system. Governance files — `.rig/processes/`, `.rig/rules/`, `.husky/`,
@@ -40,7 +40,7 @@ After applying: tell the agent it's done. It will log the change in
 ## Usage
 
 ```
-/propose
+/rig-propose
 ```
 
 Claude will ask:
@@ -55,7 +55,7 @@ for your review. **No governance file is touched until you say "apply it".**
 
 ## When to use it
 
-Use `/propose` when you've noticed:
+Use `/rig-propose` when you've noticed:
 - A step in a workflow that consistently gets skipped or causes confusion
 - A rule that's either too strict or not strict enough for this project
 - A hook behaviour that needs adjustment
@@ -65,7 +65,7 @@ Use `/propose` when you've noticed:
 
 ## When NOT to use it
 
-Do not use `/propose` for:
+Do not use `/rig-propose` for:
 - Application code changes — edit those directly
 - Memory files (`PROGRESS.md`, `ERRORS.md`, `CONTEXT_SNAPSHOT.md`) — update those directly
 - Task files — manage those directly
