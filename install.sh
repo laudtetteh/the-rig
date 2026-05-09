@@ -102,7 +102,8 @@ is_rig_owned() {
 # The manifest is committed to the repo (not gitignored) so the baseline travels
 # with the project and any team member can run an Upgrade.
 
-MANIFEST_FILE=""  # set during project-layer install (after RIG_DIR is resolved)
+MANIFEST_FILE=""        # set during project-layer install (after RIG_DIR is resolved)
+GLOBAL_MANIFEST_FILE="$HOME/.claude/.rig-global-manifest"  # global layer manifest
 
 read_manifest_hash() {
   # Returns the recorded hash for a given rel path, or empty string if not found.
@@ -141,6 +142,7 @@ PROJECT_TEMPLATES="$SCRIPT_DIR/templates/project"
 DO_GLOBAL=true
 DO_PROJECT=true
 EXTERNAL_RIG_DIR=""   # set via --rig-dir <path>
+RIG_TRACKING=""       # set during project-layer tracking detection; empty for global-only runs
 _FLAG_STRATEGY=""     # set via --strategy <name>   (skips interactive prompt)
 _FLAG_TARGET=""       # set via --target <path>     (skips interactive prompt)
 _FLAG_PROJECT_NAME="" # set via --project-name <n>  (skips interactive prompt)
@@ -313,8 +315,8 @@ else
       _SKIP_COMPONENT_SELECTION=true
       ;;
     3)
-      # Upgrade: project layer only, update Rig-owned files, preserve yours.
-      DO_GLOBAL=false
+      # Upgrade: project + global layers, update Rig-owned files, preserve yours.
+      DO_GLOBAL=true
       COLLISION_STRATEGY="upgrade"
       _SKIP_COMPONENT_SELECTION=true
       ;;
@@ -678,6 +680,89 @@ _copy_file_upgrade() {
   fi
 }
 
+# ── GLOBAL UPGRADE HANDLER ───────────────────────────────────────────────────
+# Like _copy_file_upgrade() but for global-layer files (~/.claude/).
+# All files passed here are treated as Rig-owned — the caller never passes
+# PROFILE.md (personal data that must never be auto-overwritten).
+# Caller sets MANIFEST_FILE="$GLOBAL_MANIFEST_FILE" before calling.
+_copy_global_file_upgrade() {
+  local src="$1"
+  local dest="$2"
+  local base="${3:-}"
+  local rel="${4:-}"
+
+  if [[ ! -f "$dest" ]]; then
+    mkdir -p "$(dirname "$dest")"
+    cp "$src" "$dest"
+    success "Created: ${rel}"
+    write_manifest_entry "$(sha256_file "$dest")" "$rel"
+    return
+  fi
+
+  local new_hash dest_hash manifest_hash
+  new_hash="$(sha256_file "$src")"
+  dest_hash="$(sha256_file "$dest")"
+
+  if [[ -z "$new_hash" ]]; then
+    if cmp -s "$src" "$dest"; then
+      info "Up to date: ${rel}"
+    else
+      warn "sha256 unavailable — cannot detect customizations in: ${rel}"
+    fi
+    return
+  fi
+
+  if [[ "$dest_hash" == "$new_hash" ]]; then
+    info "Up to date: ${rel}"
+    return
+  fi
+
+  manifest_hash="$(read_manifest_hash "$rel")"
+
+  if [[ -z "$manifest_hash" || "$dest_hash" == "$manifest_hash" ]]; then
+    # No prior manifest entry (first upgrade — treat as unmodified) OR
+    # hash matches manifest (unmodified since install) → safe to auto-update.
+    if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
+    cp "$src" "$dest"
+    success "Updated: ${rel}"
+    write_manifest_entry "$new_hash" "$rel"
+  else
+    # dest_hash differs from manifest_hash — user has customized this file.
+    echo ""
+    warn "Customized file detected: ${rel}"
+    echo "  Your version differs from what The Rig originally installed."
+    echo "  The new Rig version also modifies this file."
+    echo ""
+    if [[ ! -t 0 ]]; then
+      info "Non-interactive mode — skipping customized file: ${rel}"
+      info "Run the installer interactively to review and update this file."
+      return
+    fi
+    local choice
+    while true; do
+      read -r -p "$(echo -e "  ${BOLD}?${RESET} (o)verwrite  (s)kip  (d)iff  [o/s/d]: ")" choice
+      case "${choice:-}" in
+        o|O)
+          if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
+          cp "$src" "$dest"
+          success "Updated (overwritten): ${rel}"
+          write_manifest_entry "$new_hash" "$rel"
+          break ;;
+        s|S)
+          info "Skipped (kept your version): ${rel}"
+          break ;;
+        d|D)
+          echo ""
+          echo "  ── diff: your version (a) → new Rig version (b) ──"
+          diff -u "$dest" "$src" | head -100 || true
+          echo "  ── end diff ──"
+          echo "" ;;
+        *) echo "  Please enter o, s, or d." ;;
+      esac
+    done
+  fi
+}
+
 # ── GLOBAL LAYER ─────────────────────────────────────────────────────────────
 if [[ "$DO_GLOBAL" == true ]]; then
   bold "── Global layer (~/.claude/) ──"
@@ -685,49 +770,82 @@ if [[ "$DO_GLOBAL" == true ]]; then
 
   CLAUDE_DIR="$HOME/.claude"
   SKILLS_DIR="$CLAUDE_DIR/skills"
+  DEST_CLAUDE="$CLAUDE_DIR/CLAUDE.md"
 
-  # Profile path
-  DEFAULT_PROFILE_DIR="$HOME/.your-ai-contexts"
-  ask "Where should your personal profile file live?"
-  read -r -p "    Path [${DEFAULT_PROFILE_DIR}/PROFILE.md]: " PROFILE_PATH_INPUT
-  PROFILE_PATH="${PROFILE_PATH_INPUT:-${DEFAULT_PROFILE_DIR}/PROFILE.md}"
+  # Point manifest helpers at the global manifest for this section.
+  _SAVED_MANIFEST_FILE="$MANIFEST_FILE"
+  MANIFEST_FILE="$GLOBAL_MANIFEST_FILE"
 
-  echo ""
-  info "Installing to: $CLAUDE_DIR"
-  info "Profile path:  $PROFILE_PATH"
-  echo ""
+  if [[ "$COLLISION_STRATEGY" == "upgrade" && -f "$DEST_CLAUDE" ]]; then
+    # Upgrading an existing global install — extract profile path from the
+    # installed CLAUDE.md instead of prompting (preserves their actual path).
+    PROFILE_PATH=$(grep -oE '`[^`]+\.md`' "$DEST_CLAUDE" | head -1 | tr -d '`' 2>/dev/null || true)
+    if [[ -z "$PROFILE_PATH" ]]; then
+      PROFILE_PATH="$HOME/.your-ai-contexts/PROFILE.md"
+      warn "Could not detect profile path from existing CLAUDE.md — using default: $PROFILE_PATH"
+    else
+      info "Detected profile path: $PROFILE_PATH"
+    fi
+    echo ""
+  else
+    # Fresh install — prompt for profile path
+    DEFAULT_PROFILE_DIR="$HOME/.your-ai-contexts"
+    ask "Where should your personal profile file live?"
+    read -r -p "    Path [${DEFAULT_PROFILE_DIR}/PROFILE.md]: " PROFILE_PATH_INPUT
+    PROFILE_PATH="${PROFILE_PATH_INPUT:-${DEFAULT_PROFILE_DIR}/PROFILE.md}"
+    echo ""
+    info "Installing to: $CLAUDE_DIR"
+    info "Profile path:  $PROFILE_PATH"
+    echo ""
+  fi
 
   mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR" "$(dirname "$PROFILE_PATH")"
 
   # ── CLAUDE.md ──────────────────────────────────────────────────────────────
-  DEST_CLAUDE="$CLAUDE_DIR/CLAUDE.md"
-  CLAUDE_TMP="$(mktemp /tmp/rig-global-claude-XXXXXX.md)"
+  CLAUDE_TMP="$(mktemp)"
   sed "s|\\[PROFILE_PATH\\]|${PROFILE_PATH}|g" "$GLOBAL_TEMPLATES/CLAUDE.md" > "$CLAUDE_TMP"
-  copy_file "$CLAUDE_TMP" "$DEST_CLAUDE" "$CLAUDE_DIR"
+  if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
+    _copy_global_file_upgrade "$CLAUDE_TMP" "$DEST_CLAUDE" "$CLAUDE_DIR" "CLAUDE.md"
+  else
+    copy_file "$CLAUDE_TMP" "$DEST_CLAUDE" "$CLAUDE_DIR" "CLAUDE.md"
+  fi
   rm -f "$CLAUDE_TMP"
 
   # ── Skills ────────────────────────────────────────────────────────────────
   for skill_src in "$GLOBAL_TEMPLATES/skills/"*.md; do
     skill_name="$(basename "$skill_src")"
     skill_dest="$SKILLS_DIR/$skill_name"
-    copy_file "$skill_src" "$skill_dest" "$SKILLS_DIR"
+    if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
+      _copy_global_file_upgrade "$skill_src" "$skill_dest" "$SKILLS_DIR" "skills/$skill_name"
+    else
+      copy_file "$skill_src" "$skill_dest" "$SKILLS_DIR" "skills/$skill_name"
+    fi
   done
 
   # ── Profile ───────────────────────────────────────────────────────────────
-  if [[ -f "$PROFILE_PATH" ]]; then
-    warn "$PROFILE_PATH already exists — skipping (personal data, never auto-overwritten)."
-    info "To regenerate the template: cp $GLOBAL_TEMPLATES/PROFILE.md.example $PROFILE_PATH"
-  else
-    cp "$GLOBAL_TEMPLATES/PROFILE.md.example" "$PROFILE_PATH"
-    success "Created $PROFILE_PATH"
-    echo ""
-    warn "ACTION REQUIRED: Fill in your personal profile at:"
-    echo "      $PROFILE_PATH"
-    echo "  The agent loads this file at every session start."
+  # Never touched on upgrade — personal data. Only created on fresh install.
+  if [[ "$COLLISION_STRATEGY" != "upgrade" ]]; then
+    if [[ -f "$PROFILE_PATH" ]]; then
+      warn "$PROFILE_PATH already exists — skipping (personal data, never auto-overwritten)."
+      info "To regenerate the template: cp $GLOBAL_TEMPLATES/PROFILE.md.example $PROFILE_PATH"
+    else
+      cp "$GLOBAL_TEMPLATES/PROFILE.md.example" "$PROFILE_PATH"
+      success "Created $PROFILE_PATH"
+      echo ""
+      warn "ACTION REQUIRED: Fill in your personal profile at:"
+      echo "      $PROFILE_PATH"
+      echo "  The agent loads this file at every session start."
+    fi
   fi
+
+  # Restore manifest pointer
+  MANIFEST_FILE="$_SAVED_MANIFEST_FILE"
 
   echo ""
 fi
+
+# Reset backup dir between layers so each layer uses its own base path.
+BACKUP_DIR=""
 
 # ── PROJECT LAYER ─────────────────────────────────────────────────────────────
 if [[ "$DO_PROJECT" == true ]]; then
