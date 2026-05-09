@@ -876,3 +876,56 @@ _is_rig_protected() {
   run bash -c "cd '$TEST_PROJECT' && sh '$hook'"
   [ "$status" -eq 0 ]
 }
+
+# ── Global layer upgrade ──────────────────────────────────────────────────────
+
+_sha256() {
+  sha256sum "$1" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$1" | awk '{print $1}'
+}
+
+@test "upgrade strategy: global Rig-owned file updated when hash matches manifest" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+
+  # First install global layer into fake home (non-interactive: pipe empty input for prompts)
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy skip"
+  [ "$status" -eq 0 ]
+  [ -f "$fake_home/.claude/CLAUDE.md" ]
+
+  # Simulate an older installed version and record its hash in the global manifest
+  printf '# old version\n' > "$fake_home/.claude/CLAUDE.md"
+  local old_hash
+  old_hash=$(_sha256 "$fake_home/.claude/CLAUDE.md")
+  printf '%s  CLAUDE.md\n' "$old_hash" > "$fake_home/.claude/.rig-global-manifest"
+
+  # Run upgrade — CLAUDE.md hash matches manifest → auto-update
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy upgrade"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Updated"* ]]
+
+  # File should no longer contain the old content
+  run grep -c '# old version' "$fake_home/.claude/CLAUDE.md"
+  [ "$output" -eq 0 ]
+}
+
+@test "upgrade strategy: customized global file not overwritten in non-interactive" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+
+  # First install global layer
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy skip"
+  [ "$status" -eq 0 ]
+
+  # Record original hash in manifest
+  local orig_hash
+  orig_hash=$(_sha256 "$fake_home/.claude/CLAUDE.md")
+  printf '%s  CLAUDE.md\n' "$orig_hash" > "$fake_home/.claude/.rig-global-manifest"
+
+  # Simulate user customization (hash now differs from manifest)
+  printf '\n# user customization\n' >> "$fake_home/.claude/CLAUDE.md"
+
+  # Upgrade in non-interactive mode — must NOT overwrite the customized file
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy upgrade"
+  [ "$status" -eq 0 ]
+  grep -q '# user customization' "$fake_home/.claude/CLAUDE.md"
+}

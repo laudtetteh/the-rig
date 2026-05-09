@@ -9,6 +9,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `GLOBAL_MANIFEST_FILE` (`~/.claude/.rig-global-manifest`) tracks SHA256 of installed global files
+- `_copy_global_file_upgrade()` — manifest-aware upgrade handler for global layer files
+- Interactive intent 3 (Upgrade) now also syncs the global layer (`DO_GLOBAL=true`)
+- Global upgrade: auto-extracts existing `PROFILE_PATH` from installed `~/.claude/CLAUDE.md` (no prompt)
+- Global upgrade: `PROFILE.md` is never touched (personal data, always off-limits)
+- 2 new bats tests for global upgrade behavior (75 total)
+
+### Fixed
+- `RIG_TRACKING` was unbound during `--global-only` runs, crashing `init_backup_dir` under `set -u`
+- `mktemp /tmp/rig-global-claude-XXXXXX.md` used non-portable suffix (X's must be at end on macOS); replaced with bare `mktemp`
+- `BACKUP_DIR` reset between global and project layer so each layer uses its correct base path
+
 ---
 
 ## [1.12.0] — 2026-05-07
