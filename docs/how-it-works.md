@@ -34,6 +34,13 @@ Three locations work together. The installer repo produces the other two:
 │  ~/tools/the-rig/templates/    ← source files for both layers   │
 │  ~/tools/the-rig/VERSION       ← current Rig version            │
 │                                                                 │
+│  Key flags (for non-interactive / agent-driven installs):       │
+│    --global-only               install only global layer        │
+│    --project-only              install only project layer       │
+│    --target <path>             project directory to install to  │
+│    --tracking repo|local|external|stealth  tracking mode        │
+│    --strategy merge|upgrade|overwrite|skip  file handling       │
+│                                                                 │
 │  To upgrade: cd ~/tools/the-rig && git pull                     │
 │  Then re-run install.sh with --strategy upgrade                 │
 └───────────────┬─────────────────────────┬───────────────────────┘
@@ -294,6 +301,15 @@ git commit
      │     Apply filter-commit-message-inplace.sh to message file
      │     Strips: Co-authored-by, Signed-off-by, Made-with trailers
      │     Strips: "Generated with Claude/Cursor/Copilot" footer lines
+     │     Validates Conventional Commits subject-line format
+     │       (type(scope): description — skips Merge/Revert/fixup/squash)
+     │     Requires tracker-specific issue reference when issue-tracking: is set:
+     │       github → [#N] or (#N)
+     │       linear → [TEAM-123]
+     │       trello → [trello:CARD-ID]
+     │       gus    → [W-1234567]
+     │       none   → no requirement
+     │     Bypass: SKIP_COMMIT_VALIDATION=1
      │
      └─► post-commit
            Re-read committed message
@@ -397,7 +413,7 @@ proportion to the complexity of the work — not because of Rig overhead.
 
 ## The command set
 
-Thirteen slash commands covering the full development lifecycle:
+Fourteen slash commands covering the full development lifecycle:
 
 ### Project bootstrap
 | Command | Triggers | Key behaviour |
@@ -431,6 +447,7 @@ Thirteen slash commands covering the full development lifecycle:
 | `/session-name` | Session naming | Derives a session name from current PROGRESS entries and presents it as a suggestion — callable at any time, not just at wrap |
 | `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, runs self-improvement check (logs Rig gaps), trims PROGRESS/ERRORS, suggests session name, surfaces next priority |
 | `/rig-gaps` | Self-improvement | Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats a report with submission instructions for The Rig dev session |
+| `/rig-upgrade` | Upgrade workflow | Pulls latest Rig source (`git pull` in installer repo) and re-runs `install.sh` against the current project with `--strategy upgrade` |
 | `/new-feature` | *(deprecated)* | Redirects to `/task`. Kept for backward compatibility only. |
 
 ---
@@ -463,13 +480,12 @@ These sit alongside the existing `base-branch:` and `housekeeping:` fields:
 |---|---|---|---|
 | `base-branch:` | `main` | Any branch name | The integration branch all PRs target |
 | `housekeeping:` | `direct-push` | `direct-push` \| `pr-required` | How `/post-merge` handles memory-update commits |
-| `issue-tracking:` | `github` | `github` \| `none` | Whether GitHub issues are required before code; skips issue gate if `none` |
+| `issue-tracking:` | `github` | `github` \| `linear` \| `trello` \| `gus` \| `none` | Which issue tracker is required; shapes ref format in commit messages and intake wizard |
+| `issue-creator:` | `user` | `user` \| `agent` | GitHub only: whether the agent creates issues itself (`agent`) or waits for the user to provide a number (`user`) |
 | `secret-scanner:` | `gitleaks` | `gitleaks` \| `none` | Secret scanning on commit; disabling requires editing `.husky/pre-commit` |
 | `commit-cleanup:` | `yes` | `yes` \| `no` | Whether auto-injected tool footers are stripped from commit messages |
 
-The `issue-tracking: none` setting is the most impactful: it disables the issue-number
-gate in `/task`, `/ship`, `SHIP_WORKFLOW`, and `NEW_TASK_WORKFLOW`. Use it for personal
-projects, prototypes, or repos that don't use GitHub issues.
+The `issue-tracking:` setting shapes the entire task intake and commit workflow: the ref format expected in commit messages (`[#N]`, `[TEAM-123]`, `[trello:ID]`, `[W-N]`) and the intake question in `/task` both follow the configured tracker. Set to `none` for personal projects, prototypes, or repos without an issue tracker.
 
 Branch creation behavior is also parameterized by autonomy level:
 - **Low/Medium**: always confirm the base branch before `git checkout -b`

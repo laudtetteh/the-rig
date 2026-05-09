@@ -23,6 +23,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `mktemp /tmp/rig-global-claude-XXXXXX.md` used non-portable suffix (X's must be at end on macOS); replaced with bare `mktemp`
 - `BACKUP_DIR` reset between global and project layer so each layer uses its correct base path
 
+### Changed
+
+- **Documentation updated for v1.13.0 state** (`README.md`, `docs/how-it-works.md`, `docs/customizing.md`, `docs/decisions.md`): commit-msg hook description now includes Conventional Commits validation and per-tracker issue ref enforcement; `/rig-upgrade` added to command lists; installer flags section in how-it-works documents `--tracking`, `--target`, `--strategy`; issue-tracking settings table expanded to all five values; `--rig-dir` → `--tracking external` corrected in customizing.md; three new decision entries (#11–#13) for `--tracking` flag decoupling, global upgrade manifest, and multi-tracker issue enforcement. Closes #160.
+
 ---
 
 ## [1.12.0] — 2026-05-07

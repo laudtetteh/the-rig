@@ -236,6 +236,7 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 /session-name →  derive a session name from current work and present it as a suggestion
 /wrap         →  write CONTEXT_SNAPSHOT, ensure memory is current, log any Rig gaps before closing
 /rig-gaps     →  compile workflow friction from RIG_GAPS.md + ERRORS.md; format for submission to The Rig dev session
+/rig-upgrade  →  pull latest Rig source and re-run the installer with --strategy upgrade
 ```
 
 ---
@@ -248,7 +249,8 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 | `post-tool.sh` | After every Claude Code tool call | PROGRESS.md being skipped after a commit; clears commit sentinel after use |
 | `stop.sh` | When the agent finishes its final response | CONTEXT_SNAPSHOT going stale — updates `Last updated:` and appends a session-end boundary to PROGRESS.md without requiring `/wrap` |
 | `pre-commit` | Before every git commit | Secrets reaching the repository |
-| `commit-msg` + `post-commit` | On every git commit | Auto-injected tool footers (`Co-Authored-By: Claude`, `Made-with-Claude`, etc.) from embedding in commit messages — keeps history clean |
+| `commit-msg` | On every git commit | (1) Strips auto-injected tool footers (`Co-Authored-By: Claude`, `Made-with-Claude`, etc.) from commit messages; (2) validates Conventional Commits subject-line format; (3) requires a tracker-specific issue reference (`[#N]` for GitHub, `[TEAM-123]` for Linear, etc.) when `issue-tracking:` is set in `CLAUDE.md` |
+| `post-commit` | After every git commit | Re-applies footer stripping in case the git client re-injected footers after `commit-msg` ran |
 
 ---
 

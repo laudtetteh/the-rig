@@ -12,13 +12,13 @@ in the project `CLAUDE.md`. Set these once and every session inherits them:
 ```
 base-branch: main          # integration branch all PRs target
 housekeeping: direct-push  # direct-push | pr-required (how /post-merge commits)
-issue-tracking: github     # github | none (skip issue gate for personal/prototype repos)
+issue-tracking: github     # github | linear | trello | gus | none
+issue-creator: user        # user (default) | agent — GitHub only: agent auto-creates issues
 secret-scanner: gitleaks   # gitleaks | none
 commit-cleanup: yes        # yes | no (strip auto-injected tool footers from commits)
 ```
 
-**`issue-tracking: none`** is the most common override for non-GitHub or personal projects.
-It disables the issue-number requirement in `/task`, `/ship`, and commit messages.
+**`issue-tracking:`** shapes the entire task intake and commit workflow. The ref format enforced in the `commit-msg` hook (`[#N]`, `[TEAM-123]`, `[trello:ID]`, `[W-N]`) and the intake question in `/task` both follow the configured tracker. Set to `none` for personal projects, prototypes, or repos without an issue tracker.
 
 For deeper customization of individual components, see the sections below.
 
@@ -206,11 +206,10 @@ echo ".rig/" >> .git/info/exclude
 
 ### Option B — External directory
 
-Install `.rig/` to a path outside the repo entirely. Pass `--rig-dir` to the
-installer:
+Install `.rig/` to a path outside the repo entirely. Use `--tracking external` with an optional `--rig-dir` to specify the path:
 
 ```bash
-~/tools/the-rig/install.sh --project-only --rig-dir ~/.rig/projects/my-project
+~/tools/the-rig/install.sh --project-only --tracking external --rig-dir ~/.rig/projects/my-project
 ```
 
 Or choose option 3 in the interactive tracking prompt. The installer will:
@@ -229,7 +228,7 @@ The project root stays clean. The agent finds its memory and rules via
 > ⚠️ **Re-clone warning:** when you clone the project on a new machine, the
 > external `.rig/` directory doesn't travel with it. You must manually restore
 > the external directory on the new machine — either by re-running the installer
-> with `--rig-dir` pointing to the same path, or by copying it from a backup.
+> with `--tracking external --rig-dir <same-path>`, or by copying it from a backup.
 > See `docs/troubleshooting.md` → "CONTEXT_SNAPSHOT.md is missing after a re-clone"
 > for the full recovery steps.
 

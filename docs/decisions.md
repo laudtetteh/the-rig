@@ -121,3 +121,39 @@ Why The Rig is built the way it is. Each entry covers what was decided, what was
 **Rationale:** Agents under time pressure or approaching a context limit routinely skip housekeeping. The auto-stub means there's always a placeholder entry after every commit — the agent expands it during wrap-up, but if the session ends abruptly, the record still exists. The stub is idempotent (won't duplicate if the hash is already in the file) and clearly marked as auto-logged.
 
 **Tradeoff accepted:** Heuristic-based detection (hash in brackets) could produce false positives if non-commit bash output happens to match the pattern. Accepted — a spurious stub is much less harmful than a missing entry.
+
+---
+
+## 11. `--tracking` flag is orthogonal to `--target`
+
+**Decided:** `--tracking repo|local|external|stealth` is a separate flag that sets the tracking mode independently of `--target` (which only sets the destination path).
+
+**Rejected:** Using `--target` as the signal for tracking mode (i.e. "if `--target` is provided, use local tracking"), which was the original behaviour.
+
+**Rationale:** The original coupling meant that any non-interactive install with `--target` would silently default to local tracking, even when the user intended stealth or external. Decoupling lets users run fully non-interactive stealth installs: `./install.sh --target <path> --tracking stealth --strategy merge`. The interactive prompt still exists when neither flag is provided.
+
+**Tradeoff accepted:** One more flag to remember for scripted installs. Documented in `docs/agent-install.md` with full non-interactive examples.
+
+---
+
+## 12. Global layer now tracked by a separate upgrade manifest
+
+**Decided:** The global layer (`~/.claude/CLAUDE.md`, `~/.claude/skills/`) has its own manifest file (`~/.claude/.rig-global-manifest`) separate from the project-layer `.rig/memory/.rig-manifest`.
+
+**Rejected:** Re-using the project manifest for global files, or having no manifest for the global layer (leaving it unprotected from silent overwrites on upgrade).
+
+**Rationale:** The global and project layers have different file locations and lifecycles. Sharing a manifest would conflate two unrelated sets of files. Without a global manifest, every upgrade run would either silently overwrite `~/.claude/CLAUDE.md` (losing user customizations) or never update it (leaving Rig rule changes undelivered). The separate manifest gives the same upsert/detect-customization behaviour for both layers.
+
+**Tradeoff accepted:** Two manifest files to maintain. Acceptable — they are in different directories and the same `write_manifest_entry()` / `read_manifest_hash()` functions handle both (via temporary `MANIFEST_FILE` redirection).
+
+---
+
+## 13. Issue tracking is configurable per project with per-tracker commit ref enforcement
+
+**Decided:** `issue-tracking: github|linear|trello|gus|none` controls the entire intake and commit workflow. The `commit-msg` hook validates the ref format for the configured tracker at every commit.
+
+**Rejected:** GitHub-only enforcement (the original design), or treating all non-GitHub trackers as `none` (no enforcement).
+
+**Rationale:** Real teams use Linear, Trello, GUS, and other trackers. The original GitHub-only gate would either force teams to set `issue-tracking: none` (losing all enforcement) or use GitHub issues in addition to their real tracker (double bookkeeping). Per-tracker enforcement extends the discipline — commit messages prove the ticket exists for whichever tracker the team uses.
+
+**Tradeoff accepted:** Each new tracker type requires a regex pattern in `commit-msg` and handling in the `/task` intake wizard. Acceptable — the pattern is simple and each tracker has a well-defined ref format.
