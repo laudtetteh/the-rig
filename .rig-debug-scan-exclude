@@ -1,0 +1,12 @@
+# .rig-debug-scan-exclude
+#
+# Glob patterns for paths that should be excluded from debug artifact scanning.
+# One pattern per line. Lines starting with # are ignored.
+# Uses shell glob syntax (e.g. vendor/**, templates/project/.husky/*).
+#
+# Add paths here when the pre-commit debug scanner produces false positives —
+# for example, template files that define the very patterns being scanned for,
+# or vendor directories that contain legitimate uses of debug APIs.
+
+# Template hook files contain debug pattern definitions as string literals
+templates/project/.husky/*

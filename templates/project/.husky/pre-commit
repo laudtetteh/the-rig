@@ -63,7 +63,7 @@ breakpoint\(
 binding\.pry
 byebug
 System\.out\.println\(
-dd\(
+(^|[^a-zA-Z0-9_])dd\(
 dump\(.*=>>"
 
 # Merge with project-specific patterns if present
@@ -74,6 +74,13 @@ if [ -f ".rig-debug-patterns" ]; then
     ALL_PATTERNS="$ALL_PATTERNS
 $EXTRA"
   fi
+fi
+
+# Load project-specific path exclusions (.rig-debug-scan-exclude)
+# One glob pattern per line (e.g. vendor/**, templates/project/.husky/*). # lines ignored.
+RIG_SCAN_EXCLUDES=""
+if [ -f ".rig-debug-scan-exclude" ]; then
+  RIG_SCAN_EXCLUDES=$(grep -v '^#' .rig-debug-scan-exclude | grep -v '^$' || true)
 fi
 
 # Build a single combined regex (patterns joined with |)
@@ -94,6 +101,17 @@ for f in $STAGED_FILES; do
     *.pdf|*.zip|*.tar|*.gz|*.mp4|*.mp3|*.mov) continue ;;
     .husky/*|.claude/hooks/*) continue ;;
   esac
+
+  # Skip paths matching .rig-debug-scan-exclude glob patterns
+  if [ -n "$RIG_SCAN_EXCLUDES" ]; then
+    _rig_skip=0
+    while IFS= read -r _rig_excl; do
+      case "$f" in $_rig_excl) _rig_skip=1; break ;; esac
+    done <<_RIG_EXCL_EOF
+$RIG_SCAN_EXCLUDES
+_RIG_EXCL_EOF
+    [ "$_rig_skip" -eq 1 ] && continue
+  fi
 
   # Get the staged version of the file and scan it
   # || true: grep exits 1 on no match; sh -e (used by Husky) treats that as failure

@@ -513,15 +513,22 @@ copy_file() {
     merge)
       # settings.json gets special treatment; everything else is skipped
       if [[ "$(basename "$dest")" == "settings.json" && "$dest" == *".claude/settings.json" ]]; then
-        local tmp_merged
+        local tmp_merged tmp_src_subst abs_target escaped_target
         tmp_merged="$(mktemp /tmp/rig-settings-merged-XXXXXX.json)"
-        if merge_settings_json "$dest" "$src" "$tmp_merged"; then
+        # Substitute [REPO_ROOT] in a temp copy of the incoming template before
+        # merging, so dedup can compare identical command strings (not template
+        # placeholders vs real paths).
+        tmp_src_subst="$(mktemp /tmp/rig-settings-src-XXXXXX.json)"
+        abs_target="$(cd "$TARGET" && pwd)"
+        escaped_target="${abs_target//\//\\/}"
+        sed "s/\\[REPO_ROOT\\]/${escaped_target}/g" "$src" > "$tmp_src_subst"
+        if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged"; then
           cp "$tmp_merged" "$dest"
           success "Merged .claude/settings.json"
         else
           info "Skipped settings.json (merge failed — see warning above)"
         fi
-        rm -f "$tmp_merged"
+        rm -f "$tmp_merged" "$tmp_src_subst"
       else
         info "Skipped (exists): ${dest#${base}/}"
       fi
@@ -558,15 +565,21 @@ _copy_file_upgrade() {
 
   # ── settings.json: always smart-merge ──────────────────────────────────────
   if [[ "$(basename "$dest")" == "settings.json" && "$dest" == *".claude/settings.json" ]]; then
-    local tmp_merged
+    local tmp_merged tmp_src_subst abs_target escaped_target
     tmp_merged="$(mktemp /tmp/rig-settings-merged-XXXXXX.json)"
-    if merge_settings_json "$dest" "$src" "$tmp_merged"; then
+    # Substitute [REPO_ROOT] before merging so dedup compares real paths,
+    # not template placeholders vs already-substituted existing commands.
+    tmp_src_subst="$(mktemp /tmp/rig-settings-src-XXXXXX.json)"
+    abs_target="$(cd "$TARGET" && pwd)"
+    escaped_target="${abs_target//\//\\/}"
+    sed "s/\\[REPO_ROOT\\]/${escaped_target}/g" "$src" > "$tmp_src_subst"
+    if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged"; then
       cp "$tmp_merged" "$dest"
       success "Merged .claude/settings.json"
     else
       info "Skipped settings.json (merge failed — see warning above)"
     fi
-    rm -f "$tmp_merged"
+    rm -f "$tmp_merged" "$tmp_src_subst"
     return
   fi
 
