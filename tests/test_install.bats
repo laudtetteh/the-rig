@@ -852,6 +852,93 @@ _is_rig_protected() {
   [ "$status" -eq 0 ]
 }
 
+@test "commit-msg: rejects message missing Linear ref when issue-tracking: linear" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  printf 'issue-tracking: linear\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  printf 'feat(auth): add login flow\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Linear"* ]]
+}
+
+@test "commit-msg: accepts message with Linear ref when issue-tracking: linear" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  printf 'issue-tracking: linear\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  printf 'feat(auth): add login flow [ENG-123]\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -eq 0 ]
+}
+
+@test "commit-msg: rejects message missing Trello ref when issue-tracking: trello" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  printf 'issue-tracking: trello\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  printf 'feat(auth): add login flow\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Trello"* ]]
+}
+
+@test "commit-msg: accepts message with Trello ref when issue-tracking: trello" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  printf 'issue-tracking: trello\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  printf 'feat(auth): add login flow [trello:abc123]\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -eq 0 ]
+}
+
+@test "commit-msg: rejects message missing GUS ref when issue-tracking: gus" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  printf 'issue-tracking: gus\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  printf 'feat(auth): add login flow\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GUS"* ]]
+}
+
+@test "commit-msg: accepts message with GUS ref when issue-tracking: gus" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  printf 'issue-tracking: gus\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  printf 'feat(auth): add login flow [W-1234567]\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -eq 0 ]
+}
+
 # ── pre-commit: .rig-debug-scan-exclude path exclusions ──────────────────────
 
 @test "pre-commit: .rig-debug-scan-exclude skips matched paths" {
