@@ -4,8 +4,8 @@
 # 1. Strips auto-injected tool footers (Co-Authored-By, Made-with-Claude, etc.)
 #    to keep history clean and human-authored in tone.
 # 2. Validates Conventional Commits subject-line format.
-# 3. If issue-tracking: github (the default), requires a GitHub issue reference
-#    ([#N] or (#N)) in the subject line.
+# 3. Requires an issue/ticket reference in the subject line, format depending on
+#    issue-tracking: in CLAUDE.md (github | linear | trello | gus | none).
 #
 # To disable format validation: set SKIP_COMMIT_VALIDATION=1 before committing.
 # To disable footer stripping: remove or comment out the filter block below.
@@ -48,7 +48,7 @@ if ! echo "$SUBJECT" | grep -qE "^($VALID_TYPES)(\(.+\))?: .+"; then
   exit 1
 fi
 
-# ── Step 3: Require issue reference if issue-tracking: github ────────────────
+# ── Step 3: Require issue/ticket reference based on issue-tracking setting ───
 CLAUDE_MD="${ROOT}/CLAUDE.md"
 ISSUE_TRACKING=""
 if [ -f "$CLAUDE_MD" ]; then
@@ -57,19 +57,63 @@ fi
 # Default to github if not set
 : "${ISSUE_TRACKING:=github}"
 
-if [ "$ISSUE_TRACKING" = "github" ]; then
-  # Accept both [#N] (convention) and (#N) (GitHub squash-merge auto-format)
-  if ! echo "$SUBJECT" | grep -qE '(\[#[0-9]+\]|\(#[0-9]+\))'; then
-    echo ""
-    echo "ERROR: Commit message must include a GitHub issue reference."
-    echo "  Expected: type(scope): description [#N]"
-    echo "  Got:      $SUBJECT"
-    echo "  Create the issue first, then reference it: gh issue create ..."
-    echo ""
-    echo "  To bypass: SKIP_COMMIT_VALIDATION=1 git commit ..."
-    echo ""
-    exit 1
-  fi
-fi
+case "$ISSUE_TRACKING" in
+  github)
+    # Accept both [#N] (convention) and (#N) (GitHub squash-merge auto-format)
+    if ! echo "$SUBJECT" | grep -qE '(\[#[0-9]+\]|\(#[0-9]+\))'; then
+      echo ""
+      echo "ERROR: Commit message must include a GitHub issue reference."
+      echo "  Expected: type(scope): description [#N]"
+      echo "  Got:      $SUBJECT"
+      echo "  Create the issue first: gh issue create ..."
+      echo ""
+      echo "  To bypass: SKIP_COMMIT_VALIDATION=1 git commit ..."
+      echo ""
+      exit 1
+    fi
+    ;;
+  linear)
+    # Linear ticket format: [TEAM-123] where TEAM is one or more uppercase letters
+    if ! echo "$SUBJECT" | grep -qE '\[[A-Z]+-[0-9]+\]'; then
+      echo ""
+      echo "ERROR: Commit message must include a Linear ticket reference."
+      echo "  Expected: type(scope): description [TEAM-123]"
+      echo "  Got:      $SUBJECT"
+      echo ""
+      echo "  To bypass: SKIP_COMMIT_VALIDATION=1 git commit ..."
+      echo ""
+      exit 1
+    fi
+    ;;
+  trello)
+    # Trello card format: [trello:CARD-ID]
+    if ! echo "$SUBJECT" | grep -qE '\[trello:[^]]+\]'; then
+      echo ""
+      echo "ERROR: Commit message must include a Trello card reference."
+      echo "  Expected: type(scope): description [trello:CARD-ID]"
+      echo "  Got:      $SUBJECT"
+      echo ""
+      echo "  To bypass: SKIP_COMMIT_VALIDATION=1 git commit ..."
+      echo ""
+      exit 1
+    fi
+    ;;
+  gus)
+    # GUS work item format: [W-1234567]
+    if ! echo "$SUBJECT" | grep -qE '\[W-[0-9]+\]'; then
+      echo ""
+      echo "ERROR: Commit message must include a GUS work item reference."
+      echo "  Expected: type(scope): description [W-1234567]"
+      echo "  Got:      $SUBJECT"
+      echo ""
+      echo "  To bypass: SKIP_COMMIT_VALIDATION=1 git commit ..."
+      echo ""
+      exit 1
+    fi
+    ;;
+  none|*)
+    # No tracker configured — no reference required
+    ;;
+esac
 
 exit 0

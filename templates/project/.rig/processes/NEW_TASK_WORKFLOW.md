@@ -13,30 +13,41 @@
 
 ---
 
-## Step 0 — GitHub issue first
+## Step 0 — Issue/ticket first
 
 **Read `issue-tracking:` from `CLAUDE.md` before proceeding.**
 
-- **If `issue-tracking: none`:** skip this step. No issue number is required in the task file or commit messages. Continue to Step 1.
-- **If `issue-tracking: github`** (or field absent — default): follow the full step below.
+| `issue-tracking` value | Required before Step 1 |
+|---|---|
+| `github` (or absent) | GitHub issue `#N`; read `issue-creator:` to decide who creates it |
+| `linear` | Linear ticket ID (e.g. `ENG-123`); user always provides |
+| `trello` | Trello card ID; user always provides |
+| `gus` | GUS work item ID (e.g. `W-1234567`); user always provides |
+| `none` | No ticket required — skip this step |
 
-Before any code is written, a GitHub issue must exist and be linked in the task file.
-The `/task` wizard enforces this: it will not proceed to Part 2 without an issue number.
-If you are running this workflow without going through `/task`, stop and create the issue now.
+**If `issue-tracking: github`** (or absent):
 
-**Issue validation — required before Step 1.** Open the task file and find the
-`**GitHub issue**: #[N]` field. Apply these rules:
+Also read `issue-creator:` (default: `user`).
+- `issue-creator: user`: block until the user provides `#N`. Do not proceed without it.
+- `issue-creator: agent`: create the issue now with `gh issue create`, note the `#N`, proceed.
+  If the user already provided a number, use that instead — skip creation.
+
+**Ticket validation — required before Step 1.** Open the task file and find the
+`**Issue**: [ref]` field. Apply these rules:
 - If the field is empty, `N/A`, `TBD`, or absent: **stop. Do not proceed to Step 1.**
-  Either run `/task` to create a proper intake, or create the GitHub issue manually
-  and update the field before continuing. A task without a linked issue cannot be activated.
-- If the field contains a valid issue number (e.g. `#42`): proceed.
+  Either run `/task` to create a proper intake, or add the ticket reference manually.
+- If the field contains a valid reference for the configured tracker: proceed.
 
-This check applies whether the task was opened via `/task`, picked from the backlog
-manually, or resumed from `.rig/tasks/active/`.
+This check applies whether the task was opened via `/task`, picked from the backlog,
+or resumed from `.rig/tasks/active/`.
 
-The issue number belongs in:
-- The task file's `**GitHub issue**: #[N]` field
-- Every commit message on this branch: `feat(scope): description [#N]`
+The ticket reference belongs in:
+- The task file's `**Issue**: [ref]` field
+- Every commit message on this branch (format per tracker):
+  - GitHub: `feat(scope): description [#N]`
+  - Linear: `feat(scope): description [ENG-123]`
+  - Trello: `feat(scope): description [trello:CARD-ID]`
+  - GUS: `feat(scope): description [W-1234567]`
 
 ---
 

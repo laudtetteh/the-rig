@@ -39,20 +39,31 @@ Ask the user the following. Collect all answers before moving to Part 2.
    the codebase (what service, module, or directory will this touch?).
 3. **Hard constraints?** Any deadline, off-limits paths, technology restrictions, or
    things that must not change?
-4. **GitHub issue number?** Read `issue-tracking:` from `CLAUDE.md` first.
-   - **If `issue-tracking: github`** (or field is absent — default): an issue is required.
-     - If the user provides a number (e.g. `#42`): note it and continue.
-     - If no issue exists yet: **stop here.** Say exactly:
-       > "Every task needs a GitHub issue before we start. Create one now and share
-       > the number — I'll wait. It goes in the task file and every commit."
+4. **Issue/ticket?** Read `issue-tracking:` and `issue-creator:` from `CLAUDE.md` first.
+
+   - **`issue-tracking: github`** (or field absent — default):
+     - Also read `issue-creator:` (default: `user`).
+     - **`issue-creator: user`**: A GitHub issue is required. If the user already provided a number (e.g. `#42`), note it and continue. If none exists yet, stop and say exactly:
+       > "Every task needs a GitHub issue before we start. Create one now and share the number — I'll wait. It goes in the task file and every commit."
        Do not proceed to Part 2 until a real issue number is provided.
-   - **If `issue-tracking: none`**: skip the issue requirement. Note in the task file:
-     `**GitHub issue**: N/A (issue-tracking: none)`. Continue to Part 2 immediately.
+     - **`issue-creator: agent`**: Create the GitHub issue now using the task description from question 1. Run:
+       ```bash
+       gh issue create --title "[task title]" --body "[one-line context]"
+       ```
+       Note the number, tell the user: "Created issue #[N]. Proceeding." If the user already provided a number, use that instead — skip creation.
+
+   - **`issue-tracking: linear`**: Ask for the existing Linear ticket ID (e.g. `ENG-123`). Note in the task file: `**Issue**: ENG-123`. Agent never creates Linear tickets. If no ticket exists, stop and ask the user to create one.
+
+   - **`issue-tracking: trello`**: Ask for the existing Trello card ID or short URL. Note in the task file: `**Issue**: trello:CARD-ID`. Agent never creates Trello cards.
+
+   - **`issue-tracking: gus`**: Ask for the existing GUS work item ID (e.g. `W-1234567`). Note in the task file: `**Issue**: W-1234567`. Agent never creates GUS items.
+
+   - **`issue-tracking: none`**: Skip the issue requirement. Note in the task file: `**Issue**: N/A (issue-tracking: none)`. Continue to Part 2 immediately.
 
 After collecting all answers, confirm back:
 
 > "Got it. You want to [restate task in one sentence], working in [area], with
-> [constraints or 'no hard constraints']. Issue: #[N]. Let's configure how I'll operate."
+> [constraints or 'no hard constraints']. Issue: [ref]. Let's configure how I'll operate."
 
 ---
 

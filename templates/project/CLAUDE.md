@@ -112,8 +112,20 @@ issue-tracking: github
 
 | Value | Behaviour |
 |---|---|
-| `github` | GitHub issues are required before any code is written. `/task` blocks until an issue number is provided. Issue number goes in every commit. `gh` CLI is used for all PR/issue operations. |
-| `none` | No issue tracker in use. Issue number requirement is skipped in `/task`, `/ship`, and commit messages. Use for personal projects, prototypes, or non-GitHub repos. |
+| `github` | GitHub issues required. `/task` blocks until issue number provided (or agent creates one if `issue-creator: agent`). Ref format: `[#N]`. `gh` CLI used for all PR/issue operations. |
+| `linear` | Linear tickets required. User provides existing ticket ID (e.g. `ENG-123`). Ref format: `[ENG-123]`. Agent never creates Linear tickets. |
+| `trello` | Trello cards required. User provides existing card ID. Ref format: `[trello:CARD-ID]`. Agent never creates Trello cards. |
+| `gus` | GUS work items required. User provides existing item ID (e.g. `W-1234567`). Ref format: `[W-1234567]`. Agent never creates GUS items. |
+| `none` | No issue tracker. Issue requirement is skipped in `/task`, `/ship`, and commit messages. Use for personal projects or prototypes. |
+
+```
+issue-creator: user
+```
+
+| Value | Behaviour |
+|---|---|
+| `user` | (Default) Agent blocks and waits for the user to provide a ticket number before starting any task. |
+| `agent` | Agent creates the GitHub issue itself using the task description, then proceeds immediately. **Only applies when `issue-tracking: github`.** For all other trackers, `user` behavior is always used regardless of this setting. |
 
 ```
 secret-scanner: gitleaks
