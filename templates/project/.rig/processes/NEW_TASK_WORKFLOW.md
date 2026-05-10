@@ -206,9 +206,13 @@ In this order:
    *(Was there anything about The Rig itself that slowed you down, was missing, or felt wrong?
    Log it here — see `/rig-gaps` for the submission workflow.)*
 
-7. Commit with a conventional commit message referencing the task name and issue number
+7. **If the task has a `## Batches` section:** verify all batch rows have a commit
+   hash filled in before moving to done. Leave any pending rows blank — do not
+   fabricate hashes.
 
-8. Follow `SHIP_WORKFLOW.md` to open the PR
+8. Commit with a conventional commit message referencing the task name and issue number
+
+9. Follow `SHIP_WORKFLOW.md` to open the PR
 
 > **Staging note:** Stage the task file **only after** it has been moved to `.rig/tasks/done/`.
 > Never commit a task file from `.rig/tasks/active/` — it creates a confusing history where

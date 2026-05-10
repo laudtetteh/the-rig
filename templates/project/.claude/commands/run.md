@@ -99,13 +99,18 @@ For each task in the confirmed queue:
 
 3. **Execute according to autonomy level.** See the execution guide below.
 
-4. **Complete the task.** When all acceptance criteria are met:
+4. **After each commit in a multi-batch task:** if the task file has a `## Batches`
+   section, fill in the `Commit` column for the batch just completed. Use the short
+   hash (`git log -1 --format="%h"`). If this commit closes a PR checkpoint, record
+   the PR number too.
+
+5. **Complete the task.** When all acceptance criteria are met:
    - Fill in `## Done notes` in the task file
    - Move the task file from `.rig/tasks/active/` (or `.rig/tasks/backlog/`) to `.rig/tasks/done/`
    - Append an entry to `.rig/memory/PROGRESS.md`
    - Run the pre-ship checklist (`/ship`) before opening any PR
 
-5. **Decide whether to continue.** See chaining rules below.
+6. **Decide whether to continue.** See chaining rules below.
 
 ---
 
