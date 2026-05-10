@@ -11,6 +11,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.15.0] — 2026-05-09
+
+### Added
+- **`/rig-gaps --submit`** (`templates/project/.claude/commands/rig-gaps.md`): opt-in GitHub issue creation. When `.rig/memory/.rig-contribute-enabled` sentinel exists and `gh` is authenticated, each unsubmitted gap entry is reviewed individually (yes / edit / skip / stop) and posted as a public issue to `laudtetteh/the-rig`. Submitted entries are marked with `[submitted: github:#N YYYY-MM-DD]` in `RIG_GAPS.md`. Closes #131.
+- **`rig-gaps-push-target:` and contribute mode documentation** in `templates/project/CLAUDE.md`: documents the `rig-gaps-push-target:` field and the `.rig-contribute-enabled` opt-in sentinel with the `touch` command and privacy notice.
+
+### Changed
+- **`docs/how-it-works.md`**: command count updated 14 → 17; `/sprint`, `/feature-context` added to command tables; `/rig-gaps` entry updated to document `--push` and `--submit` flags; `commit-msg` section documents `# no-issue` bypass; `stop.sh` section documents auto-checkpoint; project settings table adds `rig-gaps-push-target:` field. Closes #182.
+- **`docs/customizing.md`**: `rig-gaps-push-target:` added to project settings quick-reference block; new section documents the field and the `/rig-gaps --submit` contribute-mode opt-in. Closes #182.
+
+---
+
 ## [1.14.0] — 2026-05-09
 
 ### Added
