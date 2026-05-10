@@ -57,7 +57,10 @@ Read the `**Session name:**` field from `.rig/memory/CONTEXT_SNAPSHOT.md`.
 
 ### 3 — Derive the name
 
-Format:
+Use a **tiered format** based on how many meaningful units of work this session produced.
+Count one "unit" per merged PR, completed task, or significant fix.
+
+#### Tier 1 — ≤5 units (list format)
 
 ```
 type short-desc #N | type short-desc #N | ...
@@ -66,7 +69,40 @@ type short-desc #N | type short-desc #N | ...
 - `type` matches a git commit type: `fix`, `feat`, `chore`, `refactor`, `devops`, `docs`, `test`
 - `short-desc` is 3–6 words — enough to identify the work at a glance
 - Include the PR or issue number when known
-- Keep the full string under ~100 characters
+- Keep under ~100 characters
+
+Example: `fix step accordion layout #184 | feat custom-permissions #152`
+
+#### Tier 2 — 6–15 units (grouped format)
+
+Group by commit type. For each type, list the 1–3 most significant feature areas
+affected (omit the rest). Include a count if there were more.
+
+```
+type(area, area) | type(area) x3 | type x2
+```
+
+Example: `feat(auth, dashboard) | fix(billing x4, ui) | chore x3`
+
+- Use the scope area, not individual issue numbers
+- `x N` suffix means N items of that type; omit if N = 1
+- Keep under ~100 characters; drop the smallest groups if over
+
+#### Tier 3 — 16+ units (sprint summary format)
+
+```
+sprint: N issues · feat/X fix/Y chore/Z · #A–#B
+```
+
+- `N` is the total issue/PR count
+- `feat/X fix/Y chore/Z` shows the count per dominant type (omit types with 0)
+- `#A–#B` is the issue number range (lowest to highest)
+- Keep to one line
+
+Example: `sprint: 23 issues · feat/4 fix/15 chore/4 · #130–#152`
+
+If the session covered a named milestone or sprint (e.g. a GitHub milestone), use
+the milestone name as a prefix: `milestone: Sprint 3 · 23 issues · feat/4 fix/15 · #130–#152`
 
 ### 4 — Present the suggestion
 

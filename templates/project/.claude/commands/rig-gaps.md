@@ -91,3 +91,64 @@ If the user confirms:
 - Confirm: "[N] entries marked as submitted."
 
 If the user declines or there's nothing to mark, skip silently.
+
+---
+
+## Push mode (developer shortcut)
+
+If the user says **"push"**, **"--push"**, or **"submit to rig"**, run this flow instead
+of (or after) displaying the report. This is a same-machine shortcut — it works only
+when The Rig's own repo is accessible on disk.
+
+### Step P1 — Resolve the destination
+
+Read `rig-gaps-push-target:` from `CLAUDE.md`:
+
+```bash
+PUSH_TARGET=$(grep "^rig-gaps-push-target:" "$REPO/CLAUDE.md" | awk '{print $2}' | head -1)
+```
+
+If the field is absent or empty, fail gracefully:
+> "No `rig-gaps-push-target:` set in `CLAUDE.md`. Add a line like:
+> `rig-gaps-push-target: /Users/you/.rig/projects/the-rig/memory/RIG_GAPS.md`
+> Then retry."
+Stop.
+
+Verify the target file exists:
+```bash
+[[ -f "$PUSH_TARGET" ]] || { echo "Target not found: $PUSH_TARGET"; exit 1; }
+```
+
+If it doesn't exist, fail gracefully:
+> "Target file not found: `$PUSH_TARGET`. Check the path in `rig-gaps-push-target:` and retry."
+Stop.
+
+### Step P2 — Preview and confirm
+
+Display the entries that will be pushed (same format as Step 3 report).
+Ask:
+> "Push [N] entries to `$PUSH_TARGET`? These will be appended to the Rig dev session's
+> RIG_GAPS.md for triage. Review entries above — strip any project-specific details
+> before submitting. Confirm? (yes / no)"
+
+Wait for explicit confirmation. Do not push without it.
+
+### Step P3 — Append entries
+
+Append each unsubmitted entry verbatim to `$PUSH_TARGET`:
+
+```bash
+echo "" >> "$PUSH_TARGET"
+echo "## [ENTRY CONTENT]" >> "$PUSH_TARGET"
+```
+
+One blank line before each entry. Do not duplicate entries that already exist in
+the destination (check for matching `## [date] —` header lines before appending).
+
+### Step P4 — Mark as submitted
+
+Append ` [submitted YYYY-MM-DD]` to each pushed entry's `## [date]` header in the
+**source** `RIG_GAPS.md` (the current project's file, not the destination).
+
+Confirm:
+> "[N] entries pushed to `$PUSH_TARGET` and marked as submitted."

@@ -33,6 +33,22 @@ If no argument is given, ask: **"Which feature should I document?"**
 
 ## What this does
 
+> **RIG_DIR resolution (stealth mode):** Before reading or writing any feature doc path,
+> resolve where `.rig/` actually lives. If `.rigpath` exists at the project root, read
+> it — it contains the absolute path to the external `.rig/` directory.
+>
+> ```bash
+> REPO=$(git rev-parse --show-toplevel)
+> if [[ -f "$REPO/.rigpath" ]]; then
+>   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+> else
+>   RIG_DIR="$REPO/.rig"
+> fi
+> DOCS_DIR="$RIG_DIR/docs/features"
+> ```
+>
+> Substitute `$DOCS_DIR` for `docs/features/` in every step below.
+
 ### Step 1 — Confirm the feature
 
 Restate in one sentence what you understand the feature to be and what it does
@@ -67,10 +83,10 @@ couldn't confirm with `<!-- TODO: verify -->`.
 ### Step 3 — Check for an existing doc
 
 Derive a slug from the feature name (lowercase, hyphens, no punctuation).
-Check `docs/features/` for `<slug>.md`.
+Check `$DOCS_DIR` for `<slug>.md`.
 
 - **If it exists:** stop and say:
-  > "A doc for this feature already exists at `docs/features/<slug>.md`.
+  > "A doc for this feature already exists at `$DOCS_DIR/<slug>.md`.
   > Run `/refresh-feature-doc` to update it instead."
 - **If it doesn't exist:** proceed.
 
@@ -78,7 +94,7 @@ Check `docs/features/` for `<slug>.md`.
 
 ### Step 4 — Write the doc
 
-Create `docs/features/<slug>.md` using the template below.
+Create `$DOCS_DIR/<slug>.md` using the template below.
 Fill in every section. Delete sections that genuinely don't apply rather than
 leaving them empty. Never leave placeholder brackets in the final file.
 
@@ -86,7 +102,7 @@ leaving them empty. Never leave placeholder brackets in the final file.
 
 ### Step 5 — Update the index
 
-Add a row to the index table in `docs/features/README.md`:
+Add a row to the index table in `$DOCS_DIR/README.md`:
 
 ```
 | <Feature name> | [<slug>.md](<slug>.md) | YYYY-MM-DD |
