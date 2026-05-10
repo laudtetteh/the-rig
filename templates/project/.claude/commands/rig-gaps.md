@@ -152,3 +152,127 @@ Append ` [submitted YYYY-MM-DD]` to each pushed entry's `## [date]` header in th
 
 Confirm:
 > "[N] entries pushed to `$PUSH_TARGET` and marked as submitted."
+
+---
+
+## Submit mode (GitHub issue creation)
+
+If the user says **"submit"**, **"--submit"**, or **"open issues"**, run this flow.
+This creates real GitHub issues in `laudtetteh/the-rig` via the `gh` CLI.
+It requires explicit opt-in and `gh` auth with public repo access.
+
+### Step S1 — Check opt-in
+
+Look for the opt-in sentinel:
+
+```bash
+OPT_IN="$RIG_DIR/memory/.rig-contribute-enabled"
+```
+
+If the file does not exist:
+
+> "GitHub submission is opt-in. To enable it, run:
+> `touch $RIG_DIR/memory/.rig-contribute-enabled`
+>
+> This allows `/rig-gaps --submit` to create public GitHub issues in
+> `laudtetteh/the-rig` on your behalf. Gap entries become publicly visible.
+> Only enable this if you're comfortable sharing workflow observations publicly."
+
+Stop. Do not proceed without the opt-in file.
+
+### Step S2 — Check gh auth
+
+```bash
+gh auth status 2>&1
+```
+
+If `gh` is not installed or not authenticated:
+
+> "Submit mode requires the `gh` CLI with GitHub auth.
+> Install: `brew install gh`  |  Auth: `gh auth login`
+> Then retry."
+
+Stop.
+
+### Step S3 — Privacy warning and entry preview
+
+Show a privacy warning once:
+
+> "⚠ **Privacy notice:** the following entries will be posted as public GitHub
+> issues in `laudtetteh/the-rig`. Anyone can read them.
+> Strip any project-specific details (client names, internal paths, proprietary
+> logic) before submitting. You will review each entry individually."
+
+Then list the unsubmitted entries by title only (no body):
+
+> "**[N] entries ready to review:**
+> 1. [title from first entry header]
+> 2. [title from second entry header]
+> …
+>
+> Say **go** to step through each one, or **cancel** to stop."
+
+Wait for confirmation. Do not submit without it.
+
+### Step S4 — Per-entry review and submission
+
+For each unsubmitted entry, in order:
+
+1. **Show the entry** formatted as it will appear in the GitHub issue body:
+
+   ```
+   ## Entry [N of M]: [title]
+
+   [full entry body]
+
+   ---
+   *Submitted via `/rig-gaps --submit` from The Rig.*
+   ```
+
+2. **Ask the user:**
+
+   > "Submit this entry as a GitHub issue? Options:
+   > - **yes** — submit as shown
+   > - **edit** — paste a revised body, then submit
+   > - **skip** — leave this entry unsubmitted
+   > - **stop** — stop here, don't submit any more"
+
+3. **If yes:**
+   - Derive the issue title: take the text after `— ` in the `## [date] — [title]` header line. Strip the date prefix.
+   - Run:
+     ```bash
+     gh issue create \
+       --repo laudtetteh/the-rig \
+       --title "[derived title]" \
+       --body "[entry body + submitted-via footer]" \
+       --label "type: gap-report"
+     ```
+     (If the label doesn't exist, omit `--label` silently — don't fail.)
+   - Capture the issue URL returned by `gh issue create`.
+   - Report: `✓ Submitted as [URL]`
+
+4. **If edit:**
+   - Ask: "Paste the revised entry body:"
+   - Wait for the user to provide text.
+   - Submit using the revised body (same `gh issue create` call).
+
+5. **If skip:**
+   - Note: "[title] skipped."
+   - Move to next entry.
+
+6. **If stop:**
+   - Stop the loop. Do not process remaining entries.
+
+### Step S5 — Mark submitted entries
+
+After the loop, for each entry that was successfully submitted:
+
+- Update its header line in `RIG_GAPS.md`:
+  ```
+  ## [2026-05-09] — [title] [submitted: github:#N YYYY-MM-DD]
+  ```
+  Where `#N` is the issue number extracted from the URL returned by `gh issue create`.
+
+Confirm:
+> "[N] entries submitted to laudtetteh/the-rig. [M] skipped.
+> Submitted entries marked in `RIG_GAPS.md`."
