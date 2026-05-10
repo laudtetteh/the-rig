@@ -182,6 +182,41 @@ fallback. This is slower but correct. No data is lost.
 
 ---
 
+## 7. Hook crashes with "fatal: cannot lock ref" or "index.lock" on Git 2.39+
+
+**Symptom:** A commit fails with a message like:
+
+```
+error: cannot lock ref 'HEAD': unable to resolve reference 'HEAD'
+fatal: cannot lock ref
+```
+
+or:
+
+```
+fatal: Unable to create '.../.git/index.lock': File exists.
+```
+
+**Cause:** In Git 2.39+, the index is locked for the duration of the commit
+operation. If a hook inside that operation calls `git add` to stage a file,
+Git tries to acquire a second lock — which fails because the first lock is
+still held.
+
+**Fix:** Replace any `git add <file>` calls inside hooks with:
+
+```bash
+git update-index --add <file>
+```
+
+`git update-index` writes directly to the index without acquiring the full lock,
+making it safe to call from within a hook. It accepts `--add` to stage new files,
+`--remove` to unstage, and `--chmod=+x` to mark executable bits.
+
+If you're writing a custom hook for this project and need to stage a file, always
+use `git update-index --add` instead of `git add`.
+
+---
+
 ## Still stuck?
 
 Check the session log first (`/tmp/the-rig-session.log`). If the log shows the hook

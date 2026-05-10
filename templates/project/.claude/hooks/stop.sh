@@ -107,4 +107,43 @@ if [[ ! -f "$WRAP_NEEDED" ]]; then
   fi
 fi
 
+# ── Write minimal checkpoint to CONTEXT_SNAPSHOT when .wrap-needed is set ────
+# If /wrap hasn't run and the session had meaningful commits, write a minimal
+# orientation block to CONTEXT_SNAPSHOT.md so the next session isn't flying blind.
+# This is not a full /wrap — it just records branch, last commit, and active task.
+# /wrap overwrites this with a complete snapshot; this is a safety net only.
+if [[ -f "$WRAP_NEEDED" ]]; then
+  _BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+  _COMMIT=$(git -C "$REPO" log -1 --format="%h %s" 2>/dev/null || echo "none")
+  _ACTIVE_TASK=""
+  _ACTIVE_DIR="$RIG_DIR/tasks/active"
+  if [[ -d "$_ACTIVE_DIR" ]]; then
+    _ACTIVE_TASK=$(ls "$_ACTIVE_DIR"/*.md 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
+  fi
+
+  {
+    echo "# Context Snapshot — auto-checkpoint"
+    echo ""
+    echo "> This is a minimal checkpoint written by stop.sh — not a full /wrap snapshot."
+    echo "> Run \`/wrap\` to replace this with a complete context snapshot."
+    echo ""
+    echo "**Last updated:** $NOW — auto-checkpoint (stop.sh)"
+    echo "**Branch:** $_BRANCH"
+    echo "**Last commit:** $_COMMIT"
+    if [[ -n "$_ACTIVE_TASK" ]]; then
+      echo "**Active task:** $_ACTIVE_TASK"
+    fi
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Status"
+    echo ""
+    echo "Session ended without running \`/wrap\`. Run \`/wrap\` at the start of the"
+    echo "next session to capture full context before starting new work."
+  } > "$SNAPSHOT"
+
+  echo "[$(date +%H:%M:%S)] STOP: minimal checkpoint written to CONTEXT_SNAPSHOT.md" \
+    >> "$SESSION_LOG"
+fi
+
 exit 0

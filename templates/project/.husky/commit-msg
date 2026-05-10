@@ -9,6 +9,8 @@
 #
 # To disable format validation: set SKIP_COMMIT_VALIDATION=1 before committing.
 # To disable footer stripping: remove or comment out the filter block below.
+# To skip the issue reference check for a single commit (no ticket exists):
+#   add  # no-issue  as a line in the commit message body.
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 COMMIT_MSG_FILE="$1"
@@ -56,6 +58,14 @@ if [ -f "$CLAUDE_MD" ]; then
 fi
 # Default to github if not set
 : "${ISSUE_TRACKING:=github}"
+
+# Allow the # no-issue trailer to skip the ref check for any tracker.
+# Used when a commit legitimately has no associated ticket (e.g. one-off fixes,
+# chores on personal projects with issue-tracking: github but no issue worth
+# opening). Add  # no-issue  as a standalone line in the commit body.
+if grep -q "^# no-issue" "$COMMIT_MSG_FILE" 2>/dev/null; then
+  exit 0
+fi
 
 case "$ISSUE_TRACKING" in
   github)

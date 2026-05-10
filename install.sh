@@ -138,6 +138,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GLOBAL_TEMPLATES="$SCRIPT_DIR/templates/global"
 PROJECT_TEMPLATES="$SCRIPT_DIR/templates/project"
 
+# ── Installer branch drift check ─────────────────────────────────────────────
+# If the installer lives inside a git repo, check whether it's behind its
+# remote tracking branch. A stale installer installs stale templates.
+# Runs silently if there's no remote, no network, or no git.
+# Tests can override _RIG_DRIFT_DIR to point to a mock repo.
+_DRIFT_DIR="${_RIG_DRIFT_DIR:-$SCRIPT_DIR}"
+if git -C "$_DRIFT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  git -C "$_DRIFT_DIR" fetch --quiet 2>/dev/null || true
+  _TRACKING=$(git -C "$_DRIFT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
+  if [[ -n "$_TRACKING" ]]; then
+    _BEHIND=$(git -C "$_DRIFT_DIR" rev-list "HEAD..${_TRACKING}" --count 2>/dev/null || echo 0)
+    if [[ "$_BEHIND" -gt 0 ]]; then
+      warn "The installer is ${_BEHIND} commit(s) behind ${_TRACKING}."
+      warn "Run: git -C \"$_DRIFT_DIR\" pull   to get the latest version first."
+      warn "Proceeding with the current version..."
+      echo ""
+    fi
+  fi
+fi
+
 # ── Parse flags ───────────────────────────────────────────────────────────────
 DO_GLOBAL=true
 DO_PROJECT=true

@@ -12,6 +12,11 @@
 # NOTE: Git hooks run with a stripped PATH. Never assume `command -v` will
 # find a binary that works in your interactive shell. Always check known
 # install locations explicitly.
+#
+# NOTE (Git 2.39+): Do NOT call `git add` inside a hook to stage files. In
+# Git 2.39+ this triggers a "fatal: cannot lock ref" error because the index
+# is already locked by the in-progress commit. Use `git update-index --add`
+# to stage individual files if a hook needs to modify the index.
 
 # ── 1. Secret scanning ────────────────────────────────────────────────────────
 
