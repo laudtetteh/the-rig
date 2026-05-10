@@ -9,8 +9,32 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [1.14.0] — 2026-05-09
+
+### Added
+- **`/feature-context [name]`** (`templates/project/.claude/commands/feature-context.md`): loads an existing feature doc into context before starting work. Fuzzy matches on slug or title, shows entry points / business rules / gotchas, warns if the doc is >60 days old. Gracefully falls back to `/doc-feature` if no match is found. Closes #166.
+- **`/sprint`** (`templates/project/.claude/commands/sprint.md`): conflict-aware sprint planner. Reads `## Files likely affected` from each task file, builds a conflict graph, groups tasks into conflict-free waves, and executes wave by wave with a review pause between waves. Supports targeted `/sprint [slug …]` and `--issues #N …` modes. Closes #174.
+- **`## Batches` section** (`templates/project/.rig/tasks/backlog/TASK_example.md`): promoted from an HTML comment to a real optional section. `/run.md` Step 4 now fills in the `Commit` column after each commit in a multi-batch task. `NEW_TASK_WORKFLOW.md` Step 7 verifies batch hashes before moving to done. Closes #175.
+- **`rig-gaps-push-target:` field** in `templates/project/CLAUDE.md`: when set, `/rig-gaps --push` appends unsubmitted gap entries directly to the target Rig repo's `RIG_GAPS.md` file, with dedup check and confirmation before append. Closes #168.
+- **Installer branch drift warning** (`install.sh`): warns when the installer's own git repo is behind its remote tracking branch before proceeding. Silent if no remote or no network. `_RIG_DRIFT_DIR` env var allows test injection. Closes #172.
+- **`stop.sh` auto-checkpoint** (`templates/project/.claude/hooks/stop.sh`): when `.wrap-needed` is written, also writes a minimal `CONTEXT_SNAPSHOT.md` checkpoint (current branch, last commit hash, active task file) so the next session has orientation data even if `/wrap` never ran. Closes #173.
+- 5 new bats tests (86 total).
+
+### Fixed
+- **`/doc-feature` + `/refresh-feature-doc`** now resolve `$RIG_DIR` via `.rigpath`; stealth projects write feature docs to the external directory instead of into the repo. Closes #165.
+- **`commit-msg` hook**: `# no-issue` body line bypasses the issue reference check for any tracker (GitHub, Linear, Trello, GUS). Useful for one-off chores with no ticket. Closes #170.
+- **`pre-commit` hook**: header comment warns that `git add` inside hooks causes `index.lock` errors on Git 2.39+; use `git update-index --add` instead. `docs/troubleshooting.md` gains item #7 with the fix. Closes #171.
+
 ### Changed
-- **`/propose` renamed to `/rig-propose`** (`templates/project/.claude/commands/propose.md` → `rig-propose.md`): aligns with the `rig-` prefix convention used by `/rig-gaps` and `/rig-upgrade`. All cross-file references updated: `pre-tool.sh`, `kickoff.md`, `run.md`, `task.md`, `docs/how-it-works.md`, `docs/customizing.md`, `README.md`. Closes #163.
+- **`/post-merge`**: Step 5 added — diffs merged PR files against feature doc entry point paths and prompts `/refresh-feature-doc` for any overlap. Closes #167.
+- **`/wrap`**: lighter feature doc freshness check added covering recent session commits. Closes #167.
+- **`/rig-gaps`**: push mode (`--push`) added; appends unsubmitted entries to `rig-gaps-push-target:` path. Closes #168.
+- **Tiered session naming** in `/session-name`, `/wrap`, `/post-merge`: ≤5 units listed explicitly; 6–15 grouped by type; 16+ condensed into a sprint summary line. Closes #169.
+- **`NEW_TASK_WORKFLOW.md` Step 1b**: explicit branch creation gate added — no `Write`, `Edit`, or `Bash` tool calls that modify project files until the branch is created. Closes #176.
+- **`/sprint` command** entries added to `README.md` command quick-reference.
+- **`/feature-context`** entry added to `README.md` feature knowledge table.
 
 ---
 
