@@ -87,6 +87,35 @@ For the full protocol (what to do at each autonomy level), see `SHIP_WORKFLOW.md
 
 ---
 
+### 1b — Create the branch
+
+**Do this before writing a single file.** No `Write`, `Edit`, or `Bash` tool calls
+that modify project files until this step is complete.
+
+Derive a branch name from the task type and slug:
+
+```
+feat/short-description    fix/short-description    chore/short-description
+```
+
+Create and switch to it:
+
+```bash
+git checkout -b <branch-name>
+```
+
+**Autonomy notes:**
+- **Low / Medium:** confirm the branch name with the user before running `git checkout -b`.
+- **High:** state the name you're creating ("Creating `feat/my-feature` off `main`"), then
+  branch immediately — no wait.
+
+**If already on a non-base branch:** verify it belongs to this task. If not, ask the user
+before proceeding — you may be on a leftover branch from a prior task.
+
+> This step has no exception. Even a one-line fix needs a branch. Hard Rule #3.
+
+---
+
 ## Step 2 — Orient
 
 Read these files before anything else, in this order:
