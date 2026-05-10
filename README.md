@@ -211,9 +211,11 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 
 **Daily work**
 ```
-/task         →  intake wizard: define the task + configure autonomy, check-ins, and risk
-/run          →  execute the backlog; respects per-task operating mode; chains at High autonomy
-/run [slug]   →  run a single specific task
+/task              →  intake wizard: define the task + configure autonomy, check-ins, and risk
+/run               →  execute the backlog; respects per-task operating mode; chains at High autonomy
+/run [slug]        →  run a single specific task
+/sprint            →  conflict-aware sprint planner: groups tasks into waves, runs wave by wave
+/sprint [slug …]   →  sprint over a specific set of tasks only
 ```
 
 **Ship and debug**
