@@ -145,6 +145,19 @@ commit-cleanup: yes
 | `yes` | Auto-injected tool footers (`Co-Authored-By: Claude`, `Made-with-Claude`, etc.) are stripped from commit messages by the `commit-msg` and `post-commit` hooks. |
 | `no` | Footers are kept. Comment out or remove `.husky/commit-msg` and `.husky/post-commit` to disable the stripping. |
 
+```
+rig-gaps-push-target:
+```
+
+Optional. Absolute path to a `RIG_GAPS.md` file in The Rig's own repo on this machine.
+When set, `/rig-gaps --push` appends unsubmitted gap entries directly to that file
+instead of requiring manual copy-paste. Only useful for developers who maintain The Rig
+(or a fork) on the same machine.
+
+Example: `rig-gaps-push-target: /Users/you/.rig/projects/the-rig/memory/RIG_GAPS.md`
+
+Leave blank (or omit the line) if you don't have The Rig repo on this machine.
+
 ---
 
 ## Off-limits — never touch without explicit instruction
@@ -194,10 +207,14 @@ When starting a new session, read in this order:
 
 ## Feature documentation
 
-End-to-end traces for business-critical features live in `docs/features/`.
+End-to-end traces for business-critical features. Feature docs live in
+`$RIG_DIR/docs/features/` — for repo-tracked projects this is `docs/features/`;
+for stealth/external projects it resolves to the external `.rig/` directory via
+`.rigpath`. The `/doc-feature`, `/refresh-feature-doc`, and `/feature-doc` commands
+all resolve this path automatically.
 
-- **Before touching code** that overlaps with a documented feature, read the
-  relevant doc — it captures the full chain, data model, business rules, and gotchas
+- **Before touching code** that overlaps with a documented feature, run
+  `/feature-context <feature>` to load the doc into context
 - **After any PR** that changes a documented feature's logic, run
   `/refresh-feature-doc <feature>` to keep the doc current
 - **To document a new feature**, run `/doc-feature <feature name>` immediately

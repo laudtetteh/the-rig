@@ -114,9 +114,32 @@ not content).
 
 ---
 
+## Feature doc freshness check
+
+After updating PROGRESS.md, run a lightweight check to detect if any commits this
+session touched files covered by documented features.
+
+**How:**
+
+1. Resolve `$RIG_DIR` and `$DOCS_DIR` (see RIG_DIR resolution block above).
+2. If `$DOCS_DIR` doesn't exist or has no `.md` files (other than `README.md`): skip silently.
+3. Get commits from this session — use the same session boundary logic as the Session naming step (session-end markers or snapshot date).
+4. Collect all files changed across those commits:
+   ```bash
+   git log --name-only --format="" <boundary>..HEAD | sort -u
+   ```
+5. For each feature doc, check if any changed file path overlaps with the paths in its `## Entry points` section.
+6. If overlap found, note:
+   > "Feature docs that may need a refresh after this session's changes:
+   > - `[feature name]` — run `/refresh-feature-doc <name>`"
+   Advisory only — do not block the rest of /wrap.
+7. If no overlap or no docs: skip silently.
+
+---
+
 ## Self-improvement check
 
-After logging new ERRORS.md entries, run a brief Rig retrospective:
+After the feature doc freshness check, run a brief Rig retrospective:
 
 **Scan ERRORS.md** for entries that describe friction with The Rig's own workflow
 (not project bugs). Ask: did anything about The Rig slow you down, produce wrong
@@ -240,21 +263,21 @@ snapshot, before this /wrap rewrites it).
 
 ### Build the name
 
-For each meaningful unit of work (PR merged, task completed, significant fix shipped):
-- **type** — git commit type: `fix`, `feat`, `chore`, `refactor`, `devops`, `docs`, `test`
-- **short-desc** — 3–6 words that identify the work at a glance
-- **#N** — PR or issue number; omit if none
+Count one "unit" per merged PR, completed task, or significant fix. Use the
+**tiered format** from `/session-name` (same logic — see that command for full detail):
 
-Combine with ` | `. Keep under ~100 characters — truncate from the right by
-dropping whole segments, never mid-word.
+- **≤5 units:** `type short-desc #N | type short-desc #N | ...`
+- **6–15 units:** `type(area, area) | type(area) x3 | type x2`
+- **16+ units:** `sprint: N issues · feat/X fix/Y chore/Z · #A–#B`
+
+Keep under ~100 characters. Drop smallest groups if over.
 
 ### Examples
 
 ```
 fix step accordion layout #184 | fix h3.steps remaining partials #186
-feat custom-permissions per-post levels #152 | fix picker regressions #150
-devops cypress ci speedup #170 | devops ci cleanup #171
-chore upgrade next to 14.2.1 | fix null user on profile fetch #88
+feat(auth, dashboard) | fix(billing x4, ui) | chore x3
+sprint: 23 issues · feat/4 fix/15 chore/4 · #130–#152
 ```
 
 ### Output

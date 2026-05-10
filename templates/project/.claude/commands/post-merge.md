@@ -20,10 +20,11 @@ Follows `.rig/processes/POST_MERGE_WORKFLOW.md`:
 2. Adds an entry at the top of `.rig/memory/PROGRESS.md` for the merged PR
 3. Moves the task file from `.rig/tasks/active/` → `.rig/tasks/done/`; marks `**Status**` as `done`
 4. Overwrites `.rig/memory/CONTEXT_SNAPSHOT.md` with the current project state
-5. Checks `.rig/memory/ERRORS.md` and `.rig/memory/RIG_GAPS.md` — prompts you to log anything unexpected or any workflow friction observed
-6. Makes a housekeeping commit if memory updates weren't included in the PR
-7. **Suggests a session name** based on the merged PR via `/session-name` logic (see below)
-8. Surfaces the next priority and asks: **"What's next?"**
+5. **Checks feature doc freshness** — detects if merged changes overlap with documented features (see below)
+6. Checks `.rig/memory/ERRORS.md` and `.rig/memory/RIG_GAPS.md` — prompts you to log anything unexpected or any workflow friction observed
+7. Makes a housekeeping commit if memory updates weren't included in the PR
+8. **Suggests a session name** based on the merged PR via `/session-name` logic (see below)
+9. Surfaces the next priority and asks: **"What's next?"**
 
 ---
 
@@ -73,9 +74,34 @@ will `git checkout [BASE_BRANCH] && git pull`, but flag it now so the user is aw
 
 ---
 
+## Feature doc freshness step
+
+After updating PROGRESS.md (step 2), check whether the merged PR touched any files
+that are covered by an existing feature doc.
+
+**How:**
+
+1. Resolve `$RIG_DIR` and `$DOCS_DIR` (see RIG_DIR resolution block above).
+2. If `$DOCS_DIR` doesn't exist or has no `.md` files (other than `README.md`): skip this step silently.
+3. Get the set of files changed in the merged commit:
+   ```bash
+   git diff --name-only HEAD~1 HEAD
+   ```
+4. For each `.md` file in `$DOCS_DIR` (excluding `README.md`):
+   - Read its `## Entry points` section and collect all file paths mentioned.
+   - Check if any of the merged-PR changed files match (partial path match is fine — e.g. `src/auth.py` matches `auth` in the entry points).
+5. If any feature docs have matching entry points, say:
+   > "⚠ The following feature docs may be stale after this merge:
+   > - `[feature-name]` (`$DOCS_DIR/<slug>.md`) — entry points overlap with changed files
+   > Run `/refresh-feature-doc <name>` to re-verify."
+   Do not block the rest of /post-merge — this is advisory only.
+6. If no overlap: skip silently.
+
+---
+
 ## Session naming step
 
-After the housekeeping commit (step 6), derive a session name suggestion using the
+After the housekeeping commit (step 7), derive a session name suggestion using the
 same logic as `/session-name`. The merged PR number is always known here, which
 makes this the most reliable naming signal in the system. Do **not** apply it
 automatically — present it for the user to confirm or tweak.
@@ -103,13 +129,13 @@ Read the `**Session name:**` field from `.rig/memory/CONTEXT_SNAPSHOT.md`.
 
 ### Format
 
-```
-type short-desc #N | type short-desc #N | ...
-```
+Use the **tiered format** from `/session-name` (same logic — see that command for full detail):
 
-- `type` matches the git commit type (`fix`, `feat`, `chore`, `refactor`, `devops`, `docs`, `test`)
-- `short-desc` is 3–6 words — enough to identify the work at a glance
-- Keep the full string under ~100 characters
+- **≤5 units:** `type short-desc #N | type short-desc #N | ...`
+- **6–15 units:** `type(area, area) | type(area) x3 | type x2`
+- **16+ units:** `sprint: N issues · feat/X fix/Y chore/Z · #A–#B`
+
+Keep under ~100 characters.
 
 ### Output
 

@@ -24,15 +24,31 @@ Examples:
 
 If no argument is given, ask: **"Which feature doc should I refresh?"**
 If the argument doesn't match any existing doc, list the docs in
-`docs/features/` and ask the user to confirm which one.
+`$DOCS_DIR` and ask the user to confirm which one.
 
 ---
 
 ## What this does
 
+> **RIG_DIR resolution (stealth mode):** Before reading or writing any feature doc path,
+> resolve where `.rig/` actually lives. If `.rigpath` exists at the project root, read
+> it — it contains the absolute path to the external `.rig/` directory.
+>
+> ```bash
+> REPO=$(git rev-parse --show-toplevel)
+> if [[ -f "$REPO/.rigpath" ]]; then
+>   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+> else
+>   RIG_DIR="$REPO/.rig"
+> fi
+> DOCS_DIR="$RIG_DIR/docs/features"
+> ```
+>
+> Substitute `$DOCS_DIR` for `docs/features/` in every step below.
+
 ### Step 1 — Load the existing doc
 
-Read `docs/features/<slug>.md` in full. Note the `Last updated:` date and every
+Read `$DOCS_DIR/<slug>.md` in full. Note the `Last updated:` date and every
 claim made — entry point paths, line numbers, field names, flow steps, business
 rules, and gotchas.
 
@@ -75,7 +91,7 @@ If nothing changed, say so and stop — don't update the doc needlessly.
 
 ### Step 4 — Rewrite the doc
 
-Update `docs/features/<slug>.md`:
+Update `$DOCS_DIR/<slug>.md`:
 - Correct all stale paths, line numbers, field names, and flow steps
 - Add new sections or entries for anything that was added
 - Remove entries for anything that was deleted or fixed
@@ -93,7 +109,7 @@ Do **not** rewrite the Summary unless the feature's fundamental purpose changed.
 
 2. **Log bugs to ERRORS.md** — if re-verifying the doc revealed a real bug
    (not a doc inaccuracy — an actual code problem), log it in
-   `.rig/memory/ERRORS.md` using the standard format:
+   `$RIG_DIR/memory/ERRORS.md` using the standard format:
    - Symptom / Root cause / Fix / Watch for
 
 3. **Report** — output what changed, what stayed the same, and any remaining
