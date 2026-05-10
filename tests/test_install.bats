@@ -1016,3 +1016,104 @@ _sha256() {
   [ "$status" -eq 0 ]
   grep -q '# user customization' "$fake_home/.claude/CLAUDE.md"
 }
+
+# ── commit-msg: # no-issue trailer ───────────────────────────────────────────
+
+@test "commit-msg: # no-issue trailer skips issue ref check for github tracker" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  printf 'issue-tracking: github\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  # Conventional commit but no issue ref — would normally fail
+  # Body contains # no-issue → should pass
+  printf 'chore(deps): bump library version\n\n# no-issue\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -eq 0 ]
+}
+
+@test "commit-msg: # no-issue trailer skips issue ref check for linear tracker" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  printf 'issue-tracking: linear\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  printf 'chore(deps): bump library version\n\n# no-issue\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -eq 0 ]
+}
+
+@test "commit-msg: without # no-issue, github tracker still requires ref" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.husky/commit-msg"
+  local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
+
+  printf 'issue-tracking: github\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  # No # no-issue, no ref → must still fail
+  printf 'chore(deps): bump library version\n\nSome body text.\n' > "$msg_file"
+  run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"issue reference"* ]]
+}
+
+# ── install.sh: branch drift warning ─────────────────────────────────────────
+
+@test "installer drift check: warns when installer repo is behind remote" {
+  # Create a bare remote repo and a local clone that's 1 commit behind
+  local remote_repo="$TEMP_DIR/rig-remote"
+  local local_repo="$TEMP_DIR/rig-local"
+
+  git init -q "$remote_repo"
+  git -C "$remote_repo" config user.email "test@test.com"
+  git -C "$remote_repo" config user.name "Test"
+  touch "$remote_repo/placeholder"
+  git -C "$remote_repo" add placeholder
+  git -C "$remote_repo" commit -q -m "initial commit"
+
+  git clone -q "$remote_repo" "$local_repo"
+  git -C "$local_repo" config user.email "test@test.com"
+  git -C "$local_repo" config user.name "Test"
+
+  # Add a commit to the remote that the local doesn't have
+  touch "$remote_repo/newfile"
+  git -C "$remote_repo" add newfile
+  git -C "$remote_repo" commit -q -m "new commit on remote"
+
+  # Run installer with _RIG_DRIFT_DIR pointing to the local (stale) repo
+  run bash -c "_RIG_DRIFT_DIR='$local_repo' bash '$INSTALLER' --project-only \
+    --target '$TEST_PROJECT' --project-name 'TestProject' --strategy skip"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"behind"* ]]
+}
+
+@test "installer drift check: no warning when installer repo is up to date" {
+  # A git repo with a remote that matches HEAD — no warning expected
+  local remote_repo="$TEMP_DIR/rig-remote"
+  local local_repo="$TEMP_DIR/rig-local"
+
+  git init -q "$remote_repo"
+  git -C "$remote_repo" config user.email "test@test.com"
+  git -C "$remote_repo" config user.name "Test"
+  touch "$remote_repo/placeholder"
+  git -C "$remote_repo" add placeholder
+  git -C "$remote_repo" commit -q -m "initial commit"
+
+  git clone -q "$remote_repo" "$local_repo"
+  git -C "$local_repo" config user.email "test@test.com"
+  git -C "$local_repo" config user.name "Test"
+
+  # Local and remote are in sync
+  run bash -c "_RIG_DRIFT_DIR='$local_repo' bash '$INSTALLER' --project-only \
+    --target '$TEST_PROJECT' --project-name 'TestProject' --strategy skip"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"behind"* ]]
+}
