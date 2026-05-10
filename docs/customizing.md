@@ -16,9 +16,28 @@ issue-tracking: github     # github | linear | trello | gus | none
 issue-creator: user        # user (default) | agent — GitHub only: agent auto-creates issues
 secret-scanner: gitleaks   # gitleaks | none
 commit-cleanup: yes        # yes | no (strip auto-injected tool footers from commits)
+rig-gaps-push-target:      # optional: absolute path to RIG_GAPS.md in the local Rig repo
 ```
 
 **`issue-tracking:`** shapes the entire task intake and commit workflow. The ref format enforced in the `commit-msg` hook (`[#N]`, `[TEAM-123]`, `[trello:ID]`, `[W-N]`) and the intake question in `/task` both follow the configured tracker. Set to `none` for personal projects, prototypes, or repos without an issue tracker.
+
+**`rig-gaps-push-target:`** enables `/rig-gaps --push` — a same-machine shortcut that appends unsubmitted gap entries directly to The Rig's own `RIG_GAPS.md` without copy-paste. Only useful if you maintain The Rig (or a fork) on this machine. Example:
+
+```
+rig-gaps-push-target: /Users/you/.rig/projects/the-rig/memory/RIG_GAPS.md
+```
+
+Leave blank (or omit the line) if The Rig repo isn't on this machine.
+
+**Contribute mode — opt-in GitHub issue submission via `/rig-gaps --submit`:**
+
+`/rig-gaps --submit` creates public GitHub issues in `laudtetteh/the-rig` directly via the `gh` CLI. It requires explicit opt-in:
+
+```bash
+touch .rig/memory/.rig-contribute-enabled
+```
+
+This file is gitignored — opt-in is per-machine, not per-repo. When the sentinel exists, each gap entry is reviewed and confirmed individually before submission. Requires `gh auth login` with public repo access. Strip any project-specific details (client names, internal paths) before submitting — entries become publicly visible.
 
 For deeper customization of individual components, see the sections below.
 

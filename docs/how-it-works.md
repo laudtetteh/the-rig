@@ -277,6 +277,10 @@ Agent finishes response
            If PROGRESS.md exists:
              Append <!-- session-end YYYY-MM-DD HH:MM --> boundary marker
              (idempotent: skips if last non-blank line is already a marker)
+           If .wrap-needed flag exists (session ended without /wrap):
+             Write a minimal auto-checkpoint to CONTEXT_SNAPSHOT.md
+             (current branch + last commit; prevents the next session from loading
+             the full PROGRESS.md history when a snapshot is absent or stale)
 ```
 
 **Critical implementation note:** Tool names in Claude Code are `PascalCase`
@@ -309,7 +313,8 @@ git commit
      │       trello → [trello:CARD-ID]
      │       gus    → [W-1234567]
      │       none   → no requirement
-     │     Bypass: SKIP_COMMIT_VALIDATION=1
+     │     Bypass: `SKIP_COMMIT_VALIDATION=1` env var, or add `# no-issue` trailer
+     │     to the commit body (bypasses tracker ref check for any issue-tracking mode)
      │
      └─► post-commit
            Re-read committed message
@@ -413,7 +418,7 @@ proportion to the complexity of the work — not because of Rig overhead.
 
 ## The command set
 
-Fourteen slash commands covering the full development lifecycle:
+Seventeen slash commands covering the full development lifecycle:
 
 ### Project bootstrap
 | Command | Triggers | Key behaviour |
@@ -425,6 +430,7 @@ Fourteen slash commands covering the full development lifecycle:
 |---|---|---|
 | `/task` | `NEW_TASK_WORKFLOW` | Three-part intake wizard: goal → autonomy/check-ins/risk configuration → confirmation. Persists operating mode in task file. |
 | `/run` | Task execution loop | Surveys backlog, builds dependency-aware priority queue, executes tasks respecting per-task operating mode. Chains automatically at High autonomy. |
+| `/sprint` | Conflict-aware planner | Groups tasks into conflict-free waves by analysing `## Files likely affected`; runs waves in sequence. Accepts `/sprint [slug …]` or `/sprint --issues #N …` for a targeted set. |
 
 ### Ship and debug
 | Command | Triggers | Key behaviour |
@@ -435,6 +441,7 @@ Fourteen slash commands covering the full development lifecycle:
 ### Feature knowledge
 | Command | Triggers | Key behaviour |
 |---|---|---|
+| `/feature-context` | Context loader | Loads an existing feature doc from `docs/features/` into context before starting work — avoids stale assumptions about a documented feature's internals |
 | `/recon` | Keyword research | Sweeps merged PR history, commit messages, and live codebase for a keyword. Synthesizes an evolution timeline + current state. `--depth shallow` (default) or `--depth full`. Natural precursor to `/doc-feature`. |
 | `/doc-feature` | Research + write | Traces a named feature end-to-end (entry point → data layer → render logic) and produces a structured doc in `docs/features/`. Guards against duplicates; updates the README index. |
 | `/refresh-feature-doc` | Re-verify + update | Re-reads every claim in an existing feature doc against current code; corrects stale paths/line numbers; logs bugs found to `ERRORS.md`. Run after any PR that touches a documented feature. |
@@ -446,7 +453,7 @@ Fourteen slash commands covering the full development lifecycle:
 | `/rig-propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
 | `/session-name` | Session naming | Derives a session name from current PROGRESS entries and presents it as a suggestion — callable at any time, not just at wrap |
 | `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, runs self-improvement check (logs Rig gaps), trims PROGRESS/ERRORS, suggests session name, surfaces next priority |
-| `/rig-gaps` | Self-improvement | Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats a report with submission instructions for The Rig dev session |
+| `/rig-gaps` | Self-improvement | Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats report for submission. `--push` appends directly to the local Rig repo (requires `rig-gaps-push-target:` in `CLAUDE.md`); `--submit` creates public GitHub issues in `laudtetteh/the-rig` (opt-in; requires `.rig-contribute-enabled` sentinel + `gh` auth) |
 | `/rig-upgrade` | Upgrade workflow | Pulls latest Rig source (`git pull` in installer repo) and re-runs `install.sh` against the current project with `--strategy upgrade` |
 | `/new-feature` | *(deprecated)* | Redirects to `/task`. Kept for backward compatibility only. |
 
@@ -484,6 +491,7 @@ These sit alongside the existing `base-branch:` and `housekeeping:` fields:
 | `issue-creator:` | `user` | `user` \| `agent` | GitHub only: whether the agent creates issues itself (`agent`) or waits for the user to provide a number (`user`) |
 | `secret-scanner:` | `gitleaks` | `gitleaks` \| `none` | Secret scanning on commit; disabling requires editing `.husky/pre-commit` |
 | `commit-cleanup:` | `yes` | `yes` \| `no` | Whether auto-injected tool footers are stripped from commit messages |
+| `rig-gaps-push-target:` | *(unset)* | Absolute file path | Path to `RIG_GAPS.md` in the local Rig repo on this machine; enables `/rig-gaps --push` to append entries directly. Leave blank if The Rig repo isn't on this machine. |
 
 The `issue-tracking:` setting shapes the entire task intake and commit workflow: the ref format expected in commit messages (`[#N]`, `[TEAM-123]`, `[trello:ID]`, `[W-N]`) and the intake question in `/task` both follow the configured tracker. Set to `none` for personal projects, prototypes, or repos without an issue tracker.
 
