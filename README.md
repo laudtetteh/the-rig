@@ -238,7 +238,9 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 /rig-propose  →  submit a change to governance files for human approval before anything is touched
 /session-name →  derive a session name from current work and present it as a suggestion
 /wrap         →  write CONTEXT_SNAPSHOT, ensure memory is current, log any Rig gaps before closing
-/rig-gaps     →  compile workflow friction from RIG_GAPS.md + ERRORS.md; format for submission to The Rig dev session
+/rig-gaps          →  compile workflow friction from RIG_GAPS.md + ERRORS.md; format for submission to The Rig dev session
+/rig-gaps --push   →  append unsubmitted entries to local Rig repo (same-machine shortcut; requires rig-gaps-push-target: in CLAUDE.md)
+/rig-gaps --submit →  create public GitHub issues in laudtetteh/the-rig (opt-in; requires .rig-contribute-enabled + gh auth)
 /rig-upgrade  →  pull latest Rig source and re-run the installer with --strategy upgrade
 ```
 

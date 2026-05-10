@@ -158,6 +158,18 @@ Example: `rig-gaps-push-target: /Users/you/.rig/projects/the-rig/memory/RIG_GAPS
 
 Leave blank (or omit the line) if you don't have The Rig repo on this machine.
 
+**Contribute mode** — opt-in GitHub issue submission via `/rig-gaps --submit`:
+
+```bash
+# Enable once to allow /rig-gaps --submit to post public GitHub issues:
+touch .rig/memory/.rig-contribute-enabled
+```
+
+When this sentinel file exists, `/rig-gaps --submit` can create issues in
+`laudtetteh/the-rig` via the `gh` CLI. Each entry is reviewed and confirmed
+individually before submission. Requires `gh auth login` with public repo access.
+The file is gitignored — opt-in is per-machine, not per-repo.
+
 ---
 
 ## Off-limits — never touch without explicit instruction
