@@ -56,7 +56,23 @@ for the user or business. Ask for correction before proceeding if unsure.
 
 ---
 
-### Step 2 — Research end-to-end
+### Step 2 — Check for an existing doc
+
+Derive a slug from the feature name (lowercase, hyphens, no punctuation).
+Check `$DOCS_DIR` for `<slug>.md`.
+
+- **If it exists:** stop and say:
+  > "A doc for this feature already exists at `$DOCS_DIR/<slug>.md`.
+  > Run `/refresh-feature-doc` to update it instead."
+- **If it doesn't exist:** proceed to Step 3.
+
+Also check `$RIG_DIR/memory/ERRORS.md` for any gotchas logged about this feature
+(keyword search). If found, note them — they belong in the final doc's
+`## Known gotchas` section.
+
+---
+
+### Step 3 — Research end-to-end
 
 Trace the full stack for this feature. The exact layer names vary by project —
 use the ones that apply:
@@ -77,18 +93,6 @@ use the ones that apply:
 
 Use only line numbers you have verified by reading the file. Mark anything you
 couldn't confirm with `<!-- TODO: verify -->`.
-
----
-
-### Step 3 — Check for an existing doc
-
-Derive a slug from the feature name (lowercase, hyphens, no punctuation).
-Check `$DOCS_DIR` for `<slug>.md`.
-
-- **If it exists:** stop and say:
-  > "A doc for this feature already exists at `$DOCS_DIR/<slug>.md`.
-  > Run `/refresh-feature-doc` to update it instead."
-- **If it doesn't exist:** proceed.
 
 ---
 

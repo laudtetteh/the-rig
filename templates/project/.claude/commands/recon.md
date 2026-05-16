@@ -42,6 +42,47 @@ If no argument is given, ask: **"What topic or feature should I research?"**
 
 ## What this does
 
+### Step 0 — Internal docs check (before any API calls)
+
+Before hitting the GitHub API or git history, search local knowledge sources for
+the keyword. This saves tokens and surfaces existing documentation immediately.
+
+**0a — Feature docs:**
+```bash
+ls "$RIG_DIR/docs/features/" 2>/dev/null | grep -i "<keyword>" || true
+grep -ril "<keyword>" "$RIG_DIR/docs/features/" 2>/dev/null || true
+```
+If a matching feature doc exists, read its `## Summary` and `## Current state`
+sections and display them. Tell the user:
+> "Found an existing feature doc: `docs/features/<slug>.md` (last updated: [date]).
+> Showing summary below. Continue with full PR/commit sweep? [yes / no]"
+If no: skip Steps 1–3, jump to Step 4 (synthesize from the doc). If yes: continue.
+
+**0b — DECISIONS.md:**
+```bash
+grep -i "<keyword>" "$RIG_DIR/memory/DECISIONS.md" 2>/dev/null | head -10 || true
+```
+If matches found, show the relevant decision entries.
+
+**0c — ERRORS.md:**
+```bash
+grep -i "<keyword>" "$RIG_DIR/memory/ERRORS.md" 2>/dev/null | head -10 || true
+```
+If matches found, show the relevant error/gotcha entries. These are high-signal —
+if the keyword has a known pitfall logged, surface it early.
+
+**0d — PROGRESS.md:**
+```bash
+grep -i "<keyword>" "$RIG_DIR/memory/PROGRESS.md" 2>/dev/null | head -5 || true
+```
+Show any matching progress entries (indicates recent work on this topic).
+
+If **nothing was found** in any internal source: proceed silently to Step 1.
+If **something was found**: display it, then ask whether to continue with the
+external sweep. The user may already have enough context.
+
+---
+
 ### Step 1 — Keyword sweep: merged PR history
 
 Search merged PR titles and bodies for the keyword(s):
