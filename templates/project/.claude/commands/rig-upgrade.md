@@ -19,6 +19,62 @@ gated — survey before touching anything, confirm before committing.
 
 ---
 
+## Flags
+
+```
+/rig-upgrade                  # default: upgrade project layer, then offer global layer
+/rig-upgrade --version        # print versions only — no upgrade triggered
+/rig-upgrade --scope=project  # upgrade project layer only (skip Phase 4 global)
+/rig-upgrade --scope=global   # upgrade global layer only (skip Phases 1–3 project)
+/rig-upgrade --scope=both     # upgrade both layers without prompting (same as default but explicit)
+```
+
+### `--version` flag (early exit)
+
+If the user passes `--version`, skip all phases and print version info only:
+
+```bash
+# Project installed version
+PROJECT_VERSION=$(cat "$RIG_DIR/VERSION" 2>/dev/null || echo "not installed")
+PROJECT_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$RIG_DIR/VERSION" 2>/dev/null \
+  || stat -c "%y" "$RIG_DIR/VERSION" 2>/dev/null | cut -d' ' -f1-2 | cut -c1-16 \
+  || echo "unknown")
+
+# Global installer version
+GLOBAL_INSTALLER=~/tools/the-rig
+GLOBAL_VERSION=$(cat "$GLOBAL_INSTALLER/VERSION" 2>/dev/null || echo "not found")
+GLOBAL_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$GLOBAL_INSTALLER/VERSION" 2>/dev/null \
+  || stat -c "%y" "$GLOBAL_INSTALLER/VERSION" 2>/dev/null | cut -d' ' -f1-2 | cut -c1-16 \
+  || echo "unknown")
+```
+
+Output:
+
+> ```
+> Rig version info
+> ─────────────────────────────────────────
+> Project (.rig/VERSION):         1.15.0   (last modified: 2026-05-09 11:30)
+> Global installer (~/tools/):    1.15.0   (last modified: 2026-05-09 11:22)
+> ```
+
+If project and global versions differ, note:
+> "⚠️ Project is at `$PROJECT_VERSION` but global installer is at `$GLOBAL_VERSION`.
+> Run `/rig-upgrade` to sync."
+
+Then stop — do not proceed to Phase 0.
+
+### `--scope` flag
+
+Read the scope flag before Phase 0. Default is `both` (current behavior).
+
+- `--scope=project`: set `SKIP_GLOBAL=true`. Phase 4 is skipped entirely.
+- `--scope=global`: set `SKIP_PROJECT=true`. Phases 1, 2, and 3 are skipped entirely. Jump directly to Phase 4.
+- `--scope=both`: normal flow (no skip).
+
+These flags do not suppress the Phase 0 session state check — always run 0a first.
+
+---
+
 ## Phase 0 — Pre-flight
 
 ### 0a — Session state
@@ -96,6 +152,9 @@ Report what version will be installed:
 ---
 
 ## Phase 1 — Pull + Survey (read-only)
+
+> **Scope gate:** If `SKIP_PROJECT=true` (from `--scope=global`), skip Phases 1, 2,
+> and 3 entirely. Jump to Phase 4.
 
 ### 1a — Pull installer source to latest
 
@@ -370,7 +429,10 @@ and offer to install them.
 
 ## Phase 4 — Global layer upgrade (optional)
 
-Ask the user:
+> **Scope gate:** If `SKIP_GLOBAL=true` (from `--scope=project`), skip Phase 4
+> entirely. Jump to Phase 5.
+
+If `--scope=both` or no scope flag: ask the user:
 > "Do you also want to upgrade the global layer (`~/.claude/CLAUDE.md` + skills)?"
 
 If **no**: skip to Phase 5.
