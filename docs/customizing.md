@@ -280,9 +280,10 @@ entries and `.git/hooks/` scripts are per-clone and must be set up on each machi
 > **Single-session assumption:** The Rig is designed around one active Claude Code
 > session at a time per project. Running two sessions simultaneously against the same
 > repo is untested — hooks write to shared files (`PROGRESS.md`, the session log)
-> without locking, so concurrent sessions can produce race conditions in PROGRESS.md
-> auto-stubs. For team use, each engineer should work in their own branch with their
-> own active task file.
+> and concurrent auto-stubs in PROGRESS.md can race. `/wrap` includes a lock file
+> guard (`.wrap-in-progress`) that detects a concurrent or crashed wrap and aborts
+> rather than corrupting the snapshot. For team use, each engineer should work in
+> their own branch with their own active task file.
 
 The Rig was designed for solo or small-team use. For larger teams:
 
