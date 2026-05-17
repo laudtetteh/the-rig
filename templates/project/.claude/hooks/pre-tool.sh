@@ -80,14 +80,40 @@ if [[ "$TOOL" == "Bash" ]]; then
       echo "  (Or create it yourself: touch '${COMMIT_OK}')" >&2
       exit 1
     fi
+
+    # ── Guard: block commits directly to main/master ──────────────────────
+    # Exception: projects that set 'housekeeping: direct-push' in CLAUDE.md
+    # allow direct commits for post-merge housekeeping. All other projects
+    # require a feature branch.
+    CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+    if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
+      HOUSEKEEPING=$(grep "^housekeeping:" "$REPO/CLAUDE.md" 2>/dev/null \
+        | awk '{print $2}' | tr -d '[:space:]' || echo "")
+      if [[ "$HOUSEKEEPING" != "direct-push" ]]; then
+        echo "" >&2
+        echo "  Commit to '$CURRENT_BRANCH' blocked by The Rig." >&2
+        echo "" >&2
+        echo "  Committing directly to '$CURRENT_BRANCH' is not allowed." >&2
+        echo "  Create a feature branch first:" >&2
+        echo "    git checkout -b feat/your-description" >&2
+        echo "" >&2
+        echo "  To allow direct housekeeping commits, set in CLAUDE.md:" >&2
+        echo "    housekeeping: direct-push" >&2
+        exit 1
+      fi
+    fi
   fi
 fi
 
 # ── Block writes to protected paths ──────────────────────────────────────────
 if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" ]]; then
 
-  # Extract the target file path from the JSON input
-  PATH_ARG=$(echo "$INPUT" | grep -o '"file_path":"[^"]*"' | head -1 | cut -d'"' -f4)
+  # Extract the target file path from the JSON input.
+  # python3 handles embedded quotes and escapes correctly — the grep approach
+  # silently fails on paths containing escaped quote characters.
+  PATH_ARG=$(python3 -c \
+    "import json,sys; print(json.load(sys.stdin).get('file_path',''))" \
+    <<< "$INPUT" 2>/dev/null || true)
 
   # ── THE RIG'S OWN GOVERNANCE FILES (self-protection) ─────────────────────
   # The agent must not rewrite the rules it is supposed to follow.
