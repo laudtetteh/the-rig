@@ -103,6 +103,15 @@ updates at milestones, and flag any change that touches more than 5 files.
 
 ---
 
+## Testing
+
+> Set during `/task` intake. Read by `/ship` Step 3.8.
+
+**Required**: `yes` | `no` | `optional`
+**What to test**: [describe what tests are expected, or "N/A"]
+
+---
+
 ## Done notes
 
 > Filled in when the task is complete, before moving to `tasks/done/`.
