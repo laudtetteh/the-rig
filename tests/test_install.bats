@@ -500,6 +500,53 @@ _sentinel_check() {
   [ "$?" -eq 0 ]
 }
 
+# ── Hook behavior: main-branch commit guard ───────────────────────────────────
+# pre-tool.sh blocks git commit on main/master unless CLAUDE.md sets
+# housekeeping: direct-push. Tested independently of the sentinel check.
+
+_main_branch_check() {
+  # Mirrors the main-branch guard logic in pre-tool.sh.
+  # Returns 0 (allow) or 1 (block).
+  local current_branch="$1"
+  local repo_dir="$2"
+
+  if [[ "$current_branch" == "main" || "$current_branch" == "master" ]]; then
+    local housekeeping
+    housekeeping=$(grep "^housekeeping:" "$repo_dir/CLAUDE.md" 2>/dev/null \
+      | awk '{print $2}' | tr -d '[:space:]' || echo "")
+    if [[ "$housekeeping" != "direct-push" ]]; then
+      return 1  # blocked
+    fi
+  fi
+  return 0  # allowed
+}
+
+@test "main-branch guard: commit to main blocked when housekeeping is not direct-push" {
+  local repo_dir="$TEMP_DIR/repo"
+  mkdir -p "$repo_dir"
+  echo "# CLAUDE.md" > "$repo_dir/CLAUDE.md"
+
+  run _main_branch_check "main" "$repo_dir"
+  [ "$status" -ne 0 ]
+}
+
+@test "main-branch guard: commit to main allowed when housekeeping is direct-push" {
+  local repo_dir="$TEMP_DIR/repo"
+  mkdir -p "$repo_dir"
+  echo "housekeeping: direct-push" > "$repo_dir/CLAUDE.md"
+
+  run _main_branch_check "main" "$repo_dir"
+  [ "$status" -eq 0 ]
+}
+
+@test "main-branch guard: commit to non-main branch always passes" {
+  local repo_dir="$TEMP_DIR/repo"
+  mkdir -p "$repo_dir"
+
+  run _main_branch_check "feat/my-feature" "$repo_dir"
+  [ "$status" -eq 0 ]
+}
+
 # ── Hook behavior: PROGRESS.md auto-stub ──────────────────────────────────────
 # post-tool.sh appends a stub to PROGRESS.md after every git commit.
 # We test the stub logic in isolation.
