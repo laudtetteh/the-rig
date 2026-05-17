@@ -157,3 +157,27 @@ Why The Rig is built the way it is. Each entry covers what was decided, what was
 **Rationale:** Real teams use Linear, Trello, GUS, and other trackers. The original GitHub-only gate would either force teams to set `issue-tracking: none` (losing all enforcement) or use GitHub issues in addition to their real tracker (double bookkeeping). Per-tracker enforcement extends the discipline — commit messages prove the ticket exists for whichever tracker the team uses.
 
 **Tradeoff accepted:** Each new tracker type requires a regex pattern in `commit-msg` and handling in the `/task` intake wizard. Acceptable — the pattern is simple and each tracker has a well-defined ref format.
+
+---
+
+## 14. Python3 JSON parsing for hook input extraction over grep pipelines
+
+**Decided:** Use `python3 -c "import json,sys; print(json.load(sys.stdin).get(...))"` to extract fields from JSON tool input in `pre-tool.sh`.
+
+**Rejected:** `grep -o '"field_name":"[^"]*"' | head -1 | cut -d'"' -f4` — a grep pipeline that was the original implementation for `PATH_ARG` extraction.
+
+**Rationale:** The grep approach silently fails on any path or command string containing an escaped quote character (`\"`). JSON paths like `"/some/path/with\"quote\"/file"` would produce an empty string, causing the path block and governance protection checks to silently skip. The python3 approach correctly handles all valid JSON input including edge cases, and is consistent with how `BASH_CMD` extraction was already implemented in the same file.
+
+**Tradeoff accepted:** Requires python3 to be present on the host (it is on macOS ≥ 10.15 and most Linux distributions). On a system without python3, the extraction returns an empty string via `|| true`, which causes path checks to pass silently — the same failure mode as the grep approach on malformed input. Acceptable: python3 availability is a reasonable baseline for Claude Code environments.
+
+---
+
+## 15. No pre-compaction hook — /wrap is the sole compaction safeguard
+
+**Decided:** Rely on the agent noticing the "8% until auto-compact" CLI status bar warning and running `/wrap` proactively, as instructed in `CLAUDE.md`.
+
+**Rejected:** A `PreCompact` hook event that would trigger `/wrap` automatically before Claude Code compacts the conversation.
+
+**Rationale:** Investigated whether Claude Code exposes a pre-compaction hook event — it does not (as of 2026). The "8% until auto-compact" indicator in the CLI status bar is a UI element only; there is no corresponding hook in `~/.claude/settings.json` or the hooks system. The closest available mechanism is the `Stop` event (`stop.sh`), which fires at session end — too late for compaction recovery, since compaction happens mid-session. The `CLAUDE.md` rule "when you see a compaction warning, run `/wrap` immediately before the next tool call" is the only viable mechanism.
+
+**Tradeoff accepted:** Depends on agent attention and available context. A session that reaches near-compaction may not have enough remaining context to run `/wrap` effectively. This is a known capability gap in the Claude Code hooks system, not a solvable problem within The Rig. If Claude Code adds a `PreCompact` hook in a future release, this decision should be revisited.
