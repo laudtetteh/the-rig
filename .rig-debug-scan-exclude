@@ -10,3 +10,7 @@
 
 # Template hook files contain debug pattern definitions as string literals
 templates/project/.husky/*
+
+# Template command files document debug patterns as examples — exclude to prevent
+# false positives when the patterns themselves appear in documentation text
+templates/project/.claude/commands/*

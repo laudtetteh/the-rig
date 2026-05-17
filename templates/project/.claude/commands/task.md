@@ -40,6 +40,12 @@ Ask the user the following. Collect all answers before moving to Part 2.
 3. **Hard constraints?** Any deadline, off-limits paths, technology restrictions, or
    things that must not change?
 4. **Issue/ticket?** Read `issue-tracking:` and `issue-creator:` from `CLAUDE.md` first.
+5. **Tests required?** Should this task include tests?
+   - **yes** — tests are required before this task can ship
+   - **no** — tests are explicitly out of scope (state why, e.g. "pure config change")
+   - **optional** — write tests if the logic warrants it; no hard gate
+   Record the answer in the task file under `## Testing`. The `/ship` pre-commit step
+   reads this field — if `yes`, tests must exist before the commit is allowed.
 
    - **`issue-tracking: github`** (or field absent — default):
      - Also read `issue-creator:` (default: `user`).
@@ -63,7 +69,8 @@ Ask the user the following. Collect all answers before moving to Part 2.
 After collecting all answers, confirm back:
 
 > "Got it. You want to [restate task in one sentence], working in [area], with
-> [constraints or 'no hard constraints']. Issue: [ref]. Let's configure how I'll operate."
+> [constraints or 'no hard constraints']. Issue: [ref]. Tests: [yes/no/optional].
+> Let's configure how I'll operate."
 
 ---
 

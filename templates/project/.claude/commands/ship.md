@@ -135,6 +135,48 @@ Wait for confirmation. High autonomy: state the base and proceed immediately.
 
 ---
 
+## Step 3.8 — Pre-commit cleanup
+
+Before presenting the checklist, actively clean up the diff. Do not ask permission —
+this cleanup is always required.
+
+**3.8a — Remove debug statements.** Scan staged and unstaged changes for:
+- `console.log`, `console.debug`, `console.warn`, `console.error` (JavaScript/TypeScript)
+- `print(`, `pprint(`, `logging.debug(` used as one-off debug output (Python)
+- `debugger;` statements
+- `# DEBUG`, `# TEMP`, `// DEBUG`, `// TEMP` inline comments
+- `dd(`, `dump(`, `ray(` (PHP debug helpers)
+- Any other obvious debug instrumentation added during development
+
+For each one found: remove it, stage the change, note it in your next message.
+If unsure whether a statement is intentional debug output or production logging,
+leave it and flag it in Step 4 for the user to decide.
+
+**3.8b — Run the linter** (if one is configured for this project):
+```bash
+# Read test-command from CLAUDE.md, or try common linters:
+# npm run lint / eslint . / ruff check . / flake8 / shellcheck
+```
+If the linter fails: fix the issues before continuing. Do not proceed to Step 4
+with failing lint. If no linter is configured, note it and skip.
+
+**3.8c — Run tests** (conditional):
+Read the active task file's `## Testing` field.
+- **`Required: yes`**: run the test suite now. If tests fail: fix them before
+  continuing. Do not proceed to Step 4 with failing tests.
+- **`Required: optional`**: run tests if the command is fast (< 60s); report results.
+- **`Required: no`** or field absent: skip.
+
+```bash
+# Use the test command from CLAUDE.md or the project's standard:
+# npm test / pytest / bats tests/ / etc.
+```
+
+Report what was cleaned, what linting found, and test results (pass/fail/skip)
+in a single summary line before continuing.
+
+---
+
 ## Step 4 — Pre-ship checklist
 
 Work through the following. Report the result of each check:
@@ -231,11 +273,44 @@ In this order:
 
 ---
 
-## Step 9 — Open the PR
+## Step 9 — Open or update the PR
 
 **The PR body must describe what was actually built — not the original plan.**
 If scope changed during implementation, note it explicitly. Reviewers read the PR
 description to understand what landed, not what was intended.
+
+**First: check if a PR already exists for this branch.**
+
+```bash
+CURRENT_BRANCH=$(git branch --show-current)
+EXISTING_PR=$(gh pr list --head "$CURRENT_BRANCH" --json number,title,url --jq '.[0]' 2>/dev/null || echo "")
+```
+
+**If a PR already exists:**
+
+> "PR #[N] already exists for this branch: [title]
+> [URL]
+>
+> Options:
+> - **[u] Update** — revise title, body, labels, and linked issues to reflect the new work
+> - **[k] Keep as-is** — the existing PR is accurate, no changes needed"
+
+If user chooses **[u]**:
+1. Show the current PR title and body (run `gh pr view [N] --json title,body`)
+2. Draft the updated title and body based on ALL work on this branch (not just the latest commit)
+3. Show the proposed changes and ask for approval
+4. Run:
+   ```bash
+   gh pr edit [N] --title "[updated title]" --body-file /tmp/ship-pr-body.md
+   ```
+5. Check labels: `gh pr view [N] --json labels` — add any missing labels for new work areas
+6. Verify the `Closes #[issue]` line covers all linked issues for the full scope of work
+
+If user chooses **[k]**: skip to Notes. Done.
+
+**If no PR exists:** continue with template detection and PR creation below.
+
+---
 
 **Template detection — this is a hard gate:**
 
