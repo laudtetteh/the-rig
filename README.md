@@ -211,8 +211,8 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 
 **Daily work**
 ```
-/task              →  intake wizard: define the task + configure autonomy, check-ins, and risk
-/run               →  execute the backlog; respects per-task operating mode; chains at High autonomy
+/task              →  intake wizard: goal + autonomy/check-ins/risk/testing configuration
+/run               →  execute active task; surfaces operating mode wizard if absent; chains at High autonomy
 /run [slug]        →  run a single specific task
 /sprint            →  conflict-aware sprint planner: groups tasks into waves, runs wave by wave
 /sprint [slug …]   →  sprint over a specific set of tasks only
@@ -220,28 +220,37 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 
 **Ship and debug**
 ```
-/ship         →  pre-ship checklist, commit, open PR
+/ship         →  pre-commit cleanup + checklist + commit + open or update PR
 /debug        →  hypothesis-first diagnosis, mandatory ERRORS.md entry
 ```
 
 **Feature knowledge**
 ```
-/recon [topic]               →  sweep PR history + commits + codebase for a keyword; synthesize an evolution timeline
+/recon [topic]               →  check internal docs first, then sweep PR history + codebase; synthesize timeline
 /feature-context [name]      →  load an existing feature doc into context before starting work on that feature
-/doc-feature [name]          →  research a feature end-to-end; produce a structured doc in docs/features/
+/doc-feature [name]          →  check for existing doc, then research end-to-end; produce doc in docs/features/
 /refresh-feature-doc [name]  →  re-verify an existing feature doc against current code; correct stale claims
+```
+
+**Orientation and docs**
+```
+/status       →  project dashboard: branch, active tasks, backlog count, recent progress, pending flags
+/doc-list     →  show docs/INDEX.md without loading full doc files
+/rig-help     →  print all Rig commands with descriptions and key flags
 ```
 
 **Governance and housekeeping**
 ```
-/post-merge   →  post-merge hygiene: pull main, update memory, move task file, housekeeping commit
-/rig-propose  →  submit a change to governance files for human approval before anything is touched
-/session-name →  derive a session name from current work and present it as a suggestion
-/wrap         →  write CONTEXT_SNAPSHOT, ensure memory is current, log any Rig gaps before closing
-/rig-gaps          →  compile workflow friction from RIG_GAPS.md + ERRORS.md; format for submission to The Rig dev session
-/rig-gaps --push   →  append unsubmitted entries to local Rig repo (same-machine shortcut; requires rig-gaps-push-target: in CLAUDE.md)
+/post-merge        →  post-merge hygiene: pull main, update memory, move task file, housekeeping commit
+/rig-propose       →  submit a change to governance files for human approval before anything is touched
+/session-name      →  derive a session name from current work and present it as a suggestion
+/wrap              →  write CONTEXT_SNAPSHOT, capture in-flight task state, ensure memory is current
+/rig-gaps          →  compile workflow friction from RIG_GAPS.md + ERRORS.md; format for submission
+/rig-gaps --push   →  append unsubmitted entries to local Rig repo (requires rig-gaps-push-target: in CLAUDE.md)
 /rig-gaps --submit →  create public GitHub issues in laudtetteh/the-rig (opt-in; requires .rig-contribute-enabled + gh auth)
-/rig-upgrade  →  pull latest Rig source and re-run the installer with --strategy upgrade
+/rig-upgrade                →  pull latest Rig source and re-run installer with --strategy upgrade
+/rig-upgrade --version      →  print installed vs. available version without upgrading
+/rig-upgrade --scope=global →  upgrade global layer only; --scope=project for project layer only
 ```
 
 ---
@@ -250,7 +259,7 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 
 | Hook | Trigger | What it prevents |
 |---|---|---|
-| `pre-tool.sh` | Before every Claude Code tool call | Writes to protected paths; blocks `git commit` until user gives explicit go-ahead |
+| `pre-tool.sh` | Before every Claude Code tool call | Writes to protected paths; blocks `git commit` until user gives explicit go-ahead; blocks commits directly to `main`/`master` unless `housekeeping: direct-push` is set |
 | `post-tool.sh` | After every Claude Code tool call | PROGRESS.md being skipped after a commit; clears commit sentinel after use |
 | `stop.sh` | When the agent finishes its final response | CONTEXT_SNAPSHOT going stale — updates `Last updated:` and appends a session-end boundary to PROGRESS.md without requiring `/wrap` |
 | `pre-commit` | Before every git commit | Secrets reaching the repository |

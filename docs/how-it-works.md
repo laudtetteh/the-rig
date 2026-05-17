@@ -256,6 +256,9 @@ Every tool call
      │       Blocked → agent shows commit message, asks for trigger phrase
      │       ("commit approved" / "ship it" / "lgtm" / "go")
      │       Agent creates sentinel → commit succeeds → post-tool.sh deletes it
+     │     Guards git commit on main/master:
+     │       Blocked unless CLAUDE.md sets housekeeping: direct-push
+     │       Prevents accidental direct commits to protected branches
      │     Exit 1 (block) if any check fails
      │
      └─► post-tool.sh (PostToolUse)
@@ -418,7 +421,7 @@ proportion to the complexity of the work — not because of Rig overhead.
 
 ## The command set
 
-Seventeen slash commands covering the full development lifecycle:
+Twenty slash commands covering the full development lifecycle:
 
 ### Project bootstrap
 | Command | Triggers | Key behaviour |
@@ -428,23 +431,30 @@ Seventeen slash commands covering the full development lifecycle:
 ### Daily work
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/task` | `NEW_TASK_WORKFLOW` | Three-part intake wizard: goal → autonomy/check-ins/risk configuration → confirmation. Persists operating mode in task file. |
-| `/run` | Task execution loop | Surveys backlog, builds dependency-aware priority queue, executes tasks respecting per-task operating mode. Chains automatically at High autonomy. |
+| `/task` | `NEW_TASK_WORKFLOW` | Three-part intake wizard: goal → autonomy/check-ins/risk/testing configuration → confirmation. Persists operating mode and test requirement in task file. |
+| `/run` | Task execution loop | Executes the active task respecting its stored operating mode. If `## Operating mode` is absent from the task file, surfaces an inline wizard to configure it before proceeding. Chains automatically at High autonomy. |
 | `/sprint` | Conflict-aware planner | Groups tasks into conflict-free waves by analysing `## Files likely affected`; runs waves in sequence. Accepts `/sprint [slug …]` or `/sprint --issues #N …` for a targeted set. |
 
 ### Ship and debug
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/ship` | `SHIP_WORKFLOW` | Sequential hard gate: task confirm → issue (with template detection) → labels → branch/stale-main check → checklist → local test pause → commit approval → commit → housekeeping → PR (with template detection) |
+| `/ship` | `SHIP_WORKFLOW` | Sequential hard gate: task confirm → issue → labels → branch/stale-main check → pre-commit cleanup (removes debug statements, runs linter, runs tests if required) → checklist → local test pause → commit approval → commit → housekeeping → open or update PR |
 | `/debug` | `DEBUG_WORKFLOW` | Hypothesis before code, mandatory ERRORS.md entry |
 
 ### Feature knowledge
 | Command | Triggers | Key behaviour |
 |---|---|---|
 | `/feature-context` | Context loader | Loads an existing feature doc from `docs/features/` into context before starting work — avoids stale assumptions about a documented feature's internals |
-| `/recon` | Keyword research | Sweeps merged PR history, commit messages, and live codebase for a keyword. Synthesizes an evolution timeline + current state. `--depth shallow` (default) or `--depth full`. Natural precursor to `/doc-feature`. |
-| `/doc-feature` | Research + write | Traces a named feature end-to-end (entry point → data layer → render logic) and produces a structured doc in `docs/features/`. Guards against duplicates; updates the README index. |
+| `/recon` | Keyword research | Checks internal docs first (`DECISIONS.md`, `ERRORS.md`, `PROGRESS.md`) before reading code. If nothing found internally, sweeps merged PR history, commit messages, and live codebase for a keyword. Synthesizes an evolution timeline + current state. |
+| `/doc-feature` | Research + write | Checks for an existing doc first, then traces a named feature end-to-end and produces a structured doc in `docs/features/`. Guards against duplicates; updates the README index. |
 | `/refresh-feature-doc` | Re-verify + update | Re-reads every claim in an existing feature doc against current code; corrects stale paths/line numbers; logs bugs found to `ERRORS.md`. Run after any PR that touches a documented feature. |
+
+### Orientation and docs
+| Command | Triggers | Key behaviour |
+|---|---|---|
+| `/status` | State dashboard | Shows current branch, active tasks (with goals), backlog count, recent PROGRESS entries, and any pending housekeeping flags. Fast alternative to loading full context files. |
+| `/doc-list` | Docs index | Reads `docs/INDEX.md` and displays the table. Use before loading a full doc file to identify which one covers what you need. |
+| `/rig-help` | Command reference | Prints all Rig commands with one-liner descriptions and key flags. Self-contained — no individual command files are loaded. |
 
 ### Governance and housekeeping
 | Command | Triggers | Key behaviour |
@@ -452,9 +462,9 @@ Seventeen slash commands covering the full development lifecycle:
 | `/post-merge` | `POST_MERGE_WORKFLOW` | Post-merge hygiene: pull base branch, update PROGRESS, move task file, housekeeping commit, suggest session name, surface next priority |
 | `/rig-propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
 | `/session-name` | Session naming | Derives a session name from current PROGRESS entries and presents it as a suggestion — callable at any time, not just at wrap |
-| `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, updates PROGRESS, runs self-improvement check (logs Rig gaps), trims PROGRESS/ERRORS, suggests session name, surfaces next priority |
+| `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, captures in-flight task state, updates PROGRESS, trims PROGRESS/ERRORS, suggests session name, surfaces next priority. Concurrent session guard prevents race conditions on PROGRESS.md. |
 | `/rig-gaps` | Self-improvement | Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats report for submission. `--push` appends directly to the local Rig repo (requires `rig-gaps-push-target:` in `CLAUDE.md`); `--submit` creates public GitHub issues in `laudtetteh/the-rig` (opt-in; requires `.rig-contribute-enabled` sentinel + `gh` auth) |
-| `/rig-upgrade` | Upgrade workflow | Pulls latest Rig source (`git pull` in installer repo) and re-runs `install.sh` against the current project with `--strategy upgrade` |
+| `/rig-upgrade` | Upgrade workflow | Pulls latest Rig source and re-runs `install.sh` with `--strategy upgrade`. `--version` prints installed vs. available versions without upgrading. `--scope=project\|global\|both` limits which layers are upgraded. |
 | `/new-feature` | *(deprecated)* | Redirects to `/task`. Kept for backward compatibility only. |
 
 ---
