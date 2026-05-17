@@ -39,6 +39,32 @@ Performs the session-end housekeeping that prevents state loss between sessions:
 >
 > Substitute `$RIG_DIR` for `.rig/` in every step below.
 
+## Concurrent session guard — run before anything else
+
+Check for a `.wrap-in-progress` sentinel that would indicate another session is
+already running `/wrap`:
+
+```bash
+WRAP_LOCK="$RIG_DIR/memory/.wrap-in-progress"
+if [[ -f "$WRAP_LOCK" ]]; then
+  echo "⚠️  Another /wrap is already running (or a previous run crashed)."
+  echo "   Lock file: $WRAP_LOCK"
+  echo "   If no other session is active, delete it and retry:"
+  echo "   rm '$WRAP_LOCK'"
+  exit 1
+fi
+touch "$WRAP_LOCK"
+```
+
+Create the sentinel immediately. Delete it at the very end of `/wrap` (step 11,
+after flag cleanup). If `/wrap` fails mid-run, the sentinel will persist — the
+user must delete it manually. This is intentional: a stale lock is safer than
+silent corruption.
+
+The sentinel file is gitignored alongside other `.rig/memory/` runtime files.
+
+---
+
 ## Git state check — run first, before anything else
 
 Before writing any files, run:
@@ -220,6 +246,38 @@ Never trim without confirmation. Never delete entries — only move them.
 
 ---
 
+## Active tasks — in-flight state capture
+
+After ERRORS.md cleanup and before session naming, read `.rig/tasks/active/`.
+
+**If empty:** note "No tasks in flight" and continue.
+
+**If non-empty:** for each active task file, write a `## Resuming from` section
+into CONTEXT_SNAPSHOT.md that captures enough state for the next session to
+resume without re-reading the conversation. The section must include:
+
+```
+## Resuming from: [task-slug]
+
+**Task goal:** [one sentence from ## Goal]
+**What's done:** [bullet list of completed sub-steps or commits in this session]
+**What's pending:** [bullet list of remaining work to reach acceptance criteria]
+**Decisions made this session:** [any non-obvious choices made during implementation]
+**Files touched so far:** [list — use git diff HEAD --name-only or from memory]
+**Next action:** [the very next concrete step the next session should take]
+```
+
+Do not write "see task file" or vague summaries. The next session must be able to
+pick up exactly where you left off from this section alone.
+
+If the task has a `## Batches` section, include which batches are complete and
+which are pending.
+
+This section is written into CONTEXT_SNAPSHOT.md alongside the rest of the
+snapshot — overwrite the previous version.
+
+---
+
 ## Session naming step
 
 After reporting active tasks, derive a session name from this session's work and
@@ -300,17 +358,21 @@ completions), skip this step silently.
 
 ## Flag cleanup (step 11)
 
-After suggesting a session name and before asking "What's next?", delete the
-`.wrap-needed` flag file if it exists:
+After suggesting a session name and before asking "What's next?", run both cleanups:
 
 ```bash
-rm -f "$(git rev-parse --show-toplevel)/.rig/memory/.wrap-needed" 2>/dev/null || true
+# Clear the wrap-needed flag
+rm -f "$RIG_DIR/memory/.wrap-needed" 2>/dev/null || true
+
+# Release the concurrent session lock
+rm -f "$RIG_DIR/memory/.wrap-in-progress" 2>/dev/null || true
 ```
 
-(Resolve via `.rigpath` if present.) Log to session log: "`.wrap-needed` cleared."
+Log: "`.wrap-needed` cleared. Concurrent session lock released."
 
-This signals to `stop.sh` that `/wrap` has run and no flag should be written until
-the next commit creates new unexpanded stubs.
+`.wrap-needed` signals to `stop.sh` that `/wrap` has run and no flag should be
+written until the next commit creates new unexpanded stubs.
+`.wrap-in-progress` signals to concurrent sessions that this wrap is complete.
 
 ---
 
@@ -320,4 +382,4 @@ the next commit creates new unexpanded stubs.
 - `.rig/memory/PROGRESS_archive.md` and `.rig/memory/ERRORS_archive.md` are gitignored — full history on disk, not in the repo
 - Always **overwrite** the snapshot, never append to it; it represents current state, not history
 - History belongs in `.rig/memory/PROGRESS.md` (recent) and `PROGRESS_archive.md` (older); same pattern for `ERRORS.md` / `ERRORS_archive.md`
-- If a task is in progress but not done, note its exact state in the snapshot so the next session can resume without re-reading the whole conversation
+- If a task is in progress but not done, use the "Active tasks — in-flight state capture" step above to write a structured `## Resuming from` section into CONTEXT_SNAPSHOT. Vague notes are not sufficient — the next session must be able to resume from the snapshot alone.
