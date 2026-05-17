@@ -94,6 +94,19 @@ For each task in the confirmed queue:
 1. **Load the task file.** Read `## Goal`, `## Approach`, `## Acceptance criteria`,
    and `## Operating mode`.
 
+   **If `## Operating mode` is absent:** do not silently default. Surface the
+   three-setting wizard inline before doing anything else:
+
+   > "`[task-slug]` has no operating mode configured. Let me set that up before
+   > we start — it only takes a moment."
+
+   Present the Autonomy / Check-ins / Risk menus exactly as `/task` Part 2 does.
+   Collect the answers, then **write the result into the task file** under a new
+   `## Operating mode` block (same format as the task template). Confirm:
+   > "Operating mode saved. Starting now."
+
+   The written block persists — future `/run` calls on this task will not re-prompt.
+
 2. **Announce the task.** State:
    > "Starting: `[task-slug]` — [goal sentence] (Autonomy: [level], Check-ins: [level])"
 
@@ -198,8 +211,9 @@ process.
 
 ## Notes
 
-- If a task has no `## Operating mode` block, default to Medium / Normal / Balanced
-  and note the assumption.
+- If a task has no `## Operating mode` block, surface the wizard inline (see Step 2
+  item 1). Never silently default — the wizard fires once, writes the answer to the
+  task file, and execution follows immediately.
 - If `.rig/tasks/active/` already has a task in it when `/run` is called, offer to resume
   it rather than starting a new one from the backlog.
 - `/run` does not modify the queue mid-execution. If new tasks are added to the backlog
