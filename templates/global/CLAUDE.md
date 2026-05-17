@@ -160,8 +160,9 @@ Read the context profile above silently. No summary unless asked.
 ### Command routing
 
 When a user message implies a specific Rig workflow but doesn't name a command,
-route to the right command rather than handling it ad-hoc. Read the intent, not
-the literal words.
+surface the right command and ask for consent before doing anything. Read the
+intent, not the literal words — but never act on the interpretation without
+the user's explicit confirmation.
 
 | If the user implies… | Route to | Trigger signals |
 |---|---|---|
@@ -174,10 +175,11 @@ the literal words.
 | Sprint or work planning | `/sprint` | "plan the sprint", "what should we tackle", "what's the priority", "let's scope the work" |
 | Wrapping up the session | `/wrap` | "that's it for today", "wrapping up", "save progress", "end of session" |
 
-When you recognize a match, name the command and offer to run it — don't silently
-reroute or handle the request as if the command doesn't exist. Say:
+When you recognize a match, name the command and ask:
 > "This sounds like a `/recon` job — want me to run that?"
-Then wait for confirmation.
+Do not invoke the command or handle the request yourself until the user
+explicitly confirms. A "yes", "go", or restatement of the intent is confirmation;
+silence or an ambiguous reply is not.
 
 ---
 
