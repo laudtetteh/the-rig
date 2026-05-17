@@ -1164,3 +1164,243 @@ _sha256() {
   [ "$status" -eq 0 ]
   [[ "$output" != *"behind"* ]]
 }
+
+# ── Command behavior: /status ─────────────────────────────────────────────────
+# /status reads RIG_DIR, counts backlog tasks, and checks pending flag files.
+# We test the extractable shell logic in isolation.
+
+_status_resolve_rig_dir() {
+  # Mirrors RIG_DIR resolution in /status (and all other commands).
+  # Prints the resolved RIG_DIR path.
+  local repo="$1"
+  if [[ -f "$repo/.rigpath" ]]; then
+    tr -d '[:space:]' < "$repo/.rigpath"
+  else
+    echo "$repo/.rig"
+  fi
+}
+
+_status_pending_flags() {
+  # Returns a space-separated list of active flag names, or nothing.
+  local rig_dir="$1"
+  local flags=""
+  [[ -f "$rig_dir/memory/.wrap-needed" ]] && flags="$flags wrap-needed"
+  [[ -f "$rig_dir/memory/.post-merge-pending" ]] && flags="$flags post-merge-pending"
+  echo "${flags# }"
+}
+
+_status_backlog_count() {
+  # Returns the number of task files in the backlog directory.
+  ls "$1/tasks/backlog/" 2>/dev/null | wc -l | tr -d '[:space:]'
+}
+
+@test "status: RIG_DIR resolves to repo/.rig when .rigpath absent" {
+  local repo="$TEMP_DIR/repo"
+  mkdir -p "$repo"
+
+  result=$(_status_resolve_rig_dir "$repo")
+  [ "$result" = "$repo/.rig" ]
+}
+
+@test "status: RIG_DIR resolves to external path when .rigpath present" {
+  local repo="$TEMP_DIR/repo"
+  local external="$TEMP_DIR/external-rig"
+  mkdir -p "$repo"
+  echo "$external" > "$repo/.rigpath"
+
+  result=$(_status_resolve_rig_dir "$repo")
+  [ "$result" = "$external" ]
+}
+
+@test "status: no pending flags when neither sentinel exists" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+
+  result=$(_status_pending_flags "$rig_dir")
+  [ "$result" = "" ]
+}
+
+@test "status: wrap-needed flag detected when sentinel present" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+  touch "$rig_dir/memory/.wrap-needed"
+
+  result=$(_status_pending_flags "$rig_dir")
+  [[ "$result" == *"wrap-needed"* ]]
+}
+
+@test "status: both flags detected when both sentinels present" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+  touch "$rig_dir/memory/.wrap-needed"
+  touch "$rig_dir/memory/.post-merge-pending"
+
+  result=$(_status_pending_flags "$rig_dir")
+  [[ "$result" == *"wrap-needed"* ]]
+  [[ "$result" == *"post-merge-pending"* ]]
+}
+
+@test "status: backlog count returns correct number of task files" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/tasks/backlog"
+  touch "$rig_dir/tasks/backlog/TASK_alpha.md"
+  touch "$rig_dir/tasks/backlog/TASK_beta.md"
+  touch "$rig_dir/tasks/backlog/TASK_gamma.md"
+
+  result=$(_status_backlog_count "$rig_dir")
+  [ "$result" = "3" ]
+}
+
+@test "status: backlog count is zero when backlog directory is empty" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/tasks/backlog"
+
+  result=$(_status_backlog_count "$rig_dir")
+  [ "$result" = "0" ]
+}
+
+# ── Command behavior: /wrap concurrent session guard ──────────────────────────
+# /wrap checks for .wrap-in-progress before doing anything, then creates it.
+# We test the acquire/release cycle in isolation.
+
+_wrap_acquire_lock() {
+  # Mirrors the concurrent session guard in /wrap.
+  # Returns 0 (lock acquired + sentinel created) or 1 (already locked).
+  local wrap_lock="$1"
+  if [[ -f "$wrap_lock" ]]; then
+    return 1  # another session is wrapping, or prior run crashed
+  fi
+  touch "$wrap_lock"
+  return 0
+}
+
+_wrap_release_lock() {
+  # Mirrors the cleanup at the end of /wrap (step 11).
+  local wrap_lock="$1"
+  rm -f "$wrap_lock"
+}
+
+@test "wrap guard: lock acquisition blocked when sentinel already exists" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+  touch "$rig_dir/memory/.wrap-in-progress"
+
+  run _wrap_acquire_lock "$rig_dir/memory/.wrap-in-progress"
+  [ "$status" -ne 0 ]
+}
+
+@test "wrap guard: lock acquired and sentinel created when none exists" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+  local lock="$rig_dir/memory/.wrap-in-progress"
+
+  run _wrap_acquire_lock "$lock"
+  [ "$status" -eq 0 ]
+  [[ -f "$lock" ]]
+}
+
+@test "wrap guard: sentinel removed after lock release" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+  local lock="$rig_dir/memory/.wrap-in-progress"
+  touch "$lock"
+
+  _wrap_release_lock "$lock"
+  [[ ! -f "$lock" ]]
+}
+
+# ── Command behavior: /ship commit sentinel ───────────────────────────────────
+# /ship Step 7 creates .rig-commit-ok before running git commit.
+# pre-tool.sh checks for this sentinel (tested in the sentinel section above).
+# Here we test the sentinel creation path used by /ship.
+
+_ship_create_commit_sentinel() {
+  # Mirrors Step 7 sentinel creation in /ship.
+  # Creates .rig-commit-ok in $rig_dir/memory/.
+  local rig_dir="$1"
+  touch "$rig_dir/memory/.rig-commit-ok"
+}
+
+@test "ship sentinel: .rig-commit-ok created at correct path" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+
+  _ship_create_commit_sentinel "$rig_dir"
+  [[ -f "$rig_dir/memory/.rig-commit-ok" ]]
+}
+
+@test "ship sentinel: .rig-commit-ok absent before /ship creates it" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+
+  [[ ! -f "$rig_dir/memory/.rig-commit-ok" ]]
+}
+
+@test "ship sentinel: pre-tool sentinel check passes once sentinel is created by /ship" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+
+  # Sentinel absent → commit gate blocks
+  run _sentinel_check "Bash" "$rig_dir" "git commit -m 'test'"
+  [ "$status" -ne 0 ]
+
+  # /ship creates the sentinel
+  _ship_create_commit_sentinel "$rig_dir"
+
+  # Sentinel present → commit gate allows
+  run _sentinel_check "Bash" "$rig_dir" "git commit -m 'test'"
+  [ "$status" -eq 0 ]
+}
+
+# ── Command behavior: /rig-upgrade VERSION check ──────────────────────────────
+# Phase 3a of /rig-upgrade compares $RIG_DIR/VERSION to $INSTALLER_SRC/VERSION.
+# Returns 0 if they match, 1 if they differ (fix required).
+
+_upgrade_version_check() {
+  # Mirrors Phase 3a logic in /rig-upgrade.
+  # Returns 0 (versions match) or 1 (mismatch detected).
+  local rig_dir="$1"
+  local installer_src="$2"
+
+  local installed expected
+  installed=$(cat "$rig_dir/VERSION" 2>/dev/null || echo "missing")
+  expected=$(cat "$installer_src/VERSION" 2>/dev/null || echo "missing")
+
+  if [[ "$installed" == "$expected" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+@test "rig-upgrade version check: passes when installed version matches installer" {
+  local rig_dir="$TEMP_DIR/rig"
+  local installer_src="$TEMP_DIR/installer"
+  mkdir -p "$rig_dir" "$installer_src"
+  echo "1.15.0" > "$rig_dir/VERSION"
+  echo "1.15.0" > "$installer_src/VERSION"
+
+  run _upgrade_version_check "$rig_dir" "$installer_src"
+  [ "$status" -eq 0 ]
+}
+
+@test "rig-upgrade version check: detects mismatch when versions differ" {
+  local rig_dir="$TEMP_DIR/rig"
+  local installer_src="$TEMP_DIR/installer"
+  mkdir -p "$rig_dir" "$installer_src"
+  echo "1.14.0" > "$rig_dir/VERSION"
+  echo "1.15.0" > "$installer_src/VERSION"
+
+  run _upgrade_version_check "$rig_dir" "$installer_src"
+  [ "$status" -ne 0 ]
+}
+
+@test "rig-upgrade version check: detects mismatch when installed VERSION file missing" {
+  local rig_dir="$TEMP_DIR/rig"
+  local installer_src="$TEMP_DIR/installer"
+  mkdir -p "$rig_dir" "$installer_src"
+  # No VERSION in rig_dir
+  echo "1.15.0" > "$installer_src/VERSION"
+
+  run _upgrade_version_check "$rig_dir" "$installer_src"
+  [ "$status" -ne 0 ]
+}
