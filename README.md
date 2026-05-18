@@ -283,6 +283,7 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 | [Claude Code](https://docs.anthropic.com/claude-code) | The AI coding CLI this system wraps |
 | bash 3.2+ | For `install.sh` and hook scripts |
 | git | For hooks and version control |
+| python3 | Required by `pre-tool.sh` for JSON parsing. Standard on macOS 12+ and most Linux distros. |
 | [gitleaks](https://github.com/gitleaks/gitleaks) | Secret scanning (`brew install gitleaks`) |
 | npm / npx | For Husky initialization (optional if not using Node projects) |
 
