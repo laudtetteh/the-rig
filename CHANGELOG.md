@@ -35,6 +35,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`/rig-help`** (`templates/project/.claude/commands/rig-help.md`): 4 missing commands added (`/post-merge`, `/session-name`, `/rig-install`, `/propose` alias); 3 incorrect descriptions corrected (`/run`, `/sprint`, `/recon`); 4 missing argument signatures added. Template synced. Closes #210.
 - **`README.md`** and **`docs/how-it-works.md`**: command count updated 13 → 22; `/rig-install` added to command tables; `python3` added to requirements table; `## Release` section added for `/pre-release-review`. Closes #210, #212.
 - **`docs/troubleshooting.md`**: item #8 added — "Commit to 'main' blocked by The Rig" — with fixes for both feature-branch projects (create a branch) and solo/housekeeping projects (`housekeeping: direct-push`). Closes #212.
+- **Installer `.rigpath` auto-detection** (`install.sh`): `--strategy upgrade` without `--tracking` now detects an existing `.rigpath` and infers `stealth` or `external` mode automatically, preventing `.rig/` files from landing in the project directory instead of the external path. Stealth installs also now add `.rig/` to `.git/info/exclude` alongside `.rig-backup/`. 2 new bats tests (111 total). Closes #217.
 
 ---
 
