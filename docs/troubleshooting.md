@@ -217,6 +217,39 @@ use `git update-index --add` instead of `git add`.
 
 ---
 
+## 8. "Commit to 'main' blocked by The Rig"
+
+**Symptom:** The agent tries to commit and receives:
+
+```
+Commit to 'main' blocked by The Rig.
+Committing directly to 'main' is not allowed.
+Create a feature branch first: git checkout -b feat/your-description
+```
+
+**Cause:** The main-branch commit guard in `pre-tool.sh` blocks all direct commits
+to `main` or `master` unless the project explicitly allows them.
+
+**Fix for feature branch projects:** this is the correct behavior. Create a branch
+before committing:
+
+```bash
+git checkout -b feat/your-change
+```
+
+**Fix for solo or housekeeping projects** that legitimately commit directly to `main`
+(e.g. post-merge housekeeping commits): add this line to your project's `CLAUDE.md`:
+
+```
+housekeeping: direct-push
+```
+
+This setting tells the guard that direct commits are intentional for this project.
+It is already set in The Rig's own `CLAUDE.md` as it uses direct-push for
+housekeeping commits.
+
+---
+
 ## Still stuck?
 
 Check the session log first (`/tmp/the-rig-session.log`). If the log shows the hook

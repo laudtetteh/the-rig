@@ -327,13 +327,15 @@ installer_output=$("$INSTALLER_SRC/install.sh" \
 echo "$installer_output"  # show full output to user
 ```
 
-Parse the captured output to populate result accumulators:
+Parse the captured output to populate result accumulators. The installer's
+`success()` function prefixes every line with ANSI color codes and a status
+symbol (`✓ `), so match on substring rather than prefix:
 
 ```bash
 while IFS= read -r line; do
   case "$line" in
-    Updated:*)
-      UPGRADED+=("${line#Updated: }") ;;
+    *"Updated: "*)
+      UPGRADED+=("${line#*Updated: }") ;;
   esac
 done <<< "$installer_output"
 ```

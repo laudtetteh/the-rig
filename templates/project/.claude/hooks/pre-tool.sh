@@ -60,10 +60,15 @@ echo "[$(date +%H:%M:%S)] PRE  $TOOL" >> /tmp/the-rig-session.log
 
 if [[ "$TOOL" == "Bash" ]]; then
   # Parse the command string from the JSON input.
-  # python3 handles embedded quotes and escapes correctly.
-  BASH_CMD=$(python3 -c \
-    "import json,sys; print(json.load(sys.stdin).get('command',''))" \
-    <<< "$INPUT" 2>/dev/null || true)
+  # python3 handles embedded quotes and escapes correctly; falls back to grep
+  # on systems where python3 is absent so the guard is never silently disabled.
+  if command -v python3 >/dev/null 2>&1; then
+    BASH_CMD=$(python3 -c \
+      "import json,sys; print(json.load(sys.stdin).get('command',''))" \
+      <<< "$INPUT" 2>/dev/null || true)
+  else
+    BASH_CMD=$(echo "$INPUT" | grep -o '"command":"[^"]*"' | head -1 | cut -d'"' -f4)
+  fi
 
   # ── Gate git commit on sentinel file ───────────────────────────────────
   COMMIT_OK="$RIG_DIR/memory/.rig-commit-ok"
@@ -109,11 +114,15 @@ fi
 if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" ]]; then
 
   # Extract the target file path from the JSON input.
-  # python3 handles embedded quotes and escapes correctly — the grep approach
-  # silently fails on paths containing escaped quote characters.
-  PATH_ARG=$(python3 -c \
-    "import json,sys; print(json.load(sys.stdin).get('file_path',''))" \
-    <<< "$INPUT" 2>/dev/null || true)
+  # python3 handles embedded quotes and escapes correctly; falls back to grep
+  # on systems where python3 is absent so write protection is never silently disabled.
+  if command -v python3 >/dev/null 2>&1; then
+    PATH_ARG=$(python3 -c \
+      "import json,sys; print(json.load(sys.stdin).get('file_path',''))" \
+      <<< "$INPUT" 2>/dev/null || true)
+  else
+    PATH_ARG=$(echo "$INPUT" | grep -o '"file_path":"[^"]*"' | head -1 | cut -d'"' -f4)
+  fi
 
   # ── THE RIG'S OWN GOVERNANCE FILES (self-protection) ─────────────────────
   # The agent must not rewrite the rules it is supposed to follow.
