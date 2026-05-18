@@ -760,6 +760,27 @@ _is_rig_protected() {
   [ ! -f "$TEST_PROJECT/.rigpath" ]
 }
 
+@test "upgrade without --tracking auto-detects stealth mode from .rigpath" {
+  # Simulate a project previously installed with --tracking stealth:
+  # .rigpath exists pointing at an external directory.
+  local rig_ext="$TEMP_DIR/rig-external"
+  mkdir -p "$rig_ext"
+  echo "$rig_ext" > "$TEST_PROJECT/.rigpath"
+
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  # .rig/ files must land in external dir, not project dir
+  [ -f "$rig_ext/memory/PROGRESS.md" ]
+  [ ! -f "$TEST_PROJECT/.rig/memory/PROGRESS.md" ]
+}
+
+@test "stealth install adds .rig/ to .git/info/exclude" {
+  local rig_ext="$TEMP_DIR/rig-external"
+  run_installer --strategy skip --tracking stealth --rig-dir "$rig_ext"
+  [ "$status" -eq 0 ]
+  grep -qF ".rig/" "$TEST_PROJECT/.git/info/exclude"
+}
+
 # ── Gap 4: stop.sh writes .wrap-needed on 2+ commits ─────────────────────────
 
 @test "stop.sh: writes .wrap-needed when session log has 2+ commits" {
