@@ -257,7 +257,7 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 /rig-gaps --push   →  append unsubmitted entries to local Rig repo (requires rig-gaps-push-target: in CLAUDE.md)
 /rig-gaps --submit →  create public GitHub issues in laudtetteh/the-rig (opt-in; requires .rig-contribute-enabled + gh auth)
 /rig-upgrade                →  pull latest Rig source and re-run installer with --strategy upgrade
-/rig-upgrade --version      →  print installed vs. available version without upgrading
+/rig-upgrade --version      →  print installed version, global installer version, and latest GitHub release; warns if behind
 /rig-upgrade --scope=global →  upgrade global layer only; --scope=project for project layer only
 ```
 

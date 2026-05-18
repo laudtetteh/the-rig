@@ -470,7 +470,7 @@ Twenty-two slash commands covering the full development lifecycle:
 | `/session-name` | Session naming | Derives a session name from current PROGRESS entries and presents it as a suggestion — callable at any time, not just at wrap |
 | `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, captures in-flight task state, updates PROGRESS, trims PROGRESS/ERRORS, suggests session name, surfaces next priority. Concurrent session guard prevents race conditions on PROGRESS.md. |
 | `/rig-gaps` | Self-improvement | Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats report for submission. `--push` appends directly to the local Rig repo (requires `rig-gaps-push-target:` in `CLAUDE.md`); `--submit` creates public GitHub issues in `laudtetteh/the-rig` (opt-in; requires `.rig-contribute-enabled` sentinel + `gh` auth) |
-| `/rig-upgrade` | Upgrade workflow | Pulls latest Rig source and re-runs `install.sh` with `--strategy upgrade`. `--version` prints installed vs. available versions without upgrading. `--scope=project\|global\|both` limits which layers are upgraded. |
+| `/rig-upgrade` | Upgrade workflow | Pulls latest Rig source and re-runs `install.sh` with `--strategy upgrade`. `--version` prints the project version, global installer version, and the latest tagged release from GitHub (via `gh`), warning if any are out of sync. `--scope=project\|global\|both` limits which layers are upgraded. |
 | `/new-feature` | *(deprecated)* | Redirects to `/task`. Kept for backward compatibility only. |
 
 ---
