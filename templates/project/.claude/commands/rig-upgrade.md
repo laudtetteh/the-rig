@@ -298,6 +298,21 @@ Then say:
 
 **Wait for confirmation before Phase 2.**
 
+### 1f — Initialise result accumulators
+
+Declare these arrays before Phase 2 begins. Every sub-phase appends to them;
+Phase 5 reads them to produce an accurate summary.
+
+```bash
+UPGRADED=()             # files the installer auto-updated
+CUSTOMIZED_ACCEPTED=()  # user-modified files where user chose [a]ccept
+CUSTOMIZED_KEPT=()      # user-modified files where user chose [k]eep
+SKIPPED_BASE_BRANCH=()  # files skipped due to [BASE_BRANCH] false-positive
+FIXED=()                # manual corrections (VERSION, settings.json, commands)
+GLOBAL_UPDATED=()       # global layer sections/skills updated
+GLOBAL_SKIPPED=()       # global layer sections/skills kept by user
+```
+
 ---
 
 ## Phase 2 — Project layer upgrade
@@ -305,14 +320,26 @@ Then say:
 ### 2a — Run the installer
 
 ```bash
-"$INSTALLER_SRC/install.sh" \
+installer_output=$("$INSTALLER_SRC/install.sh" \
   --project-only \
   --strategy upgrade \
-  --target "$REPO"
+  --target "$REPO" 2>&1)
+echo "$installer_output"  # show full output to user
 ```
 
-Capture the full output. Watch for:
-- `"Updated: ..."` — file was auto-updated ✓
+Parse the captured output to populate result accumulators:
+
+```bash
+while IFS= read -r line; do
+  case "$line" in
+    Updated:*)
+      UPGRADED+=("${line#Updated: }") ;;
+  esac
+done <<< "$installer_output"
+```
+
+Watch for:
+- `"Updated: ..."` — file was auto-updated ✓ → added to `UPGRADED[]`
 - `"Up to date: ..."` — file already current ✓
 - `"Merged .claude/settings.json"` — settings merged ✓
 - `"Customized file detected: ..."` — user-modified file was skipped; handle in 2b
@@ -340,20 +367,27 @@ For each file the installer reported as `"Customized file detected:"`:
    > - **[s] Show full file** — read both versions in full before deciding
 
 4. If user chooses **[a]**: copy the template (with substitutions) over the installed file.
-   Then update the manifest entry:
+   Then update the manifest entry and record the result:
    ```bash
    NEW_HASH=$(shasum -a 256 "$REPO/$rel" 2>/dev/null | awk '{print $1}')
    # Replace the old hash line in .rig-manifest
    sed -i '' "/$rel$/s/^[a-f0-9]* /$NEW_HASH /" "$MANIFEST" 2>/dev/null || \
    sed -i "/$rel$/s/^[a-f0-9]* /$NEW_HASH /" "$MANIFEST"
+   CUSTOMIZED_ACCEPTED+=("$rel")
    ```
 
-5. If user chooses **[k]**: log a note and move on.
+5. If user chooses **[k]**: log a note and move on:
+   ```bash
+   CUSTOMIZED_KEPT+=("$rel")
+   ```
 
 **Note on `[BASE_BRANCH]` diffs:** If the only differences are `[BASE_BRANCH]` vs the
 actual branch name (e.g. `main`), that is a known false positive — the file content is
 effectively identical. Skip it automatically and say: "Skipped `$rel` — only `[BASE_BRANCH]`
 substitution differs (expected)."
+   ```bash
+   SKIPPED_BASE_BRANCH+=("$rel")
+   ```
 
 ### 2c — Stealth: update `.git/hooks/`
 
@@ -392,6 +426,7 @@ EXPECTED_VERSION=$(cat "$INSTALLER_SRC/VERSION")
   sed -i '' "/\.rig\/VERSION$/s/^[a-f0-9]* /$NEW_HASH /" "$MANIFEST" 2>/dev/null || \
   sed -i "/\.rig\/VERSION$/s/^[a-f0-9]* /$NEW_HASH /" "$MANIFEST"
   echo "Fixed .rig/VERSION: $INSTALLED_VERSION → $EXPECTED_VERSION"
+  FIXED+=(".rig/VERSION: $INSTALLED_VERSION → $EXPECTED_VERSION")
   ```
 
 ### 3b — settings.json deduplication check
@@ -414,7 +449,10 @@ else:
 
 If duplicates are found, remove them: each hook event (`PreToolUse`, `PostToolUse`, `Stop`)
 should have **exactly one** entry. Keep the first occurrence; delete the rest. Write the
-cleaned file back with `json.dump(..., indent=2)`.
+cleaned file back with `json.dump(..., indent=2)`. Record the fix:
+```bash
+FIXED+=("settings.json: removed duplicate hook entries")
+```
 
 ### 3c — Commands inventory check
 
@@ -423,7 +461,10 @@ ls "$REPO/.claude/commands/"
 ```
 
 Every command in `$TEMPLATES/.claude/commands/` should be present. List any that are missing
-and offer to install them.
+and offer to install them. For each one installed:
+```bash
+FIXED+=("commands: installed $name")
+```
 
 ---
 
@@ -455,8 +496,14 @@ For each changed section, present:
 > "Section `## [Section Name]` changed in the template. Apply this update?"
 > [show the template version of the section]
 
-If the user says yes: replace only that section in `~/.claude/CLAUDE.md`.
-If the user says no or skip: leave it.
+If the user says yes: replace only that section in `~/.claude/CLAUDE.md` and record it:
+```bash
+GLOBAL_UPDATED+=("CLAUDE.md: ## $section_name")
+```
+If the user says no or skip:
+```bash
+GLOBAL_SKIPPED+=("CLAUDE.md: ## $section_name")
+```
 
 ### 4b — Skills
 
@@ -477,21 +524,54 @@ done
 ```
 
 For each changed skill, show the diff and ask: update or keep?
+```bash
+# On update:
+GLOBAL_UPDATED+=("skill: $name")
+# On keep:
+GLOBAL_SKIPPED+=("skill: $name")
+```
 
 ---
 
 ## Phase 5 — Wrap-up
 
-Print a summary:
+Print a summary using the result accumulators populated in Phases 2–4:
 
-```
-=== Upgrade complete: $CURRENT_VERSION → $EXPECTED_VERSION ===
+```bash
+echo "=== Upgrade complete: $CURRENT_VERSION → $EXPECTED_VERSION ==="
+echo ""
 
-Auto-updated:  [list of files updated by installer]
-Reviewed:      [list of customized files and what the user chose]
-Skipped:       [list of user-owned files correctly skipped]
-Fixed:         [VERSION, settings.json dedup, etc.]
-Global layer:  [updated sections / skipped]
+if [[ ${#UPGRADED[@]} -gt 0 ]]; then
+  echo "Auto-updated (${#UPGRADED[@]}):"
+  printf '  %s\n' "${UPGRADED[@]}"
+else
+  echo "Auto-updated: (none — all files already current)"
+fi
+echo ""
+
+if [[ ${#CUSTOMIZED_ACCEPTED[@]} -gt 0 || ${#CUSTOMIZED_KEPT[@]} -gt 0 || ${#SKIPPED_BASE_BRANCH[@]} -gt 0 ]]; then
+  echo "Reviewed (customized files):"
+  for f in "${CUSTOMIZED_ACCEPTED[@]}"; do printf '  accepted: %s\n' "$f"; done
+  for f in "${CUSTOMIZED_KEPT[@]}";    do printf '  kept:     %s\n' "$f"; done
+  for f in "${SKIPPED_BASE_BRANCH[@]}"; do printf '  skipped (BASE_BRANCH only): %s\n' "$f"; done
+else
+  echo "Reviewed: (no customized files)"
+fi
+echo ""
+
+if [[ ${#FIXED[@]} -gt 0 ]]; then
+  echo "Fixed (${#FIXED[@]}):"
+  printf '  %s\n' "${FIXED[@]}"
+fi
+echo ""
+
+if [[ ${#GLOBAL_UPDATED[@]} -gt 0 || ${#GLOBAL_SKIPPED[@]} -gt 0 ]]; then
+  echo "Global layer:"
+  for f in "${GLOBAL_UPDATED[@]}"; do printf '  updated: %s\n' "$f"; done
+  for f in "${GLOBAL_SKIPPED[@]}"; do printf '  kept:    %s\n' "$f"; done
+else
+  echo "Global layer: skipped"
+fi
 ```
 
 If this project has a bats test suite (`tests/*.bats`), remind the user:
