@@ -11,6 +11,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.17.0] — 2026-05-18
+
+### Added
+- **`/rig-upgrade --version` GitHub release check** (`templates/project/.claude/commands/rig-upgrade.md`): the `--version` flag now fetches the latest tagged release from `laudtetteh/the-rig` via the `gh` CLI and includes it in the version output. Warns if the installed version is behind the latest release. Gracefully omits the line if `gh` is unavailable or the network is unreachable. Updated README and `docs/how-it-works.md` to document the new output. Closes #222.
+
+---
+
 ## [1.16.0] — 2026-05-18
 
 ### Added
