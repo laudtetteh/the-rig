@@ -137,6 +137,7 @@ write_manifest_entry() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GLOBAL_TEMPLATES="$SCRIPT_DIR/templates/global"
 PROJECT_TEMPLATES="$SCRIPT_DIR/templates/project"
+INSTALLER_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "unknown")"
 
 # ── Installer branch drift check ─────────────────────────────────────────────
 # If the installer lives inside a git repo, check whether it's behind its
@@ -1162,6 +1163,22 @@ if [[ "$DO_PROJECT" == true ]]; then
       copy_file "$src_file" "$dest_file" "$TARGET" "$rel"
     fi
   done < <(find "$PROJECT_TEMPLATES" -type f -print0)
+
+  # ── WRITE INSTALLER VERSION INTO .rig/VERSION ─────────────────────────────
+  # Always write the running installer's own version, overriding whatever the
+  # static template file contains. This prevents drift when the template copy
+  # lags behind the root VERSION bump. The manifest entry is upserted so the
+  # upgrade strategy continues to detect user customizations correctly.
+  _RIG_VER_DEST=""
+  if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
+    _RIG_VER_DEST="$EXTERNAL_RIG_DIR/VERSION"
+  else
+    _RIG_VER_DEST="$TARGET/.rig/VERSION"
+  fi
+  if [[ -n "$_RIG_VER_DEST" && -d "$(dirname "$_RIG_VER_DEST")" ]]; then
+    echo "$INSTALLER_VERSION" > "$_RIG_VER_DEST"
+    write_manifest_entry "$(sha256_file "$_RIG_VER_DEST")" ".rig/VERSION"
+  fi
 
   # ── SUBSTITUTE PLACEHOLDERS ───────────────────────────────────────────────
   TARGET_ABS="$(cd "$TARGET" && pwd)"

@@ -781,6 +781,27 @@ _is_rig_protected() {
   grep -qF ".rig/" "$TEST_PROJECT/.git/info/exclude"
 }
 
+@test "fresh install: .rig/VERSION matches installer VERSION" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  local installed; installed=$(cat "$TEST_PROJECT/.rig/VERSION")
+  local expected; expected=$(cat "$BATS_TEST_DIRNAME/../VERSION")
+  [ "$installed" = "$expected" ]
+}
+
+@test "upgrade: .rig/VERSION updated to installer VERSION even when template is stale" {
+  # Simulate an installed project whose .rig/VERSION is behind the installer.
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  echo "0.0.0" > "$TEST_PROJECT/.rig/VERSION"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  local installed; installed=$(cat "$TEST_PROJECT/.rig/VERSION")
+  local expected; expected=$(cat "$BATS_TEST_DIRNAME/../VERSION")
+  [ "$installed" = "$expected" ]
+}
+
 # ── Gap 4: stop.sh writes .wrap-needed on 2+ commits ─────────────────────────
 
 @test "stop.sh: writes .wrap-needed when session log has 2+ commits" {
