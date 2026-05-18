@@ -11,6 +11,33 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.16.0] — 2026-05-18
+
+### Added
+- **`/run` operating mode prompt** (`templates/project/.claude/commands/run.md`): tasks without a `## Operating mode` block now trigger an inline three-setting wizard (autonomy / codebase knowledge / uncertainty handling). The answer is written back to the task file and skipped on all future runs for that task. Closes #185.
+- **`/wrap` concurrent session guard** (`templates/project/.claude/commands/wrap.md`): a `.wrap-in-progress` sentinel blocks a second concurrent `/wrap` call from corrupting `CONTEXT_SNAPSHOT.md`. Sentinel deleted at final cleanup. Tighter session boundary detection for mid-session runs. Closes #186.
+- **`/rig-upgrade --version` and `--scope` flags** (`templates/project/.claude/commands/rig-upgrade.md`): `--version` prints project + global installer versions with last-modified timestamps and warns if they differ. `--scope project|global|both` limits the upgrade surface without a full reinstall. Closes #187.
+- **`/task` test intake + `/ship` pre-commit cleanup** (`templates/project/.claude/commands/task.md`, `ship.md`): `/task` intake adds question 5 ("Tests required?"); answer written to task file under `## Testing`. `/ship` Step 3.8 actively removes debug statements and runs the linter before the pre-commit checklist. Both commands detect PR updates vs. new PRs. Closes #189.
+- **Main-branch commit guard** (`templates/project/.claude/hooks/pre-tool.sh`): blocks `git commit` directly to `main`/`master` unless `CLAUDE.md` sets `housekeeping: direct-push`. Prevents accidental direct commits in feature-branch projects. Closes #190.
+- **Command routing table** in global `CLAUDE.md` template (`templates/global/.claude/CLAUDE.md`): maps user intent signals to the correct Rig command. Agent surfaces the command and asks for consent before routing — explicit confirmation required, silence is not enough. Closes #191.
+- **`docs/INDEX.md` + `/doc-list` + `/rig-help` + `/status` commands**: `docs/INDEX.md` lists all docs with one-line descriptions. `/doc-list` reads it. `/rig-help` displays all slash commands grouped by workflow with signatures and descriptions. `/status` surfaces current branch, task, and session state. Closes #192.
+- **`/rig-upgrade` result collection** (`templates/project/.claude/commands/rig-upgrade.md`): result accumulator arrays (`UPGRADED`, `CUSTOMIZED_ACCEPTED`, `CUSTOMIZED_KEPT`, `SKIPPED_BASE_BRANCH`, `FIXED`, `GLOBAL_UPDATED`, `GLOBAL_SKIPPED`) are populated during Phases 2–4 and read in the Phase 5 summary, replacing static placeholders with an accurate upgrade report. Closes #203.
+- **`/pre-release-review` command** in two variants: `.claude/commands/pre-release-review.md` (Rig-specific — covers bats, upgrade path, `is_rig_owned`, `[BASE_BRANCH]` substitution); `templates/project/.claude/commands/pre-release-review.md` (generic, ships to all installed projects). Closes #212.
+- 23 new bats tests: main-branch commit guard (3 tests, PR #205), behavior simulation for `/status`, `/wrap`, `/ship`, `/rig-upgrade` (16 tests, PR #207), structural linting across all 22 command files (4 tests, PR #208). Suite: 86 → 109 tests total.
+
+### Fixed
+- **`/recon` + `/doc-feature`** (`templates/project/.claude/commands/recon.md`, `doc-feature.md`): Step 0 now checks `docs/features/`, `DECISIONS.md`, `ERRORS.md`, and `PROGRESS.md` before sweeping external sources — surfaces existing knowledge first and asks whether a full sweep is still needed. Closes #188.
+- **Command routing consent**: routing instruction tightened so the agent must surface the right command and ask for confirmation before acting; silence is not confirmation. Closes #191.
+- **`pre-tool.sh` python3 fallback** (`templates/project/.claude/hooks/pre-tool.sh`): python3 absence silently disabled both the commit gate and write protection. Added `command -v python3` check with a `grep`-based fallback so both guards remain active on systems without python3. Closes #212.
+- **`/rig-upgrade` ANSI-safe result parsing** (`templates/project/.claude/commands/rig-upgrade.md`): installer's `success()` prefixes output with ANSI color codes, causing the `Updated:*` prefix pattern to never match. Changed to substring match (`*"Updated: "*`). Closes #212.
+
+### Changed
+- **`/rig-help`** (`templates/project/.claude/commands/rig-help.md`): 4 missing commands added (`/post-merge`, `/session-name`, `/rig-install`, `/propose` alias); 3 incorrect descriptions corrected (`/run`, `/sprint`, `/recon`); 4 missing argument signatures added. Template synced. Closes #210.
+- **`README.md`** and **`docs/how-it-works.md`**: command count updated 13 → 22; `/rig-install` added to command tables; `python3` added to requirements table; `## Release` section added for `/pre-release-review`. Closes #210, #212.
+- **`docs/troubleshooting.md`**: item #8 added — "Commit to 'main' blocked by The Rig" — with fixes for both feature-branch projects (create a branch) and solo/housekeeping projects (`housekeeping: direct-push`). Closes #212.
+
+---
+
 ## [1.15.0] — 2026-05-09
 
 ### Added
