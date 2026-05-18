@@ -21,3 +21,10 @@ When this command is triggered, say:
 > Run `/task` to start the intake wizard."
 
 Do not proceed with the old workflow. Redirect only.
+
+---
+
+## Notes
+
+Deprecated in favour of `/task`, which adds an intake wizard for autonomy level,
+check-in frequency, and risk tolerance on top of the same `NEW_TASK_WORKFLOW`.
