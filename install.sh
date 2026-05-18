@@ -988,6 +988,16 @@ if [[ "$DO_PROJECT" == true ]]; then
   elif [[ -n "$EXTERNAL_RIG_DIR" ]]; then
     # --rig-dir was provided (without --tracking): backward-compatible external mode.
     RIG_TRACKING="external"
+  elif [[ -f "$TARGET/.rigpath" ]]; then
+    # Existing .rigpath detected — auto-detect tracking mode without prompting.
+    # Avoids writing .rig/ files to the wrong location when --tracking is omitted.
+    EXTERNAL_RIG_DIR=$(tr -d '[:space:]' < "$TARGET/.rigpath")
+    if [[ "$EXTERNAL_RIG_DIR" == "${HOME}/.rig/projects/"* ]]; then
+      RIG_TRACKING="stealth"
+    else
+      RIG_TRACKING="external"
+    fi
+    info "Detected .rigpath — using ${RIG_TRACKING} mode: $EXTERNAL_RIG_DIR"
   else
     echo "How should .rig/ be tracked in git?"
     echo ""
@@ -1260,6 +1270,7 @@ if [[ "$DO_PROJECT" == true ]]; then
       _stealth_exclude ".gitleaks.toml"
       _stealth_exclude "docs/features/README.md"
       _stealth_exclude ".rig-backup/"
+      _stealth_exclude ".rig/"
       # .rigpath is already excluded by the external-mode block above
     else
       warn ".git/info/exclude not found — stealth exclusions could not be applied."
