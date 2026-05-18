@@ -66,7 +66,7 @@ The Rig has two layers that load in sequence at every session start:
 | Rules (4) | `templates/project/.rig/rules/` | Coding standards, git conventions, security rules, verification protocol |
 | Memory system | `templates/project/.rig/memory/` | PROGRESS log, ERRORS log, DECISIONS log, CONTEXT_SNAPSHOT (session state), RIG_GAPS (self-improvement feedback) |
 | Task lifecycle | `templates/project/.rig/tasks/` | Structured task files through backlog → active → done |
-| Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 21 slash commands |
+| Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 22 slash commands |
 | Feature docs | `templates/project/docs/features/` | README index + `/doc-feature` and `/refresh-feature-doc` commands for capturing and maintaining business-critical feature knowledge |
 | Git hooks | `templates/project/.husky/` | Secret scanning (gitleaks) + auto-injected tool footer removal |
 | GitHub templates | `templates/project/.github/` | PR template + 3 issue templates |
@@ -223,6 +223,13 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 ```
 /ship         →  pre-commit cleanup + checklist + commit + open or update PR
 /debug        →  hypothesis-first diagnosis, mandatory ERRORS.md entry
+```
+
+**Release**
+```
+/pre-release-review  →  full stability review before cutting a release: regressions, tests, security,
+                         docs accuracy, maintainability, edge cases, version bump readiness;
+                         outputs a scored report with a SHIP / HOLD recommendation
 ```
 
 **Feature knowledge**

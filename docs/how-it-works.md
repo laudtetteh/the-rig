@@ -421,11 +421,12 @@ proportion to the complexity of the work — not because of Rig overhead.
 
 ## The command set
 
-Twenty slash commands covering the full development lifecycle:
+Twenty-two slash commands covering the full development lifecycle:
 
 ### Project bootstrap
 | Command | Triggers | Key behaviour |
 |---|---|---|
+| `/rig-install` | Guided wizard | Asks three questions (scope, path, tracking mode), shows the exact install command, and verifies the result. For upgrades of existing installs, use `/rig-upgrade`. |
 | `/kickoff` | `NEW_TASK_WORKFLOW` | Reads `PROJECT_BRIEF.md`, confirms understanding, scaffolds `CLAUDE.md` + task backlog + GitHub issues in one pass |
 
 ### Daily work
@@ -440,6 +441,11 @@ Twenty slash commands covering the full development lifecycle:
 |---|---|---|
 | `/ship` | `SHIP_WORKFLOW` | Sequential hard gate: task confirm → issue → labels → branch/stale-main check → pre-commit cleanup (removes debug statements, runs linter, runs tests if required) → checklist → local test pause → commit approval → commit → housekeeping → open or update PR |
 | `/debug` | `DEBUG_WORKFLOW` | Hypothesis before code, mandatory ERRORS.md entry |
+
+### Release
+| Command | Triggers | Key behaviour |
+|---|---|---|
+| `/pre-release-review` | Full review sweep | Covers regressions, test coverage, security, docs accuracy, maintainability, edge cases, and version bump readiness. Outputs a scored Markdown report with a SHIP / HOLD / SHIP WITH FIXES recommendation. |
 
 ### Feature knowledge
 | Command | Triggers | Key behaviour |

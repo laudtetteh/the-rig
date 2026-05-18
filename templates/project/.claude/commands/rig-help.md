@@ -46,6 +46,12 @@ No arguments. Output the table below directly — do not read individual command
 |---|---|
 | `/debug` | Structured diagnosis. Hypothesis → reproduce → isolate → fix → log in `ERRORS.md`. No code touched until the bug is reproduced. |
 
+## Release
+
+| Command | What it does |
+|---|---|
+| `/pre-release-review` | Full stability review before cutting a release. Covers regressions, test coverage, security, docs accuracy, maintainability, edge cases, and version bump readiness. Outputs a scored report with a SHIP / HOLD recommendation. |
+
 ## Project setup
 
 | Command | What it does |
