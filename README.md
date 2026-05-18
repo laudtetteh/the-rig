@@ -62,11 +62,11 @@ The Rig has two layers that load in sequence at every session start:
 | Personal profile | `templates/global/PROFILE.md.example` | Your professional context — the agent reads it so you never re-explain yourself |
 | Skills (5) | `templates/global/skills/` | Reusable prompt scripts for debug, review, refactor, tests, explain |
 | Project brain | `templates/project/CLAUDE.md` | Project-specific identity, stack, conventions, off-limits paths |
-| Processes (4) | `templates/project/.rig/processes/` | Step-by-step workflows: new-task, ship, debug, post-merge |
+| Processes (5) | `templates/project/.rig/processes/` | Step-by-step workflows: new-task, ship, debug, post-merge, upgrade |
 | Rules (4) | `templates/project/.rig/rules/` | Coding standards, git conventions, security rules, verification protocol |
 | Memory system | `templates/project/.rig/memory/` | PROGRESS log, ERRORS log, DECISIONS log, CONTEXT_SNAPSHOT (session state), RIG_GAPS (self-improvement feedback) |
 | Task lifecycle | `templates/project/.rig/tasks/` | Structured task files through backlog → active → done |
-| Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 13 slash commands |
+| Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 21 slash commands |
 | Feature docs | `templates/project/docs/features/` | README index + `/doc-feature` and `/refresh-feature-doc` commands for capturing and maintaining business-critical feature knowledge |
 | Git hooks | `templates/project/.husky/` | Secret scanning (gitleaks) + auto-injected tool footer removal |
 | GitHub templates | `templates/project/.github/` | PR template + 3 issue templates |
@@ -206,6 +206,7 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 
 **Start a project**
 ```
+/rig-install  →  guided install wizard: asks scope/path/tracking, shows the exact install command, verifies result
 /kickoff      →  reads PROJECT_BRIEF.md, scaffolds CLAUDE.md + task backlog + GitHub issues
 ```
 
