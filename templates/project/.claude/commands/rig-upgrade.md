@@ -46,6 +46,17 @@ GLOBAL_VERSION=$(cat "$GLOBAL_INSTALLER/VERSION" 2>/dev/null || echo "not found"
 GLOBAL_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$GLOBAL_INSTALLER/VERSION" 2>/dev/null \
   || stat -c "%y" "$GLOBAL_INSTALLER/VERSION" 2>/dev/null | cut -d' ' -f1-2 | cut -c1-16 \
   || echo "unknown")
+
+# Latest GitHub release (requires gh CLI; graceful fallback if unavailable)
+GITHUB_VERSION=""
+GITHUB_DATE=""
+if command -v gh >/dev/null 2>&1; then
+  _gh_json=$(gh release view --repo laudtetteh/the-rig --json tagName,publishedAt 2>/dev/null || true)
+  if [[ -n "$_gh_json" ]]; then
+    GITHUB_VERSION=$(echo "$_gh_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['tagName'])" 2>/dev/null || true)
+    GITHUB_DATE=$(echo "$_gh_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['publishedAt'][:10])" 2>/dev/null || true)
+  fi
+fi
 ```
 
 Output:
@@ -53,13 +64,26 @@ Output:
 > ```
 > Rig version info
 > ─────────────────────────────────────────
-> Project (.rig/VERSION):         1.15.0   (last modified: 2026-05-09 11:30)
-> Global installer (~/tools/):    1.15.0   (last modified: 2026-05-09 11:22)
+> Project (.rig/VERSION):         1.16.0   (last modified: 2026-05-18 11:41)
+> Global installer (~/tools/):    1.16.0   (last modified: 2026-05-18 10:52)
+> Latest GitHub release:          v1.16.0  (published: 2026-05-18)
 > ```
 
-If project and global versions differ, note:
-> "⚠️ Project is at `$PROJECT_VERSION` but global installer is at `$GLOBAL_VERSION`.
-> Run `/rig-upgrade` to sync."
+If `GITHUB_VERSION` is empty (gh not available or network failed), print instead:
+> ```
+> Latest GitHub release:          (unavailable — gh not found or no network)
+> ```
+
+After printing all three lines, apply these checks in order:
+
+1. If project and global versions differ:
+   > "⚠️ Project is at `$PROJECT_VERSION` but global installer is at `$GLOBAL_VERSION`. Run `/rig-upgrade` to sync."
+
+2. If a GitHub version was retrieved and it differs from `$PROJECT_VERSION`
+   (compare after stripping a leading `v` from `$GITHUB_VERSION`):
+   > "⚠️ A newer release is available: `$GITHUB_VERSION`. Pull `~/tools/the-rig` and run `/rig-upgrade`."
+
+3. If all three are in sync: say nothing extra.
 
 Then stop — do not proceed to Phase 0.
 
