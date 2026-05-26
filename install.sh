@@ -420,6 +420,47 @@ backup_file() {
   cp "$src" "$dest"
 }
 
+# ── BREAKING CHANGE CHECK ─────────────────────────────────────────────────────
+# Print any "### Changed — BREAKING" bullets from CHANGELOG sections that are
+# newer than $current_version, then prompt the user to confirm before continuing.
+# Silent (returns 0) when: version is unknown, changelog missing, or no breaking
+# changes exist in the upgrade range.
+_show_breaking_changes() {
+  local current_version="$1"
+  local changelog="$2"
+
+  [[ "$current_version" == "unknown" ]] && return 0
+  [[ -f "$changelog" ]] || return 0
+
+  local breaking_lines
+  breaking_lines=$(awk -v ver="$current_version" '
+    BEGIN { stop=0; in_breaking=0 }
+    /^## \[/ {
+      if (index($0, "[" ver "]") > 0) { stop=1 }
+      in_breaking=0
+    }
+    stop { next }
+    /^### .*BREAKING/ { in_breaking=1; next }
+    /^### / { in_breaking=0 }
+    in_breaking && /^- / { print }
+  ' "$changelog")
+
+  [[ -n "$breaking_lines" ]] || return 0
+
+  echo ""
+  warn "Breaking changes since v${current_version} — review before upgrading:"
+  echo ""
+  while IFS= read -r line; do
+    echo "  $line"
+  done <<< "$breaking_lines"
+  echo ""
+  if ! confirm "Continue upgrade with the above breaking changes?" "y"; then
+    info "Upgrade cancelled. No files were modified."
+    exit 0
+  fi
+  echo ""
+}
+
 # ── SMART MERGE: .claude/settings.json ───────────────────────────────────────
 # Merges The Rig's hooks into an existing settings.json without duplicating
 # any hook that already has the same command string.
@@ -1023,6 +1064,20 @@ if [[ "$DO_PROJECT" == true ]]; then
     MANIFEST_FILE="$EXTERNAL_RIG_DIR/memory/.rig-manifest"
   else
     MANIFEST_FILE="$TARGET/.rig/memory/.rig-manifest"
+  fi
+
+  # ── BREAKING CHANGE GATE (upgrade only) ───────────────────────────────────
+  # Read the project's installed Rig version and surface any breaking changes
+  # between it and the incoming installer version before touching any files.
+  # Tests can override _RIG_TEST_CHANGELOG to point to a controlled fixture.
+  if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
+    if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
+      _installed_version=$(cat "$EXTERNAL_RIG_DIR/VERSION" 2>/dev/null || echo "unknown")
+    else
+      _installed_version=$(cat "$TARGET/.rig/VERSION" 2>/dev/null || echo "unknown")
+    fi
+    _changelog_path="${_RIG_TEST_CHANGELOG:-$SCRIPT_DIR/CHANGELOG.md}"
+    _show_breaking_changes "$_installed_version" "$_changelog_path"
   fi
 
   echo ""

@@ -186,12 +186,43 @@ If `$INSTALLER_SRC` is NOT `$REPO`:
 
 ```bash
 git -C "$INSTALLER_SRC" pull origin main 2>&1
-cat "$INSTALLER_SRC/VERSION"  # confirm new version after pull
+INSTALLER_VERSION=$(cat "$INSTALLER_SRC/VERSION" 2>/dev/null || echo "unknown")
+echo "Installer now at: $INSTALLER_VERSION"
 ```
 
 If `$INSTALLER_SRC` IS `$REPO`: skip — dev repo is already on the correct state.
 
-### 1b — Detect tracking mode and key paths
+### 1b — Breaking-change gate
+
+Read `$INSTALLER_SRC/CHANGELOG.md` and extract all `### Changed — BREAKING` bullets
+from sections newer than `$CURRENT_VERSION` (i.e., above the `## [$CURRENT_VERSION]`
+header in the file). Sections are in descending order; stop collecting at
+`## [$CURRENT_VERSION]`.
+
+```bash
+CHANGELOG="$INSTALLER_SRC/CHANGELOG.md"
+```
+
+If `$CHANGELOG` does not exist or `$CURRENT_VERSION` is `"unknown"`: skip silently and
+continue to 1c.
+
+Otherwise, collect the breaking-change bullets. If **no breaking changes** exist in
+the range: say briefly —
+> "No breaking changes since v$CURRENT_VERSION. Proceeding."
+
+If **breaking changes exist**: display them in full, then say —
+> "⚠️ Breaking changes since v$CURRENT_VERSION:
+>
+> [list of bullets, verbatim from CHANGELOG]
+>
+> Review the above before proceeding. Type **go** to continue the upgrade, or
+> **cancel** to abort. No files will be modified until you confirm."
+
+Wait for the user's response. If they say **cancel** (or anything other than
+**go** / **yes** / **proceed** / **continue**): say "Upgrade cancelled. No files
+were modified." and stop. Do not proceed to 1c.
+
+### 1c — Detect tracking mode and key paths
 
 ```bash
 # Tracking mode
@@ -213,7 +244,7 @@ BASE_BRANCH=$(grep "^base-branch:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $
 BASE_BRANCH="${BASE_BRANCH:-main}"
 ```
 
-### 1c — Survey changed files
+### 1d — Survey changed files
 
 For each key Rig-owned file, compare the installed version to the template.
 Where the template uses `[BASE_BRANCH]`, substitute `$BASE_BRANCH` before diffing.
@@ -277,7 +308,7 @@ _diff_tpl ".rig/VERSION" "$TEMPLATES/.rig/VERSION" "$RIG_DIR/VERSION"
 _diff_tpl ".gitleaks.toml" "$TEMPLATES/.gitleaks.toml" "$REPO/.gitleaks.toml"
 ```
 
-### 1d — Check for user-modified Rig-owned files
+### 1e — Check for user-modified Rig-owned files
 
 Read the manifest to find files where the installed hash differs from the manifest hash.
 These are files the user has edited since install — the installer will skip them.
@@ -297,7 +328,7 @@ if [[ -f "$MANIFEST" ]]; then
 fi
 ```
 
-### 1e — Present the plan and wait
+### 1f — Present the plan and wait
 
 Display a summary table before touching anything:
 
@@ -322,7 +353,7 @@ Then say:
 
 **Wait for confirmation before Phase 2.**
 
-### 1f — Initialise result accumulators
+### 1g — Initialise result accumulators
 
 Declare these arrays before Phase 2 begins. Every sub-phase appends to them;
 Phase 5 reads them to produce an accurate summary.
