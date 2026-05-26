@@ -9,6 +9,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed — BREAKING
+- **Default install tracking mode changed to stealth** (`install.sh`): the interactive
+  prompt now defaults to option 4 (stealth) instead of option 1 (in-repo). All Rig
+  files are stored in `~/.rig/projects/<name>/` by default — no `.rig/` is committed
+  to the project repo. Users who prefer in-repo tracking must choose option 1 explicitly
+  or pass `--tracking repo`. This affects all fresh installs where no `--tracking` flag
+  is provided. Closes #233.
+
 ---
 
 ## [1.17.0] — 2026-05-18

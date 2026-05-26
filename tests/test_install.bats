@@ -31,10 +31,12 @@ teardown() {
 
 run_installer() {
   # Convenience wrapper: always project-only, into TEST_PROJECT, with a fixed name.
-  # Extra args (e.g. --strategy) can be appended.
+  # Defaults to --tracking repo so tests remain isolated in TEMP_DIR.
+  # Tests that need stealth/external tracking pass --tracking explicitly (overrides).
   run bash "$INSTALLER" --project-only \
     --target "$TEST_PROJECT" \
     --project-name "TestProject" \
+    --tracking repo \
     "$@"
 }
 
@@ -513,6 +515,23 @@ assert 'additionalContext' in d['hookSpecificOutput']
   rm -rf "$tmpdir"
 }
 
+@test "syntax: subagent-start.sh has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.claude/hooks/subagent-start.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "stealth default: install without --tracking uses stealth mode" {
+  local rig_ext="$TEMP_DIR/rig-stealth"
+  run bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --strategy skip \
+    --rig-dir "$rig_ext"
+  [ "$status" -eq 0 ]
+  [ -f "$rig_ext/memory/PROGRESS.md" ]
+  [ ! -f "$TEST_PROJECT/.rig/memory/PROGRESS.md" ]
+}
+
 @test "syntax: session-end.sh has valid bash syntax" {
   run bash -n "$REPO_ROOT/templates/project/.claude/hooks/session-end.sh"
   [ "$status" -eq 0 ]
@@ -905,11 +924,18 @@ _is_rig_protected() {
   [[ "$output" == *"Invalid --tracking"* ]]
 }
 
-@test "--target without --tracking still defaults to repo tracking" {
-  run_installer --strategy skip
-  [ "$status" -eq 0 ]
-  [ -f "$TEST_PROJECT/.rig/memory/PROGRESS.md" ]
-  [ ! -f "$TEST_PROJECT/.rigpath" ]
+@test "--target without --tracking defaults to stealth tracking" {
+  local rig_ext="$TEMP_DIR/rig-stealth-default"
+  # Call installer directly (not run_installer) — no --tracking, no prompt stdin
+  run bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --strategy skip \
+    --rig-dir "$rig_ext"
+  # .rig/ lands in external dir, not inside the project
+  [ -f "$rig_ext/memory/PROGRESS.md" ]
+  [ ! -f "$TEST_PROJECT/.rig/memory/PROGRESS.md" ]
+  [ -f "$TEST_PROJECT/.rigpath" ]
 }
 
 @test "upgrade without --tracking auto-detects stealth mode from .rigpath" {
@@ -919,7 +945,12 @@ _is_rig_protected() {
   mkdir -p "$rig_ext"
   echo "$rig_ext" > "$TEST_PROJECT/.rigpath"
 
-  run_installer --strategy skip
+  # Call installer directly without --tracking so .rigpath auto-detection fires.
+  # run_installer() prepends --tracking repo which would override auto-detect.
+  run bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --strategy skip
   [ "$status" -eq 0 ]
   # .rig/ files must land in external dir, not project dir
   [ -f "$rig_ext/memory/PROGRESS.md" ]

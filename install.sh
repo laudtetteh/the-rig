@@ -922,7 +922,7 @@ if [[ "$DO_PROJECT" == true ]]; then
   # How should .rig/ appear (or not appear) in git?
   # --tracking flag takes precedence; --rig-dir alone implies external (backward-compat).
   # When neither is set, show the interactive prompt — including when --target is provided.
-  RIG_TRACKING="repo"   # default: committed with the project
+  RIG_TRACKING="stealth"   # default: zero Rig traces in git
   RIGPATH_FILE=""       # absolute path to .rigpath (set if external or stealth mode)
 
   if [[ -n "$_FLAG_TRACKING" ]]; then
@@ -968,15 +968,15 @@ if [[ "$DO_PROJECT" == true ]]; then
   else
     echo "How should .rig/ be tracked in git?"
     echo ""
-    echo "  1) In the repo      — committed with the project (default, recommended for solo projects)"
+    echo "  1) In the repo      — committed with the project (not recommended for shared repos)"
     echo "  2) Local only       — added to .git/info/exclude; invisible to teammates, no .gitignore change"
     echo "  3) External         — install .rig/ to a path outside this repo entirely"
-    echo "  4) Stealth          — zero Rig traces in git: all Rig files excluded or external;"
+    echo "  4) Stealth          — zero Rig traces in git: all Rig files excluded or external; (default)"
     echo "                        git hooks go to .git/hooks/ (no Husky required)"
     echo "                        Use for multi-contributor repos where teammates must not see Rig files."
     echo ""
-    read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3/4] (default: 1): ")" rig_tracking_input || true
-    rig_tracking_input="${rig_tracking_input:-1}"
+    read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3/4] (default: 4): ")" rig_tracking_input || true
+    rig_tracking_input="${rig_tracking_input:-4}"
 
     case "$rig_tracking_input" in
       1) RIG_TRACKING="repo" ;;
