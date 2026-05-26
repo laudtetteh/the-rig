@@ -107,14 +107,16 @@ git init
 
 # Run the installer from your permanent Rig location
 ~/tools/the-rig/install.sh --project-only
-# Choose: 2) New project
+# Default: stealth mode — all Rig files stored outside the repo (no .rig/ committed)
+# Choose option 1 at the tracking prompt to store .rig/ in the repo instead.
 
 # Then open Claude Code in your project and run /kickoff
 # /kickoff reads PROJECT_BRIEF.md, confirms the project shape,
 # and scaffolds CLAUDE.md + task backlog + GitHub issues in one pass.
 ```
 
-The Rig stays in `~/tools/the-rig/`. Your project is clean.
+The Rig stays in `~/tools/the-rig/`. Your project is clean. By default, Rig memory
+and task files are stored in `~/.rig/projects/<project-name>/` — not committed to your repo.
 
 ---
 
