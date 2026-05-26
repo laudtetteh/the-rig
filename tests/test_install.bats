@@ -945,7 +945,12 @@ _is_rig_protected() {
   mkdir -p "$rig_ext"
   echo "$rig_ext" > "$TEST_PROJECT/.rigpath"
 
-  run_installer --strategy skip
+  # Call installer directly without --tracking so .rigpath auto-detection fires.
+  # run_installer() prepends --tracking repo which would override auto-detect.
+  run bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --strategy skip
   [ "$status" -eq 0 ]
   # .rig/ files must land in external dir, not project dir
   [ -f "$rig_ext/memory/PROGRESS.md" ]
