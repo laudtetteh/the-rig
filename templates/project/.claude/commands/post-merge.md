@@ -108,12 +108,14 @@ automatically — present it for the user to confirm or tweak.
 
 ### How to determine what belongs to this session
 
-Use the same boundary logic as `/wrap`:
+Use the same logic as `/wrap` and `/session-name`: **conversation context first,
+files as cross-reference.**
 
-1. Look for `<!-- session-end -->` markers in `.rig/memory/PROGRESS.md`. Entries
-   above the most recent marker belong to this session.
-2. If no markers exist, use the `**Last updated:**` date from CONTEXT_SNAPSHOT as
-   the boundary and collect entries added since that date.
+Your direct knowledge of what was done in this session is the primary signal —
+enumerate the PRs, tasks, and work you know about from this conversation. File
+signals (PROGRESS.md markers, CONTEXT_SNAPSHOT.md datetime) are cross-reference
+only, used to catch anything that compacted out of context. If they conflict with
+what you know, trust the conversation.
 
 ### Check for an existing session name
 
