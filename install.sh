@@ -797,40 +797,14 @@ if [[ "$DO_GLOBAL" == true ]]; then
   _SAVED_MANIFEST_FILE="$MANIFEST_FILE"
   MANIFEST_FILE="$GLOBAL_MANIFEST_FILE"
 
-  if [[ "$COLLISION_STRATEGY" == "upgrade" && -f "$DEST_CLAUDE" ]]; then
-    # Upgrading an existing global install — extract profile path from the
-    # installed CLAUDE.md instead of prompting (preserves their actual path).
-    PROFILE_PATH=$(grep -oE '`[^`]+\.md`' "$DEST_CLAUDE" | head -1 | tr -d '`' 2>/dev/null || true)
-    if [[ -z "$PROFILE_PATH" ]]; then
-      PROFILE_PATH="$HOME/.your-ai-contexts/PROFILE.md"
-      warn "Could not detect profile path from existing CLAUDE.md — using default: $PROFILE_PATH"
-    else
-      info "Detected profile path: $PROFILE_PATH"
-    fi
-    echo ""
-  else
-    # Fresh install — prompt for profile path
-    DEFAULT_PROFILE_DIR="$HOME/.your-ai-contexts"
-    ask "Where should your personal profile file live?"
-    read -r -p "    Path [${DEFAULT_PROFILE_DIR}/PROFILE.md]: " PROFILE_PATH_INPUT
-    PROFILE_PATH="${PROFILE_PATH_INPUT:-${DEFAULT_PROFILE_DIR}/PROFILE.md}"
-    echo ""
-    info "Installing to: $CLAUDE_DIR"
-    info "Profile path:  $PROFILE_PATH"
-    echo ""
-  fi
-
-  mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR" "$(dirname "$PROFILE_PATH")"
+  mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR"
 
   # ── CLAUDE.md ──────────────────────────────────────────────────────────────
-  CLAUDE_TMP="$(mktemp)"
-  sed "s|\\[PROFILE_PATH\\]|${PROFILE_PATH}|g" "$GLOBAL_TEMPLATES/CLAUDE.md" > "$CLAUDE_TMP"
   if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
-    _copy_global_file_upgrade "$CLAUDE_TMP" "$DEST_CLAUDE" "$CLAUDE_DIR" "CLAUDE.md"
+    _copy_global_file_upgrade "$GLOBAL_TEMPLATES/CLAUDE.md" "$DEST_CLAUDE" "$CLAUDE_DIR" "CLAUDE.md"
   else
-    copy_file "$CLAUDE_TMP" "$DEST_CLAUDE" "$CLAUDE_DIR" "CLAUDE.md"
+    copy_file "$GLOBAL_TEMPLATES/CLAUDE.md" "$DEST_CLAUDE" "$CLAUDE_DIR" "CLAUDE.md"
   fi
-  rm -f "$CLAUDE_TMP"
 
   # ── Skills ────────────────────────────────────────────────────────────────
   for skill_src in "$GLOBAL_TEMPLATES/skills/"*.md; do
@@ -842,22 +816,6 @@ if [[ "$DO_GLOBAL" == true ]]; then
       copy_file "$skill_src" "$skill_dest" "$SKILLS_DIR" "skills/$skill_name"
     fi
   done
-
-  # ── Profile ───────────────────────────────────────────────────────────────
-  # Never touched on upgrade — personal data. Only created on fresh install.
-  if [[ "$COLLISION_STRATEGY" != "upgrade" ]]; then
-    if [[ -f "$PROFILE_PATH" ]]; then
-      warn "$PROFILE_PATH already exists — skipping (personal data, never auto-overwritten)."
-      info "To regenerate the template: cp $GLOBAL_TEMPLATES/PROFILE.md.example $PROFILE_PATH"
-    else
-      cp "$GLOBAL_TEMPLATES/PROFILE.md.example" "$PROFILE_PATH"
-      success "Created $PROFILE_PATH"
-      echo ""
-      warn "ACTION REQUIRED: Fill in your personal profile at:"
-      echo "      $PROFILE_PATH"
-      echo "  The agent loads this file at every session start."
-    fi
-  fi
 
   # Restore manifest pointer
   MANIFEST_FILE="$_SAVED_MANIFEST_FILE"
@@ -1452,11 +1410,9 @@ echo "The Rig is installed. Next steps:"
 echo ""
 
 if [[ "$DO_GLOBAL" == true ]]; then
-  echo "  1. Fill in your personal profile (if you haven't already):"
-  echo "       \$EDITOR ${PROFILE_PATH:-~/.your-ai-contexts/PROFILE.md}"
-  echo ""
-  echo "  2. Review and personalise ~/.claude/CLAUDE.md"
-  echo "     (stack defaults, hard rules, working style)"
+  echo "  1. Fill in ~/.claude/CLAUDE.md:"
+  echo "     - '## Personal context' — your name, role, stack, and working style"
+  echo "     - '## Stack defaults' — the languages and frameworks you use"
   echo ""
 fi
 

@@ -50,14 +50,13 @@ No arguments. Output the table below directly — do not read individual command
 
 | Command | What it does |
 |---|---|
-| `/pre-release-review` | Full stability review before cutting a release. Covers regressions, test coverage, security, docs accuracy, maintainability, edge cases, and version bump readiness. Outputs a scored report with a SHIP / HOLD recommendation. |
+| `/pre-release-review` | _(release-cycle projects)_ Full stability review before cutting a release. Covers regressions, test coverage, security, docs accuracy, maintainability, edge cases, and version bump readiness. Outputs a scored report with a SHIP / HOLD recommendation. |
 
 ## Project setup
 
 | Command | What it does |
 |---|---|
-| `/kickoff` | Bootstrap a brand new project from `PROJECT_BRIEF.md`. Run once on a fresh repo. |
-| `/rig-install` | Guided first-time install wizard. Run from inside the Rig repo to install onto a new project. Asks three questions (scope, path, tracking mode), shows the exact command, and verifies the install. For upgrades of existing installs, use `/rig-upgrade`. |
+| `/kickoff` | _(new projects only)_ Bootstrap a brand new project from `PROJECT_BRIEF.md`. Run once at project creation. |
 
 ## Rig maintenance
 
@@ -65,13 +64,12 @@ No arguments. Output the table below directly — do not read individual command
 |---|---|---|
 | `/rig-upgrade` | Upgrade The Rig to the latest version. | `--version` (print versions only, no upgrade), `--scope=project\|global\|both` |
 | `/rig-propose` | Propose a change to Rig governance files (hooks, processes, rules, CLAUDE.md). Writes a diff for human review — never applies it directly. | — |
-| `/rig-gaps` | Log and submit workflow friction observed during a task. | `--push` (append to local Rig repo), `--submit` (create GitHub issue) |
+| `/rig-gaps` | _(Rig contributors)_ Log and submit workflow friction observed during a task. | `--push` (append to local Rig repo), `--submit` (create GitHub issue) |
 | `/rig-help` | This command. | — |
 
 ---
 
 ## Notes
 
-- `/new-feature` is deprecated — use `/task` instead
 - This table is maintained manually; update it when a new command is added or flags change
 - For full command details, read the relevant `.claude/commands/[name].md` file

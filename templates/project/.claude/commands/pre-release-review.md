@@ -1,5 +1,7 @@
 # Command: /pre-release-review
 
+> **For projects with a formal release cycle** — versioned libraries, shipped products, public APIs. Not needed for scripts, CLIs, internal tools, or projects without a release ceremony.
+
 Run this command before cutting a release. Performs a full stability review
 across correctness, security, test coverage, documentation, and release
 readiness. Intended for use before the version bump and changelog PR.
