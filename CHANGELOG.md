@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [1.18.0] — 2026-05-26
+
 ### Added
 - **`session-start.sh` hook** (`templates/project/.claude/hooks/session-start.sh`, `SessionStart`): injects `CONTEXT_SNAPSHOT.md` content and any pending housekeeping flag warnings (`.wrap-needed`, `.post-merge-pending`) into the conversation as `additionalContext` at the very start of each session — before the first user turn. Eliminates the need for the agent to manually read these files. Closes #238.
 - **`prompt-submit.sh` hook** (`templates/project/.claude/hooks/prompt-submit.sh`, `UserPromptSubmit`): re-checks `.wrap-needed` and `.post-merge-pending` flags on every user prompt and re-injects warnings when they are present. Ensures warnings persist across multi-turn sessions. Closes #241.
@@ -21,6 +25,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`/ship` Step 4.8 — docs/memory freshness gate** (`templates/project/.claude/commands/ship.md`): before commit, checks whether any feature docs or memory files that overlap with the PR's touched files are stale. Surfaces stale docs and waits for user decision (update now / skip). Closes #230.
 - **`--feature-docs` installer flag** (`install.sh`): gates `/doc-feature`, `/doc-list`, `/feature-context`, `/refresh-feature-doc`, and `docs/features/` installation behind an explicit opt-in flag. Default installs are leaner; projects that want feature-knowledge tooling pass `--feature-docs` to include it. Closes #250.
 - **`code-reviewer.md` agent template** (`templates/project/.claude/agents/code-reviewer.md`): reusable sub-agent for lightweight pre-commit code review. Invoked optionally by `/ship` Step 4.5; can also be triggered directly. Checks for correctness issues, logic errors, and missed edge cases in staged changes. Closes #228.
+- **Breaking-change gate in `install.sh --strategy upgrade`** (`install.sh`): new `_show_breaking_changes()` function uses `awk` to extract `### Changed — BREAKING` bullets from all CHANGELOG sections newer than the installed version. Fires before any files are touched; prompts the user to confirm before proceeding. Silent in CI/non-interactive mode (default-yes). Test injection via `_RIG_TEST_CHANGELOG`. Closes #258.
+- **Breaking-change gate in `/rig-upgrade`** (`templates/project/.claude/commands/rig-upgrade.md`): Phase 1b added between pull (1a) and tracking-mode detection (now 1c). After `git pull`, reads `CHANGELOG.md` for breaking changes between installed and incoming version. Requires user to type **go** to proceed or **cancel** to abort before Phase 2 writes any files. Closes #258.
 
 ### Changed — BREAKING
 - **Default install tracking mode changed to stealth** (`install.sh`): the interactive
