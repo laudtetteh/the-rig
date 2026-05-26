@@ -9,6 +9,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`session-start.sh` hook** (`templates/project/.claude/hooks/session-start.sh`, `SessionStart`): injects `CONTEXT_SNAPSHOT.md` content and any pending housekeeping flag warnings (`.wrap-needed`, `.post-merge-pending`) into the conversation as `additionalContext` at the very start of each session — before the first user turn. Eliminates the need for the agent to manually read these files. Closes #238.
+- **`prompt-submit.sh` hook** (`templates/project/.claude/hooks/prompt-submit.sh`, `UserPromptSubmit`): re-checks `.wrap-needed` and `.post-merge-pending` flags on every user prompt and re-injects warnings when they are present. Ensures warnings persist across multi-turn sessions. Closes #241.
+- **`permission-request.sh` hook** (`templates/project/.claude/hooks/permission-request.sh`, `PermissionRequest`): auto-approves safe, read-only tool patterns (Read, Bash read-only commands, non-destructive Grep/Find) so they never prompt. Reduces permission-prompt noise for routine operations. Closes #239.
+- **`pre-compact.sh` hook** (`templates/project/.claude/hooks/pre-compact.sh`, `PreCompact`): writes a `.compact-checkpoint.md` file before context compaction, capturing current branch, last commit, active task, and session progress markers. Outputs a `compactionSummary` JSON field so Claude receives orientation context immediately after compaction. Closes #232.
+- **`post-compact.sh` hook** (`templates/project/.claude/hooks/post-compact.sh`, `PostCompact`): reads `.compact-checkpoint.md` back and injects its content as `additionalContext` after compaction completes, restoring the working context that would otherwise be lost. Closes #232.
+- **`session-end.sh` hook** (`templates/project/.claude/hooks/session-end.sh`, `SessionEnd`): handles true session termination (distinct from `Stop`, which fires after every agent turn). Dispatches by source signal: on logout/clear, writes `.wrap-needed` and a minimal auto-checkpoint; on resume, clears the `.wrap-needed` flag. Owns the wrap-needed logic that was previously in `stop.sh`. Closes #240.
+- **`subagent-start.sh` hook** (`templates/project/.claude/hooks/subagent-start.sh`, `SubagentStart`): injects project name, current branch, active task slug, and key conventions into spawned subagents so they share the same working context as the parent session. Closes #244.
+- **`/ship` Step 4.5 — code-reviewer offer** (`templates/project/.claude/commands/ship.md`): after the checklist gate, `/ship` optionally invokes the `code-reviewer` agent for a lightweight pre-commit correctness scan. Accepts yes/no/skip; non-blocking. Closes #228, #230.
+- **`/ship` Step 4.8 — docs/memory freshness gate** (`templates/project/.claude/commands/ship.md`): before commit, checks whether any feature docs or memory files that overlap with the PR's touched files are stale. Surfaces stale docs and waits for user decision (update now / skip). Closes #230.
+- **`--feature-docs` installer flag** (`install.sh`): gates `/doc-feature`, `/doc-list`, `/feature-context`, `/refresh-feature-doc`, and `docs/features/` installation behind an explicit opt-in flag. Default installs are leaner; projects that want feature-knowledge tooling pass `--feature-docs` to include it. Closes #250.
+- **`code-reviewer.md` agent template** (`templates/project/.claude/agents/code-reviewer.md`): reusable sub-agent for lightweight pre-commit code review. Invoked optionally by `/ship` Step 4.5; can also be triggered directly. Checks for correctness issues, logic errors, and missed edge cases in staged changes. Closes #228.
+
 ### Changed — BREAKING
 - **Default install tracking mode changed to stealth** (`install.sh`): the interactive
   prompt now defaults to option 4 (stealth) instead of option 1 (in-repo). All Rig
@@ -16,6 +29,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to the project repo. Users who prefer in-repo tracking must choose option 1 explicitly
   or pass `--tracking repo`. This affects all fresh installs where no `--tracking` flag
   is provided. Closes #233.
+
+### Changed
+- **`stop.sh` simplified** (`templates/project/.claude/hooks/stop.sh`): stripped to date-update + session-end marker only. The `.wrap-needed` sentinel logic moved to `session-end.sh`, which fires on true termination events rather than after every agent turn. The `Stop` hook still fires after every response — it now only updates the `Last updated:` timestamp and appends a `<!-- session-end -->` boundary marker to `PROGRESS.md`. Closes #240.
+- **`housekeeping: direct-push` type guard** (`templates/project/.claude/hooks/pre-tool.sh`): `direct-push` now blocks commit types that indicate code changes (`feat`, `fix`, `refactor`, `test`, `perf`, `devops`, `style`) even when `direct-push` is set. Only `chore` and `docs` commit types can go directly to the base branch. `feat`, `fix`, and all other code-change types must go through a PR regardless of the housekeeping setting. Closes #221.
+- **Worktree redirect in `pre-tool.sh`** (`templates/project/.claude/hooks/pre-tool.sh`): `PreToolUse` now intercepts `Write`, `Edit`, and `NotebookEdit` calls targeting `.claude/worktrees/` paths and transparently redirects them to the main-repo equivalent path via `updatedToolInput`. Hard rule #12 (never edit inside a worktree) is now mechanically enforced rather than relying on the agent. Closes #242.
+- **`/pre-release-review` scope clarified** (`templates/project/.claude/commands/pre-release-review.md`, `rig-help.md`): opening paragraph now explicitly states the command is for projects with a formal release cycle (versioned libraries, shipped products, public APIs). Not needed for scripts, CLIs, or internal tools. Marked `(release-cycle projects)` in `/rig-help`. Closes #246.
+- **`/kickoff` marked as one-shot** (`templates/project/.claude/commands/kickoff.md`, `rig-help.md`): header now states "Run once, at project creation." End-of-flow (Step 5) includes a suggestion to delete `.claude/commands/kickoff.md` after use. Marked `(new projects only)` in `/rig-help`. Closes #247.
+- **`/rig-gaps` scoped to Rig contributors** (`templates/project/.claude/commands/rig-gaps.md`, `rig-help.md`): header now states the command is for users who contribute to or develop The Rig. Submit-step framing simplified: "Review logged gaps and decide which to act on. If you're contributing to The Rig, bring these to a Rig dev session." Marked `(Rig contributors)` in `/rig-help`. Closes #249.
+- **`## Personal context` section inlined into global `CLAUDE.md`** (`templates/global/CLAUDE.md`): personal context prompts (name, role, expertise, preferences, goals) now live directly in `CLAUDE.md` as a `## Personal context` section. Closes #248.
+- **`DOCS_DIR` resolution standard for stealth/external projects** (`templates/project/.claude/commands/`): stealth projects (`.rigpath` exists) resolve `DOCS_DIR` to `$RIG_DIR/docs`; in-repo projects use `$REPO/docs`. Applied consistently across `/doc-feature`, `/refresh-feature-doc`, `/feature-context`. Closes #250.
+
+### Removed
+- **`/new-feature` command** (`templates/project/.claude/commands/`): deprecated redirect to `/task`. Removed from template install. Closes #245.
+- **`/rig-install` command** (`templates/project/.claude/commands/`): guided install wizard. Removed from template install — `/rig-upgrade` covers all upgrade scenarios; new installs use `install.sh` directly. Closes #245.
+- **`PROFILE.md.example`** (`templates/global/`): personal context file removed from the global template. Content is now inlined in `templates/global/CLAUDE.md` as `## Personal context`. Closes #248.
 
 ---
 

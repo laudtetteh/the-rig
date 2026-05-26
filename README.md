@@ -30,9 +30,9 @@ The Rig has two layers that load in sequence at every session start:
 │  GLOBAL LAYER  (~/.claude/)                                     │
 │  Installed once. Applies to every project on the machine.       │
 │                                                                 │
-│  CLAUDE.md          ← identity, hard rules, working style       │
+│  CLAUDE.md          ← identity, hard rules, working style,      │
+│                       personal context (fill in once)           │
 │  skills/            ← reusable skill scripts (5 included)       │
-│  ~/.your-ai-contexts/PROFILE.md  ← personal/professional context│
 └────────────────────────────┬────────────────────────────────────┘
                              │ loaded first at every session
                              ▼
@@ -58,8 +58,7 @@ The Rig has two layers that load in sequence at every session start:
 
 | Component | Location | What it does |
 |---|---|---|
-| Global identity | `templates/global/CLAUDE.md` | Hard rules, working style, memory discipline — loads at every session |
-| Personal profile | `templates/global/PROFILE.md.example` | Your professional context — the agent reads it so you never re-explain yourself |
+| Global identity | `templates/global/CLAUDE.md` | Hard rules, working style, memory discipline, and a `## Personal context` section to fill in once — loads at every session |
 | Skills (5) | `templates/global/skills/` | Reusable prompt scripts for debug, review, refactor, tests, explain |
 | Project brain | `templates/project/CLAUDE.md` | Project-specific identity, stack, conventions, off-limits paths |
 | Processes (5) | `templates/project/.rig/processes/` | Step-by-step workflows: new-task, ship, debug, post-merge, upgrade |
@@ -89,8 +88,8 @@ git clone git@github.com:laudtetteh/the-rig.git ~/tools/the-rig
 cd ~/tools/the-rig
 ./install.sh --global-only
 
-# Fill in your personal profile
-$EDITOR ~/.your-ai-contexts/PROFILE.md
+# Fill in your personal context (name, role, expertise, working style)
+$EDITOR ~/.claude/CLAUDE.md   # look for the ## Personal context section
 ```
 
 This installs the global layer (`~/.claude/CLAUDE.md` + skills) once. Every project
@@ -160,8 +159,8 @@ git clone https://github.com/laudtetteh/the-rig.git ~/tools/the-rig
 cd ~/tools/the-rig
 ./install.sh --global-only
 
-# 3. Fill in your personal profile (machine-local — not committed)
-$EDITOR ~/.your-ai-contexts/PROFILE.md
+# 3. Fill in your personal context (machine-local — ## Personal context section)
+$EDITOR ~/.claude/CLAUDE.md
 
 # 4. Clone your project
 git clone <your-project-url> ~/code/my-project
@@ -188,19 +187,19 @@ See `docs/troubleshooting.md` for common issues after a re-clone.
 
 ## How it works at session start
 
-When you open Claude Code in a project using The Rig, the agent automatically reads (in order):
+When you open Claude Code in a project using The Rig, hooks fire automatically:
 
-1. `~/.claude/CLAUDE.md` — who it is and how to behave
-2. `~/.your-ai-contexts/PROFILE.md` — who you are
-3. `./CLAUDE.md` — what this project is
-4. `./.rig/memory/CONTEXT_SNAPSHOT.md` — full current state (written at session end by `/wrap`); **if present, this is sufficient — the agent stops here**
-5. `./.rig/memory/PROGRESS.md` — build history; only loaded if snapshot is absent or stale
+1. **`session-start.sh`** injects `CONTEXT_SNAPSHOT.md` and any pending flag warnings as hook context — before the first user turn
+2. The agent reads `~/.claude/CLAUDE.md` — who it is, how to behave, and your personal context
+3. The agent reads `./CLAUDE.md` — what this project is
+4. The agent reads `./.rig/memory/CONTEXT_SNAPSHOT.md` — **if present, this is sufficient; the agent stops here**
+5. `./.rig/memory/PROGRESS.md` — only loaded if snapshot is absent or stale
 6. `./.rig/memory/ERRORS.md` — what to avoid
 7. `./.rig/tasks/active/` — what's currently in flight
 
-No re-briefing. No repeating context. Every session picks up exactly where the last one left off.
+On every user prompt, `prompt-submit.sh` re-checks for pending flag warnings and re-injects them if still present. No re-briefing. No repeating context. Every session picks up exactly where the last one left off.
 
-**At session end**, `stop.sh` fires automatically (Claude Code's Stop event): it updates the `Last updated:` timestamp in `CONTEXT_SNAPSHOT.md` and appends a `<!-- session-end -->` boundary marker to `PROGRESS.md`. Run `/wrap` before closing Claude Code for a full snapshot — `stop.sh` is a lightweight safety net, not a replacement.
+**At session end**, `session-end.sh` fires (Claude Code's `SessionEnd` event) and writes `.wrap-needed` + a minimal auto-checkpoint. The `stop.sh` hook fires after every agent turn (the `Stop` event) to keep `CONTEXT_SNAPSHOT.md`'s timestamp current. Run `/wrap` before closing Claude Code for a full snapshot — the hooks are a safety net, not a replacement.
 
 ---
 
@@ -208,8 +207,7 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 
 **Start a project**
 ```
-/rig-install  →  guided install wizard: asks scope/path/tracking, shows the exact install command, verifies result
-/kickoff      →  reads PROJECT_BRIEF.md, scaffolds CLAUDE.md + task backlog + GitHub issues
+/kickoff      →  reads PROJECT_BRIEF.md, scaffolds CLAUDE.md + task backlog + GitHub issues (run once at project creation)
 ```
 
 **Daily work**
@@ -267,13 +265,27 @@ No re-briefing. No repeating context. Every session picks up exactly where the l
 
 ## What the hooks enforce
 
+### Claude Code hooks
+
+| Hook | Event | What it does |
+|---|---|---|
+| `session-start.sh` | `SessionStart` | Injects `CONTEXT_SNAPSHOT.md` and pending flag warnings before the first user turn |
+| `prompt-submit.sh` | `UserPromptSubmit` | Re-checks `.wrap-needed`/`.post-merge-pending` on every prompt; re-injects warnings when present |
+| `permission-request.sh` | `PermissionRequest` | Auto-approves safe read-only tool patterns to reduce permission-prompt noise |
+| `pre-tool.sh` | `PreToolUse` (every tool call) | Blocks writes to protected paths; gates `git commit` on user go-ahead sentinel; blocks direct commits to `main`/`master` unless `housekeeping: direct-push`; redirects worktree writes to main-repo path |
+| `post-tool.sh` | `PostToolUse` (every tool call) | Auto-stubs `PROGRESS.md` after every commit; clears commit sentinel |
+| `pre-compact.sh` | `PreCompact` | Writes compact checkpoint + `compactionSummary` before context compaction |
+| `post-compact.sh` | `PostCompact` | Injects checkpoint content as `additionalContext` after compaction |
+| `subagent-start.sh` | `SubagentStart` | Injects project name, branch, active task, and key conventions into spawned subagents |
+| `session-end.sh` | `SessionEnd` | Handles true session termination: writes `.wrap-needed` + minimal auto-checkpoint on logout/clear; clears flag on resume |
+| `stop.sh` | `Stop` (every agent turn) | Updates `Last updated:` in `CONTEXT_SNAPSHOT.md`; appends session-end boundary to `PROGRESS.md` |
+
+### Git hooks
+
 | Hook | Trigger | What it prevents |
 |---|---|---|
-| `pre-tool.sh` | Before every Claude Code tool call | Writes to protected paths; blocks `git commit` until user gives explicit go-ahead; blocks commits directly to `main`/`master` unless `housekeeping: direct-push` is set |
-| `post-tool.sh` | After every Claude Code tool call | PROGRESS.md being skipped after a commit; clears commit sentinel after use |
-| `stop.sh` | When the agent finishes its final response | CONTEXT_SNAPSHOT going stale — updates `Last updated:` and appends a session-end boundary to PROGRESS.md without requiring `/wrap` |
 | `pre-commit` | Before every git commit | Secrets reaching the repository |
-| `commit-msg` | On every git commit | (1) Strips auto-injected tool footers (`Co-Authored-By: Claude`, `Made-with-Claude`, etc.) from commit messages; (2) validates Conventional Commits subject-line format; (3) requires a tracker-specific issue reference (`[#N]` for GitHub, `[TEAM-123]` for Linear, etc.) when `issue-tracking:` is set in `CLAUDE.md` |
+| `commit-msg` | On every git commit | (1) Strips auto-injected tool footers (`Co-Authored-By: Claude`, `Made-with-Claude`, etc.); (2) validates Conventional Commits subject-line format; (3) requires a tracker-specific issue reference (`[#N]` for GitHub, `[TEAM-123]` for Linear, etc.) when `issue-tracking:` is set in `CLAUDE.md` |
 | `post-commit` | After every git commit | Re-applies footer stripping in case the git client re-injected footers after `commit-msg` ran |
 
 ---

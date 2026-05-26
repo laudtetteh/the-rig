@@ -57,19 +57,16 @@ Three locations work together. The installer repo produces the other two:
 │       memory discipline, │  │  .rig/rules/     ← standards      │
 │       planning, git,     │  │  .rig/memory/    ← PROGRESS +     │
 │       code quality,      │  │                    ERRORS +        │
-│       skill trigger table│  │                    SNAPSHOT        │
-│                          │  │  .rig/tasks/     ← backlog/active/│
-│  ~/.claude/skills/       │  │                    done            │
-│    ├─ debug.md           │  │  .claude/        ← hooks +        │
-│    ├─ code-review.md     │  │                    commands        │
-│    ├─ refactor.md        │  │  .husky/         ← git hooks      │
-│    ├─ write-tests.md     │  │  .github/        ← PR + issue     │
-│    └─ explain.md         │  │                    templates       │
-│                          │  └───────────────────────────────────┘
-│  ~/.your-ai-contexts/    │
-│    PROFILE.md            │
-│    └─ Personal context   │
-│       (path configurable)│
+│       personal context,  │  │                    SNAPSHOT        │
+│       skill trigger table│  │  .rig/tasks/     ← backlog/active/│
+│                          │  │                    done            │
+│  ~/.claude/skills/       │  │  .claude/        ← hooks (10) +   │
+│    ├─ debug.md           │  │                    commands        │
+│    ├─ code-review.md     │  │  .husky/         ← git hooks      │
+│    ├─ refactor.md        │  │  .github/        ← PR + issue     │
+│    ├─ write-tests.md     │  │                    templates       │
+│    └─ explain.md         │  └───────────────────────────────────┘
+│                          │
 └──────────────────────────┘
 ```
 
@@ -86,12 +83,14 @@ only runs when you install or upgrade.
 Session starts
      │
      ▼
-Claude Code auto-loads ~/.claude/CLAUDE.md
-     │  Hard rules, working style, memory discipline
+session-start.sh fires (SessionStart hook)
+     │  Reads CONTEXT_SNAPSHOT.md + checks .wrap-needed / .post-merge-pending
+     │  Injects snapshot content and any warnings as additionalContext
+     │  (before the first user turn — no manual file read required)
      │
      ▼
-CLAUDE.md instructs: read PROFILE.md
-     │  Personal/professional context
+Claude Code auto-loads ~/.claude/CLAUDE.md
+     │  Hard rules, working style, memory discipline, personal context
      │
      ▼
 CLAUDE.md instructs: read ./CLAUDE.md
@@ -99,12 +98,13 @@ CLAUDE.md instructs: read ./CLAUDE.md
      │
      ▼
 CLAUDE.md instructs: check .rig/memory/CONTEXT_SNAPSHOT.md
-     │  If it exists → sufficient for orientation. Load it and stop.
+     │  Already injected by hook above — agent confirms or loads from disk if absent
+     │  If it exists → sufficient for orientation. Stop here.
      │  If absent or stale → load .rig/memory/PROGRESS.md (last 20 entries only)
      │
      ▼
 CLAUDE.md instructs: read ./.rig/memory/ERRORS.md
-     │  Known pitfalls to avoid
+     │  Known pitfalls to avoid (only if snapshot absent/stale)
      │
      ▼
 CLAUDE.md instructs: skim ./.rig/memory/DECISIONS.md
@@ -117,10 +117,36 @@ CLAUDE.md instructs: read ./.rig/tasks/active/
      ▼
 Agent is oriented. Hooks are live. Ready to work.
      │
-     │  During the session (repeats every turn):
-     │  ├─ pre-tool.sh  runs before every tool call
-     │  ├─ post-tool.sh runs after every tool call
-     │  └─ stop.sh      runs after the agent's final message each turn
+     │  On every user prompt:
+     │  └─ prompt-submit.sh (UserPromptSubmit)
+     │       Re-checks .wrap-needed / .post-merge-pending; re-injects warnings
+     │
+     │  On every permission request:
+     │  └─ permission-request.sh (PermissionRequest)
+     │       Auto-approves safe read-only patterns
+     │
+     │  Before every tool call:
+     │  └─ pre-tool.sh (PreToolUse)
+     │       Protected-path check, commit gate, main-branch guard, worktree redirect
+     │
+     │  After every tool call:
+     │  └─ post-tool.sh (PostToolUse)
+     │       PROGRESS.md auto-stub on commit; sentinel cleanup
+     │
+     │  Before context compaction:
+     │  └─ pre-compact.sh (PreCompact)
+     │       Writes .compact-checkpoint.md; outputs compactionSummary JSON
+     │
+     │  After context compaction:
+     │  └─ post-compact.sh (PostCompact)
+     │       Injects checkpoint as additionalContext; restores working context
+     │
+     │  When a subagent spawns:
+     │  └─ subagent-start.sh (SubagentStart)
+     │       Injects project name, branch, active task, key conventions
+     │
+     │  After the agent's final message each turn:
+     │  └─ stop.sh (Stop)
      │       Updates "Last updated:" date in CONTEXT_SNAPSHOT.md
      │       Appends <!-- session-end YYYY-MM-DD HH:MM --> to PROGRESS.md
      │       (lightweight; idempotent — safe to run after every response)
@@ -133,6 +159,14 @@ Agent is oriented. Hooks are live. Ready to work.
      │  Trims ERRORS.md if > 30 entries
      │  Suggests session name (derives name from session-end markers)
      └─ Surfaces next priority
+     │
+     ▼
+Session ends
+     │
+     └─ session-end.sh (SessionEnd)
+          On logout/clear: writes .wrap-needed + minimal auto-checkpoint
+          On resume: clears .wrap-needed flag
+          (session-end.sh owns the wrap-needed lifecycle; stop.sh is lightweight only)
 ```
 
 ---
@@ -241,16 +275,42 @@ Step 8: Surface next priority — ask "What's next?"
 
 ### Claude Code hooks (`.claude/`)
 
-Wired via `.claude/settings.json`. Run on every tool call (`"matcher": ".*"`).
+Wired via `.claude/settings.json`. Ten hooks covering the full session lifecycle.
 
 ```
+Session starts
+     │
+     └─► session-start.sh (SessionStart)
+           Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
+           Reads CONTEXT_SNAPSHOT.md — injects as additionalContext
+           Checks .wrap-needed — injects warning if present
+           Checks .post-merge-pending — injects warning if present
+           (fires before the first user turn — no manual file read required)
+
+User submits a prompt
+     │
+     └─► prompt-submit.sh (UserPromptSubmit)
+           Re-checks .wrap-needed / .post-merge-pending on every prompt
+           Re-injects warnings when flags are present
+           (ensures flags surface even mid-session without repeating session-start)
+
+Agent requests a permission
+     │
+     └─► permission-request.sh (PermissionRequest)
+           Auto-approves safe read-only patterns:
+             Read, Bash (ls/cat/grep/find/git log/git diff/etc.), WebFetch, WebSearch
+           Returns {"behavior": "allow"} for matched patterns — no prompt shown
+           Falls through (no response) for write/destructive operations
+
 Every tool call
      │
      ├─► pre-tool.sh (PreToolUse)
      │     Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
      │     Logs call to /tmp/the-rig-session.log
+     │     Worktree redirect: Write/Edit/NotebookEdit targeting .claude/worktrees/
+     │       → rewrites path to main-repo equivalent via updatedToolInput
      │     Checks RIG_PROTECTED: blocks writes to governance files
-     │     (RIG_DIR/processes/, RIG_DIR/rules/, .husky/, CLAUDE.md, .claude/hooks/)
+     │       (RIG_DIR/processes/, RIG_DIR/rules/, .husky/, CLAUDE.md, .claude/hooks/)
      │     Checks BLOCKED_PATHS: blocks project-specific protected paths
      │     Gates git commit on $RIG_DIR/memory/.rig-commit-ok sentinel:
      │       Blocked → agent shows commit message, asks for trigger phrase
@@ -258,7 +318,8 @@ Every tool call
      │       Agent creates sentinel → commit succeeds → post-tool.sh deletes it
      │     Guards git commit on main/master:
      │       Blocked unless CLAUDE.md sets housekeeping: direct-push
-     │       Prevents accidental direct commits to protected branches
+     │       Even with direct-push: blocks feat/fix/refactor/test/perf/devops/style types
+     │       Only chore/docs may go directly to main
      │     Exit 1 (block) if any check fails
      │
      └─► post-tool.sh (PostToolUse)
@@ -271,7 +332,29 @@ Every tool call
                Append dated stub to RIG_DIR/memory/PROGRESS.md (idempotent)
                Delete $RIG_DIR/memory/.rig-commit-ok sentinel (one-shot auth)
 
-Agent finishes response
+Before context compaction
+     │
+     └─► pre-compact.sh (PreCompact)
+           Resolves RIG_DIR
+           Writes .compact-checkpoint.md: branch, last commit, active task, progress markers
+           Outputs compactionSummary JSON field for Claude to receive immediately after compact
+           (prevents disorientation when the context window is replaced)
+
+After context compaction
+     │
+     └─► post-compact.sh (PostCompact)
+           Reads .compact-checkpoint.md
+           Injects its content as additionalContext
+           (restores working context that would otherwise require manual re-orientation)
+
+When a subagent spawns
+     │
+     └─► subagent-start.sh (SubagentStart)
+           Resolves RIG_DIR
+           Injects: project name, current branch, active task slug, key conventions
+           (subagents share the same working context as the parent session)
+
+Agent finishes response each turn
      │
      └─► stop.sh (Stop event)
            Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
@@ -280,10 +363,17 @@ Agent finishes response
            If PROGRESS.md exists:
              Append <!-- session-end YYYY-MM-DD HH:MM --> boundary marker
              (idempotent: skips if last non-blank line is already a marker)
-           If .wrap-needed flag exists (session ended without /wrap):
-             Write a minimal auto-checkpoint to CONTEXT_SNAPSHOT.md
-             (current branch + last commit; prevents the next session from loading
-             the full PROGRESS.md history when a snapshot is absent or stale)
+           (lightweight; .wrap-needed logic moved to session-end.sh)
+
+Session ends (logout / clear / quit)
+     │
+     └─► session-end.sh (SessionEnd)
+           Resolves RIG_DIR
+           On logout/clear: writes .wrap-needed sentinel
+                            writes a minimal auto-checkpoint to CONTEXT_SNAPSHOT.md
+                            (current branch + last commit; prevents cold-start next session)
+           On resume:       clears .wrap-needed flag
+           (session-end.sh owns the wrap-needed lifecycle; stop.sh is for per-turn cleanup only)
 ```
 
 **Critical implementation note:** Tool names in Claude Code are `PascalCase`
@@ -421,13 +511,12 @@ proportion to the complexity of the work — not because of Rig overhead.
 
 ## The command set
 
-Twenty-two slash commands covering the full development lifecycle:
+Twenty slash commands covering the full development lifecycle:
 
 ### Project bootstrap
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/rig-install` | Guided wizard | Asks three questions (scope, path, tracking mode), shows the exact install command, and verifies the result. For upgrades of existing installs, use `/rig-upgrade`. |
-| `/kickoff` | `NEW_TASK_WORKFLOW` | Reads `PROJECT_BRIEF.md`, confirms understanding, scaffolds `CLAUDE.md` + task backlog + GitHub issues in one pass |
+| `/kickoff` | `NEW_TASK_WORKFLOW` | Reads `PROJECT_BRIEF.md`, confirms understanding, scaffolds `CLAUDE.md` + task backlog + GitHub issues in one pass. Run once at project creation — the command file can be deleted after use. |
 
 ### Daily work
 | Command | Triggers | Key behaviour |
@@ -469,9 +558,8 @@ Twenty-two slash commands covering the full development lifecycle:
 | `/rig-propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
 | `/session-name` | Session naming | Derives a session name from current PROGRESS entries and presents it as a suggestion — callable at any time, not just at wrap |
 | `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, captures in-flight task state, updates PROGRESS, trims PROGRESS/ERRORS, suggests session name, surfaces next priority. Concurrent session guard prevents race conditions on PROGRESS.md. |
-| `/rig-gaps` | Self-improvement | Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats report for submission. `--push` appends directly to the local Rig repo (requires `rig-gaps-push-target:` in `CLAUDE.md`); `--submit` creates public GitHub issues in `laudtetteh/the-rig` (opt-in; requires `.rig-contribute-enabled` sentinel + `gh` auth) |
+| `/rig-gaps` | Self-improvement | _(Rig contributors)_ Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats report for review and optional submission. `--push` appends directly to the local Rig repo (requires `rig-gaps-push-target:` in `CLAUDE.md`); `--submit` creates public GitHub issues in `laudtetteh/the-rig` (opt-in; requires `.rig-contribute-enabled` sentinel + `gh` auth) |
 | `/rig-upgrade` | Upgrade workflow | Pulls latest Rig source and re-runs `install.sh` with `--strategy upgrade`. `--version` prints the project version, global installer version, and the latest tagged release from GitHub (via `gh`), warning if any are out of sync. `--scope=project\|global\|both` limits which layers are upgraded. |
-| `/new-feature` | *(deprecated)* | Redirects to `/task`. Kept for backward compatibility only. |
 
 ---
 
