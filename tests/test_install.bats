@@ -1736,3 +1736,174 @@ print(m.group(1) + (m.group(2) if m.group(2) else '/'))
   result=$(_worktree_redirect_path "/repo/.claude/hooks/pre-tool.sh")
   [ -z "$result" ]
 }
+
+# ── Breaking change detection: _show_breaking_changes (#258) ─────────────────
+# Mirrors the awk logic in _show_breaking_changes() to unit-test detection
+# without running the full installer.
+
+_extract_breaking_changes() {
+  local current_version="$1"
+  local changelog="$2"
+
+  [[ "$current_version" == "unknown" ]] && return 1
+  [[ -f "$changelog" ]] || return 1
+
+  local breaking_lines
+  breaking_lines=$(awk -v ver="$current_version" '
+    BEGIN { stop=0; in_breaking=0 }
+    /^## \[/ {
+      if (index($0, "[" ver "]") > 0) { stop=1 }
+      in_breaking=0
+    }
+    stop { next }
+    /^### .*BREAKING/ { in_breaking=1; next }
+    /^### / { in_breaking=0 }
+    in_breaking && /^- / { print }
+  ' "$changelog")
+
+  [[ -n "$breaking_lines" ]] || return 1
+  echo "$breaking_lines"
+}
+
+_make_changelog() {
+  # Write a minimal CHANGELOG.md to $1 for testing.
+  cat > "$1" <<'CLEOF'
+# Changelog
+
+## [Unreleased]
+
+### Changed — BREAKING
+- Breaking thing in unreleased
+
+### Added
+- Non-breaking thing
+
+## [2.0.0] — 2026-01-01
+
+### Changed — BREAKING
+- Old breaking thing in 2.0.0
+
+### Added
+- Some feature in 2.0.0
+
+## [1.5.0] — 2025-06-01
+
+### Added
+- Some feature in 1.5.0
+CLEOF
+}
+
+@test "breaking change detection: surfaces bullets from [Unreleased] when installed is older" {
+  local changelog="$TEMP_DIR/CHANGELOG.md"
+  _make_changelog "$changelog"
+
+  run _extract_breaking_changes "1.5.0" "$changelog"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Breaking thing in unreleased"* ]]
+  [[ "$output" == *"Old breaking thing in 2.0.0"* ]]
+}
+
+@test "breaking change detection: surfaces only changes newer than installed version" {
+  local changelog="$TEMP_DIR/CHANGELOG.md"
+  _make_changelog "$changelog"
+
+  # Installed at 2.0.0: only [Unreleased] should be in range
+  run _extract_breaking_changes "2.0.0" "$changelog"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Breaking thing in unreleased"* ]]
+  [[ "$output" != *"Old breaking thing in 2.0.0"* ]]
+}
+
+@test "breaking change detection: silent when no breaking changes in range" {
+  local changelog="$TEMP_DIR/CHANGELOG.md"
+  # Changelog with no BREAKING section above 1.5.0
+  cat > "$changelog" <<'CLEOF'
+# Changelog
+
+## [Unreleased]
+
+### Added
+- Just an addition
+
+## [1.5.0] — 2025-06-01
+
+### Changed — BREAKING
+- Old breaking thing
+CLEOF
+
+  run _extract_breaking_changes "1.5.0" "$changelog"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "breaking change detection: silent when installed version is unknown" {
+  local changelog="$TEMP_DIR/CHANGELOG.md"
+  _make_changelog "$changelog"
+
+  run _extract_breaking_changes "unknown" "$changelog"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "breaking change detection: silent when CHANGELOG is missing" {
+  run _extract_breaking_changes "1.5.0" "$TEMP_DIR/no-such-file.md"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "breaking change detection: upgrade prints warning when breaking changes exist" {
+  # Use a controlled fixture changelog so this test doesn't depend on real CHANGELOG content.
+  local fixture="$TEMP_DIR/fixture-changelog.md"
+  cat > "$fixture" <<'CLEOF'
+# Changelog
+
+## [Unreleased]
+
+### Changed — BREAKING
+- Stealth is now the default tracking mode
+
+## [1.0.0] — 2025-01-01
+
+### Added
+- Initial release
+CLEOF
+
+  # First install to establish the project; set installed version below the range.
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  echo "0.9.0" > "$TEST_PROJECT/.rig/VERSION"
+
+  # Upgrade: confirm() auto-accepts in non-interactive mode (default "y").
+  # _RIG_TEST_CHANGELOG points the gate at our fixture instead of the real CHANGELOG.
+  _RIG_TEST_CHANGELOG="$fixture" run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Breaking changes since v0.9.0"* ]]
+  [[ "$output" == *"Stealth is now the default tracking mode"* ]]
+}
+
+@test "breaking change detection: upgrade is silent when no breaking changes in range" {
+  # Fixture has breaking changes only in [1.0.0], not in [Unreleased].
+  local fixture="$TEMP_DIR/fixture-no-breaking.md"
+  cat > "$fixture" <<'CLEOF'
+# Changelog
+
+## [Unreleased]
+
+### Added
+- Some non-breaking addition
+
+## [1.0.0] — 2025-01-01
+
+### Changed — BREAKING
+- Old breaking change (already installed)
+CLEOF
+
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  # Installed version is 1.0.0 — nothing above it has breaking changes in this fixture.
+  echo "1.0.0" > "$TEST_PROJECT/.rig/VERSION"
+
+  _RIG_TEST_CHANGELOG="$fixture" run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Breaking changes since"* ]]
+}
