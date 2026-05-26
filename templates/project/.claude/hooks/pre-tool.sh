@@ -88,8 +88,10 @@ if [[ "$TOOL" == "Bash" ]]; then
 
     # ── Guard: block commits directly to main/master ──────────────────────
     # Exception: projects that set 'housekeeping: direct-push' in CLAUDE.md
-    # allow direct commits for post-merge housekeeping. All other projects
-    # require a feature branch.
+    # allow chore(memory), chore(release), chore(post-merge), and similar
+    # housekeeping commits directly to main. Code-change types (feat, fix,
+    # refactor, test, perf, devops, style) are always blocked, even with
+    # direct-push — they must go through a feature branch and PR.
     CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
     if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
       HOUSEKEEPING=$(grep "^housekeeping:" "$REPO/CLAUDE.md" 2>/dev/null \
@@ -106,12 +108,45 @@ if [[ "$TOOL" == "Bash" ]]; then
         echo "    housekeeping: direct-push" >&2
         exit 1
       fi
+
+      # direct-push is set — still restrict to housekeeping commit types.
+      # Code-change types must go through a branch and PR regardless.
+      DIRECT_COMMIT_TYPE=""
+      if command -v python3 >/dev/null 2>&1; then
+        DIRECT_COMMIT_TYPE=$(echo "$BASH_CMD" | python3 -c "
+import re, sys
+cmd = sys.stdin.read()
+m = re.search(r\"'EOF'\\s*\\n\\s*(\\S[^\\n]*)\", cmd)
+if not m:
+    m = re.search(r'-m\\s+\"([^\"]+)\"', cmd)
+if not m:
+    m = re.search(r\"-m\\s+'([^']+)'\", cmd)
+if m:
+    first_line = m.group(1).strip()
+    tm = re.match(r'^([a-z]+)[\(:]', first_line)
+    if tm:
+        print(tm.group(1))
+" 2>/dev/null || true)
+      else
+        DIRECT_COMMIT_TYPE=$(echo "$BASH_CMD" | grep -o '"[a-z]*(' | tr -d '"(' | head -1 || true)
+      fi
+
+      CODE_TYPES="^(feat|fix|refactor|test|perf|devops|style)$"
+      if [[ -n "$DIRECT_COMMIT_TYPE" ]] && echo "$DIRECT_COMMIT_TYPE" | grep -qE "$CODE_TYPES"; then
+        echo "" >&2
+        echo "  Direct-to-main commit blocked by The Rig." >&2
+        echo "" >&2
+        echo "  'housekeeping: direct-push' only allows chore and docs commits" >&2
+        echo "  directly to main. A '$DIRECT_COMMIT_TYPE(...)' commit requires a PR:" >&2
+        echo "    git checkout -b $DIRECT_COMMIT_TYPE/your-description" >&2
+        exit 1
+      fi
     fi
   fi
 fi
 
 # ── Block writes to protected paths ──────────────────────────────────────────
-if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" ]]; then
+if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" || "$TOOL" == "NotebookEdit" ]]; then
 
   # Extract the target file path from the JSON input.
   # python3 handles embedded quotes and escapes correctly; falls back to grep
@@ -122,6 +157,33 @@ if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" ]]; then
       <<< "$INPUT" 2>/dev/null || true)
   else
     PATH_ARG=$(echo "$INPUT" | grep -o '"file_path":"[^"]*"' | head -1 | cut -d'"' -f4)
+  fi
+
+  # ── Worktree write redirect ───────────────────────────────────────────────
+  # Hard rule #12: never write files inside .claude/worktrees/ — edits there
+  # are invisible to the user's git client. Redirect to the main repo instead.
+  if [[ "$PATH_ARG" == *"/.claude/worktrees/"* ]]; then
+    REDIRECTED_PATH=""
+    if command -v python3 >/dev/null 2>&1; then
+      REDIRECTED_PATH=$(echo "$INPUT" | python3 -c "
+import json, re, sys
+data = json.load(sys.stdin)
+path = data.get('file_path', '')
+m = re.match(r'^(.*)/\.claude/worktrees/[^/]+(/.*|$)', path)
+if not m:
+    sys.exit(0)
+new_path = m.group(1) + (m.group(2) if m.group(2) else '/')
+data['file_path'] = new_path
+import json as _j
+print(_j.dumps({'updatedToolInput': data}))
+sys.stderr.write('Redirected write from worktree path to main repo: ' + new_path + '\n')
+" 2>/tmp/the-rig-worktree-redirect.tmp || true)
+    fi
+    if [[ -n "$REDIRECTED_PATH" ]]; then
+      echo "$REDIRECTED_PATH"
+      cat /tmp/the-rig-worktree-redirect.tmp >&2 2>/dev/null || true
+      exit 0
+    fi
   fi
 
   # ── THE RIG'S OWN GOVERNANCE FILES (self-protection) ─────────────────────

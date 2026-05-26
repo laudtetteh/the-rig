@@ -1446,3 +1446,106 @@ _upgrade_version_check() {
   run _upgrade_version_check "$rig_dir" "$installer_src"
   [ "$status" -ne 0 ]
 }
+
+# ── Deprecated command removal: /new-feature and /rig-install (#245) ─────────
+# Both commands were removed from templates/project/.claude/commands/.
+# Verify neither is present in a fresh install.
+
+@test "deprecated commands: new-feature.md is absent from a fresh install" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  [ ! -f "$TEST_PROJECT/.claude/commands/new-feature.md" ]
+}
+
+@test "deprecated commands: rig-install.md is absent from a fresh install" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  [ ! -f "$TEST_PROJECT/.claude/commands/rig-install.md" ]
+}
+
+# ── Hook behavior: direct-push commit type restriction (#221) ─────────────────
+# When housekeeping: direct-push is set, code-change commit types (feat, fix,
+# refactor, test, perf, devops, style) are blocked. Chore and docs are allowed.
+
+_direct_push_type_check() {
+  # Mirrors the direct-push type guard in pre-tool.sh.
+  # Returns 0 (allow) or 1 (block).
+  local commit_type="$1"
+  local code_types="^(feat|fix|refactor|test|perf|devops|style)$"
+  if [[ -n "$commit_type" ]] && echo "$commit_type" | grep -qE "$code_types"; then
+    return 1  # blocked
+  fi
+  return 0  # allowed
+}
+
+@test "direct-push type guard: feat commit is blocked" {
+  run _direct_push_type_check "feat"
+  [ "$status" -ne 0 ]
+}
+
+@test "direct-push type guard: fix commit is blocked" {
+  run _direct_push_type_check "fix"
+  [ "$status" -ne 0 ]
+}
+
+@test "direct-push type guard: refactor commit is blocked" {
+  run _direct_push_type_check "refactor"
+  [ "$status" -ne 0 ]
+}
+
+@test "direct-push type guard: chore commit is allowed" {
+  run _direct_push_type_check "chore"
+  [ "$status" -eq 0 ]
+}
+
+@test "direct-push type guard: docs commit is allowed" {
+  run _direct_push_type_check "docs"
+  [ "$status" -eq 0 ]
+}
+
+@test "direct-push type guard: empty type is allowed (no message to parse)" {
+  run _direct_push_type_check ""
+  [ "$status" -eq 0 ]
+}
+
+# ── Hook behavior: worktree write redirect (#242) ─────────────────────────────
+# pre-tool.sh intercepts Write/Edit targeting .claude/worktrees/ paths and
+# rewrites file_path to the main repo equivalent via updatedToolInput.
+
+_worktree_redirect_path() {
+  # Mirrors the worktree redirect logic in pre-tool.sh.
+  # Prints the redirected path, or nothing if not a worktree path.
+  local path="$1"
+  echo "$path" | python3 -c "
+import re, sys
+path = sys.stdin.read().strip()
+m = re.match(r'^(.*)/\.claude/worktrees/[^/]+(/.*|$)', path)
+if not m:
+    sys.exit(0)
+print(m.group(1) + (m.group(2) if m.group(2) else '/'))
+" 2>/dev/null || true
+}
+
+@test "worktree redirect: path inside worktree is redirected to main repo" {
+  local result
+  result=$(_worktree_redirect_path "/repo/.claude/worktrees/my-task/src/app.py")
+  [ "$result" = "/repo/src/app.py" ]
+}
+
+@test "worktree redirect: deeply nested worktree path is redirected correctly" {
+  local result
+  result=$(_worktree_redirect_path "/Users/dev/project/.claude/worktrees/feat-x/lib/utils/helper.sh")
+  [ "$result" = "/Users/dev/project/lib/utils/helper.sh" ]
+}
+
+@test "worktree redirect: non-worktree path is not redirected" {
+  local result
+  result=$(_worktree_redirect_path "/repo/src/app.py")
+  [ -z "$result" ]
+}
+
+@test "worktree redirect: path in .claude/hooks is not redirected (not a worktree)" {
+  local result
+  result=$(_worktree_redirect_path "/repo/.claude/hooks/pre-tool.sh")
+  [ -z "$result" ]
+}
