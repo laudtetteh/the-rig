@@ -954,14 +954,16 @@ _is_rig_protected() {
   [ "$installed" = "$expected" ]
 }
 
-# ── Gap 4: stop.sh writes .wrap-needed on 2+ commits ─────────────────────────
+# ── Gap 4: session-end.sh writes .wrap-needed on 2+ commits ──────────────────
+# Note: this logic moved from stop.sh to session-end.sh in Sprint 5.
+# stop.sh now only updates CONTEXT_SNAPSHOT date and appends session-end markers.
 
-@test "stop.sh: writes .wrap-needed when session log has 2+ commits" {
+@test "session-end.sh: writes .wrap-needed when session log has 2+ commits" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
   local rig_dir="$TEST_PROJECT/.rig"
-  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
+  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
   local session_log="$TEMP_DIR/test-session.log"
   local wrap_needed="$rig_dir/memory/.wrap-needed"
 
@@ -977,18 +979,19 @@ _is_rig_protected() {
 
   rm -f "$wrap_needed"
 
-  # Run stop.sh from inside the test project so git rev-parse resolves correctly
-  ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$stop_hook" )
+  # Run session-end.sh with source=logout; cd into project so git rev-parse resolves correctly
+  echo '{"source": "logout"}' \
+    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$session_end_hook" )
 
   [ -f "$wrap_needed" ]
 }
 
-@test "stop.sh: does not write .wrap-needed when session has fewer than 2 commits" {
+@test "session-end.sh: does not write .wrap-needed when session has fewer than 2 commits" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
   local rig_dir="$TEST_PROJECT/.rig"
-  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
+  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
   local session_log="$TEMP_DIR/test-session.log"
   local wrap_needed="$rig_dir/memory/.wrap-needed"
 
@@ -1000,7 +1003,8 @@ _is_rig_protected() {
 
   rm -f "$wrap_needed"
 
-  ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$stop_hook" )
+  echo '{"source": "logout"}' \
+    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$session_end_hook" )
 
   [ ! -f "$wrap_needed" ]
 }
