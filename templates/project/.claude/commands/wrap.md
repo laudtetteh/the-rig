@@ -286,25 +286,32 @@ the user to confirm or tweak.
 
 ### How to determine "this session's work"
 
-**Do not use today's date** — it breaks for sessions that span midnight or are
-resumed days later. Use this priority order:
+**Your conversation context is the primary signal.** Before reading any files,
+enumerate directly what was done in this session: PRs merged or opened, tasks
+completed, issues created, commands run, significant files changed. You were
+here — this is the most accurate record of what the session name should reflect.
 
-1. **`<!-- session-end -->` markers in PROGRESS.md** (most reliable)
-   The `stop.sh` hook appends `<!-- session-end YYYY-MM-DD HH:MM -->` automatically
-   when the agent finishes each response. Look for the most recent such marker:
-   - Entries **above** the most recent marker belong to this session.
-   - Entries **below** it belong to prior sessions.
+Do not use today's date as a boundary — it breaks for sessions that span midnight
+or are resumed days later.
 
-2. **`Last updated:` field in the previous CONTEXT_SNAPSHOT** (fallback)
-   If no session-end marker exists (e.g. stop.sh wasn't wired yet, or this is the
-   first /wrap on a new install), read the `**Last updated:**` field from the snapshot
-   you noted at session start (before step 1 overwrote it). Collect PROGRESS.md
-   entries added since that date.
+Use file signals as cross-reference only — to catch work that may have compacted
+out of the context window, not to override what you already know:
 
-3. **Infer from PROGRESS.md ordering** (last resort)
-   If neither signal exists, take the entries at the top of PROGRESS.md that are
-   clearly from this session's conversation, and stop when you reach entries from
-   a prior session.
+1. **`<!-- session-end -->` markers in PROGRESS.md** (cross-reference)
+   The `stop.sh` hook appends `<!-- session-end YYYY-MM-DD HH:MM -->` automatically.
+   Entries above the most recent marker are candidates to correlate with your context.
+
+2. **`Last updated:` datetime in the previous CONTEXT_SNAPSHOT** (boundary fallback)
+   If markers are absent or ambiguous, use the snapshot's `**Last updated:**` datetime
+   as an approximate session-start boundary when scanning PROGRESS.md entries.
+
+3. **PROGRESS.md ordering** (last resort for compacted context)
+   If context window is short and you cannot recall specifics, take entries at the
+   top of PROGRESS.md that plausibly match this session and stop at the prior boundary.
+
+**If conversation context and file signals conflict, trust the conversation.**
+Files may be stale, markers may be missing or duplicated across tabs. Your direct
+knowledge of this session is authoritative.
 
 ### Check for an existing session name
 

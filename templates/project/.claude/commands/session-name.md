@@ -35,14 +35,24 @@ No arguments. Run it whenever you want to name or re-name the current session.
 
 ## Steps
 
-### 1 — Determine the session boundary
+### 1 — Determine what happened this session
 
-Read `.rig/memory/PROGRESS.md`:
+**Your conversation context is the primary signal.** Before reading any files,
+enumerate directly what was done in this session: PRs merged or opened, tasks
+completed, issues created, commands run, significant files changed. You were
+here — this is the most accurate record of the session's work.
 
-- **Primary signal:** look for `<!-- session-end YYYY-MM-DD HH:MM -->` markers.
-  Entries between the top of the file and the most recent marker belong to this session.
-- **Fallback:** if no markers exist, read the `**Last updated:**` date from
-  `CONTEXT_SNAPSHOT.md` and treat entries added since that date as this session.
+File signals are cross-reference only — use them to catch anything that may have
+compacted out of the context window, not to override what you already know:
+
+- **`<!-- session-end YYYY-MM-DD HH:MM -->` markers in PROGRESS.md** — entries
+  above the most recent marker are candidates to cross-check against your context.
+- **`**Last updated:**` datetime in CONTEXT_SNAPSHOT.md** — use as an approximate
+  session-start boundary when correlating PROGRESS.md entries.
+
+**If conversation context and file signals conflict, trust the conversation.**
+Files may be stale, markers may be missing, or another tab may have written to
+the same files. Your direct knowledge of this session is authoritative.
 
 ### 2 — Check for an existing session name
 
