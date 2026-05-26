@@ -194,6 +194,55 @@ If any item cannot be confirmed, stop and resolve it before continuing.
 
 ---
 
+## Step 4.5 — Code review (optional)
+
+Ask the user:
+> "Run the code-reviewer agent on this diff? [yes / skip]"
+
+If they say yes (or "y"): invoke the `code-reviewer` agent with the staged diff
+(`git diff --cached`). Report all **Blocking** findings and stop the ship flow
+until they are resolved. **Advisory** findings are reported but do not block.
+
+If they say skip: proceed to Step 4.8.
+
+---
+
+## Step 4.8 — Docs and memory freshness gate
+
+**Check 1 — PROGRESS.md stubs (blocking)**
+
+Run:
+```bash
+grep -c "Auto-logged by post-tool hook" "$RIG_DIR/memory/PROGRESS.md" 2>/dev/null || echo 0
+```
+
+If the count is > 0: stop and say:
+> "PROGRESS.md has unexpanded auto-stubs. Run `/wrap` to expand them before shipping."
+Do not continue until the user resolves this.
+
+**Check 2 — Feature doc overlap (advisory, only if feature docs are installed)**
+
+Only run this check if `$DOCS_DIR/features/README.md` exists (where `$DOCS_DIR` is
+`$RIG_DIR/docs` for stealth/external installs, `$REPO/docs` otherwise).
+
+List the files changed in this PR (`git diff --name-only HEAD~1..HEAD 2>/dev/null || git diff --cached --name-only`).
+Cross-reference against `$DOCS_DIR/features/README.md` — if any changed file's path
+contains a slug listed in the feature doc index, report:
+> "Advisory: changed files overlap with documented feature(s): [list]. Run
+> `/refresh-feature-doc <feature>` after merging to keep docs current."
+
+This is advisory only — it does not block the ship flow.
+
+**Check 3 — docs/INDEX.md freshness (advisory, only if INDEX.md exists)**
+
+If `$DOCS_DIR/INDEX.md` exists: check if any files in `$DOCS_DIR/` were added or
+removed by this PR that are not reflected in the index. If so, report:
+> "Advisory: docs/INDEX.md may need updating — new or removed files detected in docs/."
+
+This is advisory only.
+
+---
+
 ## Step 5 — Pause for local testing
 
 **Stop here.** Do not commit yet.

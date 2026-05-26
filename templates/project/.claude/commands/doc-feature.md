@@ -41,10 +41,11 @@ If no argument is given, ask: **"Which feature should I document?"**
 > REPO=$(git rev-parse --show-toplevel)
 > if [[ -f "$REPO/.rigpath" ]]; then
 >   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+>   DOCS_DIR="$RIG_DIR/docs/features"
 > else
 >   RIG_DIR="$REPO/.rig"
+>   DOCS_DIR="$REPO/docs/features"
 > fi
-> DOCS_DIR="$RIG_DIR/docs/features"
 > ```
 >
 > Substitute `$DOCS_DIR` for `docs/features/` in every step below.

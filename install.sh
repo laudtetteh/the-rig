@@ -80,6 +80,7 @@ is_rig_owned() {
   case "$rel" in
     .claude/hooks/*|\
     .claude/commands/*|\
+    .claude/agents/*|\
     .rig/processes/*|\
     .rig/VERSION|\
     .husky/*|\
@@ -169,13 +170,15 @@ _FLAG_TARGET=""       # set via --target <path>     (skips interactive prompt)
 _FLAG_PROJECT_NAME="" # set via --project-name <n>  (skips interactive prompt)
 _FLAG_BASE_BRANCH=""  # set via --base-branch <n>   (skips interactive prompt)
 _FLAG_TRACKING=""     # set via --tracking <mode>   (skips tracking prompt; orthogonal to --target)
-SKIP_GIT_HOOKS=false  # set via --skip-git-hooks    (stealth: skip .git/hooks/ writes)
+SKIP_GIT_HOOKS=false       # set via --skip-git-hooks    (stealth: skip .git/hooks/ writes)
+INSTALL_FEATURE_DOCS=false # set via --feature-docs      (gates doc-feature/feature-context/etc.)
 
 for arg in "$@"; do
   case "$arg" in
     --global-only)      DO_PROJECT=false ;;
     --project-only)     DO_GLOBAL=false ;;
     --skip-git-hooks)   SKIP_GIT_HOOKS=true ;;
+    --feature-docs)     INSTALL_FEATURE_DOCS=true ;;
     --rig-dir|--strategy|--target|--project-name|--base-branch|--tracking)
       # two-arg flags; value captured in the loop below
       ;;
@@ -220,6 +223,11 @@ for arg in "$@"; do
       echo "  --rig-dir <path>      Install .rig/ to an external path outside the repo."
       echo "                        Writes a .rigpath pointer file at the project root."
       echo "                        Useful for shared repos where teammates don't use The Rig."
+      echo "  --feature-docs        Install feature-documentation commands (opt-in)."
+      echo "                        Includes: /doc-feature, /doc-list, /feature-context,"
+      echo "                        /refresh-feature-doc, and docs/features/README.md."
+      echo "                        Skipped by default — add for projects that maintain"
+      echo "                        end-to-end feature traces."
       echo "  --skip-git-hooks      Stealth mode only: skip writing hooks to .git/hooks/."
       echo "                        Use when the project already manages git hooks via Husky"
       echo "                        or another tool and you want to avoid the conflict."
@@ -1090,12 +1098,33 @@ if [[ "$DO_PROJECT" == true ]]; then
       .rig/processes/*)                    [[ "$INSTALL_PROCESSES" == true ]]      ;;
       .rig/rules/*)                        [[ "$INSTALL_RULES" == true ]]          ;;
       .claude/hooks/*|.claude/settings*)   [[ "$INSTALL_CLAUDE_HOOKS" == true ]]   ;;
-      .claude/commands/*)                  [[ "$INSTALL_COMMANDS" == true ]]       ;;
+      .claude/commands/doc-feature.md|\
+      .claude/commands/doc-list.md|\
+      .claude/commands/feature-context.md|\
+      .claude/commands/refresh-feature-doc.md|\
+      docs/features/*)                     [[ "$INSTALL_FEATURE_DOCS" == true ]]   ;;
+      .claude/commands/*|\
+      .claude/agents/*)                    [[ "$INSTALL_COMMANDS" == true ]]       ;;
       .husky/*|.gitleaks.toml)             [[ "$INSTALL_GIT_HOOKS" == true ]]      ;;
       .github/*)                           [[ "$INSTALL_GITHUB" == true ]]         ;;
       *)                                   return 0 ;;  # install unknown files by default
     esac
   }
+
+  # ── UPGRADE AUTO-DETECT: enable feature-docs if already installed ─────────
+  # If any feature-doc command exists in the target, preserve them on upgrade.
+  if [[ "$INSTALL_FEATURE_DOCS" != true ]]; then
+    for _fd_check in \
+      "$TARGET/.claude/commands/doc-feature.md" \
+      "$TARGET/.claude/commands/doc-list.md" \
+      "$TARGET/.claude/commands/feature-context.md" \
+      "$TARGET/.claude/commands/refresh-feature-doc.md"; do
+      if [[ -f "$_fd_check" ]]; then
+        INSTALL_FEATURE_DOCS=true
+        break
+      fi
+    done
+  fi
 
   # ── COPY PROJECT FILES ────────────────────────────────────────────────────
   while IFS= read -r -d '' src_file; do

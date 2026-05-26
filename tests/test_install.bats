@@ -513,6 +513,64 @@ assert 'additionalContext' in d['hookSpecificOutput']
   rm -rf "$tmpdir"
 }
 
+@test "syntax: session-end.sh has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.claude/hooks/session-end.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "syntax: code-reviewer agent has valid markdown header" {
+  run grep -q "^name: code-reviewer" "$REPO_ROOT/templates/project/.claude/agents/code-reviewer.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "feature-docs: doc-feature.md excluded from default install" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo 2>/dev/null
+  [ ! -f "$tmpdir/.claude/commands/doc-feature.md" ]
+  rm -rf "$tmpdir"
+}
+
+@test "feature-docs: doc-feature.md included with --feature-docs flag" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo --feature-docs 2>/dev/null
+  [ -f "$tmpdir/.claude/commands/doc-feature.md" ]
+  rm -rf "$tmpdir"
+}
+
+@test "feature-docs: upgrade preserves existing doc-feature.md without flag" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  # Fresh install with feature-docs
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo --feature-docs 2>/dev/null
+  [ -f "$tmpdir/.claude/commands/doc-feature.md" ] || skip "initial install failed"
+  # Upgrade without --feature-docs — should preserve
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy upgrade \
+    --tracking repo 2>/dev/null
+  [ -f "$tmpdir/.claude/commands/doc-feature.md" ]
+  rm -rf "$tmpdir"
+}
+
+@test "feature-docs: upgrade on project without feature-docs does not add them" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo 2>/dev/null
+  [ ! -f "$tmpdir/.claude/commands/doc-feature.md" ] || skip "initial install unexpectedly included feature-docs"
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy upgrade \
+    --tracking repo 2>/dev/null
+  [ ! -f "$tmpdir/.claude/commands/doc-feature.md" ]
+  rm -rf "$tmpdir"
+}
+
 @test "syntax: pre-commit hook has valid bash syntax" {
   run bash -n "$REPO_ROOT/templates/project/.husky/pre-commit"
   [ "$status" -eq 0 ]
@@ -896,14 +954,16 @@ _is_rig_protected() {
   [ "$installed" = "$expected" ]
 }
 
-# ── Gap 4: stop.sh writes .wrap-needed on 2+ commits ─────────────────────────
+# ── Gap 4: session-end.sh writes .wrap-needed on 2+ commits ──────────────────
+# Note: this logic moved from stop.sh to session-end.sh in Sprint 5.
+# stop.sh now only updates CONTEXT_SNAPSHOT date and appends session-end markers.
 
-@test "stop.sh: writes .wrap-needed when session log has 2+ commits" {
+@test "session-end.sh: writes .wrap-needed when session log has 2+ commits" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
   local rig_dir="$TEST_PROJECT/.rig"
-  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
+  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
   local session_log="$TEMP_DIR/test-session.log"
   local wrap_needed="$rig_dir/memory/.wrap-needed"
 
@@ -919,18 +979,19 @@ _is_rig_protected() {
 
   rm -f "$wrap_needed"
 
-  # Run stop.sh from inside the test project so git rev-parse resolves correctly
-  ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$stop_hook" )
+  # Run session-end.sh with source=logout; cd into project so git rev-parse resolves correctly
+  echo '{"source": "logout"}' \
+    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$session_end_hook" )
 
   [ -f "$wrap_needed" ]
 }
 
-@test "stop.sh: does not write .wrap-needed when session has fewer than 2 commits" {
+@test "session-end.sh: does not write .wrap-needed when session has fewer than 2 commits" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
   local rig_dir="$TEST_PROJECT/.rig"
-  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
+  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
   local session_log="$TEMP_DIR/test-session.log"
   local wrap_needed="$rig_dir/memory/.wrap-needed"
 
@@ -942,7 +1003,8 @@ _is_rig_protected() {
 
   rm -f "$wrap_needed"
 
-  ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$stop_hook" )
+  echo '{"source": "logout"}' \
+    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$session_end_hook" )
 
   [ ! -f "$wrap_needed" ]
 }
