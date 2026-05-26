@@ -46,15 +46,16 @@ NOW_FULL=$(date "+%Y-%m-%d %H:%M")
 # This keeps the freshness signal accurate for the next session without
 # requiring /wrap to have run in this session.
 if [[ -f "$SNAPSHOT" ]] && grep -q "^\*\*Last updated:\*\*" "$SNAPSHOT" 2>/dev/null; then
-  # Extract the description (everything after "YYYY-MM-DD — ")
+  # Extract the description (everything after "YYYY-MM-DD[ HH:MM] — ")
+  # Regex handles both old date-only and new datetime formats for backward compat.
   DESCRIPTION=$(grep "^\*\*Last updated:\*\*" "$SNAPSHOT" \
-    | sed 's/\*\*Last updated:\*\* [0-9-]* — //')
+    | sed 's/\*\*Last updated:\*\*[^—]*— //')
 
   TMP=$(mktemp)
-  sed "s|^\*\*Last updated:\*\*.*|\*\*Last updated:\*\* $NOW — $DESCRIPTION|" \
+  sed "s|^\*\*Last updated:\*\*.*|\*\*Last updated:\*\* $NOW_FULL — $DESCRIPTION|" \
     "$SNAPSHOT" > "$TMP" && mv "$TMP" "$SNAPSHOT"
 
-  echo "[$(date +%H:%M:%S)] STOP: updated Last updated: → $NOW in CONTEXT_SNAPSHOT" \
+  echo "[$(date +%H:%M:%S)] STOP: updated Last updated: → $NOW_FULL in CONTEXT_SNAPSHOT" \
     >> "$SESSION_LOG"
 fi
 
@@ -127,7 +128,7 @@ if [[ -f "$WRAP_NEEDED" ]]; then
     echo "> This is a minimal checkpoint written by stop.sh — not a full /wrap snapshot."
     echo "> Run \`/wrap\` to replace this with a complete context snapshot."
     echo ""
-    echo "**Last updated:** $NOW — auto-checkpoint (stop.sh)"
+    echo "**Last updated:** $NOW_FULL — auto-checkpoint (stop.sh)"
     echo "**Branch:** $_BRANCH"
     echo "**Last commit:** $_COMMIT"
     if [[ -n "$_ACTIVE_TASK" ]]; then
