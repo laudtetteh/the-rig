@@ -337,39 +337,50 @@ is_rig_owned_stub() {
   # First install populates settings.json with the Rig hooks.
   run_installer --strategy skip
   [ "$status" -eq 0 ]
+  local count_after_first
+  count_after_first=$(python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+print(sum(len(v) for v in s.get('hooks', {}).values()))
+")
   # Second install via merge should not add duplicate entries.
   run_installer --strategy merge
   [ "$status" -eq 0 ]
-  local hook_count
-  hook_count=$(python3 -c "
-import json, sys
+  local count_after_second
+  count_after_second=$(python3 -c "
+import json
 with open('$TEST_PROJECT/.claude/settings.json') as f:
     s = json.load(f)
-events = s.get('hooks', {})
-total = sum(len(v) for v in events.values())
-print(total)
+print(sum(len(v) for v in s.get('hooks', {}).values()))
 ")
-  # Should have exactly one entry per hook event (PreToolUse, PostToolUse, Stop = 3 total)
-  [ "$hook_count" -eq 3 ]
+  # Count must not grow — no duplicates added
+  [ "$count_after_second" -eq "$count_after_first" ]
 }
 
 @test "upgrade strategy: does not duplicate hooks when settings.json already has Rig hooks" {
   # First install populates settings.json with the Rig hooks.
   run_installer --strategy skip
   [ "$status" -eq 0 ]
+  local count_after_first
+  count_after_first=$(python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+print(sum(len(v) for v in s.get('hooks', {}).values()))
+")
   # Upgrade should not add duplicate entries.
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
-  local hook_count
-  hook_count=$(python3 -c "
-import json, sys
+  local count_after_second
+  count_after_second=$(python3 -c "
+import json
 with open('$TEST_PROJECT/.claude/settings.json') as f:
     s = json.load(f)
-events = s.get('hooks', {})
-total = sum(len(v) for v in events.values())
-print(total)
+print(sum(len(v) for v in s.get('hooks', {}).values()))
 ")
-  [ "$hook_count" -eq 3 ]
+  # Count must not grow — no duplicates added
+  [ "$count_after_second" -eq "$count_after_first" ]
 }
 
 # ── CLI flag validation ───────────────────────────────────────────────────────
