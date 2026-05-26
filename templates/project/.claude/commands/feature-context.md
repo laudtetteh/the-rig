@@ -36,10 +36,11 @@ If no argument is given, list available feature docs and ask which to load.
 > REPO=$(git rev-parse --show-toplevel)
 > if [[ -f "$REPO/.rigpath" ]]; then
 >   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+>   DOCS_DIR="$RIG_DIR/docs/features"
 > else
 >   RIG_DIR="$REPO/.rig"
+>   DOCS_DIR="$REPO/docs/features"
 > fi
-> DOCS_DIR="$RIG_DIR/docs/features"
 > ```
 
 ### Step 1 — Find the doc

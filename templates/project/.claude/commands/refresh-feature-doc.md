@@ -38,10 +38,11 @@ If the argument doesn't match any existing doc, list the docs in
 > REPO=$(git rev-parse --show-toplevel)
 > if [[ -f "$REPO/.rigpath" ]]; then
 >   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+>   DOCS_DIR="$RIG_DIR/docs/features"
 > else
 >   RIG_DIR="$REPO/.rig"
+>   DOCS_DIR="$REPO/docs/features"
 > fi
-> DOCS_DIR="$RIG_DIR/docs/features"
 > ```
 >
 > Substitute `$DOCS_DIR` for `docs/features/` in every step below.

@@ -513,6 +513,64 @@ assert 'additionalContext' in d['hookSpecificOutput']
   rm -rf "$tmpdir"
 }
 
+@test "syntax: session-end.sh has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.claude/hooks/session-end.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "syntax: code-reviewer agent has valid markdown header" {
+  run grep -q "^name: code-reviewer" "$REPO_ROOT/templates/project/.claude/agents/code-reviewer.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "feature-docs: doc-feature.md excluded from default install" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo 2>/dev/null
+  [ ! -f "$tmpdir/.claude/commands/doc-feature.md" ]
+  rm -rf "$tmpdir"
+}
+
+@test "feature-docs: doc-feature.md included with --feature-docs flag" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo --feature-docs 2>/dev/null
+  [ -f "$tmpdir/.claude/commands/doc-feature.md" ]
+  rm -rf "$tmpdir"
+}
+
+@test "feature-docs: upgrade preserves existing doc-feature.md without flag" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  # Fresh install with feature-docs
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo --feature-docs 2>/dev/null
+  [ -f "$tmpdir/.claude/commands/doc-feature.md" ] || skip "initial install failed"
+  # Upgrade without --feature-docs — should preserve
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy upgrade \
+    --tracking repo 2>/dev/null
+  [ -f "$tmpdir/.claude/commands/doc-feature.md" ]
+  rm -rf "$tmpdir"
+}
+
+@test "feature-docs: upgrade on project without feature-docs does not add them" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo 2>/dev/null
+  [ ! -f "$tmpdir/.claude/commands/doc-feature.md" ] || skip "initial install unexpectedly included feature-docs"
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy upgrade \
+    --tracking repo 2>/dev/null
+  [ ! -f "$tmpdir/.claude/commands/doc-feature.md" ]
+  rm -rf "$tmpdir"
+}
+
 @test "syntax: pre-commit hook has valid bash syntax" {
   run bash -n "$REPO_ROOT/templates/project/.husky/pre-commit"
   [ "$status" -eq 0 ]
