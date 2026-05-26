@@ -31,6 +31,36 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash [REPO_ROOT]/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash [REPO_ROOT]/.claude/hooks/prompt-submit.sh"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash [REPO_ROOT]/.claude/hooks/permission-request.sh"
+          }
+        ]
+      }
     ]
   }
 }
