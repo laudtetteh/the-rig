@@ -61,6 +61,26 @@
           }
         ]
       }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash [REPO_ROOT]/.claude/hooks/pre-compact.sh"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash [REPO_ROOT]/.claude/hooks/post-compact.sh"
+          }
+        ]
+      }
     ]
   }
 }

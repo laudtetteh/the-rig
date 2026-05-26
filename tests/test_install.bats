@@ -445,6 +445,74 @@ print(sum(len(v) for v in s.get('hooks', {}).values()))
   [ "$status" -eq 0 ]
 }
 
+@test "syntax: pre-compact.sh has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.claude/hooks/pre-compact.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "syntax: post-compact.sh has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.claude/hooks/post-compact.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-compact: writes checkpoint file with branch and commit info" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  git -C "$tmpdir" config user.email "test@test.com"
+  git -C "$tmpdir" config user.name "Test"
+  git -C "$tmpdir" commit --allow-empty -m "initial" -q
+  mkdir -p "$tmpdir/.rig/memory" "$tmpdir/.rig/tasks/active"
+
+  # cd into tmpdir so git rev-parse --show-toplevel returns tmpdir, not Rig repo root
+  (cd "$tmpdir" && RIG_DIR="$tmpdir/.rig" \
+    bash "$REPO_ROOT/templates/project/.claude/hooks/pre-compact.sh" >/dev/null)
+
+  [ -f "$tmpdir/.rig/memory/.compact-checkpoint.md" ]
+  grep -q "Branch:" "$tmpdir/.rig/memory/.compact-checkpoint.md"
+  grep -q "Last commit:" "$tmpdir/.rig/memory/.compact-checkpoint.md"
+  rm -rf "$tmpdir"
+}
+
+@test "post-compact: outputs additionalContext JSON when checkpoint exists" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  mkdir -p "$tmpdir/.rig/memory"
+  printf '## Compact checkpoint\n\n**Branch:** test-branch\n' \
+    > "$tmpdir/.rig/memory/.compact-checkpoint.md"
+
+  local output
+  # cd into tmpdir so git rev-parse --show-toplevel returns tmpdir, not Rig repo root
+  output=$((cd "$tmpdir" && RIG_DIR="$tmpdir/.rig" \
+    bash "$REPO_ROOT/templates/project/.claude/hooks/post-compact.sh") 2>/dev/null)
+
+  echo "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert 'hookSpecificOutput' in d
+assert d['hookSpecificOutput']['hookEventName'] == 'PostCompact'
+assert 'additionalContext' in d['hookSpecificOutput']
+" 2>/dev/null
+  [ "$?" -eq 0 ]
+  rm -rf "$tmpdir"
+}
+
+@test "post-compact: exits silently when neither checkpoint nor snapshot exists" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  mkdir -p "$tmpdir/.rig/memory"
+
+  local output
+  # cd into tmpdir so git rev-parse --show-toplevel returns tmpdir, not Rig repo root
+  output=$((cd "$tmpdir" && RIG_DIR="$tmpdir/.rig" \
+    bash "$REPO_ROOT/templates/project/.claude/hooks/post-compact.sh") 2>/dev/null)
+
+  [ -z "$output" ]
+  rm -rf "$tmpdir"
+}
+
 @test "syntax: pre-commit hook has valid bash syntax" {
   run bash -n "$REPO_ROOT/templates/project/.husky/pre-commit"
   [ "$status" -eq 0 ]
