@@ -94,7 +94,7 @@ housekeeping: direct-push
 
 | Value | Behaviour |
 |---|---|
-| `direct-push` | Commits and pushes directly to `[BASE_BRANCH]`. No branch, no PR. Default for solo projects. |
+| `direct-push` | Commits and pushes directly to `[BASE_BRANCH]`. No branch, no PR. Default for solo projects. **Scope:** `chore(memory)`, `chore(release)`, `chore(post-merge)`, `docs(...)` only. Code-change types (`feat`, `fix`, `refactor`, `test`, `perf`, `devops`) are blocked even with this setting — they must go through a PR. |
 | `pr-required` | Creates a short-lived `chore/post-merge-[N]` branch and opens a PR. Use when your team requires PRs for all changes. |
 
 Change this value to match your project's branching convention.

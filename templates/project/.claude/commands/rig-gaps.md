@@ -1,7 +1,9 @@
 # Command: /rig-gaps
 
+> **For Rig contributors and developers.** This command is for users who contribute to or develop The Rig. If you're working on your own project and have no interest in improving The Rig itself, you can ignore this command and `RIG_GAPS.md`.
+
 Compile and display all logged gaps, friction points, and improvement ideas about
-The Rig itself — formatted for submission to The Rig dev session.
+The Rig itself — for review and optional submission.
 
 ## What this does
 
@@ -67,14 +69,10 @@ Print the following:
 [paste each unsubmitted entry verbatim from RIG_GAPS.md]
 ---
 
-## How to submit
+## How to review
 
-1. Copy everything between the --- markers above
-2. Open Claude Code in ~/tools/the-rig (or wherever The Rig lives)
-3. Paste and say:
-   "Here are gap reports from [project name]. Please analyze, triage, and create issues."
-
-The Rig agent will review, open GitHub issues, and implement fixes.
+Review logged gaps and decide which to act on. If you're contributing to The Rig,
+bring these to a Rig dev session or use `/rig-gaps --submit` to open GitHub issues directly.
 ```
 
 ---

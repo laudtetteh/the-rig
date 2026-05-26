@@ -1,5 +1,7 @@
 # Command: /kickoff
 
+> **Run once, at project creation.** After `/kickoff` completes, this command has no further use — you can delete `.claude/commands/kickoff.md` from your project.
+
 Trigger this command to bootstrap a brand new project from scratch.
 
 `/kickoff` is the greenfield entry point. It reads your `PROJECT_BRIEF.md`, confirms
@@ -220,6 +222,8 @@ After scaffolding is complete:
 >
 > Suggested first move: run `/run [first-task-slug]` — that's the foundation
 > everything else builds on.
+>
+> This command has no further use. You can delete `.claude/commands/kickoff.md` — it won't be needed again.
 >
 > Anything to adjust before you start?"
 

@@ -15,16 +15,15 @@
 At the start of any session, silently read in this order:
 
 1. This file
-2. `[PROFILE_PATH]` — your personal and professional context
-3. The project's `./CLAUDE.md` (if present)
-4. `./.rig/memory/CONTEXT_SNAPSHOT.md` — **if this exists, it is sufficient for orientation.
+2. The project's `./CLAUDE.md` (if present)
+3. `./.rig/memory/CONTEXT_SNAPSHOT.md` — **if this exists, it is sufficient for orientation.
    Stop here unless the task requires deeper history.**
    *(If `.rigpath` exists at the project root, read that file to get the real `.rig/` path
-   and substitute it for `.rig/` in steps 4–7.)*
-5. `./.rig/memory/PROGRESS.md` — only if `CONTEXT_SNAPSHOT.md` is absent or more than
+   and substitute it for `.rig/` in steps 3–6.)*
+4. `./.rig/memory/PROGRESS.md` — only if `CONTEXT_SNAPSHOT.md` is absent or more than
    one session old. Load the most recent entries only (last 20 `##` sections).
-6. `./.rig/memory/ERRORS.md` (if present)
-7. `./.rig/tasks/active/` (if present) — understand the current task
+5. `./.rig/memory/ERRORS.md` (if present)
+6. `./.rig/tasks/active/` (if present) — understand the current task
 
 **After reading context, check for pending housekeeping flags before starting any work:**
 
@@ -223,6 +222,21 @@ Never commit directly to `main` or `master`.
 | [Frontend] | [e.g. Next.js / TypeScript] |
 | [Database] | [e.g. PostgreSQL] |
 | [Infra] | [e.g. Docker + GitHub Actions] |
+
+---
+
+## Personal context
+
+> Fill in once. The agent uses this to tailor responses to your background and goals.
+> Leave blank or delete lines that don't apply.
+
+- **Name / handle**: [Your name]
+- **Role**: [e.g. Senior Engineer at Acme, solo founder, student]
+- **Core stack**: [languages and frameworks you use most]
+- **Experience notes**: [e.g. "10 years Python, new to Rust", "strong backend, weak on CSS"]
+- **Working style**: [e.g. "prefer terse responses", "want a plan before code", "challenge my assumptions"]
+- **Goals**: [what you're trying to build or learn right now]
+- **Active projects**: [brief description of current work, if useful for context]
 
 ---
 
