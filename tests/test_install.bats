@@ -459,11 +459,14 @@ print(sum(len(v) for v in s.get('hooks', {}).values()))
   local tmpdir
   tmpdir=$(mktemp -d)
   git -C "$tmpdir" init -q
+  git -C "$tmpdir" config user.email "test@test.com"
+  git -C "$tmpdir" config user.name "Test"
   git -C "$tmpdir" commit --allow-empty -m "initial" -q
   mkdir -p "$tmpdir/.rig/memory" "$tmpdir/.rig/tasks/active"
 
-  REPO="$tmpdir" RIG_DIR="$tmpdir/.rig" \
-    bash "$REPO_ROOT/templates/project/.claude/hooks/pre-compact.sh" >/dev/null
+  # cd into tmpdir so git rev-parse --show-toplevel returns tmpdir, not Rig repo root
+  (cd "$tmpdir" && RIG_DIR="$tmpdir/.rig" \
+    bash "$REPO_ROOT/templates/project/.claude/hooks/pre-compact.sh" >/dev/null)
 
   [ -f "$tmpdir/.rig/memory/.compact-checkpoint.md" ]
   grep -q "Branch:" "$tmpdir/.rig/memory/.compact-checkpoint.md"
@@ -480,8 +483,9 @@ print(sum(len(v) for v in s.get('hooks', {}).values()))
     > "$tmpdir/.rig/memory/.compact-checkpoint.md"
 
   local output
-  output=$(REPO="$tmpdir" RIG_DIR="$tmpdir/.rig" \
-    bash "$REPO_ROOT/templates/project/.claude/hooks/post-compact.sh" 2>/dev/null)
+  # cd into tmpdir so git rev-parse --show-toplevel returns tmpdir, not Rig repo root
+  output=$((cd "$tmpdir" && RIG_DIR="$tmpdir/.rig" \
+    bash "$REPO_ROOT/templates/project/.claude/hooks/post-compact.sh") 2>/dev/null)
 
   echo "$output" | python3 -c "
 import json, sys
@@ -501,8 +505,9 @@ assert 'additionalContext' in d['hookSpecificOutput']
   mkdir -p "$tmpdir/.rig/memory"
 
   local output
-  output=$(REPO="$tmpdir" RIG_DIR="$tmpdir/.rig" \
-    bash "$REPO_ROOT/templates/project/.claude/hooks/post-compact.sh" 2>/dev/null)
+  # cd into tmpdir so git rev-parse --show-toplevel returns tmpdir, not Rig repo root
+  output=$((cd "$tmpdir" && RIG_DIR="$tmpdir/.rig" \
+    bash "$REPO_ROOT/templates/project/.claude/hooks/post-compact.sh") 2>/dev/null)
 
   [ -z "$output" ]
   rm -rf "$tmpdir"
