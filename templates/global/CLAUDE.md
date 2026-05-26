@@ -27,6 +27,10 @@ At the start of any session, silently read in this order:
 
 **After reading context, check for pending housekeeping flags before starting any work:**
 
+> The `SessionStart` hook injects flag warnings automatically at session start.
+> The `UserPromptSubmit` hook re-checks on every prompt. These instructions are
+> a fallback for sessions where the hooks are absent or fail.
+
 - If `.rig/memory/.wrap-needed` exists: say exactly —
   > "⚠️ The last session ended without running `/wrap`. CONTEXT_SNAPSHOT.md may be
   > stale and PROGRESS.md has unexpanded entries. Run `/wrap` now to capture session

@@ -419,6 +419,21 @@ print(total)
   [ "$status" -eq 0 ]
 }
 
+@test "syntax: session-start.sh has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.claude/hooks/session-start.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "syntax: prompt-submit.sh has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.claude/hooks/prompt-submit.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "syntax: permission-request.sh has valid bash syntax" {
+  run bash -n "$REPO_ROOT/templates/project/.claude/hooks/permission-request.sh"
+  [ "$status" -eq 0 ]
+}
+
 @test "syntax: pre-commit hook has valid bash syntax" {
   run bash -n "$REPO_ROOT/templates/project/.husky/pre-commit"
   [ "$status" -eq 0 ]

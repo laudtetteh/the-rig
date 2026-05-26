@@ -201,6 +201,10 @@ docker compose up
 
 ## Context files — load at session start
 
+> **Hook-enforced:** The `SessionStart` hook automatically injects `CONTEXT_SNAPSHOT.md`
+> and any pending flag warnings before the first turn. The instructions below are a
+> fallback for sessions where the hook is absent or fails.
+
 When starting a new session, read in this order:
 
 1. `.rig/memory/CONTEXT_SNAPSHOT.md` — **if this exists, it is sufficient for orientation.
@@ -210,6 +214,22 @@ When starting a new session, read in this order:
 3. `.rig/memory/ERRORS.md` — known pitfalls
 4. `.rig/memory/DECISIONS.md` — architectural and process decisions (skim only)
 5. `.rig/tasks/active/` — current in-flight task(s)
+
+**After reading context, check for pending housekeeping flags:**
+
+> The `UserPromptSubmit` hook injects these warnings automatically on every prompt.
+> Check manually only if the hook is absent or the session started without one.
+
+- If `.rig/memory/.wrap-needed` exists: say exactly —
+  > "⚠️ The last session ended without running `/wrap`. CONTEXT_SNAPSHOT.md may be
+  > stale and PROGRESS.md has unexpanded entries. Run `/wrap` now to capture session
+  > state before we start new work — or say 'skip wrap' to proceed anyway."
+  Wait for the user's response before continuing.
+
+- If `.rig/memory/.post-merge-pending` exists: say exactly —
+  > "⚠️ A merge landed since `/post-merge` was last run. Memory may not reflect the
+  > merged state. Run `/post-merge` now — or say 'skip post-merge' to proceed anyway."
+  Wait for the user's response before continuing.
 
 > **External .rig/ note:** if `.rigpath` exists at the project root, all `.rig/`
 > paths above resolve to the external directory it points to. The installer
