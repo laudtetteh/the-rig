@@ -11,6 +11,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.18.1] — 2026-05-26
+
+### Fixed
+- **Upgrade tracking mode auto-detect** (`install.sh`): `--strategy upgrade` without `--tracking` now infers the existing mode from git state when `.rigpath` is absent — git-committed `.rig/` → repo; `.rig/` in `.git/info/exclude` or `.gitignore` → local. Previously fell through to the interactive prompt which defaulted to stealth, silently migrating repo/local installs. 3 new bats tests. Closes #262.
+
+---
+
 ## [1.18.0] — 2026-05-26
 
 ### Added
