@@ -966,6 +966,23 @@ if [[ "$DO_PROJECT" == true ]]; then
   RIG_TRACKING="stealth"   # default: zero Rig traces in git
   RIGPATH_FILE=""       # absolute path to .rigpath (set if external or stealth mode)
 
+  # ── Upgrade: auto-detect existing tracking mode ───────────────────────────
+  # When upgrading without --tracking and no .rigpath, infer the prior mode
+  # from git state instead of defaulting to stealth via the interactive prompt.
+  # Prevents silently migrating repo/local installs to stealth on upgrade.
+  if [[ "$COLLISION_STRATEGY" == "upgrade" && -z "$_FLAG_TRACKING" \
+        && -z "$EXTERNAL_RIG_DIR" && ! -f "$TARGET/.rigpath" \
+        && -d "$TARGET/.rig" ]]; then
+    if [[ -n "$(git -C "$TARGET" ls-files -- ".rig/" 2>/dev/null)" ]]; then
+      _FLAG_TRACKING="repo"
+      info "Auto-detected existing tracking mode: repo (.rig/ is git-committed)"
+    elif grep -qF '.rig/' "$TARGET/.git/info/exclude" 2>/dev/null \
+         || grep -qF '.rig/' "$TARGET/.gitignore" 2>/dev/null; then
+      _FLAG_TRACKING="local"
+      info "Auto-detected existing tracking mode: local (.rig/ is git-excluded)"
+    fi
+  fi
+
   if [[ -n "$_FLAG_TRACKING" ]]; then
     # --tracking flag: validate and apply without prompting
     case "$_FLAG_TRACKING" in
