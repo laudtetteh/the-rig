@@ -964,6 +964,57 @@ _is_rig_protected() {
   grep -qF ".rig/" "$TEST_PROJECT/.git/info/exclude"
 }
 
+@test "upgrade auto-detects repo mode when .rig/ is git-committed" {
+  # Simulate a project previously installed in repo mode: .rig/ files committed.
+  run_installer --strategy skip --tracking repo
+  git -C "$TEST_PROJECT" add "$TEST_PROJECT/.rig/VERSION"
+  git -C "$TEST_PROJECT" commit -m "chore: initial rig install" --allow-empty-message 2>/dev/null || true
+
+  # Run upgrade directly (not via run_installer) so auto-detect fires.
+  run bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --strategy upgrade
+  [ "$status" -eq 0 ]
+  # Must stay in repo mode: no .rigpath, .rig/VERSION still in project dir
+  [ ! -f "$TEST_PROJECT/.rigpath" ]
+  [ -f "$TEST_PROJECT/.rig/VERSION" ]
+  [[ "$output" == *"Auto-detected existing tracking mode: repo"* ]]
+}
+
+@test "upgrade auto-detects local mode when .rig/ is in .git/info/exclude" {
+  # Simulate a project previously installed in local mode.
+  run_installer --strategy skip --tracking local
+  # Confirm .rig/ is in .git/info/exclude (installed by --tracking local)
+  grep -qF ".rig/" "$TEST_PROJECT/.git/info/exclude"
+
+  # Run upgrade directly so auto-detect fires.
+  run bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --strategy upgrade
+  [ "$status" -eq 0 ]
+  # Must stay in local mode: no .rigpath, .rig/ still in project dir
+  [ ! -f "$TEST_PROJECT/.rigpath" ]
+  [ -f "$TEST_PROJECT/.rig/VERSION" ]
+  [[ "$output" == *"Auto-detected existing tracking mode: local"* ]]
+}
+
+@test "upgrade auto-detects local mode when .rig/ is in .gitignore" {
+  # Simulate a project where .rig/ was manually added to .gitignore (not via installer).
+  run_installer --strategy skip --tracking repo
+  echo ".rig/" >> "$TEST_PROJECT/.gitignore"
+
+  # .rig/ files are NOT in the git index (run_installer --tracking repo commits nothing).
+  run bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ ! -f "$TEST_PROJECT/.rigpath" ]
+  [[ "$output" == *"Auto-detected existing tracking mode: local"* ]]
+}
+
 @test "fresh install: .rig/VERSION matches installer VERSION" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
