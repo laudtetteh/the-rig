@@ -57,13 +57,18 @@ write_wrap_needed() {
 
 write_minimal_checkpoint() {
   [[ ! -d "$RIG_DIR/memory" ]] && return
-  local branch commit active_task
+  local branch commit active_task session_name=""
   branch=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
   commit=$(git -C "$REPO" log -1 --format="%h %s" 2>/dev/null || echo "none")
   active_task=""
   if [[ -d "$RIG_DIR/tasks/active" ]]; then
     active_task=$(ls "$RIG_DIR/tasks/active"/*.md 2>/dev/null \
       | head -1 | xargs basename 2>/dev/null || true)
+  fi
+  # Preserve the session name from the existing snapshot before overwriting it.
+  if [[ -f "$SNAPSHOT" ]]; then
+    session_name=$(grep -m1 "^\*\*Session name:\*\*" "$SNAPSHOT" 2>/dev/null \
+      | sed 's/\*\*Session name:\*\* *//' || true)
   fi
 
   {
@@ -76,6 +81,7 @@ write_minimal_checkpoint() {
     echo "**Branch:** $branch"
     echo "**Last commit:** $commit"
     [[ -n "$active_task" ]] && echo "**Active task:** $active_task"
+    [[ -n "$session_name" ]] && echo "**Session name:** $session_name"
     echo ""
     echo "---"
     echo ""

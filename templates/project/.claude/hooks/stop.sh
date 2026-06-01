@@ -39,14 +39,18 @@ NOW_FULL=$(date "+%Y-%m-%d %H:%M")
 # This keeps the freshness signal accurate for the next session without
 # requiring /wrap to have run in this session.
 if [[ -f "$SNAPSHOT" ]] && grep -q "^\*\*Last updated:\*\*" "$SNAPSHOT" 2>/dev/null; then
-  # Extract the description (everything after "YYYY-MM-DD[ HH:MM] — ")
-  # Regex handles both old date-only and new datetime formats for backward compat.
+  # Extract the description (everything after "YYYY-MM-DD[ HH:MM] — ").
+  # Handles both old date-only and new datetime formats for backward compat.
   DESCRIPTION=$(grep "^\*\*Last updated:\*\*" "$SNAPSHOT" \
     | sed 's/\*\*Last updated:\*\*[^—]*— //')
 
+  # Use awk instead of sed so that | characters in session names (e.g.
+  # "fix auth #91 | feat dashboard #92") do not corrupt the replacement.
   TMP=$(mktemp)
-  sed "s|^\*\*Last updated:\*\*.*|\*\*Last updated:\*\* $NOW_FULL — $DESCRIPTION|" \
-    "$SNAPSHOT" > "$TMP" && mv "$TMP" "$SNAPSHOT"
+  awk -v now="$NOW_FULL" -v desc="$DESCRIPTION" -v em="—" '
+    /^\*\*Last updated:\*\*/ { print "**Last updated:** " now " " em " " desc; next }
+    { print }
+  ' "$SNAPSHOT" > "$TMP" && mv "$TMP" "$SNAPSHOT"
 
   echo "[$(date +%H:%M:%S)] STOP: updated Last updated: → $NOW_FULL in CONTEXT_SNAPSHOT" \
     >> "$SESSION_LOG"

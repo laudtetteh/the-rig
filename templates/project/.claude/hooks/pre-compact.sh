@@ -53,8 +53,9 @@ if [[ -f "$SNAPSHOT" ]]; then
     | sed 's/\*\*Session name:\*\* *//' || echo "none")
   # Extract the header section (everything before the first --- divider) for
   # post-compaction orientation; agent can read project state without needing
-  # the full snapshot file.
-  CONTEXT_HEADER=$(awk '/^---/{exit} {print}' "$SNAPSHOT" 2>/dev/null || true)
+  # the full snapshot file. Capped at 25 lines to guard against malformed
+  # files with no --- divider producing an oversized checkpoint.
+  CONTEXT_HEADER=$(awk '/^---/{exit} {print}' "$SNAPSHOT" 2>/dev/null | head -25 || true)
 fi
 
 # ── Write checkpoint ───────────────────────────────────────────────────────────
