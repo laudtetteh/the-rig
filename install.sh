@@ -1180,13 +1180,13 @@ if [[ "$DO_PROJECT" == true ]]; then
       .rig/tasks/*)                        [[ "$INSTALL_TASKS" == true ]]          ;;
       .rig/processes/*)                    [[ "$INSTALL_PROCESSES" == true ]]      ;;
       .rig/rules/*)                        [[ "$INSTALL_RULES" == true ]]          ;;
+      .claude/hooks/subagent-start.sh)     [[ "$INSTALL_SUBAGENTS" == true ]]      ;;
       .claude/hooks/*|.claude/settings*)   [[ "$INSTALL_CLAUDE_HOOKS" == true ]]   ;;
       .claude/commands/doc-feature.md|\
       .claude/commands/doc-list.md|\
       .claude/commands/feature-context.md|\
       .claude/commands/refresh-feature-doc.md|\
       docs/features/*)                     [[ "$INSTALL_FEATURE_DOCS" == true ]]   ;;
-      .claude/hooks/subagent-start.sh)     [[ "$INSTALL_SUBAGENTS" == true ]]      ;;
       .claude/commands/rig-gaps.md|\
       .claude/commands/rig-propose.md)     [[ "$INSTALL_CONTRIBUTE" == true ]]     ;;
       .claude/commands/*|\
