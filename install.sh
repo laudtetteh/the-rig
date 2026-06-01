@@ -172,6 +172,8 @@ _FLAG_BASE_BRANCH=""  # set via --base-branch <n>   (skips interactive prompt)
 _FLAG_TRACKING=""     # set via --tracking <mode>   (skips tracking prompt; orthogonal to --target)
 SKIP_GIT_HOOKS=false       # set via --skip-git-hooks    (stealth: skip .git/hooks/ writes)
 INSTALL_FEATURE_DOCS=false # set via --feature-docs      (gates doc-feature/feature-context/etc.)
+INSTALL_SUBAGENTS=false    # set via --subagents          (gates subagent-start.sh + SubagentStart hook)
+INSTALL_CONTRIBUTE=false   # set via --contribute         (gates rig-gaps.md + rig-propose.md)
 
 for arg in "$@"; do
   case "$arg" in
@@ -179,6 +181,8 @@ for arg in "$@"; do
     --project-only)     DO_GLOBAL=false ;;
     --skip-git-hooks)   SKIP_GIT_HOOKS=true ;;
     --feature-docs)     INSTALL_FEATURE_DOCS=true ;;
+    --subagents)        INSTALL_SUBAGENTS=true ;;
+    --contribute)       INSTALL_CONTRIBUTE=true ;;
     --rig-dir|--strategy|--target|--project-name|--base-branch|--tracking)
       # two-arg flags; value captured in the loop below
       ;;
@@ -228,6 +232,13 @@ for arg in "$@"; do
       echo "                        /refresh-feature-doc, and docs/features/README.md."
       echo "                        Skipped by default — add for projects that maintain"
       echo "                        end-to-end feature traces."
+      echo "  --subagents           Install multi-agent hook (opt-in)."
+      echo "                        Installs subagent-start.sh and wires the SubagentStart"
+      echo "                        event in settings.json. Skipped by default — add for"
+      echo "                        projects that use Claude Code multi-agent workflows."
+      echo "  --contribute          Install Rig contributor commands (opt-in)."
+      echo "                        Installs /rig-gaps and /rig-propose. Useful for"
+      echo "                        developers who maintain The Rig or a fork."
       echo "  --skip-git-hooks      Stealth mode only: skip writing hooks to .git/hooks/."
       echo "                        Use when the project already manages git hooks via Husky"
       echo "                        or another tool and you want to avoid the conflict."
@@ -1175,6 +1186,9 @@ if [[ "$DO_PROJECT" == true ]]; then
       .claude/commands/feature-context.md|\
       .claude/commands/refresh-feature-doc.md|\
       docs/features/*)                     [[ "$INSTALL_FEATURE_DOCS" == true ]]   ;;
+      .claude/hooks/subagent-start.sh)     [[ "$INSTALL_SUBAGENTS" == true ]]      ;;
+      .claude/commands/rig-gaps.md|\
+      .claude/commands/rig-propose.md)     [[ "$INSTALL_CONTRIBUTE" == true ]]     ;;
       .claude/commands/*|\
       .claude/agents/*)                    [[ "$INSTALL_COMMANDS" == true ]]       ;;
       .husky/*|.gitleaks.toml)             [[ "$INSTALL_GIT_HOOKS" == true ]]      ;;
@@ -1193,6 +1207,23 @@ if [[ "$DO_PROJECT" == true ]]; then
       "$TARGET/.claude/commands/refresh-feature-doc.md"; do
       if [[ -f "$_fd_check" ]]; then
         INSTALL_FEATURE_DOCS=true
+        break
+      fi
+    done
+  fi
+
+  # ── UPGRADE AUTO-DETECT: enable subagents if already installed ─────────────
+  if [[ "$INSTALL_SUBAGENTS" != true && -f "$TARGET/.claude/hooks/subagent-start.sh" ]]; then
+    INSTALL_SUBAGENTS=true
+  fi
+
+  # ── UPGRADE AUTO-DETECT: enable contribute if already installed ─────────────
+  if [[ "$INSTALL_CONTRIBUTE" != true ]]; then
+    for _cc_check in \
+      "$TARGET/.claude/commands/rig-gaps.md" \
+      "$TARGET/.claude/commands/rig-propose.md"; do
+      if [[ -f "$_cc_check" ]]; then
+        INSTALL_CONTRIBUTE=true
         break
       fi
     done
@@ -1246,6 +1277,29 @@ if [[ "$DO_PROJECT" == true ]]; then
   if [[ -f "$TARGET_CLAUDE" ]]; then
     sed_inplace "s/\\[Project Name\\]/${PROJECT_NAME}/g" "$TARGET_CLAUDE"
     success "Substituted [Project Name] in CLAUDE.md"
+  fi
+
+  # ── INJECT SubagentStart hook when --subagents is active ─────────────────
+  # The settings.json template omits SubagentStart by default (it's opt-in).
+  # When INSTALL_SUBAGENTS=true (via --subagents or auto-detect), inject the
+  # SubagentStart entry with [REPO_ROOT] placeholder; it is substituted below.
+  if [[ "$INSTALL_SUBAGENTS" == true && -f "$TARGET/.claude/settings.json" ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+      python3 - "$TARGET/.claude/settings.json" <<'PYEOF' 2>/dev/null || true
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    s = json.load(f)
+hooks = s.setdefault('hooks', {})
+if 'SubagentStart' not in hooks:
+    hooks['SubagentStart'] = [{'hooks': [{'type': 'command',
+        'command': 'bash [REPO_ROOT]/.claude/hooks/subagent-start.sh'}]}]
+    with open(path, 'w') as f:
+        json.dump(s, f, indent=2)
+        f.write('\n')
+PYEOF
+      success "Wired SubagentStart hook in .claude/settings.json"
+    fi
   fi
 
   # Substitute [REPO_ROOT] in settings.json with the absolute project path.

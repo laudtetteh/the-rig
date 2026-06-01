@@ -63,9 +63,23 @@ No arguments. Output the table below directly — do not read individual command
 | Command | What it does | Key flags |
 |---|---|---|
 | `/rig-upgrade` | Upgrade The Rig to the latest version. | `--version` (print versions only, no upgrade), `--scope=project\|global\|both` |
-| `/rig-propose` | Propose a change to Rig governance files (hooks, processes, rules, CLAUDE.md). Writes a diff for human review — never applies it directly. | — |
-| `/rig-gaps` | _(Rig contributors)_ Log and submit workflow friction observed during a task. | `--push` (append to local Rig repo), `--submit` (create GitHub issue) |
+| `/rig-propose` | _(opt-in: `--contribute`)_ Propose a change to Rig governance files (hooks, processes, rules, CLAUDE.md). Writes a diff for human review — never applies it directly. | — |
+| `/rig-gaps` | _(opt-in: `--contribute`)_ Log and submit workflow friction observed during a task. | `--push` (append to local Rig repo), `--submit` (create GitHub issue) |
 | `/rig-help` | This command. | — |
+
+---
+
+## Installer opt-in flags
+
+Some features are not installed by default. Pass these flags to `install.sh` (or `/rig-upgrade`) to enable them:
+
+| Flag | What it installs |
+|---|---|
+| `--feature-docs` | `/doc-feature`, `/doc-list`, `/feature-context`, `/refresh-feature-doc`, and `docs/features/` — for projects that maintain end-to-end feature traces |
+| `--subagents` | `subagent-start.sh` hook + `SubagentStart` event wiring in `settings.json` — for projects using multi-agent Claude Code workflows |
+| `--contribute` | `/rig-gaps` and `/rig-propose` — for developers who maintain The Rig or a fork |
+
+These flags are preserved across upgrades: once a feature is installed, it is auto-detected and retained on future upgrade runs without re-passing the flag.
 
 ---
 
