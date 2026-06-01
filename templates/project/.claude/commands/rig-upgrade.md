@@ -173,6 +173,51 @@ INSTALLER_VERSION=$(cat "$INSTALLER_SRC/VERSION" 2>/dev/null || echo "unknown")
 Report what version will be installed:
 > "Upgrading: **$CURRENT_VERSION → $INSTALLER_VERSION**"
 
+### 0e — CLAUDE.md path sanity check
+
+Detect whether `CLAUDE.md` contains paths that belong to a different tracking mode.
+This can happen when an upgrade was run with the wrong tracking flag, writing stealth
+absolute paths into a repo-tracked project's `CLAUDE.md`.
+
+```bash
+CLAUDE_MD="$REPO/CLAUDE.md"
+if [[ -f "$CLAUDE_MD" ]]; then
+  # Check for stealth-style absolute paths (e.g. /Users/name/.rig/projects/)
+  STEALTH_PATHS=$(grep -E '/\.rig/projects/' "$CLAUDE_MD" 2>/dev/null || true)
+
+  if [[ -n "$STEALTH_PATHS" && "$TRACKING" == "repo" ]]; then
+    echo "⚠️  Path mismatch in CLAUDE.md:"
+    echo "   CLAUDE.md contains absolute stealth paths but this is a repo-tracked install."
+    echo "   These paths point to a directory that likely does not exist:"
+    echo "$STEALTH_PATHS" | head -5
+    echo ""
+    echo "   This causes the agent to fail silently when Bash is unavailable."
+    echo "   Options:"
+    echo "   [f] Fix — rewrite context-loading and @import paths to use relative .rig/ paths"
+    echo "   [s] Skip — leave CLAUDE.md unchanged (mismatch persists)"
+  fi
+fi
+```
+
+If user chooses **[f]**: make the following substitutions in `$CLAUDE_MD`:
+
+1. Replace the numbered context-loading list (lines starting with `1.`, `2.`, etc. that
+   reference an absolute `.rig/projects/*/memory/` path) with relative equivalents:
+   - `/Users/*/memory/CONTEXT_SNAPSHOT.md` → `.rig/memory/CONTEXT_SNAPSHOT.md`
+   - `/Users/*/memory/PROGRESS.md` → `.rig/memory/PROGRESS.md`
+   - `/Users/*/memory/ERRORS.md` → `.rig/memory/ERRORS.md`
+   - `/Users/*/memory/DECISIONS.md` → `.rig/memory/DECISIONS.md`
+   - `/Users/*/tasks/active/` → `.rig/tasks/active/`
+2. Replace `@/Users/*/rules/*.md` imports with `@.rig/rules/*.md`
+3. Replace the "External .rig/ note" block with the hook-enforced context note from the
+   current template.
+
+Then confirm: "CLAUDE.md paths corrected to relative `.rig/` references."
+
+If user chooses **[s]**: note the skip and continue.
+
+If CLAUDE.md does not exist, or tracking is not `repo`, or no stealth paths found: skip silently.
+
 ---
 
 ## Phase 1 — Pull + Survey (read-only)
@@ -267,24 +312,29 @@ _diff_tpl() {
 
 Survey these files (adjust paths based on `$TRACKING`):
 
-**Claude hooks** (always at `$REPO/.claude/hooks/`):
+**Claude hooks** — iterate the template directory so new hooks are never missed:
 ```bash
-for f in pre-tool.sh post-tool.sh stop.sh; do
-  _diff_tpl ".claude/hooks/$f" "$TEMPLATES/.claude/hooks/$f" "$REPO/.claude/hooks/$f"
+echo "=== Surveying Claude hooks ==="
+for tpl in "$TEMPLATES/.claude/hooks/"*.sh; do
+  [[ -f "$tpl" ]] || continue
+  f=$(basename "$tpl")
+  _diff_tpl ".claude/hooks/$f" "$tpl" "$REPO/.claude/hooks/$f"
 done
 ```
 
-**Claude commands** (always at `$REPO/.claude/commands/`):
+**Claude commands** — iterate the template directory:
 ```bash
-for f in debug.md doc-feature.md kickoff.md new-feature.md post-merge.md propose.md \
-          recon.md refresh-feature-doc.md rig-gaps.md run.md session-name.md ship.md \
-          task.md upgrade.md wrap.md; do
-  _diff_tpl ".claude/commands/$f" "$TEMPLATES/.claude/commands/$f" "$REPO/.claude/commands/$f"
+echo "=== Surveying Claude commands ==="
+for tpl in "$TEMPLATES/.claude/commands/"*.md; do
+  [[ -f "$tpl" ]] || continue
+  f=$(basename "$tpl")
+  _diff_tpl ".claude/commands/$f" "$tpl" "$REPO/.claude/commands/$f"
 done
 ```
 
 **Git hooks** (location depends on tracking mode):
 ```bash
+echo "=== Surveying git hooks (${TRACKING} mode) ==="
 for f in pre-commit commit-msg post-commit post-merge filter-commit-message-inplace.sh; do
   if [[ "$TRACKING" == "stealth" ]]; then
     _diff_tpl ".husky/$f" "$TEMPLATES/.husky/$f" "$REPO/.git/hooks/$f"
@@ -296,9 +346,11 @@ done
 
 **Process files** (location: `$RIG_DIR/processes/`):
 ```bash
-for f in SHIP_WORKFLOW.md NEW_TASK_WORKFLOW.md POST_MERGE_WORKFLOW.md \
-          DEBUG_WORKFLOW.md UPGRADE_WORKFLOW.md; do
-  _diff_tpl ".rig/processes/$f" "$TEMPLATES/.rig/processes/$f" "$RIG_DIR/processes/$f"
+echo "=== Surveying process files ==="
+for tpl in "$TEMPLATES/.rig/processes/"*.md; do
+  [[ -f "$tpl" ]] || continue
+  f=$(basename "$tpl")
+  _diff_tpl ".rig/processes/$f" "$tpl" "$RIG_DIR/processes/$f"
 done
 ```
 
