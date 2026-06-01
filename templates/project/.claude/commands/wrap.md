@@ -373,13 +373,18 @@ rm -f "$RIG_DIR/memory/.wrap-needed" 2>/dev/null || true
 
 # Release the concurrent session lock
 rm -f "$RIG_DIR/memory/.wrap-in-progress" 2>/dev/null || true
+
+# Clear any stale compact checkpoint — the full snapshot supersedes it
+rm -f "$RIG_DIR/memory/.compact-checkpoint.md" 2>/dev/null || true
 ```
 
-Log: "`.wrap-needed` cleared. Concurrent session lock released."
+Log: "`.wrap-needed` cleared. Concurrent session lock released. Compact checkpoint cleared."
 
 `.wrap-needed` signals to `stop.sh` that `/wrap` has run and no flag should be
 written until the next commit creates new unexpanded stubs.
 `.wrap-in-progress` signals to concurrent sessions that this wrap is complete.
+`.compact-checkpoint.md` is cleared so the next session reads the authoritative
+`CONTEXT_SNAPSHOT.md` rather than a stale post-compaction checkpoint.
 
 ---
 
