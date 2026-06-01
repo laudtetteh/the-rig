@@ -45,6 +45,18 @@ if [[ -f "$PROGRESS_FILE" ]]; then
   LAST_PROGRESS=$(grep -m1 "^## " "$PROGRESS_FILE" 2>/dev/null | sed 's/^## //' || echo "none")
 fi
 
+SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
+SESSION_NAME="none"
+CONTEXT_HEADER=""
+if [[ -f "$SNAPSHOT" ]]; then
+  SESSION_NAME=$(grep -m1 "^\*\*Session name:\*\*" "$SNAPSHOT" 2>/dev/null \
+    | sed 's/\*\*Session name:\*\* *//' || echo "none")
+  # Extract the header section (everything before the first --- divider) for
+  # post-compaction orientation; agent can read project state without needing
+  # the full snapshot file.
+  CONTEXT_HEADER=$(awk '/^---/{exit} {print}' "$SNAPSHOT" 2>/dev/null || true)
+fi
+
 # ── Write checkpoint ───────────────────────────────────────────────────────────
 
 cat > "$CHECKPOINT" <<CPEOF
@@ -54,12 +66,17 @@ cat > "$CHECKPOINT" <<CPEOF
 **Last commit:** ${LAST_COMMIT}
 **Active task:** ${ACTIVE_TASK}
 **Last progress entry:** ${LAST_PROGRESS}
+**Session name:** ${SESSION_NAME}
+
+---
+
+${CONTEXT_HEADER}
 CPEOF
 
 # ── Output compactionSummary ───────────────────────────────────────────────────
 
 if command -v python3 >/dev/null 2>&1; then
-  SUMMARY="Branch: ${BRANCH} | Last commit: ${LAST_COMMIT} | Active task: ${ACTIVE_TASK} | Last progress: ${LAST_PROGRESS}"
+  SUMMARY="Branch: ${BRANCH} | Last commit: ${LAST_COMMIT} | Active task: ${ACTIVE_TASK} | Last progress: ${LAST_PROGRESS} | Session: ${SESSION_NAME}"
   printf '%s' "$SUMMARY" | python3 -c "
 import json, sys
 summary = sys.stdin.read()

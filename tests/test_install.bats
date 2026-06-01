@@ -590,6 +590,119 @@ assert 'additionalContext' in d['hookSpecificOutput']
   rm -rf "$tmpdir"
 }
 
+@test "subagents: subagent-start.sh excluded from default install" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo 2>/dev/null
+  [ ! -f "$tmpdir/.claude/hooks/subagent-start.sh" ]
+  rm -rf "$tmpdir"
+}
+
+@test "subagents: subagent-start.sh included with --subagents flag" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo --subagents 2>/dev/null
+  [ -f "$tmpdir/.claude/hooks/subagent-start.sh" ]
+  rm -rf "$tmpdir"
+}
+
+@test "subagents: SubagentStart wired in settings.json with --subagents flag" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo --subagents 2>/dev/null
+  grep -q '"SubagentStart"' "$tmpdir/.claude/settings.json"
+  rm -rf "$tmpdir"
+}
+
+@test "subagents: SubagentStart absent from settings.json without flag" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo 2>/dev/null
+  ! grep -q '"SubagentStart"' "$tmpdir/.claude/settings.json"
+  rm -rf "$tmpdir"
+}
+
+@test "subagents: upgrade preserves existing subagent-start.sh without flag" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo --subagents 2>/dev/null
+  [ -f "$tmpdir/.claude/hooks/subagent-start.sh" ] || skip "initial install failed"
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy upgrade \
+    --tracking repo 2>/dev/null
+  [ -f "$tmpdir/.claude/hooks/subagent-start.sh" ]
+  rm -rf "$tmpdir"
+}
+
+@test "subagents: upgrade on project without subagents does not add hook" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo 2>/dev/null
+  [ ! -f "$tmpdir/.claude/hooks/subagent-start.sh" ] || skip "initial install unexpectedly included subagent-start"
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy upgrade \
+    --tracking repo 2>/dev/null
+  [ ! -f "$tmpdir/.claude/hooks/subagent-start.sh" ]
+  rm -rf "$tmpdir"
+}
+
+@test "contribute: rig-gaps.md excluded from default install" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo 2>/dev/null
+  [ ! -f "$tmpdir/.claude/commands/rig-gaps.md" ]
+  rm -rf "$tmpdir"
+}
+
+@test "contribute: rig-gaps.md and rig-propose.md included with --contribute flag" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo --contribute 2>/dev/null
+  [ -f "$tmpdir/.claude/commands/rig-gaps.md" ]
+  [ -f "$tmpdir/.claude/commands/rig-propose.md" ]
+  rm -rf "$tmpdir"
+}
+
+@test "contribute: upgrade preserves existing rig-gaps.md without flag" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo --contribute 2>/dev/null
+  [ -f "$tmpdir/.claude/commands/rig-gaps.md" ] || skip "initial install failed"
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy upgrade \
+    --tracking repo 2>/dev/null
+  [ -f "$tmpdir/.claude/commands/rig-gaps.md" ]
+  rm -rf "$tmpdir"
+}
+
+@test "contribute: upgrade on project without contribute does not add rig-gaps" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
+    --tracking repo 2>/dev/null
+  [ ! -f "$tmpdir/.claude/commands/rig-gaps.md" ] || skip "initial install unexpectedly included contribute commands"
+  bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy upgrade \
+    --tracking repo 2>/dev/null
+  [ ! -f "$tmpdir/.claude/commands/rig-gaps.md" ]
+  rm -rf "$tmpdir"
+}
+
 @test "syntax: pre-commit hook has valid bash syntax" {
   run bash -n "$REPO_ROOT/templates/project/.husky/pre-commit"
   [ "$status" -eq 0 ]
