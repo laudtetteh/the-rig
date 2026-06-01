@@ -130,7 +130,11 @@ Do **not** run anything automatically. Present it for the user to confirm, copy,
 ### 5 — After confirmation
 
 When the user confirms the name (or runs `/session-name` with a name argument),
-update the `**Session name:**` field in `.rig/memory/CONTEXT_SNAPSHOT.md` to match.
+write the name into `.rig/memory/CONTEXT_SNAPSHOT.md`:
+
+- **If `**Session name:**` field already exists:** update it in-place.
+- **If absent:** insert it as the second line of the file (after `**Last updated:**`),
+  or append it to the header block before the first `---` divider.
 
 ---
 
