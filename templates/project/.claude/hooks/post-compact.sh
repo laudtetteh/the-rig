@@ -18,10 +18,14 @@ else
   RIG_DIR="$REPO/.rig"
 fi
 
-CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint.md"
 SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
 
-if [[ -f "$CHECKPOINT" ]]; then
+CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint-${PPID}.md"
+if [[ ! -f "$CHECKPOINT" ]]; then
+  CHECKPOINT=$(ls -t "$RIG_DIR/memory"/.compact-checkpoint-*.md 2>/dev/null | head -1 || true)
+fi
+
+if [[ -n "$CHECKPOINT" ]] && [[ -f "$CHECKPOINT" ]]; then
   CONTEXT=$(cat "$CHECKPOINT")
 elif [[ -f "$SNAPSHOT" ]]; then
   CONTEXT=$(cat "$SNAPSHOT")

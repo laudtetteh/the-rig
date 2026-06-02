@@ -131,6 +131,8 @@ case "$SOURCE" in
       write_minimal_checkpoint
     fi
 
+    rm -f "$RIG_DIR/memory/.compact-checkpoint-${PPID}.md" 2>/dev/null || true
+
     echo "[$(date +%H:%M:%S)] SESSION_END: source=${SOURCE} — session terminated" \
       >> "$SESSION_LOG" 2>/dev/null || true
     ;;
