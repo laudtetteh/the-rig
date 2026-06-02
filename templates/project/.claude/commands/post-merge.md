@@ -52,6 +52,29 @@ which PR merged if it's not clear from context.
 >
 > Substitute `$RIG_DIR` for `.rig/` in every step below.
 
+## Concurrent session guard — run before anything else
+
+Check for a `.snapshot-write-in-progress` sentinel before touching CONTEXT_SNAPSHOT.
+Both `/wrap` and `/post-merge` write the snapshot; if either is running in another
+session, block rather than silently overwrite:
+
+```bash
+SNAP_LOCK="$RIG_DIR/memory/.snapshot-write-in-progress"
+if [[ -f "$SNAP_LOCK" ]]; then
+  echo "⚠️  A snapshot write is already in progress (/wrap or /post-merge in another session)."
+  echo "   Lock file: $SNAP_LOCK"
+  echo "   If no other session is active, delete it and retry:"
+  echo "   rm '$SNAP_LOCK'"
+  exit 1
+fi
+touch "$SNAP_LOCK"
+```
+
+The lock is released in the Flag cleanup step at the very end. If `/post-merge`
+fails mid-run, the sentinel persists — delete it manually before retrying.
+
+---
+
 ## Git state check — run first, before anything else
 
 Before touching any files, verify the repo is in a known-good state:
@@ -158,15 +181,20 @@ If no meaningful work shipped (pure exploration, no merges), skip this step sile
 
 ## Flag cleanup
 
-After step 8 ("What's next?"), delete the `.post-merge-pending` flag file if it exists:
+After step 8 ("What's next?"), run all cleanups:
 
 ```bash
-rm -f "$(git rev-parse --show-toplevel)/.rig/memory/.post-merge-pending" 2>/dev/null || true
+# Release the concurrent session lock
+rm -f "$RIG_DIR/memory/.snapshot-write-in-progress" 2>/dev/null || true
+
+# Clear the post-merge-pending flag
+rm -f "$RIG_DIR/memory/.post-merge-pending" 2>/dev/null || true
 ```
 
-(Resolve via `.rigpath` if present.) This flag is written by `.husky/post-merge` after
-every merge and is detected at the next session start. Cleaning it up here confirms
-that `/post-merge` ran successfully.
+The `.post-merge-pending` flag is written by `.husky/post-merge` after every merge
+and detected at the next session start. Clearing it here confirms `/post-merge` ran
+successfully. The `.snapshot-write-in-progress` lock is cleared to unblock any
+concurrent `/wrap` or `/post-merge` waiting to run.
 
 ---
 
