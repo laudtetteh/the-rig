@@ -23,7 +23,7 @@ fi
 
 [[ ! -d "$RIG_DIR/memory" ]] && exit 0
 
-CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint.md"
+CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint-${PPID}.md"
 
 # ── Gather context ─────────────────────────────────────────────────────────────
 

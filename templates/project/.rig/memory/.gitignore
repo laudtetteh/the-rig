@@ -45,3 +45,9 @@ ERRORS_archive.md
 # to cover /post-merge too). Kept here for projects that still have this file on
 # disk from older sessions.
 .wrap-in-progress
+
+# .compact-checkpoint-<PPID>.md files are PPID-scoped per-session compact checkpoints.
+# Written by pre-compact.sh, read by post-compact.sh and session-start.sh (source=compact),
+# and deleted by session-end.sh on session close. Gitignored — ephemeral, never committed.
+.compact-checkpoint.md
+.compact-checkpoint-*.md

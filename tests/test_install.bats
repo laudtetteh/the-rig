@@ -470,9 +470,11 @@ print(sum(len(v) for v in s.get('hooks', {}).values()))
   (cd "$tmpdir" && RIG_DIR="$tmpdir/.rig" \
     bash "$REPO_ROOT/templates/project/.claude/hooks/pre-compact.sh" >/dev/null)
 
-  [ -f "$tmpdir/.rig/memory/.compact-checkpoint.md" ]
-  grep -q "Branch:" "$tmpdir/.rig/memory/.compact-checkpoint.md"
-  grep -q "Last commit:" "$tmpdir/.rig/memory/.compact-checkpoint.md"
+  local cp_file
+  cp_file=$(ls -t "$tmpdir/.rig/memory"/.compact-checkpoint-*.md 2>/dev/null | head -1 || true)
+  [ -n "$cp_file" ]
+  grep -q "Branch:" "$cp_file"
+  grep -q "Last commit:" "$cp_file"
   rm -rf "$tmpdir"
 }
 
@@ -482,7 +484,7 @@ print(sum(len(v) for v in s.get('hooks', {}).values()))
   git -C "$tmpdir" init -q
   mkdir -p "$tmpdir/.rig/memory"
   printf '## Compact checkpoint\n\n**Branch:** test-branch\n' \
-    > "$tmpdir/.rig/memory/.compact-checkpoint.md"
+    > "$tmpdir/.rig/memory/.compact-checkpoint-12345.md"
 
   local output
   # cd into tmpdir so git rev-parse --show-toplevel returns tmpdir, not Rig repo root
@@ -512,6 +514,95 @@ assert 'additionalContext' in d['hookSpecificOutput']
     bash "$REPO_ROOT/templates/project/.claude/hooks/post-compact.sh") 2>/dev/null)
 
   [ -z "$output" ]
+  rm -rf "$tmpdir"
+}
+
+@test "pre-compact: concurrent sessions write separate checkpoints, no clobbering" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  git -C "$tmpdir" config user.email "test@test.com"
+  git -C "$tmpdir" config user.name "Test"
+  git -C "$tmpdir" commit --allow-empty -m "initial" -q
+  mkdir -p "$tmpdir/.rig/memory" "$tmpdir/.rig/tasks/active"
+
+  # Pre-create a checkpoint simulating an existing concurrent session
+  printf '## Compact checkpoint\n\n**Branch:** feat/other-session\n' \
+    > "$tmpdir/.rig/memory/.compact-checkpoint-11111.md"
+
+  # Current session runs pre-compact — must not overwrite the other session's file
+  (cd "$tmpdir" && RIG_DIR="$tmpdir/.rig" \
+    bash "$REPO_ROOT/templates/project/.claude/hooks/pre-compact.sh" >/dev/null)
+
+  # Other session's checkpoint must be intact
+  [ -f "$tmpdir/.rig/memory/.compact-checkpoint-11111.md" ]
+  grep -q "feat/other-session" "$tmpdir/.rig/memory/.compact-checkpoint-11111.md"
+  # A second checkpoint file (from this session) must also exist
+  local count
+  count=$(ls "$tmpdir/.rig/memory"/.compact-checkpoint-*.md 2>/dev/null | wc -l | tr -d ' ')
+  [ "$count" -ge 2 ]
+  rm -rf "$tmpdir"
+}
+
+@test "post-compact: reads own PPID-scoped checkpoint when multiple checkpoints exist" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  git -C "$tmpdir" config user.email "test@test.com"
+  git -C "$tmpdir" config user.name "Test"
+  git -C "$tmpdir" commit --allow-empty -m "initial" -q
+  mkdir -p "$tmpdir/.rig/memory" "$tmpdir/.rig/tasks/active"
+
+  # Create a stale checkpoint from a different session (old PID)
+  printf '## Compact checkpoint\n\n**Branch:** feat/wrong-session\n' \
+    > "$tmpdir/.rig/memory/.compact-checkpoint-99.md"
+
+  # Run pre-compact then post-compact in the same subshell (shared PPID)
+  # — post-compact must return the checkpoint written by pre-compact (this session),
+  # not the stale one from PID 99
+  local output
+  output=$((cd "$tmpdir" && RIG_DIR="$tmpdir/.rig" \
+    bash "$REPO_ROOT/templates/project/.claude/hooks/pre-compact.sh" >/dev/null && \
+    bash "$REPO_ROOT/templates/project/.claude/hooks/post-compact.sh") 2>/dev/null)
+
+  echo "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+ctx = d['hookSpecificOutput']['additionalContext']
+assert 'wrong-session' not in ctx, 'Got stale checkpoint from wrong session: ' + ctx
+assert 'Branch:' in ctx, 'Expected branch info in checkpoint: ' + ctx
+" 2>/dev/null
+  [ "$?" -eq 0 ]
+  rm -rf "$tmpdir"
+}
+
+@test "session-start: compact source uses most-recent checkpoint when no PPID-scoped file exists" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  git -C "$tmpdir" init -q
+  mkdir -p "$tmpdir/.rig/memory"
+
+  # Create an older checkpoint and a newer one — session-start must pick the newest
+  printf '## Compact checkpoint\n\n**Branch:** feat/old-session\n' \
+    > "$tmpdir/.rig/memory/.compact-checkpoint-111.md"
+  # Ensure newer mtime on the second file
+  sleep 0.05
+  printf '## Compact checkpoint\n\n**Branch:** feat/latest-session\n' \
+    > "$tmpdir/.rig/memory/.compact-checkpoint-222.md"
+
+  local output
+  output=$((cd "$tmpdir" && RIG_DIR="$tmpdir/.rig" \
+    printf '{"source":"compact"}' | \
+    bash "$REPO_ROOT/templates/project/.claude/hooks/session-start.sh") 2>/dev/null)
+
+  echo "$output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+ctx = d['hookSpecificOutput']['additionalContext']
+assert 'latest-session' in ctx, 'Expected latest-session but got: ' + ctx
+assert 'old-session' not in ctx, 'Got stale checkpoint instead of latest: ' + ctx
+" 2>/dev/null
+  [ "$?" -eq 0 ]
   rm -rf "$tmpdir"
 }
 

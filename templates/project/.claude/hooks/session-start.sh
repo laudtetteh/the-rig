@@ -38,7 +38,6 @@ except Exception:
 fi
 
 SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
-COMPACT_CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint.md"
 WRAP_NEEDED="$RIG_DIR/memory/.wrap-needed"
 POST_MERGE_PENDING="$RIG_DIR/memory/.post-merge-pending"
 
@@ -88,7 +87,11 @@ case "$SOURCE" in
     ;;
 
   compact)
-    if [[ -f "$COMPACT_CHECKPOINT" ]]; then
+    COMPACT_CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint-${PPID}.md"
+    if [[ ! -f "$COMPACT_CHECKPOINT" ]]; then
+      COMPACT_CHECKPOINT=$(ls -t "$RIG_DIR/memory"/.compact-checkpoint-*.md 2>/dev/null | head -1 || true)
+    fi
+    if [[ -n "$COMPACT_CHECKPOINT" ]] && [[ -f "$COMPACT_CHECKPOINT" ]]; then
       CONTEXT=$(cat "$COMPACT_CHECKPOINT")
     elif [[ -f "$SNAPSHOT" ]]; then
       CONTEXT=$(cat "$SNAPSHOT")
