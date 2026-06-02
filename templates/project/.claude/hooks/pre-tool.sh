@@ -33,8 +33,10 @@ fi
 
 # ── Session log ──────────────────────────────────────────────────────────────
 # Logs every tool call with a timestamp. Useful for debugging agent behaviour.
-# Comment out if too noisy.
-echo "[$(date +%H:%M:%S)] PRE  $TOOL" >> /tmp/the-rig-session.log
+# Scoped per-project so concurrent sessions on different projects don't
+# contaminate each other's commit counts. Override with RIG_SESSION_LOG env var.
+SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session-$(basename "$REPO").log}"
+echo "[$(date +%H:%M:%S)] PRE  $TOOL" >> "$SESSION_LOG"
 
 # ── Guard: git commit and git push ───────────────────────────────────────────
 #

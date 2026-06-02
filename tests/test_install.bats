@@ -1204,6 +1204,60 @@ _is_rig_protected() {
   [ ! -f "$wrap_needed" ]
 }
 
+# ── Session log path is per-project ──────────────────────────────────────────
+# Hooks must write to /tmp/the-rig-session-<project>.log, not a global path.
+# This prevents cross-project commit count contamination in session-end.sh.
+
+@test "session log path: stop.sh and session-end.sh use per-project log filename" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
+  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
+
+  # Both hooks must reference the per-project pattern, not the global path
+  run grep "the-rig-session\.log" "$stop_hook"
+  [ "$status" -ne 0 ]  # global path must NOT appear
+
+  run grep 'the-rig-session-.*\.log\|the-rig-session-\$(basename' "$stop_hook"
+  [ "$status" -eq 0 ]  # per-project pattern must appear
+
+  run grep "the-rig-session\.log" "$session_end_hook"
+  [ "$status" -ne 0 ]  # global path must NOT appear
+
+  run grep 'the-rig-session-.*\.log\|the-rig-session-\$(basename' "$session_end_hook"
+  [ "$status" -eq 0 ]  # per-project pattern must appear
+}
+
+@test "session-end.sh: commit count not inflated by stubs from a different project" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local rig_dir="$TEST_PROJECT/.rig"
+  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  local wrap_needed="$rig_dir/memory/.wrap-needed"
+
+  printf '**Last updated:** 2026-01-01 — test snapshot\n' \
+    > "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+
+  # Simulate a different project's log with 2 commits written to a separate path
+  local other_project_log="$TEMP_DIR/the-rig-session-other-project.log"
+  printf '[10:00:00] PROGRESS stub: abc1234 feat(x): first commit [#1]\n' >> "$other_project_log"
+  printf '[10:01:00] PROGRESS stub: def5678 feat(x): second commit [#1]\n' >> "$other_project_log"
+
+  # This project's log is empty — injected via RIG_SESSION_LOG pointing to
+  # a per-project path with zero stubs
+  local this_project_log="$TEMP_DIR/the-rig-session-test-project.log"
+
+  rm -f "$wrap_needed"
+
+  echo '{"source": "logout"}' \
+    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$this_project_log" bash "$session_end_hook" )
+
+  # .wrap-needed must NOT be set — the other project's stubs must not be visible
+  [ ! -f "$wrap_needed" ]
+}
+
 # ── Gap 5: commit-msg validates Conventional Commits format ───────────────────
 
 @test "commit-msg: rejects non-conventional commit message" {
