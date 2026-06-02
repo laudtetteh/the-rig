@@ -44,4 +44,6 @@ without loading large files unnecessarily.
 
 - Reads `$DOCS_DIR/INDEX.md` only — does not scan or read the doc files themselves
 - The index is maintained manually; update it when a doc is added or its scope changes
-- Feature doc index is separate: `$DOCS_DIR/features/README.md` (managed by `/doc-feature`)
+- **Do not display `$DOCS_DIR/features/README.md` here.** Feature docs are a separate
+  system managed by `/doc-feature` and `/feature-context` — `/doc-list` shows the
+  general docs index only.
