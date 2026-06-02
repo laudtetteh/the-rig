@@ -73,8 +73,9 @@ write_minimal_checkpoint() {
     active_task=$(ls "$RIG_DIR/tasks/active"/*.md 2>/dev/null \
       | head -1 | xargs basename 2>/dev/null || true)
   fi
-  # Preserve the session name from the existing snapshot before overwriting it.
-  if [[ -f "$SNAPSHOT" ]]; then
+  # Preserve session name only if this session owns it — prevents inheriting a
+  # name written by a concurrent sibling that ran /session-name or /wrap.
+  if [[ -f "/tmp/.rig-session-name-set-${PPID}" ]] && [[ -f "$SNAPSHOT" ]]; then
     session_name=$(grep -m1 "^\*\*Session name:\*\*" "$SNAPSHOT" 2>/dev/null \
       | sed 's/\*\*Session name:\*\* *//' || true)
   fi
@@ -132,6 +133,7 @@ case "$SOURCE" in
     fi
 
     rm -f "$RIG_DIR/memory/.compact-checkpoint-${PPID}.md" 2>/dev/null || true
+    rm -f "/tmp/.rig-session-name-set-${PPID}" 2>/dev/null || true
 
     echo "[$(date +%H:%M:%S)] SESSION_END: source=${SOURCE} — session terminated" \
       >> "$SESSION_LOG" 2>/dev/null || true
