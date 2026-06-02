@@ -47,19 +47,23 @@ already running `/wrap` or `/post-merge`:
 ```bash
 SNAP_LOCK="$RIG_DIR/memory/.snapshot-write-in-progress"
 if [[ -f "$SNAP_LOCK" ]]; then
-  echo "⚠️  A snapshot write is already in progress (/wrap or /post-merge in another session)."
-  echo "   Lock file: $SNAP_LOCK"
-  echo "   If no other session is active, delete it and retry:"
-  echo "   rm '$SNAP_LOCK'"
-  exit 1
+  LOCK_AGE=$(( $(date +%s) - $(stat -c %Y "$SNAP_LOCK" 2>/dev/null || stat -f %m "$SNAP_LOCK" 2>/dev/null || echo 0) ))
+  if [[ "$LOCK_AGE" -gt 1800 ]]; then
+    echo "⚠️  Stale lock detected (age: ${LOCK_AGE}s). Auto-removing and proceeding."
+    rm -f "$SNAP_LOCK"
+  else
+    echo "⚠️  A snapshot write is already in progress (/wrap or /post-merge in another session, lock age: ${LOCK_AGE}s)."
+    echo "   If the other session is no longer active: rm '$SNAP_LOCK'"
+    exit 1
+  fi
 fi
 touch "$SNAP_LOCK"
 ```
 
 Create the sentinel immediately. Delete it at the very end of `/wrap` (step 11,
-after flag cleanup). If `/wrap` fails mid-run, the sentinel will persist — the
-user must delete it manually. This is intentional: a stale lock is safer than
-silent corruption.
+after flag cleanup). Locks older than 30 minutes are automatically expired on the
+next run — they are from crashed sessions. Locks under 30 minutes block and require
+the other session to finish (or the lock deleted manually if that session is gone).
 
 The sentinel file is gitignored alongside other `.rig/memory/` runtime files.
 

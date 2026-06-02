@@ -61,17 +61,21 @@ session, block rather than silently overwrite:
 ```bash
 SNAP_LOCK="$RIG_DIR/memory/.snapshot-write-in-progress"
 if [[ -f "$SNAP_LOCK" ]]; then
-  echo "⚠️  A snapshot write is already in progress (/wrap or /post-merge in another session)."
-  echo "   Lock file: $SNAP_LOCK"
-  echo "   If no other session is active, delete it and retry:"
-  echo "   rm '$SNAP_LOCK'"
-  exit 1
+  LOCK_AGE=$(( $(date +%s) - $(stat -c %Y "$SNAP_LOCK" 2>/dev/null || stat -f %m "$SNAP_LOCK" 2>/dev/null || echo 0) ))
+  if [[ "$LOCK_AGE" -gt 1800 ]]; then
+    echo "⚠️  Stale lock detected (age: ${LOCK_AGE}s). Auto-removing and proceeding."
+    rm -f "$SNAP_LOCK"
+  else
+    echo "⚠️  A snapshot write is already in progress (/wrap or /post-merge in another session, lock age: ${LOCK_AGE}s)."
+    echo "   If the other session is no longer active: rm '$SNAP_LOCK'"
+    exit 1
+  fi
 fi
 touch "$SNAP_LOCK"
 ```
 
-The lock is released in the Flag cleanup step at the very end. If `/post-merge`
-fails mid-run, the sentinel persists — delete it manually before retrying.
+The lock is released in the Flag cleanup step at the very end. Locks older than
+30 minutes are automatically expired — they are from crashed sessions.
 
 ---
 
