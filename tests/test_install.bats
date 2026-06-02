@@ -1204,6 +1204,55 @@ _is_rig_protected() {
   [ ! -f "$wrap_needed" ]
 }
 
+# ── TASK_255: session-end.sh skips write_minimal_checkpoint if snap lock held ─
+
+@test "session-end.sh: skips write_minimal_checkpoint when snapshot write lock exists" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local rig_dir="$TEST_PROJECT/.rig"
+  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  local session_log="$TEMP_DIR/the-rig-session-test.log"
+  local snap_lock="$rig_dir/memory/.snapshot-write-in-progress"
+
+  # Write a recognisable snapshot so we can detect if it was overwritten
+  printf '**Last updated:** 2026-01-01 — original snapshot\n' \
+    > "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+
+  # Simulate /wrap holding the lock
+  touch "$snap_lock"
+
+  echo '{"source": "logout"}' \
+    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$session_end_hook" )
+
+  # Snapshot must be unchanged — write_minimal_checkpoint was skipped
+  grep -q "original snapshot" "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+}
+
+@test "session-end.sh: write_minimal_checkpoint runs normally when no lock exists" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local rig_dir="$TEST_PROJECT/.rig"
+  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  local session_log="$TEMP_DIR/the-rig-session-test.log"
+  local snap_lock="$rig_dir/memory/.snapshot-write-in-progress"
+
+  printf '**Last updated:** 2026-01-01 — original snapshot\n' \
+    > "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+  # Ensure unexpanded stubs exist so the write-needed path is triggered
+  printf '[10:00:00] PROGRESS stub: abc1234 feat(x): commit [#1]\n' >> "$session_log"
+  printf '[10:01:00] PROGRESS stub: def5678 feat(x): commit [#2]\n' >> "$session_log"
+
+  rm -f "$snap_lock"
+
+  echo '{"source": "logout"}' \
+    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$session_end_hook" )
+
+  # Snapshot must have been replaced with the minimal checkpoint content
+  grep -q "session-end checkpoint" "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+}
+
 # ── Session log path is per-project ──────────────────────────────────────────
 # Hooks must write to /tmp/the-rig-session-<project>.log, not a global path.
 # This prevents cross-project commit count contamination in session-end.sh.

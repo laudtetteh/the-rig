@@ -41,19 +41,19 @@ Performs the session-end housekeeping that prevents state loss between sessions:
 
 ## Concurrent session guard — run before anything else
 
-Check for a `.wrap-in-progress` sentinel that would indicate another session is
-already running `/wrap`:
+Check for a `.snapshot-write-in-progress` sentinel that would indicate another session is
+already running `/wrap` or `/post-merge`:
 
 ```bash
-WRAP_LOCK="$RIG_DIR/memory/.wrap-in-progress"
-if [[ -f "$WRAP_LOCK" ]]; then
-  echo "⚠️  Another /wrap is already running (or a previous run crashed)."
-  echo "   Lock file: $WRAP_LOCK"
+SNAP_LOCK="$RIG_DIR/memory/.snapshot-write-in-progress"
+if [[ -f "$SNAP_LOCK" ]]; then
+  echo "⚠️  A snapshot write is already in progress (/wrap or /post-merge in another session)."
+  echo "   Lock file: $SNAP_LOCK"
   echo "   If no other session is active, delete it and retry:"
-  echo "   rm '$WRAP_LOCK'"
+  echo "   rm '$SNAP_LOCK'"
   exit 1
 fi
-touch "$WRAP_LOCK"
+touch "$SNAP_LOCK"
 ```
 
 Create the sentinel immediately. Delete it at the very end of `/wrap` (step 11,
@@ -372,7 +372,7 @@ After suggesting a session name and before asking "What's next?", run both clean
 rm -f "$RIG_DIR/memory/.wrap-needed" 2>/dev/null || true
 
 # Release the concurrent session lock
-rm -f "$RIG_DIR/memory/.wrap-in-progress" 2>/dev/null || true
+rm -f "$RIG_DIR/memory/.snapshot-write-in-progress" 2>/dev/null || true
 
 # Clear any stale compact checkpoint — the full snapshot supersedes it
 rm -f "$RIG_DIR/memory/.compact-checkpoint.md" 2>/dev/null || true
@@ -382,7 +382,7 @@ Log: "`.wrap-needed` cleared. Concurrent session lock released. Compact checkpoi
 
 `.wrap-needed` signals to `stop.sh` that `/wrap` has run and no flag should be
 written until the next commit creates new unexpanded stubs.
-`.wrap-in-progress` signals to concurrent sessions that this wrap is complete.
+`.snapshot-write-in-progress` signals to concurrent sessions that this snapshot write is complete.
 `.compact-checkpoint.md` is cleared so the next session reads the authoritative
 `CONTEXT_SNAPSHOT.md` rather than a stale post-compaction checkpoint.
 

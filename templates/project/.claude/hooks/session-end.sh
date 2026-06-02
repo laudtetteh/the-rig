@@ -43,6 +43,7 @@ fi
 SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
 PROGRESS="$RIG_DIR/memory/PROGRESS.md"
 WRAP_NEEDED="$RIG_DIR/memory/.wrap-needed"
+SNAP_LOCK="$RIG_DIR/memory/.snapshot-write-in-progress"
 SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session-$(basename "$REPO").log}"
 NOW_FULL=$(date "+%Y-%m-%d %H:%M" 2>/dev/null || true)
 
@@ -57,6 +58,13 @@ write_wrap_needed() {
 
 write_minimal_checkpoint() {
   [[ ! -d "$RIG_DIR/memory" ]] && return
+  # If /wrap or /post-merge was running when the session closed, don't clobber
+  # their in-progress snapshot. The stale lock will surface at next session start.
+  if [[ -f "$SNAP_LOCK" ]]; then
+    echo "[$(date +%H:%M:%S)] SESSION_END: snapshot write in progress — skipping write_minimal_checkpoint" \
+      >> "$SESSION_LOG" 2>/dev/null || true
+    return
+  fi
   local branch commit active_task session_name=""
   branch=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
   commit=$(git -C "$REPO" log -1 --format="%h %s" 2>/dev/null || echo "none")

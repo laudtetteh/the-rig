@@ -34,3 +34,14 @@ ERRORS_archive.md
 # signalling that /post-merge should be run before starting new work.
 # Deleted by /post-merge when it completes successfully. Never committed.
 .post-merge-pending
+
+# .snapshot-write-in-progress is a mutual-exclusion lock held by /wrap and
+# /post-merge while writing CONTEXT_SNAPSHOT.md. Prevents concurrent writes from
+# silently overwriting each other. session-end.sh checks this before calling
+# write_minimal_checkpoint. Never committed.
+.snapshot-write-in-progress
+
+# .wrap-in-progress is the legacy name for .snapshot-write-in-progress (renamed
+# to cover /post-merge too). Kept here for projects that still have this file on
+# disk from older sessions.
+.wrap-in-progress
