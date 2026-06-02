@@ -175,6 +175,15 @@ After the user confirms, **update the `**Session name:**` field in
 `.rig/memory/CONTEXT_SNAPSHOT.md`** to match. This lets subsequent /wrap or
 /post-merge calls detect the existing name and suggest appends correctly.
 
+Then run:
+
+```bash
+touch "/tmp/.rig-session-name-set-${PPID}"
+```
+
+This sentinel tells `session-end.sh` that this session owns the name, preventing
+a concurrent sibling session from inheriting it when it writes its minimal checkpoint.
+
 If no meaningful work shipped (pure exploration, no merges), skip this step silently.
 
 ---

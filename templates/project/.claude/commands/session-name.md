@@ -129,12 +129,42 @@ Do **not** run anything automatically. Present it for the user to confirm, copy,
 
 ### 5 — After confirmation
 
-When the user confirms the name (or runs `/session-name` with a name argument),
-write the name into `.rig/memory/CONTEXT_SNAPSHOT.md`:
+When the user confirms the name (or runs `/session-name` with a name argument):
+
+**5a — Check for a concurrent snapshot write before editing.**
+
+Run this before calling `Edit` on CONTEXT_SNAPSHOT.md:
+
+```bash
+REPO=$(git rev-parse --show-toplevel)
+if [[ -f "$REPO/.rigpath" ]]; then RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath"); else RIG_DIR="$REPO/.rig"; fi
+SNAP_LOCK="$RIG_DIR/memory/.snapshot-write-in-progress"
+if [[ -f "$SNAP_LOCK" ]]; then
+  echo "⚠️ A snapshot write is in progress in another session. Wait for it to finish, then re-run /session-name. Or delete the lock manually: rm '$SNAP_LOCK'"
+  exit 1
+fi
+```
+
+If the lock exists, surface the warning and stop — do not proceed to the `Edit` call.
+
+**5b — Write the name.**
+
+Write the name into `.rig/memory/CONTEXT_SNAPSHOT.md`:
 
 - **If `**Session name:**` field already exists:** update it in-place.
 - **If absent:** insert it as the second line of the file (after `**Last updated:**`),
   or append it to the header block before the first `---` divider.
+
+**5c — Record session ownership.**
+
+After the name is written, run:
+
+```bash
+touch "/tmp/.rig-session-name-set-${PPID}"
+```
+
+This sentinel tells `session-end.sh` that this session owns the name, preventing
+a concurrent sibling session from inheriting it when it writes its minimal checkpoint.
 
 ---
 
