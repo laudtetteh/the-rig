@@ -43,7 +43,7 @@ fi
 SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
 PROGRESS="$RIG_DIR/memory/PROGRESS.md"
 WRAP_NEEDED="$RIG_DIR/memory/.wrap-needed"
-SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session.log}"
+SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session-$(basename "$REPO").log}"
 NOW_FULL=$(date "+%Y-%m-%d %H:%M" 2>/dev/null || true)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

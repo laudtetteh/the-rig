@@ -29,8 +29,9 @@ fi
 
 SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
 PROGRESS="$RIG_DIR/memory/PROGRESS.md"
-# Allow tests to inject a custom session log path via RIG_SESSION_LOG env var.
-SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session.log}"
+# Scoped per-project to prevent cross-project commit count contamination.
+# Override with RIG_SESSION_LOG env var (used in tests).
+SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session-$(basename "$REPO").log}"
 NOW_FULL=$(date "+%Y-%m-%d %H:%M")
 
 # ── Update Last updated: date in CONTEXT_SNAPSHOT ────────────────────────────

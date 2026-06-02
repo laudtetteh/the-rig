@@ -28,7 +28,7 @@ else
 fi
 
 PROGRESS_FILE="$RIG_DIR/memory/PROGRESS.md"
-SESSION_LOG="/tmp/the-rig-session.log"
+SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session-$(basename "$REPO").log}"
 
 # ── Session log ───────────────────────────────────────────────────────────────
 echo "[$(date +%H:%M:%S)] POST $TOOL" >> "$SESSION_LOG"

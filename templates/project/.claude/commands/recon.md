@@ -182,5 +182,5 @@ State the suggestion explicitly. Don't act on it — let the user decide.
 - If the keyword is very broad (e.g. "auth", "user"), warn the user and ask if they
   want to narrow it before proceeding.
 - If the repo has no merged PRs yet (fresh project), skip Step 1 and note it.
-- The session log at `/tmp/the-rig-session.log` is not part of the recon scope —
+- The session log at `/tmp/the-rig-session-<project>.log` is not part of the recon scope —
   it's ephemeral and not meaningful for evolution research.
