@@ -213,6 +213,54 @@ session touched files covered by documented features.
 
 ---
 
+## PR description freshness step
+
+After the feature doc freshness check, verify that the open PR for this branch
+reflects all commits that have landed since it was opened.
+
+**How:**
+
+1. Check for an open PR on the current branch:
+   ```bash
+   CURRENT_BRANCH=$(git branch --show-current)
+   PR_JSON=$(gh pr list --head "$CURRENT_BRANCH" --json number,title,body,labels --limit 1 2>/dev/null || echo "[]")
+   PR_NUMBER=$(echo "$PR_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['number'] if d else '')" 2>/dev/null || echo "")
+   ```
+   If `PR_NUMBER` is empty (no open PR or `gh` unavailable): skip silently.
+
+2. Get the PR body:
+   ```bash
+   PR_BODY=$(echo "$PR_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['body'] if d else '')" 2>/dev/null || echo "")
+   ```
+
+3. Get commits on this branch not yet in base:
+   ```bash
+   BASE=$(grep "^base-branch:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+   BASE="${BASE:-main}"
+   git log "origin/$BASE"..HEAD --format="%s" 2>/dev/null
+   ```
+
+4. For each commit subject, skip housekeeping types: `chore(memory)`, `chore(post-merge)`,
+   `chore(release)`, `chore(rig)`. For the rest, do a case-insensitive substring check
+   against the PR body.
+
+5. **If any non-housekeeping commits are not reflected in the PR body**, surface in the
+   wrap summary:
+   > "PR #[N] description may be stale — [N] commit(s) not in description:
+   >   - type(scope): commit subject
+   >   - ...
+   > Update PR description? [yes / no]"
+
+   If the user says yes: append an `## Additional changes` section to the PR body
+   listing the unrepresented commits. Show the proposed addition before editing:
+   ```bash
+   gh pr edit "$PR_NUMBER" --body-file /tmp/wrap-pr-body.md
+   ```
+
+6. If all commits are reflected, or this is a housekeeping-only session: skip silently.
+
+---
+
 ## Self-improvement check
 
 After the feature doc freshness check, run a brief Rig retrospective:

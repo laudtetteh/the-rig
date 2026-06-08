@@ -112,3 +112,25 @@ _fail_with_list() {
 @test "post-merge.md: executes POST_MERGE_WORKFLOW automatically after report" {
   grep -q "execute POST_MERGE_WORKFLOW steps" "$COMMAND_DIR/post-merge.md"
 }
+
+# ── PR description freshness ───────────────────────────────────────────────────
+
+@test "wrap.md: contains PR description freshness step" {
+  grep -q "## PR description freshness step" "$COMMAND_DIR/wrap.md"
+}
+
+@test "wrap.md: PR freshness step skips housekeeping commit types" {
+  grep -q "chore(memory)" "$COMMAND_DIR/wrap.md"
+}
+
+@test "wrap.md: PR freshness step skips silently when no open PR" {
+  grep -q "skip silently" "$COMMAND_DIR/wrap.md"
+}
+
+@test "ship.md: Step 9 compares commits against existing PR description before prompting" {
+  grep -q "compare the branch commits against the existing PR description" "$COMMAND_DIR/ship.md"
+}
+
+@test "ship.md: Step 9 skips housekeeping commit types in freshness check" {
+  grep -qE "chore\(memory\)" "$COMMAND_DIR/ship.md"
+}
