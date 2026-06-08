@@ -11,6 +11,28 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.19.0] — 2026-06-08
+
+### Added
+- **`/rig-status` command** (`templates/project/.claude/commands/rig-status.md`): installation health check — verifies hook wiring, memory files, settings.json entries, and pending flags in one pass. Run any time to confirm the project layer is intact, especially after re-cloning on a new machine. Closes #296.
+- **Stale-version offer in `install.sh`** (`install.sh`): when the installer source is behind the tracking remote, an interactive 3-option prompt now offers to pull-and-rerun (recommended), continue with the stale version, or exit. In non-interactive mode, behavior is unchanged (warn and continue). The re-run uses `exec` to pass all original flags through. Closes #299.
+- **`/fewer-permission-prompts` baseline seeding** (`install.sh`, `templates/project/.claude/settings.json`): fresh installs now seed 5 `permissions.allow` entries for common read-only git patterns (`git log`, `git diff`, `git show`, `git status`, `git branch`) that would otherwise prompt every session. Closes #294.
+- **One-time nudge for `/fewer-permission-prompts`** (`templates/project/.claude/hooks/prompt-submit.sh`): after a few sessions, `prompt-submit.sh` surfaces a one-time suggestion to run `/fewer-permission-prompts` to expand the allowlist. Fires at most once per project (`.permission-nudge-offered` sentinel). Closes #294.
+- **PR description freshness check in `/wrap` and `/ship`** (`templates/project/.claude/commands/wrap.md`, `ship.md`): before ending a session or committing, checks whether the open PR description is stale relative to new commits. Skips housekeeping commit types. Closes #293.
+- **Upgrade commit strategy guidance** (`templates/project/.rig/processes/UPGRADE_WORKFLOW.md`, `templates/project/.claude/commands/rig-upgrade.md`, `templates/project/CLAUDE.md`): Step 7 in `UPGRADE_WORKFLOW.md` and Phase 5a in `rig-upgrade.md` now recommend branch+PR when 4+ files change, direct-push for 1–3 files. `CLAUDE.md` `housekeeping:` table clarifies upgrade commits are not covered by the direct-push convention. Closes #301.
+
+### Fixed
+- **Stale in-repo `.rig/` cleanup** (`install.sh`): when a stealth install detects a residual in-repo `.rig/` directory from a prior non-stealth install, the default is now auto-remove (was: skip). In non-interactive mode the removal is automatic; interactive mode defaults to `y`. Closes #297.
+- **`/wrap` and `/post-merge` session report** (`templates/project/.claude/commands/wrap.md`, `post-merge.md`): standardized report format, auto-executes housekeeping steps without confirmation gates, and removes stale prompts ("Trim now?", "Did anything unexpected happen?"). Closes #292.
+- **`/ship` Step 9 and `/wrap` PR freshness**: uses `chore(memory)` skip filter so housekeeping commits don't falsely trigger a "description is stale" warning. Closes #293.
+- **`--project-only` non-interactive mode** (`install.sh`): `--project-only` without `--strategy` no longer blocks on the intent menu in non-interactive mode — defaults to upgrade intent. Closes #295.
+
+### Changed
+- **`/wrap` and `/post-merge` report cadence** (`templates/project/.claude/commands/wrap.md`, `post-merge.md`): session summary is now produced as a single Wrap report / Post-merge report before housekeeping steps execute. No mid-flow confirmation gates. Closes #292.
+- **Stale `.rig/` removal default changed to `y`** (`install.sh`): in-repo `.rig/` cleanup during stealth migration now auto-removes in non-interactive mode (changed from default-no to default-yes). Closes #297.
+
+---
+
 ## [1.18.1] — 2026-05-26
 
 ### Fixed
