@@ -6,10 +6,13 @@
 # a warning into context if either is set — so the agent sees the flag
 # whether it was set at session start or mid-session (e.g. after a commit).
 #
-# Must be fast: UserPromptSubmit has a 30-second timeout.
-# When no flags are set, exits immediately with no output.
+# Also fires a one-time nudge when the project's permission allowlist is
+# sparse, suggesting /fewer-permission-prompts to reduce session friction.
 #
-# Output: JSON {"additionalContext": "..."} when a flag is present.
+# Must be fast: UserPromptSubmit has a 30-second timeout.
+# When no flags are set and the nudge has already been offered, exits immediately.
+#
+# Output: JSON {"additionalContext": "..."} when there is something to surface.
 # Claude Code receives this as context alongside the user's message.
 
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
@@ -23,13 +26,14 @@ fi
 
 WRAP_NEEDED="$RIG_DIR/memory/.wrap-needed"
 POST_MERGE_PENDING="$RIG_DIR/memory/.post-merge-pending"
+NUDGE_FLAG="$RIG_DIR/memory/.permission-nudge-offered"
 
-# Fast path: no flags set — exit with no output
-if [[ ! -f "$WRAP_NEEDED" && ! -f "$POST_MERGE_PENDING" ]]; then
+# Fast path: no flags AND nudge already evaluated — exit immediately
+if [[ ! -f "$WRAP_NEEDED" && ! -f "$POST_MERGE_PENDING" && -f "$NUDGE_FLAG" ]]; then
   exit 0
 fi
 
-# Build warning text
+# Build warning text for housekeeping flags
 WARNINGS=""
 if [[ -f "$WRAP_NEEDED" ]]; then
   WARNINGS+="⚠️ The last session ended without running /wrap. CONTEXT_SNAPSHOT.md may be stale and PROGRESS.md has unexpanded entries. Run /wrap now to capture session state before starting new work — or say 'skip wrap' to proceed anyway."
@@ -38,6 +42,29 @@ if [[ -f "$POST_MERGE_PENDING" ]]; then
   [[ -n "$WARNINGS" ]] && WARNINGS+=$'\n\n'
   WARNINGS+="⚠️ A merge landed since /post-merge was last run. Memory may not reflect the merged state. Run /post-merge now — or say 'skip post-merge' to proceed anyway."
 fi
+
+# Permission nudge — once per project when allowlist is sparse
+if [[ ! -f "$NUDGE_FLAG" ]] && command -v python3 >/dev/null 2>&1; then
+  SETTINGS="$REPO/.claude/settings.json"
+  if [[ -f "$SETTINGS" ]]; then
+    allowed_count=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open('$SETTINGS'))
+    print(len(d.get('permissions', {}).get('allow', [])))
+except Exception:
+    print(99)
+" 2>/dev/null || echo 99)
+    touch "$NUDGE_FLAG"
+    if [[ "$allowed_count" -lt 5 ]]; then
+      [[ -n "$WARNINGS" ]] && WARNINGS+=$'\n\n'
+      WARNINGS+="Tip: run /fewer-permission-prompts to build a permission allowlist from your session history — reduces repetitive prompts without affecting oversight of write operations."
+    fi
+  fi
+fi
+
+# Exit cleanly if nothing to report
+[[ -z "$WARNINGS" ]] && exit 0
 
 # Output JSON additionalContext
 if command -v python3 >/dev/null 2>&1; then

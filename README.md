@@ -129,6 +129,23 @@ cd ~/code/my-project
 
 ---
 
+### Reducing permission prompts
+
+Claude Code asks for confirmation on many tool calls. The Rig seeds a baseline
+allowlist for common read-only git operations in `.claude/settings.json` automatically.
+
+To expand it based on your actual session activity, run:
+
+```
+/fewer-permission-prompts
+```
+
+This scans recent tool use, identifies safe patterns, and adds them to your
+`.claude/settings.json`. Run it once after a few sessions to cut the friction
+significantly — it adds patterns, never removes them.
+
+---
+
 ### Upgrading
 
 ```bash

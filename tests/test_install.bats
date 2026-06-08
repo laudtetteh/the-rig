@@ -392,6 +392,68 @@ print(sum(len(v) for v in s.get('hooks', {}).values()))
   [ "$count_after_second" -eq "$count_after_first" ]
 }
 
+@test "fresh install: settings.json includes baseline permissions.allow entries" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  local allow_count
+  allow_count=$(python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+print(len(s.get('permissions', {}).get('allow', [])))
+")
+  # Baseline has 5 read-only git patterns
+  [ "$allow_count" -ge 5 ]
+  grep -q '"Bash(git status\*)"' "$TEST_PROJECT/.claude/settings.json"
+  grep -q '"Bash(git log\*)"' "$TEST_PROJECT/.claude/settings.json"
+  grep -q '"Bash(git rev-parse\*)"' "$TEST_PROJECT/.claude/settings.json"
+}
+
+@test "merge strategy: does not duplicate permissions.allow on re-install" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  local count_after_first
+  count_after_first=$(python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+print(len(s.get('permissions', {}).get('allow', [])))
+")
+  run_installer --strategy merge
+  [ "$status" -eq 0 ]
+  local count_after_second
+  count_after_second=$(python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+print(len(s.get('permissions', {}).get('allow', [])))
+")
+  # Allow list count must not grow — no duplicates added
+  [ "$count_after_second" -eq "$count_after_first" ]
+}
+
+@test "upgrade strategy: does not duplicate permissions.allow on upgrade" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  local count_after_first
+  count_after_first=$(python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+print(len(s.get('permissions', {}).get('allow', [])))
+")
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  local count_after_second
+  count_after_second=$(python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+print(len(s.get('permissions', {}).get('allow', [])))
+")
+  [ "$count_after_second" -eq "$count_after_first" ]
+}
+
 # ── CLI flag validation ───────────────────────────────────────────────────────
 
 @test "--strategy with invalid value warns and falls back to interactive" {
@@ -467,6 +529,15 @@ print(sum(len(v) for v in s.get('hooks', {}).values()))
 @test "syntax: prompt-submit.sh has valid bash syntax" {
   run bash -n "$REPO_ROOT/templates/project/.claude/hooks/prompt-submit.sh"
   [ "$status" -eq 0 ]
+}
+
+@test "prompt-submit.sh: contains permission nudge logic" {
+  local f="$REPO_ROOT/templates/project/.claude/hooks/prompt-submit.sh"
+  grep -q "NUDGE_FLAG" "$f"
+  grep -q "fewer-permission-prompts" "$f"
+  grep -q "permission-nudge-offered" "$f"
+  # Fast path must check nudge flag so it exits before building WARNINGS
+  grep -q 'NUDGE_FLAG' "$f"
 }
 
 @test "syntax: permission-request.sh has valid bash syntax" {
