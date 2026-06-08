@@ -81,15 +81,20 @@ This file is **gitignored** — it lives on disk only, read at session start.
 
 ---
 
-## Step 5 — Check ERRORS.md and RIG_GAPS.md
+## Step 5 — Update ERRORS.md and RIG_GAPS.md
 
-If anything unexpected happened during the task or the merge process, log it in
-`.rig/memory/ERRORS.md` now. Do not defer — the detail is freshest immediately
-after the work.
+Based on this session's context — tool output, errors hit, unexpected behaviors, non-obvious
+pitfalls — **infer** whether anything should be added to these files. Do not ask the user;
+derive from what was observed.
 
-If anything about The Rig's workflow felt wrong, was missing, or slowed you down
-during this task, log it in `.rig/memory/RIG_GAPS.md`. Use `/rig-gaps` to compile
-and submit those entries to The Rig dev session.
+**ERRORS.md:** For any inferred entry, check the archive first to avoid duplicates
+(see ERRORS.md logging step in `/wrap` for the dedup protocol). Add new entries at the top.
+
+**RIG_GAPS.md:** If anything about The Rig's workflow felt wrong, was missing, or slowed
+work down during this task, log it now while the detail is fresh. Use `/rig-gaps` to
+compile and submit these entries to The Rig dev session.
+
+Include any additions in the Post-merge report (see report step in `/post-merge`).
 
 ---
 

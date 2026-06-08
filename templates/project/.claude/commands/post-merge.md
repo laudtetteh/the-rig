@@ -101,6 +101,58 @@ will `git checkout [BASE_BRANCH] && git pull`, but flag it now so the user is aw
 
 ---
 
+## Post-merge report step
+
+**Run this after the git state check, before executing POST_MERGE_WORKFLOW steps.**
+
+### Collection phase
+
+Gather all findings silently — no output yet:
+
+1. **Merged PR** — title, number, branch name (from context or `git log --oneline -1`)
+2. **"This session" summary** — from conversation context: all PRs merged or opened, tasks completed, issues resolved this session. Conversation context is the primary signal; PROGRESS.md markers are cross-reference only.
+3. **Task file** — which active task file maps to the merged PR (for step 3 of POST_MERGE_WORKFLOW)
+4. **ERRORS.md additions** — infer from session context whether any unexpected behaviors, footguns, or pitfalls should be added
+5. **Feature doc overlaps** — files changed in the merged PR vs. documented feature entry points (see Feature doc freshness step below)
+6. **Session name** — derive suggestion; check for existing name in CONTEXT_SNAPSHOT.md
+
+### Report
+
+Print a single structured report before executing POST_MERGE_WORKFLOW:
+
+```
+## Post-merge report — [BASE_BRANCH] — [date]
+
+**Merged:** PR #N — type(scope): description
+
+**This session:**
+- PR #N merged: type(scope): description
+- [other work items this session]
+(omit if this is the only work item)
+
+**ERRORS.md:** [N new entries: short-title-1 | no new entries]
+**Feature docs:** [⚠ overlap — run /refresh-feature-doc X | no overlaps]
+**Task file:** [TASK_N_slug.md → moving to done/ | no active task found]
+
+**Session name:** [suggested: "type desc #N | type desc #N" | already set — appending: "..." | nothing meaningful shipped, skipped]
+```
+
+### Execution
+
+After printing the report, **execute POST_MERGE_WORKFLOW steps 1–8 automatically**:
+
+- Pull latest [BASE_BRANCH] and confirm HEAD
+- Update PROGRESS.md
+- Move task file to done/
+- Write CONTEXT_SNAPSHOT.md
+- Add inferred ERRORS.md entries (if any)
+- Make housekeeping commit
+- Apply session name — only if user says "use that" or equivalent
+
+All steps execute automatically. The session name is the only action requiring explicit user input.
+
+---
+
 ## Feature doc freshness step
 
 After updating PROGRESS.md (step 2), check whether the merged PR touched any files

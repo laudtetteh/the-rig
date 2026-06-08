@@ -97,20 +97,67 @@ Run this:
 - Before switching to a different task or project
 - Any time you want to ensure a future session can pick up exactly where you left off
 
+---
+
+## Wrap report step
+
+**Run this after the git state check and any uncommitted-changes gate, before writing anything.**
+
+### Collection phase
+
+Gather all findings silently — no output yet:
+
+1. **PROGRESS.md entry count** — note if trim is needed (count > 20) and how many would be archived
+2. **Session-end markers** — count stale markers (all but the most recent)
+3. **"This session" summary** — from conversation context: PRs merged or opened, tasks completed, issues resolved, significant changes made. Conversation context is the primary signal; PROGRESS.md markers are cross-reference only.
+4. **ERRORS.md additions** — infer from session context whether any unexpected behaviors, footguns, or non-obvious pitfalls should be added (see ERRORS.md logging step below)
+5. **Feature doc overlaps** — files changed this session vs. documented feature entry points (see Feature doc freshness step below)
+6. **Active tasks** — read `.rig/tasks/active/`
+7. **Session name** — derive suggestion (see Session naming step below); check for existing name in CONTEXT_SNAPSHOT.md
+
+### Report
+
+Print a single structured report before executing anything:
+
+```
+## Wrap report — [branch] — [date]
+
+**This session:**
+- PR #N merged: type(scope): short description
+- [other work items]
+(omit this section if nothing meaningful shipped this session)
+
+**PROGRESS.md:** [N entries → trimming X to archive (topics: CI setup, stealth mode, ...) | N entries, no trim needed]
+**Session-end markers:** [pruned N stale markers | none to prune]
+**ERRORS.md:** [N new entries: short-title-1, short-title-2 | no new entries]
+**Feature docs:** [⚠ overlap detected — run /refresh-feature-doc X | no overlaps]
+**Active tasks:** [task-slug | none]
+
+**Session name:** [suggested: "type desc #N | type desc #N" | already set — appending: "..." | nothing meaningful shipped, skipped]
+```
+
+### Execution
+
+After printing the report, **execute all automatic actions without further prompts**:
+
+- Trim PROGRESS.md if count > 20
+- Prune stale session-end markers
+- Add inferred ERRORS.md entries (if any)
+- Trim ERRORS.md if count > 30
+- Write CONTEXT_SNAPSHOT.md
+- Touch session-name sentinel and update snapshot name field — only if user says "use that", "yes", or equivalent in response to the suggested name
+
+The session name is the only action requiring explicit user input. Everything else executes immediately after the report is printed.
+
+---
+
 ## Trim step — PROGRESS.md
 
 After updating `.rig/memory/PROGRESS.md`, count the number of `## ` entry headers in the file.
 
 **If the count is 20 or fewer:** nothing to do.
 
-**If the count exceeds 20:** tell the user:
-
-> "`.rig/memory/PROGRESS.md` has [N] entries. I'll move the oldest [N-20] to
-> `.rig/memory/PROGRESS_archive.md` to keep session startup lean. The archive is
-> gitignored — history is preserved locally but won't be loaded at session start.
-> Trim now?"
-
-If the user confirms:
+**If the count exceeds 20:** note in the Wrap report, then execute automatically after the report is printed:
 1. Identify the oldest entries (bottom of the file, since entries are newest-first)
 2. Prepend them to `.rig/memory/PROGRESS_archive.md` (create if absent)
 3. Remove them from `.rig/memory/PROGRESS.md`, leaving the 20 most recent entries
@@ -119,9 +166,8 @@ If the user confirms:
    <!-- archived YYYY-MM-DD: [N] entries moved to PROGRESS_archive.md. Topics: [3–6 word comma-separated summary of what was archived, e.g. "CI setup, manifest tracking, stealth mode, command rename"] -->
    ```
    This lets future sessions know what history exists in the archive without loading it.
-5. Confirm: "`.rig/memory/PROGRESS.md` trimmed to 20 entries. Archive: `.rig/memory/PROGRESS_archive.md`"
 
-Never trim without confirmation. Never delete entries — only move them.
+Never delete entries — only move them.
 
 ---
 
@@ -200,10 +246,9 @@ If there is nothing to log, skip silently — do not mention this step.
 
 ## ERRORS.md logging step
 
-Ask: "Did anything unexpected, buggy, or footgun-worthy happen this session that isn't
-already documented?"
+Based on this session's context — tool output, errors observed, unexpected behaviors, non-obvious footguns encountered — **infer** whether anything happened that is not already documented in ERRORS.md. Do not ask the user; derive from what was observed during the session.
 
-If yes, **before creating a new entry**:
+If there are entries to add, **before creating any new entry**:
 
 1. Search the active `.rig/memory/ERRORS.md` for a similar entry (keyword match is enough).
 2. If `ERRORS_archive.md` exists, do a quick search there too:
@@ -227,14 +272,7 @@ After checking `.rig/memory/ERRORS.md`, count the number of `## ` entry headers 
 
 **If the count is 30 or fewer:** nothing to do.
 
-**If the count exceeds 30:** tell the user:
-
-> "`.rig/memory/ERRORS.md` has [N] entries. I'll move the oldest [N-30] to
-> `.rig/memory/ERRORS_archive.md` to keep session startup lean. The archive is
-> gitignored — pitfall history is preserved locally but won't load at session start.
-> Trim now?"
-
-If the user confirms:
+**If the count exceeds 30:** note in the Wrap report, then execute automatically after the report is printed:
 1. Identify the oldest entries (bottom of the file, since entries are newest-first)
 2. Prepend them to `.rig/memory/ERRORS_archive.md` (create if absent)
 3. Remove them from `.rig/memory/ERRORS.md`, leaving the 30 most recent entries
@@ -244,9 +282,8 @@ If the user confirms:
    ```
    This lets the agent grep for a category keyword without loading the archive, and
    signals to the ERRORS.md logging step that the archive should be checked.
-5. Confirm: "`.rig/memory/ERRORS.md` trimmed to 30 entries. Archive: `.rig/memory/ERRORS_archive.md`"
 
-Never trim without confirmation. Never delete entries — only move them.
+Never delete entries — only move them.
 
 ---
 

@@ -73,3 +73,42 @@ _fail_with_list() {
   done
   [ "${#failures[@]}" -eq 0 ] || _fail_with_list "H2 missing space after ##" "${failures[@]}"
 }
+
+# ── wrap / post-merge behavior spec ───────────────────────────────────────────
+
+@test "wrap.md: contains Wrap report step section" {
+  grep -q "## Wrap report step" "$COMMAND_DIR/wrap.md"
+}
+
+@test "wrap.md: Wrap report step defines collection phase and report format" {
+  grep -q "Collection phase" "$COMMAND_DIR/wrap.md"
+  grep -q "This session" "$COMMAND_DIR/wrap.md"
+  grep -q "Wrap report —" "$COMMAND_DIR/wrap.md"
+}
+
+@test "wrap.md: PROGRESS.md trim executes automatically — no confirmation gate" {
+  # Must NOT contain the old 'Trim now?' prompt
+  ! grep -q "Trim now?" "$COMMAND_DIR/wrap.md"
+}
+
+@test "wrap.md: ERRORS.md logging infers from context — no 'ask' prompt" {
+  # Must NOT ask the user whether anything unexpected happened
+  ! grep -q "Did anything unexpected" "$COMMAND_DIR/wrap.md"
+}
+
+@test "wrap.md: trim steps reference Wrap report — not standalone confirmations" {
+  grep -q "note in the Wrap report" "$COMMAND_DIR/wrap.md"
+}
+
+@test "post-merge.md: contains Post-merge report step section" {
+  grep -q "## Post-merge report step" "$COMMAND_DIR/post-merge.md"
+}
+
+@test "post-merge.md: Post-merge report step defines collection and report format" {
+  grep -q "Collection phase" "$COMMAND_DIR/post-merge.md"
+  grep -q "Post-merge report —" "$COMMAND_DIR/post-merge.md"
+}
+
+@test "post-merge.md: executes POST_MERGE_WORKFLOW automatically after report" {
+  grep -q "execute POST_MERGE_WORKFLOW steps" "$COMMAND_DIR/post-merge.md"
+}
