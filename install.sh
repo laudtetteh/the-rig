@@ -1360,6 +1360,20 @@ PYEOF
       sed_inplace "s|\`.rig/tasks/|\`${EXTERNAL_RIG_DIR}/tasks/|g" "$TARGET_CLAUDE"
       success "Updated CLAUDE.md to reference external .rig/ path"
     fi
+
+    # Stale in-repo .rig/ cleanup: if the project has an old in-repo .rig/
+    # (e.g. migrating from repo/local to stealth/external), offer to remove it.
+    if [[ -d "$TARGET/.rig" ]]; then
+      echo ""
+      warn "In-repo .rig/ found at $TARGET/.rig/ — superseded by the external install at $EXTERNAL_RIG_DIR."
+      if confirm "Remove the stale in-repo .rig/ now?" "y"; then
+        rm -rf "$TARGET/.rig"
+        success "Removed stale in-repo .rig/"
+      else
+        warn "Left in place. Remove it manually to clean git status:"
+        warn "  rm -rf \"$TARGET/.rig\""
+      fi
+    fi
   fi
 
   # ── LOCAL-ONLY: add .rig/ to .git/info/exclude ───────────────────────────
@@ -1483,6 +1497,24 @@ PYEOF
   if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
     echo ""
     info "Originals backed up to: $BACKUP_DIR"
+  fi
+
+  # ── HUSKY HOOK CHANGE NOTICE (non-stealth only) ────────────────────────────
+  # In stealth mode hooks land in .git/hooks/ (not tracked by git). In repo/local
+  # mode, .husky/ files are in the working tree — surface any modifications so the
+  # user knows to stage and commit them. The next session would otherwise flag the
+  # hooks as stale without any indication they need committing.
+  if [[ "$RIG_TRACKING" != "stealth" ]]; then
+    _husky_changed=$(git -C "$TARGET" status --porcelain -- ".husky/" 2>/dev/null \
+      | grep -v "^??" || true)
+    if [[ -n "$_husky_changed" ]]; then
+      echo ""
+      info "Hook files modified — stage and commit to apply them:"
+      while IFS= read -r _line; do
+        info "  $_line"
+      done <<< "$_husky_changed"
+      info "  git add .husky/ && git commit -m 'chore(hooks): update Rig git hooks'"
+    fi
   fi
 
   echo ""

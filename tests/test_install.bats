@@ -1168,6 +1168,28 @@ _is_rig_protected() {
   grep -qF ".rig/" "$TEST_PROJECT/.git/info/exclude"
 }
 
+@test "stealth migration: warns about stale in-repo .rig/ and auto-removes in non-interactive mode" {
+  # Start with a repo-tracked install so .rig/ exists in the project directory.
+  run_installer --strategy skip --tracking repo
+  [ "$status" -eq 0 ]
+  [ -d "$TEST_PROJECT/.rig" ]
+
+  # Re-install in stealth mode. confirm() is non-interactive (non-TTY in bats),
+  # so it uses the default "y" and auto-removes .rig/ without reading stdin.
+  local rig_ext="$TEMP_DIR/rig-stealth-migration"
+  run bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking stealth \
+    --rig-dir "$rig_ext" \
+    --strategy merge
+  [ "$status" -eq 0 ]
+  # Warning must mention the stale .rig/
+  [[ "$output" == *"In-repo .rig/ found"* ]] || [[ "$output" == *"superseded"* ]]
+  # Non-interactive default is "y" — .rig/ is auto-removed
+  [ ! -d "$TEST_PROJECT/.rig" ]
+}
+
 @test "upgrade auto-detects repo mode when .rig/ is git-committed" {
   # Simulate a project previously installed in repo mode: .rig/ files committed.
   run_installer --strategy skip --tracking repo
