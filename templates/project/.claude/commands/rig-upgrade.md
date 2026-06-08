@@ -686,6 +686,35 @@ fi
 If this project has a bats test suite (`tests/*.bats`), remind the user:
 > "Run `bats tests/` to verify the installer is still working correctly."
 
+### 5a — Commit strategy recommendation
+
+Count the total modified files:
+
+```bash
+TOTAL_CHANGED=$((${#UPGRADED[@]} + ${#CUSTOMIZED_ACCEPTED[@]} + ${#FIXED[@]}))
+```
+
+If `$TOTAL_CHANGED` > 3:
+
+> "**Commit strategy:** `$TOTAL_CHANGED` files were modified — use a branch and PR,
+> even if `housekeeping: direct-push` is set:
+>
+> ```bash
+> git checkout -b chore/rig-upgrade-$EXPECTED_VERSION
+> git add -f .claude/ .husky/ .rig/processes/ .rig/rules/ .rig/VERSION
+> git commit -m "chore(rig): upgrade to The Rig $EXPECTED_VERSION [#N]"
+> gh pr create --title "chore(rig): upgrade to $EXPECTED_VERSION" ...
+> ```
+>
+> `housekeeping: direct-push` applies to memory commits (PROGRESS.md, task file moves)
+> — not to upgrades that modify hooks, commands, and process files."
+
+If `$TOTAL_CHANGED` <= 3:
+
+> "**Commit strategy:** Only `$TOTAL_CHANGED` file(s) changed — a direct
+> `chore(rig): upgrade to $EXPECTED_VERSION [#N]` commit to `$BASE_BRANCH`
+> is acceptable if `housekeeping: direct-push` is set."
+
 Then say:
 > "Upgrade complete. What's next?"
 

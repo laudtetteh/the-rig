@@ -99,6 +99,11 @@ housekeeping: direct-push
 
 Change this value to match your project's branching convention.
 
+> **Upgrade commits are not covered by this setting.** When `/rig-upgrade` modifies
+> more than 3 files (hooks, commands, process files), use a `chore/rig-upgrade-vX.Y.Z`
+> branch and PR regardless of this value. `housekeeping: direct-push` applies to
+> memory and post-merge commits only — not to Rig upgrades.
+
 ---
 
 ## Project settings

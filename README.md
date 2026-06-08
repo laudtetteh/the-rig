@@ -179,6 +179,21 @@ mode on its own — provide `--strategy` and `--tracking` to skip all prompts.
 > the stale source and offers to pull and re-run automatically — just choose option 1
 > at the prompt. The installer passes all your flags through to the re-run.
 
+**After the installer runs:** check how many files changed before committing.
+
+```bash
+git diff --stat
+```
+
+- **4+ files changed** (hooks, commands, process files): use a branch + PR —
+  `git checkout -b chore/rig-upgrade-vX.Y.Z` — even if `housekeeping: direct-push` is set.
+  Rig upgrades that rewrite hook scripts warrant review.
+- **1–3 files changed** (VERSION, settings.json only): a direct `chore(rig):` commit is fine
+  if `housekeeping: direct-push` is set.
+
+> `housekeeping: direct-push` applies to memory commits (PROGRESS.md, task file moves) — not
+> to upgrades that modify hooks and commands.
+
 ---
 
 ### Setting up on a new machine
