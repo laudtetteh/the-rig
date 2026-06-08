@@ -145,6 +145,19 @@ cd ~/code/my-project
 # state while always preserving CLAUDE.md, rules, and memory files.
 ```
 
+**Non-interactive / scripted form** (skips all menus — use this from automation or Claude Code):
+
+```bash
+~/tools/the-rig/install.sh \
+  --project-only \
+  --target ~/code/my-project \
+  --tracking stealth \
+  --strategy upgrade
+```
+
+`--project-only` is a scope flag (skip the global layer). It does not imply non-interactive
+mode on its own — provide `--strategy` and `--tracking` to skip all prompts.
+
 ---
 
 ### Setting up on a new machine

@@ -408,6 +408,26 @@ print(sum(len(v) for v in s.get('hooks', {}).values()))
   [ "$status" -ne 0 ]
 }
 
+@test "non-interactive: --project-only with empty stdin does not exit 1 on intent menu read" {
+  # Simulates Claude Code / CI calling install.sh --project-only without --strategy.
+  # Without the || true fix, read exits 1 on EOF and set -euo pipefail kills the script.
+  run bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" <<< ""
+  [ "$status" -eq 0 ]
+}
+
+@test "non-interactive: --project-only --strategy --tracking installs without any prompt" {
+  # Full non-interactive form — all menus bypassed via flags.
+  run bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking stealth \
+    --strategy merge <<< ""
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_PROJECT/.claude/settings.json" ]
+}
+
 # ── bash -n syntax checks ─────────────────────────────────────────────────────
 # Verify every shell script in the repo has valid bash syntax.
 # These catch trivial parse errors before a user ever runs an install.
