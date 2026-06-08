@@ -337,12 +337,34 @@ EXISTING_PR=$(gh pr list --head "$CURRENT_BRANCH" --json number,title,url --jq '
 
 **If a PR already exists:**
 
+Before presenting options, compare the branch commits against the existing PR description
+to surface what may be missing:
+
+```bash
+PR_NUMBER=$(echo "$EXISTING_PR" | python3 -c "import json,sys; print(json.load(sys.stdin)['number'])" 2>/dev/null || echo "")
+PR_BODY=$(gh pr view "$PR_NUMBER" --json body -q .body 2>/dev/null || echo "")
+BASE=$(grep "^base-branch:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+BASE="${BASE:-main}"
+COMMITS=$(git log "origin/${BASE}"..HEAD --format="%s" 2>/dev/null)
+```
+
+For each commit subject (skip housekeeping types: `chore(memory)`, `chore(post-merge)`,
+`chore(release)`, `chore(rig)`), check case-insensitively whether it appears in the PR body.
+Collect any that don't match.
+
+Then display:
+
 > "PR #[N] already exists for this branch: [title]
 > [URL]
 >
+> [If stale commits found:]
+> [N] commit(s) not reflected in the description:
+>   - type(scope): commit subject
+>   - ...
+>
 > Options:
-> - **[u] Update** — revise title, body, labels, and linked issues to reflect the new work
-> - **[k] Keep as-is** — the existing PR is accurate, no changes needed"
+> - **[u] Update** — revise title, body, and labels to reflect all work on this branch
+> - **[k] Keep as-is** — the existing PR description is accurate"
 
 If user chooses **[u]**:
 1. Show the current PR title and body (run `gh pr view [N] --json title,body`)
