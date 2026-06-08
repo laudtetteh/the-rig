@@ -172,12 +172,14 @@ Why The Rig is built the way it is. Each entry covers what was decided, what was
 
 ---
 
-## 15. No pre-compaction hook — /wrap is the sole compaction safeguard
+## 15. PreCompact/PostCompact hooks for compact checkpoint — implemented in Sprint 4
 
-**Decided:** Rely on the agent noticing the "8% until auto-compact" CLI status bar warning and running `/wrap` proactively, as instructed in `CLAUDE.md`.
+**Decided:** Use the `PreCompact` and `PostCompact` hook events (shipped in Claude Code) to write and re-inject a compact checkpoint automatically. `pre-compact.sh` writes `.compact-checkpoint-${PPID}.md` before compaction; `post-compact.sh` re-injects it as `additionalContext` after.
 
-**Rejected:** A `PreCompact` hook event that would trigger `/wrap` automatically before Claude Code compacts the conversation.
+**Original decision (superseded):** This entry originally recorded that no pre-compaction hook existed and `/wrap` was the sole compaction safeguard. That was accurate at the time of writing (early 2026). Claude Code subsequently added `PreCompact` and `PostCompact` hook events, making automatic checkpoint handling possible.
 
-**Rationale:** Investigated whether Claude Code exposes a pre-compaction hook event — it does not (as of 2026). The "8% until auto-compact" indicator in the CLI status bar is a UI element only; there is no corresponding hook in `~/.claude/settings.json` or the hooks system. The closest available mechanism is the `Stop` event (`stop.sh`), which fires at session end — too late for compaction recovery, since compaction happens mid-session. The `CLAUDE.md` rule "when you see a compaction warning, run `/wrap` immediately before the next tool call" is the only viable mechanism.
+**Rejected:** Timestamp-scoped checkpoints (`date +%Y%m%d-%H%M%S`) — less reliable if two compactions land within the same millisecond; leaks files on crash. Canonical shared `.compact-checkpoint.md` — second write clobbers first in concurrent sessions (the original gap this feature was designed to fill).
 
-**Tradeoff accepted:** Depends on agent attention and available context. A session that reaches near-compaction may not have enough remaining context to run `/wrap` effectively. This is a known capability gap in the Claude Code hooks system, not a solvable problem within The Rig. If Claude Code adds a `PreCompact` hook in a future release, this decision should be revisited.
+**Rationale:** `$PPID` (parent PID — the Claude Code process that spawned the hook) is stable across all hook invocations within a session. `pre-compact.sh` and `post-compact.sh` share the same PPID, so they can reliably find each other's files. `session-start.sh` (source=compact) falls back to `ls -t .compact-checkpoint-*.md | head -1` when no PPID-scoped file exists (new session after compaction has a different PPID).
+
+**Consequences:** Compact checkpoints are now PPID-scoped and isolated per session. Concurrent sessions compacting simultaneously no longer clobber each other's checkpoint. `session-end.sh` deletes the PPID-scoped checkpoint on close. The `/wrap` proactive-run rule in `CLAUDE.md` is still valid as a belt-and-suspenders safeguard.
