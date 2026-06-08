@@ -175,6 +175,10 @@ cd ~/code/my-project
 `--project-only` is a scope flag (skip the global layer). It does not imply non-interactive
 mode on its own — provide `--strategy` and `--tracking` to skip all prompts.
 
+> **Forgot to pull first?** If you run the installer before pulling, it detects
+> the stale source and offers to pull and re-run automatically — just choose option 1
+> at the prompt. The installer passes all your flags through to the re-run.
+
 ---
 
 ### Setting up on a new machine

@@ -153,9 +153,36 @@ if git -C "$_DRIFT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     _BEHIND=$(git -C "$_DRIFT_DIR" rev-list "HEAD..${_TRACKING}" --count 2>/dev/null || echo 0)
     if [[ "$_BEHIND" -gt 0 ]]; then
       warn "The installer is ${_BEHIND} commit(s) behind ${_TRACKING}."
-      warn "Run: git -C \"$_DRIFT_DIR\" pull   to get the latest version first."
-      warn "Proceeding with the current version..."
+      warn "Running from a stale version may install outdated hooks and commands."
       echo ""
+      if [[ ! -t 0 ]]; then
+        # Non-interactive (CI / piped stdin): warn and continue, don't block.
+        warn "Run: git -C \"$_DRIFT_DIR\" pull   to get the latest version first."
+        warn "Proceeding with the current version..."
+        echo ""
+      else
+        echo "  Options:"
+        echo "    1) Update now and re-run (recommended)"
+        echo "    2) Continue with current version"
+        echo "    3) Exit"
+        echo ""
+        read -r -p "  Choice [1/2/3]: " _STALE_CHOICE || true
+        case "${_STALE_CHOICE:-}" in
+          1)
+            info "Pulling latest..."
+            git -C "$_DRIFT_DIR" pull
+            exec "$SCRIPT_DIR/install.sh" "$@"
+            ;;
+          2)
+            warn "Proceeding with stale installer. Some installed files may be outdated."
+            echo ""
+            ;;
+          *)
+            echo "Exiting."
+            exit 0
+            ;;
+        esac
+      fi
     fi
   fi
 fi

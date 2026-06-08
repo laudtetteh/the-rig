@@ -1927,6 +1927,35 @@ _sha256() {
   [[ "$output" != *"behind"* ]]
 }
 
+@test "installer drift check: non-interactive mode warns and continues without blocking" {
+  # stdin is not a TTY in bats — this verifies the non-interactive path does not
+  # hang waiting for user input and exits 0 (not 3/exit-on-default).
+  local remote_repo="$TEMP_DIR/rig-remote-ni"
+  local local_repo="$TEMP_DIR/rig-local-ni"
+
+  git init -q "$remote_repo"
+  git -C "$remote_repo" config user.email "test@test.com"
+  git -C "$remote_repo" config user.name "Test"
+  touch "$remote_repo/placeholder"
+  git -C "$remote_repo" add placeholder
+  git -C "$remote_repo" commit -q -m "initial commit"
+
+  git clone -q "$remote_repo" "$local_repo"
+  git -C "$local_repo" config user.email "test@test.com"
+  git -C "$local_repo" config user.name "Test"
+
+  touch "$remote_repo/newfile"
+  git -C "$remote_repo" add newfile
+  git -C "$remote_repo" commit -q -m "new commit on remote"
+
+  run bash -c "_RIG_DRIFT_DIR='$local_repo' bash '$INSTALLER' --project-only \
+    --target '$TEST_PROJECT' --project-name 'TestProject' --strategy skip"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"behind"* ]]
+  # Installer must have continued past the warning — pre-tool.sh is a reliable install marker
+  [ -f "$TEST_PROJECT/.claude/hooks/pre-tool.sh" ]
+}
+
 # ── Command behavior: /status ─────────────────────────────────────────────────
 # /status reads RIG_DIR, counts backlog tasks, and checks pending flag files.
 # We test the extractable shell logic in isolation.
