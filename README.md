@@ -194,7 +194,9 @@ files). The hooks also need their executable bits set. Step 5 restores all of th
 > `docs/customizing.md` → "Keeping .rig/ invisible to teammates" for the full
 > external directory setup.
 
-See `docs/troubleshooting.md` for common issues after a re-clone.
+Run `/rig-status` in Claude Code any time to verify hooks, memory files,
+settings.json wiring, and pending flags in one pass. See
+`docs/troubleshooting.md` for common issues after a re-clone.
 
 ---
 

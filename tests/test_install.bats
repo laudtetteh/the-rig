@@ -143,6 +143,13 @@ is_rig_owned_stub() {
   [ -f "$TEST_PROJECT/.rig/memory/RIG_GAPS.md" ]
 }
 
+@test "skip strategy: installs rig-status.md command" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_PROJECT/.claude/commands/rig-status.md" ]
+  grep -q "^# Command: /rig-status" "$TEST_PROJECT/.claude/commands/rig-status.md"
+}
+
 # ── Overwrite strategy ────────────────────────────────────────────────────────
 
 @test "overwrite strategy: creates files on fresh install" {

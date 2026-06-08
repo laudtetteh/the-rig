@@ -4,6 +4,22 @@ Common problems and how to fix them.
 
 ---
 
+## 0. First: run /rig-status
+
+Before digging into a specific problem, run `/rig-status`. It checks all
+hook files, memory files, settings.json wiring, and pending flags in one
+pass — and prints a ✓/✗ report with fix hints for anything broken.
+
+```
+/rig-status
+```
+
+If the output is clean (0 issues), the problem is likely in how the agent
+is interpreting instructions, not in the installation. Proceed to the
+sections below for specific symptoms.
+
+---
+
 ## 1. Hooks aren't firing
 
 **Symptom:** Claude Code makes writes or runs `git commit` without going through the
