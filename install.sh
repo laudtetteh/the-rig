@@ -516,6 +516,15 @@ for event, incoming_hooks in incoming.get("hooks", {}).items():
                 existing_commands.add(cmd)  # rig-debug-ok
                 break  # each entry is a unit; add it once
 
+# Merge permissions.allow (dedup by pattern string)
+incoming_allow = incoming.get("permissions", {}).get("allow", [])
+if incoming_allow:
+    existing_allow = existing.get("permissions", {}).get("allow", [])
+    existing_allow_set = set(existing_allow)
+    new_patterns = [p for p in incoming_allow if p not in existing_allow_set]
+    if new_patterns:
+        existing.setdefault("permissions", {}).setdefault("allow", []).extend(new_patterns)
+
 with open(output_path, "w") as f:
     json.dump(existing, f, indent=2)
     f.write("\n")
