@@ -158,6 +158,37 @@ git diff --stat                          # review all changes before committing
 
 ---
 
+## Step 7 — Commit the upgrade
+
+After verifying the installed files, decide how to commit them.
+
+```bash
+git diff --stat   # count the modified files
+```
+
+| Files changed | Strategy |
+|---|---|
+| 1–3 files | Direct `chore(rig):` commit to `[BASE_BRANCH]` acceptable if `housekeeping: direct-push` |
+| 4+ files | **Branch + PR** — regardless of `housekeeping:` setting |
+
+For any upgrade that modifies 4 or more files (hooks, commands, process files, VERSION):
+
+```bash
+# Replace X.Y.Z with the new version
+git checkout -b chore/rig-upgrade-vX.Y.Z
+git add -f .claude/ .husky/ .rig/processes/ .rig/rules/ .rig/VERSION
+git commit -m "chore(rig): upgrade to The Rig vX.Y.Z [#N]"
+gh pr create --title "chore(rig): upgrade to vX.Y.Z" \
+  --body "Upgrades The Rig from vOLD to vNEW. See CHANGELOG for details."
+```
+
+> **Why branch + PR for upgrades?** `housekeeping: direct-push` governs memory commits
+> (`PROGRESS.md`, task file moves, `chore(post-merge)`) — not upgrades that rewrite hook
+> scripts, commands, and process files. Those changes affect every session going forward and
+> warrant review, even on solo projects.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
