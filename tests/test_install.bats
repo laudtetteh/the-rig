@@ -1906,11 +1906,17 @@ _status_backlog_count() {
 # We test the acquire/release cycle in isolation.
 
 _wrap_acquire_lock() {
-  # Mirrors the concurrent session guard in /wrap.
-  # Returns 0 (lock acquired + sentinel created) or 1 (already locked).
+  # Mirrors the concurrent session guard in /wrap and /post-merge.
+  # Returns 0 (lock acquired + sentinel created) or 1 (active lock present).
   local wrap_lock="$1"
   if [[ -f "$wrap_lock" ]]; then
-    return 1  # another session is wrapping, or prior run crashed
+    local lock_age
+    lock_age=$(( $(date +%s) - $(stat -c %Y "$wrap_lock" 2>/dev/null || stat -f %m "$wrap_lock" 2>/dev/null || echo 0) ))
+    if [[ "$lock_age" -gt 1800 ]]; then
+      rm -f "$wrap_lock"  # stale — auto-expire
+    else
+      return 1  # active lock, block
+    fi
   fi
   touch "$wrap_lock"
   return 0
@@ -1925,10 +1931,28 @@ _wrap_release_lock() {
 @test "wrap guard: lock acquisition blocked when sentinel already exists" {
   local rig_dir="$TEMP_DIR/rig"
   mkdir -p "$rig_dir/memory"
-  touch "$rig_dir/memory/.wrap-in-progress"
+  local lock="$rig_dir/memory/.wrap-in-progress"
+  touch "$lock"  # fresh mtime — under 1800s, must block
 
-  run _wrap_acquire_lock "$rig_dir/memory/.wrap-in-progress"
+  run _wrap_acquire_lock "$lock"
   [ "$status" -ne 0 ]
+}
+
+@test "wrap guard: stale lock (>1800s) is auto-removed and acquisition proceeds" {
+  local rig_dir="$TEMP_DIR/rig"
+  mkdir -p "$rig_dir/memory"
+  local lock="$rig_dir/memory/.wrap-in-progress"
+  touch "$lock"
+  # Set mtime to 2025-01-01 00:00 — guaranteed older than 30 minutes
+  touch -t 202501010000 "$lock"
+
+  run _wrap_acquire_lock "$lock"
+  [ "$status" -eq 0 ]
+  [ -f "$lock" ]  # new lock written
+  # Verify the new lock has a recent mtime (within 60s of now)
+  local new_age
+  new_age=$(( $(date +%s) - $(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null || echo 0) ))
+  [ "$new_age" -lt 60 ]
 }
 
 @test "wrap guard: lock acquired and sentinel created when none exists" {
