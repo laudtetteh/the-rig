@@ -336,7 +336,7 @@ else
   echo "                      (backs up originals to .rig-backup/)"
   echo "  5) Custom         — full control over layers, strategy, and components"
   echo ""
-  read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3/4/5] (default: 2): ")" intent_input
+  read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3/4/5] (default: 2): ")" intent_input || true
   intent_input="${intent_input:-2}"
 
   case "$intent_input" in
@@ -897,7 +897,7 @@ if [[ "$DO_PROJECT" == true ]]; then
   else
     DEFAULT_TARGET="$(pwd)"
     ask "Target project directory?"
-    read -r -p "    Path [${DEFAULT_TARGET}]: " TARGET_INPUT
+    read -r -p "    Path [${DEFAULT_TARGET}]: " TARGET_INPUT || true
     TARGET="${TARGET_INPUT:-$DEFAULT_TARGET}"
   fi
 
