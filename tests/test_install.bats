@@ -2493,3 +2493,60 @@ CLEOF
   [ "$status" -eq 0 ]
   [[ "$output" != *"Breaking changes since"* ]]
 }
+
+# ── permission-request.sh: RIG_DIR write auto-approval ───────────────────────
+
+_perm_invoke() {
+  # Run permission-request.sh with given tool_name and file_path.
+  # Uses _RIG_TEST_RIG_DIR to inject rig_dir without being overwritten by the hook.
+  local tool_name="$1" file_path="$2" rig_dir="$3"
+  local input
+  input=$(printf '{"tool_name":"%s","tool_input":{"file_path":"%s"}}' "$tool_name" "$file_path")
+  printf '%s' "$input" | \
+    _RIG_TEST_RIG_DIR="$rig_dir" \
+    bash "$REPO_ROOT/templates/project/.claude/hooks/permission-request.sh" 2>/dev/null
+}
+
+@test "permission-request: Edit to \$RIG_DIR is auto-approved" {
+  local rig_dir
+  rig_dir=$(mktemp -d)
+  mkdir -p "$rig_dir/memory"
+  local result
+  result=$(_perm_invoke "Edit" "$rig_dir/memory/PROGRESS.md" "$rig_dir")
+  [[ "$result" == *'"behavior": "allow"'* ]] || [[ "$result" == *'"behavior":"allow"'* ]]
+}
+
+@test "permission-request: Write to \$RIG_DIR is auto-approved" {
+  local rig_dir
+  rig_dir=$(mktemp -d)
+  mkdir -p "$rig_dir/memory"
+  local result
+  result=$(_perm_invoke "Write" "$rig_dir/memory/CONTEXT_SNAPSHOT.md" "$rig_dir")
+  [[ "$result" == *'"behavior": "allow"'* ]] || [[ "$result" == *'"behavior":"allow"'* ]]
+}
+
+@test "permission-request: Edit outside \$RIG_DIR is not auto-approved" {
+  local rig_dir
+  rig_dir=$(mktemp -d)
+  mkdir -p "$rig_dir/memory"
+  local result
+  result=$(_perm_invoke "Edit" "/some/other/project/src/main.py" "$rig_dir")
+  [[ -z "$result" ]]
+}
+
+@test "permission-request: .rig-strict-permissions sentinel disables RIG_DIR approval" {
+  local rig_dir
+  rig_dir=$(mktemp -d)
+  mkdir -p "$rig_dir/memory"
+  touch "$rig_dir/memory/.rig-strict-permissions"
+  local result
+  result=$(_perm_invoke "Edit" "$rig_dir/memory/PROGRESS.md" "$rig_dir")
+  [[ -z "$result" ]]
+}
+
+@test "fresh install: settings.json includes /tmp/ write patterns" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  grep -q '"Write(/tmp/\*.md)"' "$TEST_PROJECT/.claude/settings.json"
+  grep -q '"Write(/tmp/\*.txt)"' "$TEST_PROJECT/.claude/settings.json"
+}
