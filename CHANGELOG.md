@@ -11,6 +11,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.20.0] — 2026-06-09
+
+### Added
+- **Auto-approval of `Edit`/`Write` to `$RIG_DIR` in `permission-request.sh`** (`templates/project/.claude/hooks/permission-request.sh`): the hook now resolves `$RIG_DIR` at runtime (`.rigpath` for stealth mode, `$REPO/.rig` fallback) and auto-approves any `Edit`, `Write`, or `NotebookEdit` call targeting a path under it. Eliminates repeated permission prompts for writes to Rig's own memory, tasks, and docs. Opt-out: `touch $RIG_DIR/memory/.rig-strict-permissions`. Closes #312.
+- **`/tmp/` write patterns in baseline `settings.json`** (`templates/project/.claude/settings.json`): `Write(/tmp/*.md)` and `Write(/tmp/*.txt)` added to the default `permissions.allow` list so agents can use temp files without approval.
+
+---
+
 ## [1.19.0] — 2026-06-08
 
 ### Added
