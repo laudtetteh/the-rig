@@ -2,10 +2,10 @@
 # pre-compact.sh
 #
 # Runs before Claude Code compacts the context (PreCompact event).
-# Writes a minimal checkpoint to $RIG_DIR/memory/.compact-checkpoint.md
-# capturing current branch, last commit, active task, and last progress entry.
-# The checkpoint is read back by post-compact.sh (same session) and by
-# session-start.sh when source=compact (new session after compaction).
+# Writes a minimal checkpoint to $RIG_DIR/memory/.compact-checkpoint-{PPID}.md
+# capturing current branch, last commit, active task, session anchor, and
+# tentative name. The checkpoint is read back by post-compact.sh (same session)
+# and by session-start.sh when source=compact (new session after compaction).
 #
 # Also outputs a compactionSummary so the checkpoint survives in the
 # compacted summary itself.
@@ -46,11 +46,38 @@ if [[ -f "$PROGRESS_FILE" ]]; then
 fi
 
 SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
-SESSION_NAME="none"
+SESSION_ANCHOR="none"
+TENTATIVE_NAME="none"
 CONTEXT_HEADER=""
+
+# ── Read session identity from session file (UUID model) ──────────────────────
+SESSION_FILE="$RIG_DIR/memory/sessions/session-${PPID}.json"
+if [[ -f "$SESSION_FILE" ]]; then
+  # Single python3 call for both fields — halves subprocess cost and avoids
+  # a race where the file changes between two sequential reads.
+  _session_data=$(SESSION_F="$SESSION_FILE" python3 -c "
+import json, os, sys
+try:
+    d = json.load(open(os.environ['SESSION_F']))
+    sys.stdout.write((d.get('anchor') or 'none') + '\n')
+    sys.stdout.write((d.get('tentative_name') or 'none') + '\n')
+except Exception:
+    sys.stdout.write('none\nnone\n')
+" 2>/dev/null || printf 'none\nnone\n')
+  SESSION_ANCHOR=$(printf '%s' "$_session_data" | head -1)
+  TENTATIVE_NAME=$(printf '%s' "$_session_data" | tail -n +2 | head -1)
+  [[ -z "$SESSION_ANCHOR" ]] && SESSION_ANCHOR="none"
+  [[ -z "$TENTATIVE_NAME" ]] && TENTATIVE_NAME="none"
+elif [[ -f "$SNAPSHOT" ]]; then
+  # Backward-compat: session started before UUID system was installed.
+  # Try to read the legacy "Session name:" field written by old /wrap.
+  _legacy=$(grep "^\*\*Session name:\*\*" "$SNAPSHOT" 2>/dev/null \
+    | sed 's/\*\*Session name:\*\* *//' | head -1 || true)
+  [[ -n "$_legacy" ]] && TENTATIVE_NAME="$_legacy"
+fi
+# ─────────────────────────────────────────────────────────────────────────────
+
 if [[ -f "$SNAPSHOT" ]]; then
-  SESSION_NAME=$(grep -m1 "^\*\*Session name:\*\*" "$SNAPSHOT" 2>/dev/null \
-    | sed 's/\*\*Session name:\*\* *//' || echo "none")
   # Extract the header section (everything before the first --- divider) for
   # post-compaction orientation; agent can read project state without needing
   # the full snapshot file. Capped at 25 lines to guard against malformed
@@ -67,7 +94,8 @@ cat > "$CHECKPOINT" <<CPEOF
 **Last commit:** ${LAST_COMMIT}
 **Active task:** ${ACTIVE_TASK}
 **Last progress entry:** ${LAST_PROGRESS}
-**Session name:** ${SESSION_NAME}
+**Session anchor:** ${SESSION_ANCHOR}
+**Session tentative name:** ${TENTATIVE_NAME}
 
 ---
 
@@ -77,7 +105,7 @@ CPEOF
 # ── Output compactionSummary ───────────────────────────────────────────────────
 
 if command -v python3 >/dev/null 2>&1; then
-  SUMMARY="Branch: ${BRANCH} | Last commit: ${LAST_COMMIT} | Active task: ${ACTIVE_TASK} | Last progress: ${LAST_PROGRESS} | Session: ${SESSION_NAME}"
+  SUMMARY="Branch: ${BRANCH} | Last commit: ${LAST_COMMIT} | Active task: ${ACTIVE_TASK} | Last progress: ${LAST_PROGRESS} | Session anchor: ${SESSION_ANCHOR} | Tentative: ${TENTATIVE_NAME}"
   printf '%s' "$SUMMARY" | python3 -c "
 import json, sys
 summary = sys.stdin.read()

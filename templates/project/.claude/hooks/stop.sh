@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # stop.sh
 #
 # Runs after every Claude Code agent turn (Stop event).
@@ -58,17 +58,23 @@ if [[ -f "$SNAPSHOT" ]] && grep -q "^\*\*Last updated:\*\*" "$SNAPSHOT" 2>/dev/n
 fi
 
 # ── Append session-end marker to PROGRESS.md ─────────────────────────────────
-# A lightweight HTML comment that /wrap and /post-merge use as a boundary
-# when collecting entries for session naming. Safe to parse, invisible in
-# rendered Markdown.
+# Includes session UUID (sid:) so /wrap can attribute entries to the right
+# session even when multiple tabs are running concurrently.
 # Skip if PROGRESS.md doesn't exist yet.
 if [[ -f "$PROGRESS" ]]; then
+  SESSION_UUID=$(cat "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true)
   # Idempotent: don't append if the last non-blank line is already a marker
   LAST_MEANINGFUL=$(grep -v '^[[:space:]]*$' "$PROGRESS" | tail -1)
   if [[ "$LAST_MEANINGFUL" != "<!-- session-end"* ]]; then
-    printf "\n<!-- session-end %s -->\n" "$NOW_FULL" >> "$PROGRESS"
-    echo "[$(date +%H:%M:%S)] STOP: session-end marker appended ($NOW_FULL)" \
-      >> "$SESSION_LOG"
+    if [[ -n "$SESSION_UUID" ]]; then
+      printf "\n<!-- session-end %s sid:%s -->\n" "$NOW_FULL" "$SESSION_UUID" >> "$PROGRESS"
+      echo "[$(date +%H:%M:%S)] STOP: session-end marker appended ($NOW_FULL sid:$SESSION_UUID)" \
+        >> "$SESSION_LOG"
+    else
+      printf "\n<!-- session-end %s -->\n" "$NOW_FULL" >> "$PROGRESS"
+      echo "[$(date +%H:%M:%S)] STOP: session-end marker appended ($NOW_FULL, no UUID)" \
+        >> "$SESSION_LOG"
+    fi
   else
     echo "[$(date +%H:%M:%S)] STOP: session-end marker already present — skipped" \
       >> "$SESSION_LOG"

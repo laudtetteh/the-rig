@@ -7,11 +7,14 @@ suggestion. Can be run at any point in the session — not just at wrap time.
 
 ## What this does
 
-1. Determines the session boundary in `.rig/memory/PROGRESS.md`
-2. Checks `.rig/memory/CONTEXT_SNAPSHOT.md` for an existing session name
-3. Derives a name in the standard `type short-desc #N | ...` format
+1. Reads this session's UUID from `/tmp/.rig-session-${PPID}.uuid` and its session
+   file from `$RIG_DIR/memory/sessions/session-${PPID}.json`
+2. Reads any existing `tentative_name` from the session file
+3. Derives a name in the standard `type short-desc #N | ...` format using conversation
+   context as the primary signal and UUID-tagged PROGRESS entries as cross-reference
 4. Presents it as output — does **not** run anything automatically
-5. After you confirm or tweak it, updates `**Session name:**` in `CONTEXT_SNAPSHOT.md`
+5. After you confirm, writes the name to the session file (`tentative_name` if called
+   early, `final_name` if called at session end). Never writes to CONTEXT_SNAPSHOT.md.
 
 This is the same logic used by `/wrap` and `/post-merge`, but callable at any time
 without triggering a full wrap or post-merge cycle.
@@ -26,44 +29,54 @@ without triggering a full wrap or post-merge cycle.
 
 No arguments. Run it whenever you want to name or re-name the current session.
 
-> **RIG_DIR resolution (stealth mode):** Before reading `.rig/memory/PROGRESS.md` or
-> `.rig/memory/CONTEXT_SNAPSHOT.md`, resolve where `.rig/` actually lives. If `.rigpath`
-> exists at the project root, read it — it contains the absolute path to the external
-> `.rig/` directory. Substitute `$RIG_DIR` for `.rig/` in every step below.
+> **RIG_DIR resolution (stealth mode):** Before reading any `.rig/` path, resolve where
+> `.rig/` actually lives. If `.rigpath` exists at the project root, read it — it contains
+> the absolute path to the external `.rig/` directory. Substitute `$RIG_DIR` for `.rig/`
+> in every step below.
 
 ---
 
 ## Steps
 
+### 0 — Find this session's file
+
+```bash
+REPO=$(git rev-parse --show-toplevel 2>/dev/null)
+if [[ -f "$REPO/.rigpath" ]]; then RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath"); else RIG_DIR="$REPO/.rig"; fi
+SESSION_DIR="$RIG_DIR/memory/sessions"
+SESSION_FILE="$SESSION_DIR/session-${PPID}.json"
+
+SESSION_UUID=$(cat "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true)
+TENTATIVE_NAME=""
+if [[ -f "$SESSION_FILE" ]]; then
+  [[ -z "$SESSION_UUID" ]] && \
+    SESSION_UUID=$(python3 -c "import json; print(json.load(open('$SESSION_FILE')).get('anchor') or '')" 2>/dev/null || true)
+  TENTATIVE_NAME=$(python3 -c "import json; print(json.load(open('$SESSION_FILE')).get('tentative_name') or '')" 2>/dev/null || true)
+fi
+```
+
 ### 1 — Determine what happened this session
 
-**Your conversation context is the primary signal.** Before reading any files,
-enumerate directly what was done in this session: PRs merged or opened, tasks
-completed, issues created, commands run, significant files changed. You were
-here — this is the most accurate record of the session's work.
+**Your conversation context is the primary signal** — what was done, PRs opened or
+merged, tasks completed. If called early in the session to set a tentative name, use
+the stated intent as the basis.
 
-File signals are cross-reference only — use them to catch anything that may have
-compacted out of the context window, not to override what you already know:
-
-- **`<!-- session-end YYYY-MM-DD HH:MM -->` markers in PROGRESS.md** — entries
-  above the most recent marker are candidates to cross-check against your context.
-- **`**Last updated:**` datetime in CONTEXT_SNAPSHOT.md** — use as an approximate
-  session-start boundary when correlating PROGRESS.md entries.
+File signals are cross-reference only:
+- **UUID-tagged PROGRESS entries** — `grep "^## .*<!-- sid:${SESSION_UUID} -->"` to find entries from this session
+- **`tentative_name` in session file** — set pre-compaction; use as the base if context was lost to compaction
+- **`<!-- session-end -->` markers** — entries above the most recent marker as legacy fallback when no UUID
 
 **If conversation context and file signals conflict, trust the conversation.**
-Files may be stale, markers may be missing, or another tab may have written to
-the same files. Your direct knowledge of this session is authoritative.
 
-### 2 — Check for an existing session name
+### 2 — Check for an existing tentative name
 
-Read the `**Session name:**` field from `.rig/memory/CONTEXT_SNAPSHOT.md`.
+Read `tentative_name` from the session file (step 0 above).
 
-- **If blank / absent:** derive a fresh name from this session's entries.
-- **If already set:** suggest **appending** any new work rather than replacing:
-
-  > **Session already named:** `feat dashboard ui #49`
-  > **New work this session:** PR #51 (fix null user on profile fetch)
-  > **Updated suggestion:** `feat dashboard ui #49 | fix null user profile fetch #51`
+- **If blank / absent:** derive a fresh name from this session's work.
+- **If set as tentative** (`[tentative]` suffix): suggest upgrading it to a final
+  name if the session delivered what it described, or updating it if scope changed.
+- **If this command is called early** (before much work has happened): set a tentative
+  name explicitly — append `[tentative]` to mark it as subject to refinement at `/wrap`.
 
 ### 3 — Derive the name
 
@@ -111,8 +124,8 @@ sprint: N issues · feat/X fix/Y chore/Z · #A–#B
 
 Example: `sprint: 23 issues · feat/4 fix/15 chore/4 · #130–#152`
 
-If the session covered a named milestone or sprint (e.g. a GitHub milestone), use
-the milestone name as a prefix: `milestone: Sprint 3 · 23 issues · feat/4 fix/15 · #130–#152`
+If the session covered a named milestone or sprint, use the milestone name as a
+prefix: `milestone: Sprint 3 · 23 issues · feat/4 fix/15 · #130–#152`
 
 ### 4 — Present the suggestion
 
@@ -123,56 +136,69 @@ Output the name as plain text:
 
 Then invite the user to apply it:
 
-> To apply: run `/session-name` again with the name as argument, or say "use that name".
+> To apply: say "use that name" or "lgtm".
 
 Do **not** run anything automatically. Present it for the user to confirm, copy, or tweak.
 
 ### 5 — After confirmation
 
-When the user confirms the name (or runs `/session-name` with a name argument):
+When the user confirms the name:
 
-**5a — Check for a concurrent snapshot write before editing.**
+**5a — Determine if this is a tentative or final name.**
 
-Run this before calling `Edit` on CONTEXT_SNAPSHOT.md:
+- Called early in session (before most work is done) → write as `tentative_name`
+  with `[tentative]` suffix.
+- Called mid-session or at wrap time → write as `final_name`; clear `tentative_name`.
 
-```bash
-REPO=$(git rev-parse --show-toplevel)
-if [[ -f "$REPO/.rigpath" ]]; then RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath"); else RIG_DIR="$REPO/.rig"; fi
-SNAP_LOCK="$RIG_DIR/memory/.snapshot-write-in-progress"
-if [[ -f "$SNAP_LOCK" ]]; then
-  echo "⚠️ A snapshot write is in progress in another session. Wait for it to finish, then re-run /session-name. Or delete the lock manually: rm '$SNAP_LOCK'"
-  exit 1
-fi
-```
-
-If the lock exists, surface the warning and stop — do not proceed to the `Edit` call.
-
-**5b — Write the name.**
-
-Write the name into `.rig/memory/CONTEXT_SNAPSHOT.md`:
-
-- **If `**Session name:**` field already exists:** update it in-place.
-- **If absent:** insert it as the second line of the file (after `**Last updated:**`),
-  or append it to the header block before the first `---` divider.
-
-**5c — Record session ownership.**
-
-After the name is written, run:
+**5b — Write to session file.**
 
 ```bash
-touch "/tmp/.rig-session-name-set-${PPID}"
+IS_TENTATIVE=false  # set to true if called early
+CONFIRMED_NAME="<the confirmed name>"
+
+python3 - <<PYEOF
+import json
+
+session_file = "$SESSION_FILE"
+try:
+    with open(session_file) as f:
+        d = json.load(f)
+except FileNotFoundError:
+    d = {"anchor": "$SESSION_UUID", "pid": $PPID, "status": "active",
+         "tentative_name": None, "final_name": None}
+
+if "$IS_TENTATIVE" == "true":
+    d["tentative_name"] = "$CONFIRMED_NAME [tentative]"
+else:
+    d["final_name"] = "$CONFIRMED_NAME"
+    d["tentative_name"] = None   # final supersedes tentative
+
+with open(session_file, "w") as f:
+    json.dump(d, f, indent=2)
+PYEOF
 ```
 
-This sentinel tells `session-end.sh` that this session owns the name, preventing
-a concurrent sibling session from inheriting it when it writes its minimal checkpoint.
+**Do NOT write Session name to CONTEXT_SNAPSHOT.md.** CONTEXT_SNAPSHOT is
+project state only. Session names belong in session files.
+
+**5c — Log the name in PROGRESS.md if writing final.**
+
+If writing a final name, add a note at the top of PROGRESS.md:
+```
+## [date] — Session named: [final name] <!-- sid:[UUID] -->
+```
 
 ---
 
 ## Notes
 
-- If no meaningful work has been completed yet (no PROGRESS entries this session),
-  say so and skip the suggestion.
-- If CONTEXT_SNAPSHOT.md doesn't exist, note that `/wrap` should be run first to
-  create it — or offer to derive a name from PROGRESS.md alone.
+- If called early with no work done yet, still write a tentative name if the user
+  states intent — that anchor is more valuable than nothing.
+- If the session file does not exist (session predates this change), fall back to
+  deriving a name from PROGRESS.md session-end markers and legacy CONTEXT_SNAPSHOT
+  `Session name` field.
+- **Setting tentative names early** is encouraged — the tentative name survives
+  compaction and gives post-compaction agents a reliable anchor without needing to
+  reconstruct work from file signals alone.
 - **Why not `/rename`?** Claude Code has a built-in `/rename` command that renames
   the conversation. This command was renamed to `/session-name` to avoid the conflict.

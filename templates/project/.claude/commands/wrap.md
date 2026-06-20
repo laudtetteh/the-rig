@@ -113,7 +113,7 @@ Gather all findings silently — no output yet:
 4. **ERRORS.md additions** — infer from session context whether any unexpected behaviors, footguns, or non-obvious pitfalls should be added (see ERRORS.md logging step below)
 5. **Feature doc overlaps** — files changed this session vs. documented feature entry points (see Feature doc freshness step below)
 6. **Active tasks** — read `.rig/tasks/active/`
-7. **Session name** — derive suggestion (see Session naming step below); check for existing name in CONTEXT_SNAPSHOT.md
+7. **Session identity** — read session file at `$RIG_DIR/memory/sessions/session-${PPID}.json`; extract `anchor` UUID and `tentative_name`. If session file absent, fall back to session-end marker boundary.
 
 ### Report
 
@@ -133,7 +133,7 @@ Print a single structured report before executing anything:
 **Feature docs:** [⚠ overlap detected — run /refresh-feature-doc X | no overlaps]
 **Active tasks:** [task-slug | none]
 
-**Session name:** [suggested: "type desc #N | type desc #N" | already set — appending: "..." | nothing meaningful shipped, skipped]
+**Session:** [anchor: UUID | tentative: "..." | suggested final: "type desc #N | type desc #N" | nothing meaningful shipped, skipped]
 ```
 
 ### Execution
@@ -144,8 +144,8 @@ After printing the report, **execute all automatic actions without further promp
 - Prune stale session-end markers
 - Add inferred ERRORS.md entries (if any)
 - Trim ERRORS.md if count > 30
-- Write CONTEXT_SNAPSHOT.md
-- Touch session-name sentinel and update snapshot name field — only if user says "use that", "yes", or equivalent in response to the suggested name
+- Write CONTEXT_SNAPSHOT.md (project state only — no Session name field)
+- Write final session name to session file and move to `sessions/done/` — only if user confirms the suggested name
 
 The session name is the only action requiring explicit user input. Everything else executes immediately after the report is printed.
 
@@ -369,95 +369,140 @@ snapshot — overwrite the previous version.
 
 ## Session naming step
 
-After reporting active tasks, derive a session name from this session's work and
-output it as a suggestion. Do **not** apply it automatically — present it for
+After reporting active tasks, derive a final session name from this session's work
+and output it as a suggestion. Do **not** apply it automatically — present it for
 the user to confirm or tweak.
 
-### How to determine "this session's work"
+### Step 1 — Find this session's UUID and tentative name
 
-**Your conversation context is the primary signal.** Before reading any files,
-enumerate directly what was done in this session: PRs merged or opened, tasks
-completed, issues created, commands run, significant files changed. You were
-here — this is the most accurate record of what the session name should reflect.
+```bash
+REPO=$(git rev-parse --show-toplevel 2>/dev/null)
+if [[ -f "$REPO/.rigpath" ]]; then RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath"); else RIG_DIR="$REPO/.rig"; fi
+SESSION_DIR="$RIG_DIR/memory/sessions"
+SESSION_FILE="$SESSION_DIR/session-${PPID}.json"
 
-Do not use today's date as a boundary — it breaks for sessions that span midnight
-or are resumed days later.
+# Primary: /tmp sentinel written by session-start.sh
+SESSION_UUID=$(cat "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true)
+TENTATIVE_NAME=""
 
-Use file signals as cross-reference only — to catch work that may have compacted
-out of the context window, not to override what you already know:
+# Read session file for UUID (if /tmp sentinel missing) and tentative name
+if [[ -f "$SESSION_FILE" ]]; then
+  [[ -z "$SESSION_UUID" ]] && \
+    SESSION_UUID=$(python3 -c "import json; print(json.load(open('$SESSION_FILE')).get('anchor') or '')" 2>/dev/null || true)
+  TENTATIVE_NAME=$(python3 -c "import json; print(json.load(open('$SESSION_FILE')).get('tentative_name') or '')" 2>/dev/null || true)
+fi
 
-1. **`<!-- session-end -->` markers in PROGRESS.md** (cross-reference)
-   The `stop.sh` hook appends `<!-- session-end YYYY-MM-DD HH:MM -->` automatically.
-   Entries above the most recent marker are candidates to correlate with your context.
+# Fallback: scan sessions/ for most recently modified active session
+if [[ -z "$SESSION_UUID" ]] && [[ -d "$SESSION_DIR" ]]; then
+  FALLBACK_FILE=$(ls -t "$SESSION_DIR"/session-*.json 2>/dev/null \
+    | xargs grep -l '"status": "active"' 2>/dev/null | head -1 || true)
+  if [[ -n "$FALLBACK_FILE" ]]; then
+    SESSION_UUID=$(python3 -c "import json; print(json.load(open('$FALLBACK_FILE')).get('anchor') or '')" 2>/dev/null || true)
+    SESSION_FILE="$FALLBACK_FILE"
+  fi
+fi
+```
 
-2. **`Last updated:` datetime in the previous CONTEXT_SNAPSHOT** (boundary fallback)
-   If markers are absent or ambiguous, use the snapshot's `**Last updated:**` datetime
-   as an approximate session-start boundary when scanning PROGRESS.md entries.
+### Step 2 — Collect this session's work
 
-3. **PROGRESS.md ordering** (last resort for compacted context)
-   If context window is short and you cannot recall specifics, take entries at the
-   top of PROGRESS.md that plausibly match this session and stop at the prior boundary.
+**Primary signal: your conversation context.** Enumerate directly what was done
+this session — PRs merged or opened, tasks completed, issues resolved. This is
+always the most accurate signal. The tentative name (if set) is a pre-compaction
+anchor from earlier in this session — use it as a starting point if context was lost.
+
+**Every `## ` entry header you write to PROGRESS.md must include `<!-- sid:UUID -->`
+at the end of the line** (read UUID from `/tmp/.rig-session-${PPID}.uuid`). This is
+what enables UUID-keyed session attribution.
+
+**File signal — UUID-keyed PROGRESS entries:**
+```bash
+grep "^## .*<!-- sid:${SESSION_UUID} -->" "$RIG_DIR/memory/PROGRESS.md" 2>/dev/null || true
+```
+
+**Fallback — session-end marker boundary (legacy, no UUID):**
+Find the most recent `<!-- session-end -->` marker; entries above it belong to this session.
 
 **If conversation context and file signals conflict, trust the conversation.**
-Files may be stale, markers may be missing or duplicated across tabs. Your direct
-knowledge of this session is authoritative.
 
-### Check for an existing session name
+### Step 3 — Build the name
 
-Read the `**Session name:**` field from CONTEXT_SNAPSHOT.md (the previous
-snapshot, before this /wrap rewrites it).
+If a `tentative_name` exists: use it as the base. If the session delivered exactly
+what it described, confirm it (drop `[tentative]`). If scope changed, update it.
+If no tentative name: derive from scratch.
 
-- **If blank / absent:** suggest a fresh session name covering all this session's work.
-- **If already set:** the session was named in a prior /wrap or by the user directly.
-  Suggest **appending** new work to the existing name rather than replacing it:
-
-  > **Session already named:** `fix step accordion layout #184`
-  > **New work this wrap:** `feat custom-permissions #152`
-  > **Updated suggestion:** `fix step accordion layout #184 | feat custom-permissions #152`
-
-### Build the name
-
-Count one "unit" per merged PR, completed task, or significant fix. Use the
-**tiered format** from `/session-name` (same logic — see that command for full detail):
+Count one "unit" per merged PR, completed task, or significant fix. Use the tiered format:
 
 - **≤5 units:** `type short-desc #N | type short-desc #N | ...`
 - **6–15 units:** `type(area, area) | type(area) x3 | type x2`
 - **16+ units:** `sprint: N issues · feat/X fix/Y chore/Z · #A–#B`
 
-Keep under ~100 characters. Drop smallest groups if over.
+Keep under ~100 characters.
 
-### Examples
-
-```
-fix step accordion layout #184 | fix h3.steps remaining partials #186
-feat(auth, dashboard) | fix(billing x4, ui) | chore x3
-sprint: 23 issues · feat/4 fix/15 chore/4 · #130–#152
-```
-
-### Output
+### Step 4 — Present and confirm
 
 > **Suggested session name:**
-> `fix step accordion layout #184 | fix h3.steps remaining partials #186`
+> `fix(mobile): Expo Go runtime fixes + PR #360 merge [#359]`
 
-Then invite the user to apply it:
+> To apply: say "use that name", "ship it", or "lgtm".
 
-> To apply this name, run `/session-name` or say "use that name".
+### Step 5 — After confirmation: write to session file, move to done/
 
-After the user confirms, **update the `**Session name:**` field in
-`.rig/memory/CONTEXT_SNAPSHOT.md`** to match. This is how future /wrap calls
-detect an existing name and suggest appends instead of replacements.
-
-Then run:
+Write the final data atomically — write to a temp file, then rename to the
+destination in a single `os.rename` call. This prevents a crash between the
+write and the move from leaving a `status: complete` file stranded in `sessions/`
+(which the orphan scan would never surface, since it only looks for `status: active`).
 
 ```bash
-touch "/tmp/.rig-session-name-set-${PPID}"
+CONFIRMED_NAME="<the confirmed name>"
+DONE_DIR="$SESSION_DIR/done"
+mkdir -p "$DONE_DIR"
+DEST="$DONE_DIR/session-$(date +%Y%m%d)-${SESSION_UUID}.json"
+
+python3 - <<PYEOF
+import json, os
+with open("$SESSION_FILE") as f:
+    d = json.load(f)
+d["final_name"] = "$CONFIRMED_NAME"
+d["status"] = "complete"
+tmp = "$DEST" + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(d, f, indent=2)
+os.rename(tmp, "$DEST")
+PYEOF
+
+rm -f "$SESSION_FILE" 2>/dev/null || true
+rm -f "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true
 ```
 
-This sentinel tells `session-end.sh` that this session owns the name, preventing
-a concurrent sibling session from inheriting it when it writes its minimal checkpoint.
+**Do NOT write Session name to CONTEXT_SNAPSHOT.md.** CONTEXT_SNAPSHOT contains
+project state only (branch, PRs, roadmap, key facts). Session names live in session files.
 
-If nothing meaningful shipped this session (pure exploration, no PRs, no
-completions), skip this step silently.
+### Step 6 — Surface orphan sessions
+
+After completing this session, scan `$SESSION_DIR` for remaining `.json` files
+(not in `done/`) with `"status": "active"`:
+
+```bash
+for f in "$SESSION_DIR"/session-*.json; do
+  [[ -f "$f" ]] || continue
+  STATUS=$(python3 -c "import json; print(json.load(open('$f')).get('status',''))" 2>/dev/null)
+  STARTED=$(python3 -c "import json; print(json.load(open('$f')).get('started_at','?'))" 2>/dev/null)
+  NAME=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('tentative_name') or d.get('anchor','?'))" 2>/dev/null)
+  if [[ "$STATUS" == "active" ]]; then
+    echo "⚠ Orphan session (active, unwrapped): $NAME (started $STARTED, file: $(basename $f))"
+  elif [[ "$STATUS" == "complete" ]]; then
+    # complete but not moved to done/ — write step finished but rename was interrupted
+    echo "⚠ Orphan session (complete, not moved to done/): $NAME (file: $(basename $f))"
+    echo "   Move manually: mv '$f' '$DONE_DIR/'"
+  fi
+done
+```
+
+Surface any found to the user. They may be active in another tab — do not delete
+them without asking.
+
+If nothing meaningful shipped this session (pure exploration, no PRs, no completions),
+skip the naming step silently but still run the orphan scan.
 
 ---
 
@@ -472,16 +517,19 @@ rm -f "$RIG_DIR/memory/.wrap-needed" 2>/dev/null || true
 # Release the concurrent session lock
 rm -f "$RIG_DIR/memory/.snapshot-write-in-progress" 2>/dev/null || true
 
-# Clear any stale compact checkpoint — the full snapshot supersedes it
-rm -f "$RIG_DIR/memory/.compact-checkpoint.md" 2>/dev/null || true
+# Clear this session's compact checkpoint — the full snapshot supersedes it
+rm -f "$RIG_DIR/memory/.compact-checkpoint-${PPID}.md" 2>/dev/null || true
+
+# Clear /tmp UUID sentinel (session file already moved to done/ by naming step)
+rm -f "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true
 ```
 
-Log: "`.wrap-needed` cleared. Concurrent session lock released. Compact checkpoint cleared."
+Log: "`.wrap-needed` cleared. Concurrent session lock released. Compact checkpoint cleared. UUID sentinel cleared."
 
 `.wrap-needed` signals to `stop.sh` that `/wrap` has run and no flag should be
 written until the next commit creates new unexpanded stubs.
 `.snapshot-write-in-progress` signals to concurrent sessions that this snapshot write is complete.
-`.compact-checkpoint.md` is cleared so the next session reads the authoritative
+`.compact-checkpoint-{PPID}.md` is cleared so the next session reads the authoritative
 `CONTEXT_SNAPSHOT.md` rather than a stale post-compaction checkpoint.
 
 ---

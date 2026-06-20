@@ -51,3 +51,12 @@ ERRORS_archive.md
 # and deleted by session-end.sh on session close. Gitignored — ephemeral, never committed.
 .compact-checkpoint.md
 .compact-checkpoint-*.md
+
+# sessions/ holds per-session identity files (session-{PPID}.json) created by
+# session-start.sh. Runtime state only — never committed. done/ holds completed
+# session records moved there by /wrap or /post-merge.
+sessions/
+
+# tips/ holds one-time-shown sentinel files for the feature discovery tips system.
+# Per-machine state — gitignored so tips re-fire on a fresh clone.
+tips/

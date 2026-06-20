@@ -8,7 +8,8 @@
 # Source values and behaviour:
 #   logout / prompt_input_exit — user closed the session
 #       Write .wrap-needed if /wrap hasn't run and the session had meaningful
-#       commits. Write minimal checkpoint. Log session end.
+#       commits. Write minimal checkpoint. Mark session file ended-no-wrap.
+#       Clean /tmp UUID sentinel.
 #   clear — context was cleared; session will continue in a new context window
 #       Log "context cleared" to session log. Do NOT set .wrap-needed.
 #   resume — new session is starting; nothing to clean up here
@@ -65,7 +66,7 @@ write_minimal_checkpoint() {
       >> "$SESSION_LOG" 2>/dev/null || true
     return
   fi
-  local branch commit active_task session_name=""
+  local branch commit active_task session_anchor=""
   branch=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
   commit=$(git -C "$REPO" log -1 --format="%h %s" 2>/dev/null || echo "none")
   active_task=""
@@ -73,12 +74,8 @@ write_minimal_checkpoint() {
     active_task=$(ls "$RIG_DIR/tasks/active"/*.md 2>/dev/null \
       | head -1 | xargs basename 2>/dev/null || true)
   fi
-  # Preserve session name only if this session owns it — prevents inheriting a
-  # name written by a concurrent sibling that ran /session-name or /wrap.
-  if [[ -f "/tmp/.rig-session-name-set-${PPID}" ]] && [[ -f "$SNAPSHOT" ]]; then
-    session_name=$(grep -m1 "^\*\*Session name:\*\*" "$SNAPSHOT" 2>/dev/null \
-      | sed 's/\*\*Session name:\*\* *//' || true)
-  fi
+  # Read session anchor from /tmp sentinel (UUID model — no CONTEXT_SNAPSHOT Session name field)
+  session_anchor=$(cat "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true)
 
   {
     echo "# Context Snapshot — session-end checkpoint"
@@ -90,7 +87,7 @@ write_minimal_checkpoint() {
     echo "**Branch:** $branch"
     echo "**Last commit:** $commit"
     [[ -n "$active_task" ]] && echo "**Active task:** $active_task"
-    [[ -n "$session_name" ]] && echo "**Session name:** $session_name"
+    [[ -n "$session_anchor" ]] && echo "**Session anchor:** $session_anchor"
     echo ""
     echo "---"
     echo ""
@@ -133,7 +130,26 @@ case "$SOURCE" in
     fi
 
     rm -f "$RIG_DIR/memory/.compact-checkpoint-${PPID}.md" 2>/dev/null || true
-    rm -f "/tmp/.rig-session-name-set-${PPID}" 2>/dev/null || true
+    rm -f "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true
+
+    # Mark session file as ended-without-wrap so orphan detection in /wrap can
+    # distinguish "session exited without wrapping" from "still active in another tab"
+    SESSION_FILE="$RIG_DIR/memory/sessions/session-${PPID}.json"
+    if [[ -f "$SESSION_FILE" ]]; then
+      # Pass SESSION_FILE via env var to avoid SyntaxError if path contains a quote.
+      SESSION_F="$SESSION_FILE" python3 -c "
+import json, os
+try:
+    p = os.environ['SESSION_F']
+    with open(p) as f:
+        d = json.load(f)
+    d['status'] = 'ended-no-wrap'
+    with open(p, 'w') as f:
+        json.dump(d, f, indent=2)
+except Exception:
+    pass
+" 2>/dev/null || true
+    fi
 
     echo "[$(date +%H:%M:%S)] SESSION_END: source=${SOURCE} — session terminated" \
       >> "$SESSION_LOG" 2>/dev/null || true
