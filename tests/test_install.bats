@@ -1464,7 +1464,7 @@ _is_rig_protected() {
   grep -q "session-end checkpoint" "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
 }
 
-# ── TASK_252: session name ownership via /tmp sentinel ───────────────────────
+# ── UUID-based session anchor in write_minimal_checkpoint ────────────────────
 
 @test "session-end.sh: write_minimal_checkpoint omits session name when sentinel absent" {
   run_installer --strategy skip
@@ -1481,7 +1481,7 @@ _is_rig_protected() {
   printf '[10:01:00] PROGRESS stub: def5678 feat(x): second [#1]\n' >> "$session_log"
   rm -f "$rig_dir/memory/.snapshot-write-in-progress"
 
-  # No sentinel — this session never called /session-name
+  # No UUID sentinel — no anchor should appear
   echo '{"source": "logout"}' \
     | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$session_end_hook" )
 
@@ -1490,7 +1490,7 @@ _is_rig_protected() {
   [ "$status" -ne 0 ]
 }
 
-@test "session-end.sh: write_minimal_checkpoint preserves session name when sentinel present" {
+@test "session-end.sh: write_minimal_checkpoint writes session anchor from UUID sentinel" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
@@ -1498,8 +1498,7 @@ _is_rig_protected() {
   local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
   local session_log="$TEMP_DIR/the-rig-session-test.log"
 
-  # Snapshot has this session's own name
-  printf '**Last updated:** 2026-01-01\n**Session name:** my-own-session\n\n---\n' \
+  printf '**Last updated:** 2026-01-01\n\n---\n' \
     > "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
   printf '[10:00:00] PROGRESS stub: abc1234 feat(x): first [#1]\n' >> "$session_log"
   printf '[10:01:00] PROGRESS stub: def5678 feat(x): second [#1]\n' >> "$session_log"
@@ -1508,15 +1507,15 @@ _is_rig_protected() {
   # Run via bash -c so $$ inside = PPID seen by session-end.sh
   local test_project="$TEST_PROJECT"
   bash -c "
-    touch \"/tmp/.rig-session-name-set-\$\$\"
+    printf '%s' 'anchor-uuid-test' > \"/tmp/.rig-session-\$\$.uuid\"
     cd \"$test_project\"
     echo '{\"source\": \"logout\"}' \
       | RIG_SESSION_LOG=\"$session_log\" bash \"$session_end_hook\"
-    rm -f \"/tmp/.rig-session-name-set-\$\$\" 2>/dev/null
+    rm -f \"/tmp/.rig-session-\$\$.uuid\" 2>/dev/null
   "
 
-  # This session's name must appear in the checkpoint
-  grep -q "my-own-session" "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+  # Session anchor must appear in the checkpoint
+  grep -q "anchor-uuid-test" "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
 }
 
 # ── Session log path is per-project ──────────────────────────────────────────

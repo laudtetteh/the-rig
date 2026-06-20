@@ -114,7 +114,7 @@ Gather all findings silently — no output yet:
 3. **Task file** — which active task file maps to the merged PR (for step 3 of POST_MERGE_WORKFLOW)
 4. **ERRORS.md additions** — infer from session context whether any unexpected behaviors, footguns, or pitfalls should be added
 5. **Feature doc overlaps** — files changed in the merged PR vs. documented feature entry points (see Feature doc freshness step below)
-6. **Session name** — derive suggestion; check for existing name in CONTEXT_SNAPSHOT.md
+6. **Session name** — derive suggestion from session file and conversation context
 
 ### Report
 
@@ -185,30 +185,38 @@ same logic as `/session-name`. The merged PR number is always known here, which
 makes this the most reliable naming signal in the system. Do **not** apply it
 automatically — present it for the user to confirm or tweak.
 
-### How to determine what belongs to this session
+### Step 1 — Find this session's UUID and tentative name
 
-Use the same logic as `/wrap` and `/session-name`: **conversation context first,
-files as cross-reference.**
+```bash
+REPO=$(git rev-parse --show-toplevel 2>/dev/null)
+if [[ -f "$REPO/.rigpath" ]]; then RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath"); else RIG_DIR="$REPO/.rig"; fi
+SESSION_DIR="$RIG_DIR/memory/sessions"
+SESSION_FILE="$SESSION_DIR/session-${PPID}.json"
 
-Your direct knowledge of what was done in this session is the primary signal —
-enumerate the PRs, tasks, and work you know about from this conversation. File
-signals (PROGRESS.md markers, CONTEXT_SNAPSHOT.md datetime) are cross-reference
-only, used to catch anything that compacted out of context. If they conflict with
-what you know, trust the conversation.
+SESSION_UUID=$(cat "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true)
+TENTATIVE_NAME=""
+if [[ -f "$SESSION_FILE" ]]; then
+  [[ -z "$SESSION_UUID" ]] && \
+    SESSION_UUID=$(python3 -c "import json; print(json.load(open('$SESSION_FILE')).get('anchor') or '')" 2>/dev/null || true)
+  TENTATIVE_NAME=$(python3 -c "import json; print(json.load(open('$SESSION_FILE')).get('tentative_name') or '')" 2>/dev/null || true)
+fi
+```
 
-### Check for an existing session name
+### Step 2 — Collect this session's work
 
-Read the `**Session name:**` field from `.rig/memory/CONTEXT_SNAPSHOT.md`.
+**Conversation context first** — enumerate PRs, tasks, and work you know about.
+The merged PR number is always known at this point. File signals are cross-reference:
 
-- **If blank / absent:** suggest a name based on the merged PR (and any other
-  PRs or tasks completed this session).
-- **If already set:** suggest **appending** the merged PR to the existing name:
+```bash
+grep "^## .*<!-- sid:${SESSION_UUID} -->" "$RIG_DIR/memory/PROGRESS.md" 2>/dev/null || true
+```
 
-  > **Session already named:** `feat dashboard ui #49`
-  > **Merged this run:** PR #51 (fix null user on profile fetch)
-  > **Updated suggestion:** `feat dashboard ui #49 | fix null user profile fetch #51`
+**Every `## ` entry header written to PROGRESS.md must include `<!-- sid:UUID -->`
+at the end of the line.** Read UUID from `/tmp/.rig-session-${PPID}.uuid`.
 
-### Format
+If tentative_name is set, use it as the base (refine based on actual outcome).
+
+### Step 3 — Build the name
 
 Use the **tiered format** from `/session-name` (same logic — see that command for full detail):
 
@@ -218,27 +226,41 @@ Use the **tiered format** from `/session-name` (same logic — see that command 
 
 Keep under ~100 characters.
 
-### Output
+### Step 4 — Present and confirm
 
 > **Suggested session name:**
 > `feat user-auth magic-link flow #91`
 
-Then invite the user to apply it:
+> To apply: say "use that name" or "lgtm".
 
-> To apply: run `/session-name` or say "use that name".
+### Step 5 — After confirmation: write to session file, move to done/
 
-After the user confirms, **update the `**Session name:**` field in
-`.rig/memory/CONTEXT_SNAPSHOT.md`** to match. This lets subsequent /wrap or
-/post-merge calls detect the existing name and suggest appends correctly.
-
-Then run:
+Write atomically — temp file then rename — so a crash between write and move does
+not leave a `status: complete` file stranded in `sessions/` outside of `done/`.
 
 ```bash
-touch "/tmp/.rig-session-name-set-${PPID}"
+CONFIRMED_NAME="<the confirmed name>"
+DONE_DIR="$SESSION_DIR/done"
+mkdir -p "$DONE_DIR"
+DEST="$DONE_DIR/session-$(date +%Y%m%d)-${SESSION_UUID}.json"
+
+python3 - <<PYEOF
+import json, os
+with open("$SESSION_FILE") as f:
+    d = json.load(f)
+d["final_name"] = "$CONFIRMED_NAME"
+d["status"] = "complete"
+tmp = "$DEST" + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(d, f, indent=2)
+os.rename(tmp, "$DEST")
+PYEOF
+
+rm -f "$SESSION_FILE" 2>/dev/null || true
+rm -f "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true
 ```
 
-This sentinel tells `session-end.sh` that this session owns the name, preventing
-a concurrent sibling session from inheriting it when it writes its minimal checkpoint.
+**Do NOT write Session name to CONTEXT_SNAPSHOT.md.** Session names live in session files.
 
 If no meaningful work shipped (pure exploration, no merges), skip this step silently.
 
