@@ -151,6 +151,14 @@ commit-cleanup: yes
 | `no` | Footers are kept. Comment out or remove `.husky/commit-msg` and `.husky/post-commit` to disable the stripping. |
 
 ```
+# transcript-retention-days: 14
+```
+
+Optional. When set to a positive integer, `/wrap` prunes JSONL transcript files in
+`~/.claude/projects/` older than this many days. Prevents `/tmp` or disk from filling up
+after long-running projects. Commented out by default — uncomment and set a value to enable.
+
+```
 rig-gaps-push-target:
 ```
 

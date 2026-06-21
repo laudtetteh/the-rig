@@ -534,6 +534,28 @@ written until the next commit creates new unexpanded stubs.
 
 ---
 
+## Transcript pruning (opt-in)
+
+After flag cleanup, check for the `transcript-retention-days:` field in `$REPO/CLAUDE.md`.
+If present and set to a positive integer, prune old JSONL transcript files to prevent
+`/tmp` (or `~/.claude/projects/`) from filling up:
+
+```bash
+RETENTION_DAYS=$(grep "^transcript-retention-days:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+if [[ -n "$RETENTION_DAYS" && "$RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
+  PRUNED=$(find ~/.claude/projects/ -name "*.jsonl" -mtime "+${RETENTION_DAYS}" -print 2>/dev/null | wc -l | tr -d ' ')
+  find ~/.claude/projects/ -name "*.jsonl" -mtime "+${RETENTION_DAYS}" -delete 2>/dev/null || true
+  if [[ "$PRUNED" -gt 0 ]]; then
+    echo "Pruned ${PRUNED} JSONL transcript file(s) older than ${RETENTION_DAYS} days."
+  fi
+fi
+```
+
+This step is a no-op when `transcript-retention-days:` is absent or commented out.
+Report the pruned count only when files were actually deleted.
+
+---
+
 ## Notes
 
 - `.rig/memory/CONTEXT_SNAPSHOT.md` is gitignored — it lives on disk only, never committed

@@ -134,3 +134,8 @@ _fail_with_list() {
 @test "ship.md: Step 9 skips housekeeping commit types in freshness check" {
   grep -qE "chore\(memory\)" "$COMMAND_DIR/ship.md"
 }
+
+@test "wrap.md: contains transcript pruning bash block with retention-days lookup" {
+  grep -q "transcript-retention-days" "$COMMAND_DIR/wrap.md"
+  grep -q "find ~/.claude/projects/" "$COMMAND_DIR/wrap.md"
+}
