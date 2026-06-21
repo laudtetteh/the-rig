@@ -139,3 +139,19 @@ _fail_with_list() {
   grep -q "transcript-retention-days" "$COMMAND_DIR/wrap.md"
   grep -q "find ~/.claude/projects/" "$COMMAND_DIR/wrap.md"
 }
+
+@test "wrap.md: contains Permission scan opt-in section" {
+  grep -q "## Permission scan (opt-in)" "$COMMAND_DIR/wrap.md"
+}
+
+@test "wrap.md: permission scan checks .fewer-prompts-enabled sentinel" {
+  grep -q ".fewer-prompts-enabled" "$COMMAND_DIR/wrap.md"
+}
+
+@test "wrap.md: permission scan reports Auto-approved format" {
+  grep -q "Auto-approved" "$COMMAND_DIR/wrap.md"
+}
+
+@test "wrap.md: permission scan contains PYEOF heredoc delimiter" {
+  grep -q "<<'PYEOF'" "$COMMAND_DIR/wrap.md"
+}
