@@ -17,6 +17,7 @@ Performs the session-end housekeeping that prevents state loss between sessions:
 9. **Suggests a session name** — derives a name from this session's work via `/session-name` logic (see Session naming step below)
 10. Surfaces the next priority from `.rig/tasks/backlog/` and asks: "What's next?"
 11. **Cleans up housekeeping flags** — deletes `.rig/memory/.wrap-needed` if present
+12. **(opt-in) Auto-scans JSONL transcripts** for frequent Bash patterns and appends new `permissions.allow` entries to `.claude/settings.json` — enable with `touch $RIG_DIR/memory/.fewer-prompts-enabled`
 
 ## Usage
 
@@ -553,6 +554,108 @@ fi
 
 This step is a no-op when `transcript-retention-days:` is absent or commented out.
 Report the pruned count only when files were actually deleted.
+
+---
+
+## Permission scan (opt-in)
+
+After transcript pruning, scan recent JSONL transcripts for frequently-used Bash patterns
+and append new `permissions.allow` entries to `.claude/settings.json`.
+
+**Sentinel check:** run only if `$RIG_DIR/memory/.fewer-prompts-enabled` exists.
+If absent: skip silently.
+
+```bash
+if [[ -f "$RIG_DIR/memory/.fewer-prompts-enabled" ]]; then
+  # Claude Code encodes the project path by replacing / with - in the directory name
+  TRANSCRIPT_DIR="$HOME/.claude/projects/$(echo "$REPO" | sed 's|/|-|g')"
+  SETTINGS_FILE="$REPO/.claude/settings.json"
+
+  if [[ -d "$TRANSCRIPT_DIR" && -f "$SETTINGS_FILE" ]]; then
+    python3 - "$TRANSCRIPT_DIR" "$SETTINGS_FILE" <<'PYEOF'
+import json, sys, time
+from collections import Counter
+from pathlib import Path
+
+transcript_dir, settings_file = sys.argv[1], sys.argv[2]
+
+try:
+    d = json.load(open(settings_file))
+    existing = set(d.get("permissions", {}).get("allow", []))
+except Exception:
+    existing = set()
+
+SKIP = {
+    "rm", "mv", "cp", "chmod", "chown", "kill", "sudo",
+    "curl", "wget", "bash", "sh", "zsh", "fish",
+    "python3", "node", "ruby", "perl", "php",
+    "pip", "npm", "yarn", "brew",
+    "make", "docker", "kubectl",
+}
+
+cutoff = time.time() - 30 * 86400
+commands = []
+for jsonl_path in sorted(Path(transcript_dir).glob("*.jsonl")):
+    try:
+        if jsonl_path.stat().st_mtime < cutoff:
+            continue
+        with open(jsonl_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if obj.get("type") != "assistant":
+                    continue
+                for item in obj.get("message", {}).get("content", []):
+                    if (isinstance(item, dict) and
+                            item.get("type") == "tool_use" and
+                            item.get("name") == "Bash"):
+                        cmd = item.get("input", {}).get("command", "").strip()
+                        if cmd:
+                            first = cmd.split()[0].split("/")[-1]
+                            if first:
+                                commands.append(first)
+    except Exception:
+        continue
+
+counter = Counter(commands)
+new_patterns = []
+for cmd, count in counter.most_common():
+    if count < 3:
+        break
+    if cmd in SKIP:
+        continue
+    pattern = f"Bash({cmd}*)"
+    if pattern not in existing:
+        new_patterns.append(pattern)
+
+if not new_patterns:
+    sys.exit(0)
+
+try:
+    with open(settings_file) as f:
+        d = json.load(f)
+    allows = d.setdefault("permissions", {}).setdefault("allow", [])
+    added = [p for p in new_patterns if p not in allows]
+    allows.extend(added)
+    with open(settings_file, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+    if added:
+        print(f"Auto-approved {len(added)} new permission pattern(s): {', '.join(added)}")
+except Exception as e:
+    print(f"Permission scan: failed to update settings.json — {e}")
+PYEOF
+  fi
+fi
+```
+
+To enable: `touch "$RIG_DIR/memory/.fewer-prompts-enabled"` (per-machine, gitignored).
+The `/fewer-permission-prompts` skill remains available for one-off manual scans.
 
 ---
 
