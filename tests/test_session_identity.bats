@@ -277,3 +277,25 @@ summary = d['hookSpecificOutput']['compactionSummary']
 assert 'Session anchor' in summary, f'Session anchor not in summary: {summary}'
 "
 }
+
+@test "session-start: prunes compact checkpoints older than 1 day on startup" {
+  STALE_CKPT="$RIG_DIR/memory/.compact-checkpoint-stale99.md"
+  echo "# stale checkpoint" > "$STALE_CKPT"
+  # Set mtime to 50 hours ago. find -mtime +1 uses integer division (age_seconds/86400 > 1),
+  # so 25h would give 1 > 1 = false. 50h gives 180000/86400 = 2 > 1 = true.
+  python3 -c "import os, time; os.utime('$STALE_CKPT', (time.time()-180000, time.time()-180000))"
+
+  run_hook_exec "session-start.sh" '{"source":"startup"}'
+
+  [ ! -f "$STALE_CKPT" ]
+}
+
+@test "session-start: does not prune compact checkpoints younger than 1 day on startup" {
+  FRESH_CKPT="$RIG_DIR/memory/.compact-checkpoint-fresh99.md"
+  echo "# fresh checkpoint" > "$FRESH_CKPT"
+  # mtime is now — well within 1 day
+
+  run_hook_exec "session-start.sh" '{"source":"startup"}'
+
+  [ -f "$FRESH_CKPT" ]
+}

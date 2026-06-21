@@ -134,6 +134,9 @@ case "$SOURCE" in
     fi
     # ─────────────────────────────────────────────────────────────────────────
 
+    # Passive cleanup: remove stale compact checkpoints older than 1 day.
+    find "$RIG_DIR/memory" -name ".compact-checkpoint-*.md" -mtime +1 -delete 2>/dev/null || true
+
     CONTEXT=$(cat "$SNAPSHOT")
     WARNINGS=$(flag_warnings)
     if [[ -n "$WARNINGS" ]]; then
