@@ -187,8 +187,8 @@ validation step and includes the result in the review report.
 # prod-url:
 ```
 
-Optional. Referenced in `/code-review` reports when Playwright is enabled — helps link validation
-results to the environment under test.
+Optional. Included in `/code-review` reports when set — links review findings to the
+environment under test.
 
 Optional. Absolute path to a `RIG_GAPS.md` file in The Rig's own repo on this machine.
 When set, `/rig-gaps --push` appends unsubmitted gap entries directly to that file

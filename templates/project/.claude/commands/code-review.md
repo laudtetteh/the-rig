@@ -16,14 +16,14 @@ Use `/pre-release-review` before cutting a release; use `/code-review` during de
 
 ## Step 1 — Read config from CLAUDE.md
 
-Extract these fields. If a field is absent, skip the corresponding step silently — do not error.
+Extract these fields. A field is **enabled** only when it appears **uncommented** in CLAUDE.md — that is, the line does not begin with `#`. If a field is absent or commented out, skip the corresponding step silently — do not error.
 
 ```bash
-# From CLAUDE.md:
+# From CLAUDE.md (uncommented form — lines starting with # are disabled):
 # test-command: <command>    — e.g. "bats tests/" or "pytest" or "npm test"
 # lint-command: <command>    — e.g. "bash -n install.sh" or "npm run lint"
 # base-branch: <branch>      — default: main
-# testing: playwright        — if present, enables Playwright step
+# testing: playwright        — if present and uncommented, enables Playwright step
 # staging-url: <url>         — included in report if set
 # prod-url: <url>            — included in report if set
 ```
@@ -35,9 +35,10 @@ Also read `.rig/rules/coding-standards.md` (if present) to inform the Style find
 ## Step 2 — Determine diff base
 
 ```bash
-BASE=$(grep 'base-branch:' CLAUDE.md 2>/dev/null | head -1 | sed 's/.*base-branch:[[:space:]]*//' | tr -d '[:space:]')
+BASE=$(grep -E '^[^#]*base-branch:' CLAUDE.md 2>/dev/null | head -1 | sed 's/.*base-branch:[[:space:]]*//' | tr -d '[:space:]')
 BASE="${BASE:-main}"
 CURRENT=$(git branch --show-current)
+CURRENT="${CURRENT:-<detached HEAD>}"
 ```
 
 ---
@@ -66,7 +67,7 @@ Record: **Pass** / **Fail**. On fail, include output.
 
 ### Playwright (opt-in)
 
-If `testing: playwright` appears in CLAUDE.md:
+If `testing: playwright` appears uncommented in CLAUDE.md (line does not start with `#`):
 
 ```bash
 npx playwright test 2>&1 | tail -30
@@ -110,6 +111,7 @@ Output in this format:
 ## /code-review report
 
 **Branch:** <current>  **Base:** <BASE>  **Files changed:** N
+**Staging:** <staging-url or — N/A>  **Prod:** <prod-url or — N/A>
 
 ### Validation
 
