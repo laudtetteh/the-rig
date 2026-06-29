@@ -105,6 +105,77 @@ print(json.dumps({
   printf '%s' "$uuid" > "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true
 }
 
+# Returns tip text if the named tip should fire (and hasn't fired before).
+# Creates the per-tip sentinel on first call to prevent repeats.
+# Never called when .rig-tips-disabled exists — that check lives in collect_tips.
+show_tip() {
+  local name="$1"
+  local text="$2"
+  local sentinel="$RIG_DIR/memory/tips/.tip-${name}-shown"
+  [[ -f "$sentinel" ]] && return 0
+  mkdir -p "$RIG_DIR/memory/tips" 2>/dev/null || true
+  touch "$sentinel" 2>/dev/null || true
+  printf '%s' "$text"
+}
+
+# Evaluates all tip conditions and returns any tips that should fire, newline-separated.
+# Returns empty string if opt-out is set or no tip conditions are met.
+collect_tips() {
+  [[ -f "$RIG_DIR/memory/.rig-tips-disabled" ]] && return 0
+
+  local tips="" t=""
+
+  # Tip: session-name — fires after the first commit
+  local commit_count
+  commit_count=$(git -C "$REPO" rev-list --count HEAD 2>/dev/null || echo 0)
+  commit_count=$((commit_count + 0))
+  if [[ "$commit_count" -ge 1 ]]; then
+    t=$(show_tip "session-name" \
+      "Tip: run /session-name any time to anchor this session — names survive compaction." \
+      2>/dev/null || true)
+    [[ -n "$t" ]] && tips+="${t}"$'\n\n'
+  fi
+
+  # Tip: fewer-prompts — fires once a snapshot exists and the feature isn't already on
+  if [[ ! -f "$RIG_DIR/memory/.fewer-prompts-enabled" ]]; then
+    t=$(show_tip "fewer-prompts" \
+      "Tip: touch \$RIG_DIR/memory/.fewer-prompts-enabled to auto-scan permission patterns at every /wrap." \
+      2>/dev/null || true)
+    [[ -n "$t" ]] && tips+="${t}"$'\n\n'
+  fi
+
+  # Tip: task-tracking — fires after second session with no active task
+  local session_count active_tasks
+  session_count=$(ls "$RIG_DIR/memory/sessions"/session-*.json 2>/dev/null | wc -l || echo 0)
+  session_count=$((session_count + 0))
+  active_tasks=$(ls "$RIG_DIR/tasks/active"/*.md 2>/dev/null \
+    | grep -v "TASK_example" | wc -l || echo 0)
+  active_tasks=$((active_tasks + 0))
+  if [[ "$session_count" -gt 1 ]] && [[ "$active_tasks" -eq 0 ]]; then
+    t=$(show_tip "task-tracking" \
+      "Tip: Use /task to track multi-file work. Issues gate commits; tasks give the agent a recovery anchor." \
+      2>/dev/null || true)
+    [[ -n "$t" ]] && tips+="${t}"$'\n\n'
+  fi
+
+  # Tip: sprint — fires when 3+ distinct issue refs appear in PROGRESS.md
+  if [[ -f "$RIG_DIR/memory/PROGRESS.md" ]]; then
+    local issue_count
+    issue_count=$(grep -oE '\[#[0-9]+\]' "$RIG_DIR/memory/PROGRESS.md" 2>/dev/null \
+      | sort -u | wc -l || echo 0)
+    issue_count=$((issue_count + 0))
+    if [[ "$issue_count" -ge 3 ]]; then
+      t=$(show_tip "sprint" \
+        "Tip: Use /sprint to plan and batch parallel issues." \
+        2>/dev/null || true)
+      [[ -n "$t" ]] && tips+="${t}"$'\n\n'
+    fi
+  fi
+
+  tips="${tips%$'\n\n'}"
+  printf '%s' "$tips"
+}
+
 # Restore /tmp UUID from an existing session file (e.g. after tmp cleanse or restart).
 restore_session_uuid() {
   local existing_uuid
@@ -139,11 +210,12 @@ case "$SOURCE" in
 
     CONTEXT=$(cat "$SNAPSHOT")
     WARNINGS=$(flag_warnings)
-    if [[ -n "$WARNINGS" ]]; then
-      emit_context "${WARNINGS}"$'\n\n---\n\n'"${CONTEXT}"
-    else
-      emit_context "$CONTEXT"
-    fi
+    TIPS=$(collect_tips 2>/dev/null || true)
+
+    FULL_CTX="$CONTEXT"
+    [[ -n "$WARNINGS" ]] && FULL_CTX="${WARNINGS}"$'\n\n---\n\n'"${FULL_CTX}"
+    [[ -n "$TIPS" ]]    && FULL_CTX="${FULL_CTX}"$'\n\n---\n\n'"${TIPS}"
+    emit_context "$FULL_CTX"
     ;;
 
   compact)
