@@ -12,9 +12,7 @@
     "deny": [
       "Bash(rm -rf *)",
       "Bash(git push --force*)",
-      "Bash(git push -f*)",
-      "Bash(DROP TABLE*)",
-      "Bash(TRUNCATE *)"
+      "Bash(git push -f*)"
     ]
   },
   "hooks": {

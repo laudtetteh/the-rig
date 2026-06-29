@@ -555,7 +555,7 @@ if incoming_allow:
 # Merge permissions.deny (dedup by pattern string)
 incoming_deny = incoming.get("permissions", {}).get("deny", [])
 if incoming_deny:
-    existing_deny = existing.get("permissions", {}).get("deny", [])
+    existing_deny = existing.get("permissions", {}).get("deny", []) or []
     existing_deny_set = set(existing_deny)
     new_deny = [p for p in incoming_deny if p not in existing_deny_set]
     if new_deny:
