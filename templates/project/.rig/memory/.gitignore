@@ -60,3 +60,7 @@ sessions/
 # tips/ holds one-time-shown sentinel files for the feature discovery tips system.
 # Per-machine state — gitignored so tips re-fire on a fresh clone.
 tips/
+
+# .rig-tips-disabled is the global opt-out sentinel for the tips system.
+# touch this file to disable all feature discovery tips for this project.
+.rig-tips-disabled

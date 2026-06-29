@@ -299,3 +299,75 @@ assert 'Session anchor' in summary, f'Session anchor not in summary: {summary}'
 
   [ -f "$FRESH_CKPT" ]
 }
+
+# ── Feature discovery tips ────────────────────────────────────────────────────
+
+@test "tips: opt-out sentinel suppresses all tips" {
+  # Create conditions that would normally fire multiple tips
+  git -C "$REPO" commit --allow-empty -m "first commit" -q
+  touch "$RIG_DIR/memory/.rig-tips-disabled"
+
+  run_hook_exec "session-start.sh" '{"source":"startup"}'
+
+  # additionalContext must not contain any "Tip:" prefix
+  hook_output | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+ctx = d['hookSpecificOutput']['additionalContext']
+assert 'Tip:' not in ctx, f'found Tip: in context with opt-out enabled: {ctx[:200]}'
+"
+}
+
+@test "tips: session-name tip fires once and not again" {
+  git -C "$REPO" commit --allow-empty -m "first commit" -q
+
+  # First startup — tip should appear and sentinel should be created
+  run_hook_exec "session-start.sh" '{"source":"startup"}'
+  hook_output | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+ctx = d['hookSpecificOutput']['additionalContext']
+assert '/session-name' in ctx, f'/session-name tip missing on first run: {ctx[:300]}'
+"
+  [ -f "$RIG_DIR/memory/tips/.tip-session-name-shown" ]
+
+  # Second startup — tip must not repeat
+  run_hook_exec "session-start.sh" '{"source":"startup"}'
+  hook_output | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+ctx = d['hookSpecificOutput']['additionalContext']
+assert '/session-name' not in ctx, f'/session-name tip repeated on second run: {ctx[:300]}'
+"
+}
+
+@test "tips: fewer-prompts tip suppressed when .fewer-prompts-enabled exists" {
+  git -C "$REPO" commit --allow-empty -m "first commit" -q
+  touch "$RIG_DIR/memory/.fewer-prompts-enabled"
+
+  run_hook_exec "session-start.sh" '{"source":"startup"}'
+
+  hook_output | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+ctx = d['hookSpecificOutput']['additionalContext']
+assert 'fewer-prompts-enabled' not in ctx, \
+  f'fewer-prompts tip fired when feature already enabled: {ctx[:300]}'
+"
+}
+
+@test "tips: sprint tip fires when 3+ distinct issue refs in PROGRESS.md" {
+  git -C "$REPO" commit --allow-empty -m "first commit" -q
+  # Write PROGRESS.md with 3 distinct issue refs
+  printf '## 2026-06-21 — work\n[#1] [#2] [#3]\n' > "$RIG_DIR/memory/PROGRESS.md"
+
+  run_hook_exec "session-start.sh" '{"source":"startup"}'
+
+  hook_output | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+ctx = d['hookSpecificOutput']['additionalContext']
+assert '/sprint' in ctx, f'/sprint tip not fired with 3+ issue refs: {ctx[:300]}'
+"
+  [ -f "$RIG_DIR/memory/tips/.tip-sprint-shown" ]
+}
