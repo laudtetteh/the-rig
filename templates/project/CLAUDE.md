@@ -162,6 +162,34 @@ after long-running projects. Commented out by default — uncomment and set a va
 rig-gaps-push-target:
 ```
 
+```
+# test-command: bats tests/
+```
+
+Optional. Command to run the project's test suite. Read by `/code-review` to validate changes before
+reviewing the diff. Set this once and every future `/code-review` run uses it automatically.
+
+```
+# lint-command: bash -n install.sh
+```
+
+Optional. Command to run the linter or syntax checker. Read by `/code-review` alongside `test-command`.
+
+```
+# testing: playwright
+```
+
+Optional. If set to `playwright`, `/code-review` runs `npx playwright test` as an additional
+validation step and includes the result in the review report.
+
+```
+# staging-url:
+# prod-url:
+```
+
+Optional. Referenced in `/code-review` reports when Playwright is enabled — helps link validation
+results to the environment under test.
+
 Optional. Absolute path to a `RIG_GAPS.md` file in The Rig's own repo on this machine.
 When set, `/rig-gaps --push` appends unsubmitted gap entries directly to that file
 instead of requiring manual copy-paste. Only useful for developers who maintain The Rig

@@ -45,6 +45,7 @@ No arguments. Output the table below directly — do not read individual command
 | Command | What it does |
 |---|---|
 | `/debug` | Structured diagnosis. Hypothesis → reproduce → isolate → fix → log in `ERRORS.md`. No code touched until the bug is reproduced. |
+| `/code-review` | Diff-focused review of the current branch. Runs tests + lint (from `test-command:`/`lint-command:` in CLAUDE.md), analyses the diff by category (logic, security, coverage, style), and produces a structured LGTM/HOLD report. Playwright opt-in via `testing: playwright`. |
 
 ## Release
 
