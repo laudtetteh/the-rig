@@ -8,6 +8,13 @@
       "Bash(git rev-parse*)",
       "Write(/tmp/*.md)",
       "Write(/tmp/*.txt)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(DROP TABLE*)",
+      "Bash(TRUNCATE *)"
     ]
   },
   "hooks": {

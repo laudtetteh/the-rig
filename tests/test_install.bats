@@ -454,6 +454,32 @@ print(len(s.get('permissions', {}).get('allow', [])))
   [ "$count_after_second" -eq "$count_after_first" ]
 }
 
+@test "merge strategy: permissions.deny entries are preserved and not duplicated" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  # Baseline deny entries must be present after fresh install
+  local deny_count
+  deny_count=$(python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+print(len(s.get('permissions', {}).get('deny', [])))
+")
+  [ "$deny_count" -ge 1 ]
+  grep -q '"Bash(rm -rf \*)' "$TEST_PROJECT/.claude/settings.json"
+  # Re-install must not duplicate deny entries
+  run_installer --strategy merge
+  [ "$status" -eq 0 ]
+  local deny_count_after
+  deny_count_after=$(python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+print(len(s.get('permissions', {}).get('deny', [])))
+")
+  [ "$deny_count_after" -eq "$deny_count" ]
+}
+
 # ── CLI flag validation ───────────────────────────────────────────────────────
 
 @test "--strategy with invalid value warns and falls back to interactive" {
