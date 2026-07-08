@@ -82,7 +82,6 @@ is_rig_owned() {
     .claude/commands/*|\
     .claude/agents/*|\
     .rig/processes/*|\
-    .rig/VERSION|\
     .husky/*|\
     .gitleaks.toml)
       return 0 ;;
@@ -1300,17 +1299,17 @@ if [[ "$DO_PROJECT" == true ]]; then
   done < <(find "$PROJECT_TEMPLATES" -type f -print0)
 
   # ── WRITE INSTALLER VERSION INTO .rig/VERSION ─────────────────────────────
-  # Always write the running installer's own version, overriding whatever the
-  # static template file contains. This prevents drift when the template copy
-  # lags behind the root VERSION bump. The manifest entry is upserted so the
-  # upgrade strategy continues to detect user customizations correctly.
+  # No static template file — write the running installer's version directly
+  # so the installed project always reports the correct Rig version without
+  # requiring a separate template file bump on every release.
   _RIG_VER_DEST=""
   if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
     _RIG_VER_DEST="$EXTERNAL_RIG_DIR/VERSION"
   else
     _RIG_VER_DEST="$TARGET/.rig/VERSION"
   fi
-  if [[ -n "$_RIG_VER_DEST" && -d "$(dirname "$_RIG_VER_DEST")" ]]; then
+  if [[ -n "$_RIG_VER_DEST" ]]; then
+    mkdir -p "$(dirname "$_RIG_VER_DEST")" 2>/dev/null || true
     echo "$INSTALLER_VERSION" > "$_RIG_VER_DEST"
     write_manifest_entry "$(sha256_file "$_RIG_VER_DEST")" ".rig/VERSION"
   fi
