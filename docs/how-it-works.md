@@ -163,10 +163,10 @@ Agent is oriented. Hooks are live. Ready to work.
      ▼
 Session ends
      │
-     └─ session-end.sh (SessionEnd)
-          On logout/clear: writes .wrap-needed + minimal auto-checkpoint
-          On resume: clears .wrap-needed flag
-          (session-end.sh owns the wrap-needed lifecycle; stop.sh is lightweight only)
+     └─ stop.sh (also handles SessionEnd — same script, dispatches on `source` field)
+          On logout/prompt_input_exit: writes .wrap-needed + minimal auto-checkpoint
+          On clear: logs context-cleared; no .wrap-needed
+          On resume / Stop (per-turn): per-turn date update + PROGRESS marker
 ```
 
 ---
@@ -363,17 +363,18 @@ Agent finishes response each turn
            If PROGRESS.md exists:
              Append <!-- session-end YYYY-MM-DD HH:MM --> boundary marker
              (idempotent: skips if last non-blank line is already a marker)
-           (lightweight; .wrap-needed logic moved to session-end.sh)
+           Dispatches on `source` field from JSON stdin:
+             Empty source (Stop event): updates CONTEXT_SNAPSHOT date + PROGRESS marker
 
 Session ends (logout / clear / quit)
      │
-     └─► session-end.sh (SessionEnd)
+     └─► stop.sh (Stop is registered for SessionEnd too — same script, both events)
            Resolves RIG_DIR
-           On logout/clear: writes .wrap-needed sentinel
-                            writes a minimal auto-checkpoint to CONTEXT_SNAPSHOT.md
-                            (current branch + last commit; prevents cold-start next session)
-           On resume:       clears .wrap-needed flag
-           (session-end.sh owns the wrap-needed lifecycle; stop.sh is for per-turn cleanup only)
+           On logout/prompt_input_exit: writes .wrap-needed sentinel
+                                        writes a minimal auto-checkpoint to CONTEXT_SNAPSHOT.md
+                                        (current branch + last commit; prevents cold-start next session)
+           On clear:                    logs context-cleared; does NOT write .wrap-needed
+           On resume / Stop (no src):   per-turn update (date + PROGRESS marker)
 ```
 
 **Critical implementation note:** Tool names in Claude Code are `PascalCase`

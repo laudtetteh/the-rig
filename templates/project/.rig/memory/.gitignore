@@ -37,7 +37,7 @@ ERRORS_archive.md
 
 # .snapshot-write-in-progress is a mutual-exclusion lock held by /wrap and
 # /post-merge while writing CONTEXT_SNAPSHOT.md. Prevents concurrent writes from
-# silently overwriting each other. session-end.sh checks this before calling
+# silently overwriting each other. stop.sh (SessionEnd) checks this before calling
 # write_minimal_checkpoint. Never committed.
 .snapshot-write-in-progress
 
@@ -48,7 +48,7 @@ ERRORS_archive.md
 
 # .compact-checkpoint-<PPID>.md files are PPID-scoped per-session compact checkpoints.
 # Written by pre-compact.sh, read by post-compact.sh and session-start.sh (source=compact),
-# and deleted by session-end.sh on session close. Gitignored — ephemeral, never committed.
+# and deleted by stop.sh (SessionEnd) on session close. Gitignored — ephemeral, never committed.
 .compact-checkpoint.md
 .compact-checkpoint-*.md
 

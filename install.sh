@@ -525,6 +525,22 @@ with open(incoming_path) as f:
 
 existing.setdefault("hooks", {})
 
+# Remove hook entries for scripts that have been removed from the template.
+# When a script is merged into another (e.g. session-end.sh → stop.sh), any
+# existing installations still reference the old script. Strip those entries
+# before adding the new ones so the installed settings.json stays clean.
+_stale_scripts = ["session-end.sh"]
+for event in list(existing.get("hooks", {}).keys()):
+    existing["hooks"][event] = [
+        entry for entry in existing["hooks"][event]
+        if not any(
+            any(sc in h.get("command", "") for sc in _stale_scripts)
+            for h in entry.get("hooks", [])
+        )
+    ]
+    if not existing["hooks"][event]:
+        del existing["hooks"][event]
+
 for event, incoming_hooks in incoming.get("hooks", {}).items():
     existing.setdefault("hooks", {}).setdefault(event, [])
     # Collect the command strings already registered for this event
@@ -1298,6 +1314,12 @@ if [[ "$DO_PROJECT" == true ]]; then
       copy_file "$src_file" "$dest_file" "$TARGET" "$rel"
     fi
   done < <(find "$PROJECT_TEMPLATES" -type f -print0)
+
+  # ── REMOVE SCRIPTS MERGED INTO OTHER HOOKS (upgrade cleanup) ─────────────
+  # session-end.sh was merged into stop.sh in v1.21.0. Remove it from existing
+  # installs so it is no longer invoked (settings.json is updated by the
+  # merge_settings_json step above to point SessionEnd → stop.sh instead).
+  rm -f "$TARGET/.claude/hooks/session-end.sh" 2>/dev/null || true
 
   # ── WRITE INSTALLER VERSION INTO .rig/VERSION ─────────────────────────────
   # Always write the running installer's own version, overriding whatever the

@@ -781,11 +781,6 @@ assert 'old-session' not in ctx, 'Got stale checkpoint instead of latest: ' + ct
   [ ! -f "$TEST_PROJECT/.rig/memory/PROGRESS.md" ]
 }
 
-@test "syntax: session-end.sh has valid bash syntax" {
-  run bash -n "$REPO_ROOT/templates/project/.claude/hooks/session-end.sh"
-  [ "$status" -eq 0 ]
-}
-
 @test "syntax: code-reviewer agent has valid markdown header" {
   run grep -q "^name: code-reviewer" "$REPO_ROOT/templates/project/.claude/agents/code-reviewer.md"
   [ "$status" -eq 0 ]
@@ -1420,16 +1415,16 @@ _is_rig_protected() {
   [ "$installed" = "$expected" ]
 }
 
-# ── Gap 4: session-end.sh writes .wrap-needed on 2+ commits ──────────────────
-# Note: this logic moved from stop.sh to session-end.sh in Sprint 5.
-# stop.sh now only updates CONTEXT_SNAPSHOT date and appends session-end markers.
+# ── Gap 4: stop.sh (SessionEnd) writes .wrap-needed on 2+ commits ────────────
+# SessionEnd logic (logout/prompt_input_exit/clear) is now in stop.sh, which
+# handles both Stop (per-turn) and SessionEnd (true termination) events.
 
-@test "session-end.sh: writes .wrap-needed when session log has 2+ commits" {
+@test "stop.sh (SessionEnd): writes .wrap-needed when session log has 2+ commits" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
   local rig_dir="$TEST_PROJECT/.rig"
-  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
   local session_log="$TEMP_DIR/test-session.log"
   local wrap_needed="$rig_dir/memory/.wrap-needed"
 
@@ -1445,19 +1440,19 @@ _is_rig_protected() {
 
   rm -f "$wrap_needed"
 
-  # Run session-end.sh with source=logout; cd into project so git rev-parse resolves correctly
+  # Run stop.sh with source=logout (SessionEnd payload); cd into project so git rev-parse resolves
   echo '{"source": "logout"}' \
-    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$session_end_hook" )
+    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$stop_hook" )
 
   [ -f "$wrap_needed" ]
 }
 
-@test "session-end.sh: does not write .wrap-needed when session has fewer than 2 commits" {
+@test "stop.sh (SessionEnd): does not write .wrap-needed when session has fewer than 2 commits" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
   local rig_dir="$TEST_PROJECT/.rig"
-  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
   local session_log="$TEMP_DIR/test-session.log"
   local wrap_needed="$rig_dir/memory/.wrap-needed"
 
@@ -1470,19 +1465,19 @@ _is_rig_protected() {
   rm -f "$wrap_needed"
 
   echo '{"source": "logout"}' \
-    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$session_end_hook" )
+    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$stop_hook" )
 
   [ ! -f "$wrap_needed" ]
 }
 
-# ── TASK_255: session-end.sh skips write_minimal_checkpoint if snap lock held ─
+# ── stop.sh (SessionEnd) skips write_minimal_checkpoint if snap lock held ────
 
-@test "session-end.sh: skips write_minimal_checkpoint when snapshot write lock exists" {
+@test "stop.sh (SessionEnd): skips write_minimal_checkpoint when snapshot write lock exists" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
   local rig_dir="$TEST_PROJECT/.rig"
-  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
   local session_log="$TEMP_DIR/the-rig-session-test.log"
   local snap_lock="$rig_dir/memory/.snapshot-write-in-progress"
 
@@ -1494,18 +1489,18 @@ _is_rig_protected() {
   touch "$snap_lock"
 
   echo '{"source": "logout"}' \
-    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$session_end_hook" )
+    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$stop_hook" )
 
   # Snapshot must be unchanged — write_minimal_checkpoint was skipped
   grep -q "original snapshot" "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
 }
 
-@test "session-end.sh: write_minimal_checkpoint runs normally when no lock exists" {
+@test "stop.sh (SessionEnd): write_minimal_checkpoint runs normally when no lock exists" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
   local rig_dir="$TEST_PROJECT/.rig"
-  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
   local session_log="$TEMP_DIR/the-rig-session-test.log"
   local snap_lock="$rig_dir/memory/.snapshot-write-in-progress"
 
@@ -1518,7 +1513,7 @@ _is_rig_protected() {
   rm -f "$snap_lock"
 
   echo '{"source": "logout"}' \
-    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$session_end_hook" )
+    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$stop_hook" )
 
   # Snapshot must have been replaced with the minimal checkpoint content
   grep -q "session-end checkpoint" "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
@@ -1526,12 +1521,12 @@ _is_rig_protected() {
 
 # ── UUID-based session anchor in write_minimal_checkpoint ────────────────────
 
-@test "session-end.sh: write_minimal_checkpoint omits session name when sentinel absent" {
+@test "stop.sh (SessionEnd): write_minimal_checkpoint omits session name when sentinel absent" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
   local rig_dir="$TEST_PROJECT/.rig"
-  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
   local session_log="$TEMP_DIR/the-rig-session-test.log"
 
   # Snapshot has a name belonging to a sibling session
@@ -1543,19 +1538,19 @@ _is_rig_protected() {
 
   # No UUID sentinel — no anchor should appear
   echo '{"source": "logout"}' \
-    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$session_end_hook" )
+    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$stop_hook" )
 
   # Sibling's session name must NOT appear in the checkpoint
   run grep "sibling-session-name" "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
   [ "$status" -ne 0 ]
 }
 
-@test "session-end.sh: write_minimal_checkpoint writes session anchor from UUID sentinel" {
+@test "stop.sh (SessionEnd): write_minimal_checkpoint writes session anchor from UUID sentinel" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
   local rig_dir="$TEST_PROJECT/.rig"
-  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
   local session_log="$TEMP_DIR/the-rig-session-test.log"
 
   printf '**Last updated:** 2026-01-01\n\n---\n' \
@@ -1564,13 +1559,13 @@ _is_rig_protected() {
   printf '[10:01:00] PROGRESS stub: def5678 feat(x): second [#1]\n' >> "$session_log"
   rm -f "$rig_dir/memory/.snapshot-write-in-progress"
 
-  # Run via bash -c so $$ inside = PPID seen by session-end.sh
+  # Run via bash -c so $$ inside = PPID seen by stop.sh
   local test_project="$TEST_PROJECT"
   bash -c "
     printf '%s' 'anchor-uuid-test' > \"/tmp/.rig-session-\$\$.uuid\"
     cd \"$test_project\"
     echo '{\"source\": \"logout\"}' \
-      | RIG_SESSION_LOG=\"$session_log\" bash \"$session_end_hook\"
+      | RIG_SESSION_LOG=\"$session_log\" bash \"$stop_hook\"
     rm -f \"/tmp/.rig-session-\$\$.uuid\" 2>/dev/null
   "
 
@@ -1579,36 +1574,29 @@ _is_rig_protected() {
 }
 
 # ── Session log path is per-project ──────────────────────────────────────────
-# Hooks must write to /tmp/the-rig-session-<project>.log, not a global path.
-# This prevents cross-project commit count contamination in session-end.sh.
+# stop.sh must write to /tmp/the-rig-session-<project>.log, not a global path.
+# This prevents cross-project commit count contamination.
 
-@test "session log path: stop.sh and session-end.sh use per-project log filename" {
+@test "session log path: stop.sh uses per-project log filename" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
   local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
-  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
 
-  # Both hooks must reference the per-project pattern, not the global path
+  # Must reference the per-project pattern, not the global path
   run grep "the-rig-session\.log" "$stop_hook"
   [ "$status" -ne 0 ]  # global path must NOT appear
 
   run grep 'the-rig-session-.*\.log\|the-rig-session-\$(basename' "$stop_hook"
   [ "$status" -eq 0 ]  # per-project pattern must appear
-
-  run grep "the-rig-session\.log" "$session_end_hook"
-  [ "$status" -ne 0 ]  # global path must NOT appear
-
-  run grep 'the-rig-session-.*\.log\|the-rig-session-\$(basename' "$session_end_hook"
-  [ "$status" -eq 0 ]  # per-project pattern must appear
 }
 
-@test "session-end.sh: commit count not inflated by stubs from a different project" {
+@test "stop.sh (SessionEnd): commit count not inflated by stubs from a different project" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
   local rig_dir="$TEST_PROJECT/.rig"
-  local session_end_hook="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
   local wrap_needed="$rig_dir/memory/.wrap-needed"
 
   printf '**Last updated:** 2026-01-01 — test snapshot\n' \
@@ -1626,10 +1614,71 @@ _is_rig_protected() {
   rm -f "$wrap_needed"
 
   echo '{"source": "logout"}' \
-    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$this_project_log" bash "$session_end_hook" )
+    | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$this_project_log" bash "$stop_hook" )
 
   # .wrap-needed must NOT be set — the other project's stubs must not be visible
   [ ! -f "$wrap_needed" ]
+}
+
+@test "upgrade: session-end.sh removed from existing installs" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  # Simulate an old install that has session-end.sh present
+  touch "$TEST_PROJECT/.claude/hooks/session-end.sh"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  # File must be gone after upgrade
+  [ ! -f "$TEST_PROJECT/.claude/hooks/session-end.sh" ]
+}
+
+@test "upgrade: settings.json SessionEnd hook updated from session-end.sh to stop.sh" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local settings="$TEST_PROJECT/.claude/settings.json"
+
+  # Manually insert a stale SessionEnd → session-end.sh entry
+  python3 -c "
+import json
+with open('$settings') as f:
+    d = json.load(f)
+d.setdefault('hooks', {})['SessionEnd'] = [
+    {'hooks': [{'type': 'command', 'command': 'bash /repo/.claude/hooks/session-end.sh'}]}
+]
+with open('$settings', 'w') as f:
+    json.dump(d, f, indent=2)
+"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  # session-end.sh entry must be gone
+  run python3 -c "
+import json, sys
+with open('$settings') as f:
+    d = json.load(f)
+for entry in d.get('hooks', {}).get('SessionEnd', []):
+    for h in entry.get('hooks', []):
+        if 'session-end.sh' in h.get('command', ''):
+            sys.exit(1)
+"
+  [ "$status" -eq 0 ]
+
+  # stop.sh entry must be present
+  run python3 -c "
+import json, sys
+with open('$settings') as f:
+    d = json.load(f)
+for entry in d.get('hooks', {}).get('SessionEnd', []):
+    for h in entry.get('hooks', []):
+        if 'stop.sh' in h.get('command', ''):
+            sys.exit(0)
+sys.exit(1)
+"
+  [ "$status" -eq 0 ]
 }
 
 # ── Gap 5: commit-msg validates Conventional Commits format ───────────────────
