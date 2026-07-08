@@ -11,6 +11,25 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.21.0] — 2026-07-07
+
+### Added
+- **UUID-based session identity system** (`templates/project/.claude/hooks/stop.sh`, `session-start.sh`, `wrap.md`, `post-merge.md`): each session gets a UUID written to `/tmp/.rig-session-$PPID.uuid` at start; `stop.sh` annotates PROGRESS.md markers with `sid:UUID`; `pre-compact.sh` writes the UUID into the compact checkpoint; `/wrap` uses the anchor for session naming. Closes #315.
+- **Permission scan opt-in in `/wrap`** (`templates/project/.claude/commands/wrap.md`): after transcript pruning, `/wrap` can scan the last 30 days of JSONL transcripts for Bash commands seen ≥3 times and append them to `permissions.allow`. Activate via `.fewer-prompts-enabled` sentinel. Closes #316.
+- **Feature discovery tips system** (`templates/project/.claude/hooks/session-start.sh`): `show_tip()` + `collect_tips()` fire four one-time contextual tips during startup — session-name, fewer-prompts, task-tracking, and sprint. Global opt-out via `.rig-tips-disabled`. Closes #317.
+- **`permissions.deny` baseline in `settings.json`** (`templates/project/.claude/settings.json`, `install.sh`): fresh installs include 3 deny patterns (`rm -rf *`, `git push --force*`, `git push -f*`); `merge_settings_json` deduplicates deny entries on upgrade (mirrors existing allow logic, with `or []` null guard). Closes #318.
+- **`/code-review` command** (`templates/project/.claude/commands/code-review.md`): reads `test-command:`, `lint-command:`, `base-branch:`, `testing:`, `staging-url:`, and `prod-url:` from CLAUDE.md; analyses diff by category (logic, security, coverage, style); produces a LGTM/HOLD report; `--fix` mode applies suggestions one at a time. Commented-field false positive fixed (grep filters `#`-prefixed lines). CLAUDE.md template gains 5 optional commented fields. Closes #319.
+
+### Changed
+- **`stop.sh` now handles both Stop and SessionEnd events** (`templates/project/.claude/hooks/stop.sh`): dispatches on the `source` field from JSON stdin — empty source for per-turn Stop, `logout`/`prompt_input_exit`/`clear`/`resume` for SessionEnd. `session-end.sh` is deleted; upgrade path strips stale hook entries from `settings.json` and removes the file from disk. Closes #321.
+- **`.rig/VERSION` is now written dynamically** (`install.sh`): removed static `templates/project/.rig/VERSION` — the installer writes `$INSTALLER_VERSION` to `.rig/VERSION` at install/upgrade time. Eliminates the two-file version bump requirement. `mkdir -p` safety added to the write block. Closes #322.
+
+### Fixed
+- **Temp file cleanup on session start** (`templates/project/.claude/hooks/session-start.sh`): prunes `.compact-checkpoint-*.md` files older than 1 day on startup to prevent accumulation. Closes #320.
+- **Transcript pruning opt-in in `/wrap`** (`templates/project/.claude/commands/wrap.md`): JSONL transcript pruning is now opt-in via `transcript-retention-days:` in CLAUDE.md; CLAUDE.md template adds the field (commented out by default). Closes #320.
+
+---
+
 ## [1.20.0] — 2026-06-09
 
 ### Added
