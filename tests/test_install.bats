@@ -51,7 +51,6 @@ is_rig_owned_stub() {
     .claude/hooks/*|\
     .claude/commands/*|\
     .rig/processes/*|\
-    .rig/VERSION|\
     .husky/*|\
     .gitleaks.toml)
       return 0 ;;
