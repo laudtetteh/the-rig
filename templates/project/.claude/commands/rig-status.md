@@ -97,7 +97,7 @@ Check each hook file for existence and executable bit. Two categories:
 | PermissionRequest | `permission-request.sh` |
 | PreCompact | `pre-compact.sh` |
 | PostCompact | `post-compact.sh` |
-| SessionEnd | `session-end.sh` |
+| SessionEnd | `stop.sh` |
 
 For each, check `$REPO/.claude/hooks/<name>.sh`:
 - ✓ `[event] → .claude/hooks/[file] (exists, executable)`

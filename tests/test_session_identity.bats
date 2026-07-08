@@ -23,7 +23,6 @@ setup() {
   mkdir -p "$HOOK_DIR"
   cp "$(pwd)/templates/project/.claude/hooks/session-start.sh" "$HOOK_DIR/session-start.sh"
   cp "$(pwd)/templates/project/.claude/hooks/stop.sh"          "$HOOK_DIR/stop.sh"
-  cp "$(pwd)/templates/project/.claude/hooks/session-end.sh"   "$HOOK_DIR/session-end.sh"
   cp "$(pwd)/templates/project/.claude/hooks/pre-compact.sh"   "$HOOK_DIR/pre-compact.sh"
   chmod +x "$HOOK_DIR"/*.sh
 
@@ -192,7 +191,9 @@ with open('$TEST_SESSION_FILE', 'w') as f:
   [ "$COUNT" -eq 1 ]
 }
 
-# ── session-end.sh ───────────────────────────────────────────────────────────
+# ── stop.sh (SessionEnd events) ──────────────────────────────────────────────
+# stop.sh now handles both Stop (per-turn) and SessionEnd (true termination).
+# SessionEnd payloads carry source=logout|prompt_input_exit|clear|resume.
 
 @test "session-end: logout marks session file ended-no-wrap" {
   python3 -c "
@@ -205,7 +206,7 @@ with open('$TEST_SESSION_FILE', 'w') as f:
   # Need unexpanded stubs so .wrap-needed gets written (which drives checkpoint)
   echo "## stub <!-- Auto-logged by post-tool hook -->" > "$RIG_DIR/memory/PROGRESS.md"
 
-  run_hook_exec "session-end.sh" '{"source":"logout"}'
+  run_hook_exec "stop.sh" '{"source":"logout"}'
 
   STATUS=$(python3 -c "import json; print(json.load(open('$TEST_SESSION_FILE')).get('status',''))")
   [ "$STATUS" = "ended-no-wrap" ]
@@ -215,7 +216,7 @@ with open('$TEST_SESSION_FILE', 'w') as f:
   echo "abc12345" > "$TEST_UUID_FILE"
   echo "## stub <!-- Auto-logged by post-tool hook -->" > "$RIG_DIR/memory/PROGRESS.md"
 
-  run_hook_exec "session-end.sh" '{"source":"logout"}'
+  run_hook_exec "stop.sh" '{"source":"logout"}'
 
   [ ! -f "$TEST_UUID_FILE" ]
 }
@@ -224,7 +225,7 @@ with open('$TEST_SESSION_FILE', 'w') as f:
   echo "abc12345" > "$TEST_UUID_FILE"
   echo "## stub <!-- Auto-logged by post-tool hook -->" > "$RIG_DIR/memory/PROGRESS.md"
 
-  run_hook_exec "session-end.sh" '{"source":"logout"}'
+  run_hook_exec "stop.sh" '{"source":"logout"}'
 
   grep -q "\*\*Session anchor:\*\*" "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
   ! grep -q "\*\*Session name:\*\*" "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
@@ -233,7 +234,7 @@ with open('$TEST_SESSION_FILE', 'w') as f:
 @test "session-end: clear does not set .wrap-needed" {
   echo "## stub <!-- Auto-logged by post-tool hook -->" > "$RIG_DIR/memory/PROGRESS.md"
 
-  run_hook_exec "session-end.sh" '{"source":"clear"}'
+  run_hook_exec "stop.sh" '{"source":"clear"}'
 
   [ ! -f "$RIG_DIR/memory/.wrap-needed" ]
 }

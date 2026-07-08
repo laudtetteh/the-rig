@@ -83,7 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash [REPO_ROOT]/.claude/hooks/session-end.sh"
+            "command": "bash [REPO_ROOT]/.claude/hooks/stop.sh"
           }
         ]
       }
