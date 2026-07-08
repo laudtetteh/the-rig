@@ -552,6 +552,15 @@ if incoming_allow:
     if new_patterns:
         existing.setdefault("permissions", {}).setdefault("allow", []).extend(new_patterns)
 
+# Merge permissions.deny (dedup by pattern string)
+incoming_deny = incoming.get("permissions", {}).get("deny", [])
+if incoming_deny:
+    existing_deny = existing.get("permissions", {}).get("deny", []) or []
+    existing_deny_set = set(existing_deny)
+    new_deny = [p for p in incoming_deny if p not in existing_deny_set]
+    if new_deny:
+        existing.setdefault("permissions", {}).setdefault("deny", []).extend(new_deny)
+
 with open(output_path, "w") as f:
     json.dump(existing, f, indent=2)
     f.write("\n")

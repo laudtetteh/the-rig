@@ -454,6 +454,66 @@ print(len(s.get('permissions', {}).get('allow', [])))
   [ "$count_after_second" -eq "$count_after_first" ]
 }
 
+@test "merge strategy: permissions.deny entries are preserved and not duplicated" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  # Baseline deny entries must be present after fresh install
+  local deny_count
+  deny_count=$(python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+print(len(s.get('permissions', {}).get('deny', [])))
+")
+  [ "$deny_count" -ge 1 ]
+  grep -q '"Bash(rm -rf \*)' "$TEST_PROJECT/.claude/settings.json"
+  # Add a user-custom deny entry to verify it is preserved on re-install
+  python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+s.setdefault('permissions', {}).setdefault('deny', []).append('Bash(curl *)')
+with open('$TEST_PROJECT/.claude/settings.json', 'w') as f:
+    json.dump(s, f, indent=2)
+    f.write('\n')
+"
+  run_installer --strategy merge
+  [ "$status" -eq 0 ]
+  local deny_count_after
+  deny_count_after=$(python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+print(len(s.get('permissions', {}).get('deny', [])))
+")
+  # Count must equal original + 1 (sentinel preserved, no duplication)
+  [ "$deny_count_after" -eq "$((deny_count + 1))" ]
+  grep -q '"Bash(curl \*)' "$TEST_PROJECT/.claude/settings.json"
+}
+
+@test "upgrade strategy: does not duplicate permissions.deny on upgrade" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  local count_after_first
+  count_after_first=$(python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+print(len(s.get('permissions', {}).get('deny', [])))
+")
+  [ "$count_after_first" -ge 1 ]
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  local count_after_second
+  count_after_second=$(python3 -c "
+import json
+with open('$TEST_PROJECT/.claude/settings.json') as f:
+    s = json.load(f)
+print(len(s.get('permissions', {}).get('deny', [])))
+")
+  [ "$count_after_second" -eq "$count_after_first" ]
+}
+
 # ── CLI flag validation ───────────────────────────────────────────────────────
 
 @test "--strategy with invalid value warns and falls back to interactive" {
