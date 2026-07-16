@@ -37,13 +37,7 @@ if command -v python3 >/dev/null 2>&1; then
   printf '%s' "$CONTEXT" | python3 -c "
 import json, sys
 ctx = sys.stdin.read()
-out = {
-    'hookSpecificOutput': {
-        'hookEventName': 'PostCompact',
-        'additionalContext': ctx
-    }
-}
-print(json.dumps(out))
+print(json.dumps({'systemMessage': ctx}))
 " 2>/dev/null || true
 fi
 

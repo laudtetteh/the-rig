@@ -7,8 +7,8 @@
 # tentative name. The checkpoint is read back by post-compact.sh (same session)
 # and by session-start.sh when source=compact (new session after compaction).
 #
-# Also outputs a compactionSummary so the checkpoint survives in the
-# compacted summary itself.
+# Also outputs a systemMessage so the checkpoint content is injected into
+# the compaction context before Claude compacts.
 #
 # Falls through silently (exit 0, no output) on any error or missing files.
 
@@ -102,20 +102,13 @@ cat > "$CHECKPOINT" <<CPEOF
 ${CONTEXT_HEADER}
 CPEOF
 
-# ── Output compactionSummary ───────────────────────────────────────────────────
+# ── Output checkpoint as systemMessage ────────────────────────────────────────
 
-if command -v python3 >/dev/null 2>&1; then
-  SUMMARY="Branch: ${BRANCH} | Last commit: ${LAST_COMMIT} | Active task: ${ACTIVE_TASK} | Last progress: ${LAST_PROGRESS} | Session anchor: ${SESSION_ANCHOR} | Tentative: ${TENTATIVE_NAME}"
-  printf '%s' "$SUMMARY" | python3 -c "
-import json, sys
-summary = sys.stdin.read()
-out = {
-    'hookSpecificOutput': {
-        'hookEventName': 'PreCompact',
-        'compactionSummary': summary
-    }
-}
-print(json.dumps(out))
+if command -v python3 >/dev/null 2>&1 && [[ -f "$CHECKPOINT" ]]; then
+  CHECKPOINT_F="$CHECKPOINT" python3 -c "
+import json, os
+ctx = open(os.environ['CHECKPOINT_F']).read()
+print(json.dumps({'systemMessage': ctx}))
 " 2>/dev/null || true
 fi
 

@@ -635,7 +635,7 @@ print(len(s.get('permissions', {}).get('deny', [])))
   rm -rf "$tmpdir"
 }
 
-@test "post-compact: outputs additionalContext JSON when checkpoint exists" {
+@test "post-compact: outputs systemMessage JSON when checkpoint exists" {
   local tmpdir
   tmpdir=$(mktemp -d)
   git -C "$tmpdir" init -q
@@ -651,9 +651,8 @@ print(len(s.get('permissions', {}).get('deny', [])))
   echo "$output" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
-assert 'hookSpecificOutput' in d
-assert d['hookSpecificOutput']['hookEventName'] == 'PostCompact'
-assert 'additionalContext' in d['hookSpecificOutput']
+assert 'systemMessage' in d
+assert 'test-branch' in d['systemMessage']
 " 2>/dev/null
   [ "$?" -eq 0 ]
   rm -rf "$tmpdir"
