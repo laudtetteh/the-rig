@@ -268,14 +268,13 @@ with open('$TEST_SESSION_FILE', 'w') as f:
   grep -q "\*\*Session anchor:\*\* none" "$CKPT"
 }
 
-@test "pre-compact: emits compactionSummary JSON with Session anchor field" {
+@test "pre-compact: emits systemMessage JSON with Session anchor field" {
   run_hook_exec "pre-compact.sh" '{}'
   hook_output | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
-assert 'hookSpecificOutput' in d, 'missing hookSpecificOutput'
-summary = d['hookSpecificOutput']['compactionSummary']
-assert 'Session anchor' in summary, f'Session anchor not in summary: {summary}'
+assert 'systemMessage' in d, 'missing systemMessage'
+assert 'Session anchor' in d['systemMessage'], f'Session anchor not in systemMessage: {d[\"systemMessage\"]}'
 "
 }
 

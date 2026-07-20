@@ -2,8 +2,8 @@
 # post-compact.sh
 #
 # Runs after Claude Code finishes compacting the context (PostCompact event).
-# Reads the checkpoint written by pre-compact.sh and re-injects it as
-# additionalContext so the agent can resume mid-task without losing awareness
+# Reads the checkpoint written by pre-compact.sh and re-injects it as a
+# systemMessage so the agent can resume mid-task without losing awareness
 # of what branch, commit, and step were active before compaction.
 #
 # Falls back to CONTEXT_SNAPSHOT.md if no checkpoint exists.
@@ -37,13 +37,7 @@ if command -v python3 >/dev/null 2>&1; then
   printf '%s' "$CONTEXT" | python3 -c "
 import json, sys
 ctx = sys.stdin.read()
-out = {
-    'hookSpecificOutput': {
-        'hookEventName': 'PostCompact',
-        'additionalContext': ctx
-    }
-}
-print(json.dumps(out))
+print(json.dumps({'systemMessage': ctx}))
 " 2>/dev/null || true
 fi
 
