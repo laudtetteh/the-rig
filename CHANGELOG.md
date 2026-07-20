@@ -25,6 +25,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`.rig/VERSION` is now written dynamically** (`install.sh`): removed static `templates/project/.rig/VERSION` — the installer writes `$INSTALLER_VERSION` to `.rig/VERSION` at install/upgrade time. Eliminates the two-file version bump requirement. `mkdir -p` safety added to the write block. Closes #322.
 
 ### Fixed
+- **Compact hook JSON validation failure** (`templates/project/.claude/hooks/pre-compact.sh`, `post-compact.sh`): both hooks were emitting `hookSpecificOutput` with `hookEventName: "PreCompact"/"PostCompact"` — event names not in the Claude Code schema. Every compaction silently dropped hook output. Fix: replace `hookSpecificOutput` with the top-level `systemMessage` field, which is valid for all hook events. `pre-compact.sh` now emits the full checkpoint file (not just a summary line), providing more context during compaction. Closes #333.
 - **Temp file cleanup on session start** (`templates/project/.claude/hooks/session-start.sh`): prunes `.compact-checkpoint-*.md` files older than 1 day on startup to prevent accumulation. Closes #320.
 - **Transcript pruning opt-in in `/wrap`** (`templates/project/.claude/commands/wrap.md`): JSONL transcript pruning is now opt-in via `transcript-retention-days:` in CLAUDE.md; CLAUDE.md template adds the field (commented out by default). Closes #320.
 
