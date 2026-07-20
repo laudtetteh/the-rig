@@ -189,6 +189,23 @@ gh pr create --title "chore(rig): upgrade to vX.Y.Z" \
 
 ---
 
+## Known gotchas when extending hooks
+
+**`git add` inside a pre-commit hook fails on Git 2.39+**
+
+Git 2.39+ holds the index lock for the entire duration of the pre-commit hook. Any
+`git add` call inside the hook (or scripts it invokes) fails with:
+
+```
+fatal: Unable to create '.git/index.lock': File exists.
+Another git process seems to be running in this repository
+```
+
+Use `git update-index --add <file>` instead — it stages individual files without
+acquiring the index lock and works correctly inside hooks on all Git versions.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
