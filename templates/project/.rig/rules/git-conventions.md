@@ -33,6 +33,13 @@ Optional body explaining WHY, not what. The diff shows what.
 
 **Issue reference:** `[#N]` at the end of the subject line. Required when a GitHub issue exists.
 
+> **`[#N]` is a reference, not an auto-close trigger.** GitHub auto-closes the linked issue
+> only when a commit containing `Closes #N`, `Fixes #N`, or `Resolves #N` in its **body**
+> is merged to the default branch — or when those keywords appear in the **PR body** of a
+> PR merging to the default branch. The `[#N]` subject-line format fulfils The Rig's
+> commit-msg validation and creates a hyperlink in GitHub history, but does not auto-close.
+> Always include `Closes #N` in the PR body (the `/ship` PR template already does this).
+
 ### Examples
 
 ```

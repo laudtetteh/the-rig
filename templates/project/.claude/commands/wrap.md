@@ -174,7 +174,9 @@ Never delete entries — only move them.
 
 ## Marker prune step — PROGRESS.md session-end markers
 
-`stop.sh` appends `<!-- session-end YYYY-MM-DD HH:MM -->` after every agent turn.
+`stop.sh` appends `<!-- session-end YYYY-MM-DD HH:MM sid:UUID -->` after every agent turn
+(where `UUID` is the session anchor written to `/tmp/.rig-session-$PPID.uuid` at session start;
+omitted on pre-v1.21.0 installs that lack the UUID system).
 Over time these accumulate in PROGRESS.md without bound — they are not covered by
 the `## ` header trim above.
 
@@ -327,12 +329,16 @@ After checking `.rig/memory/ERRORS.md`, count the number of `## ` entry headers 
 3. Remove them from `.rig/memory/ERRORS.md`, leaving the 30 most recent entries
 4. **Append a trim stub** at the bottom of the trimmed `ERRORS.md`:
    ```
-   <!-- archived YYYY-MM-DD: [N] entries moved to ERRORS_archive.md. Categories: [3–6 word comma-separated summary, e.g. "bats non-interactive, gitleaks path, Husky sh-e, worktree writes"] -->
+   <!-- archived YYYY-MM-DD: [N] entries moved to ERRORS_archive.md. Categories: [3–6 word comma-separated summary, e.g. "bats non-interactive, gitleaks path, Husky sh-e, worktree writes"] — NEW ENTRIES GO ABOVE THIS LINE -->
    ```
    This lets the agent grep for a category keyword without loading the archive, and
    signals to the ERRORS.md logging step that the archive should be checked.
+   The `NEW ENTRIES GO ABOVE THIS LINE` marker is load-bearing: it prevents future
+   sessions from appending entries below the stub (which inverts newest-first order
+   and breaks the next trim's direction detection).
 
-Never delete entries — only move them.
+Never delete entries — only move them. ERRORS.md is always newest-first: add new
+`## ` entries at the **top**, never below the archived stub.
 
 ---
 
