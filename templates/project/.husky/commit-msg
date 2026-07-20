@@ -77,7 +77,8 @@ case "$ISSUE_TRACKING" in
       echo "  Got:      $SUBJECT"
       echo "  Create the issue first: gh issue create ..."
       echo ""
-      echo "  To bypass: SKIP_COMMIT_VALIDATION=1 git commit ..."
+      echo "  Per-commit bypass (no ticket needed): add  # no-issue  as a line in the commit body"
+      echo "  Full validation bypass:               SKIP_COMMIT_VALIDATION=1 git commit ..."
       echo ""
       exit 1
     fi
