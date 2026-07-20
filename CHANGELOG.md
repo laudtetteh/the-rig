@@ -11,6 +11,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.22.0] — 2026-07-19
+
+### Fixed
+- **`[#N]` auto-close clarification** (`templates/project/.rig/rules/git-conventions.md`): added explicit callout that `[#N]` in the commit subject is a reference only — GitHub auto-close requires `Closes #N`, `Fixes #N`, or `Resolves #N` in the PR body or commit body. The `/ship` PR template already includes `Closes #N`; the rule file now explains why. Closes #335.
+- **Session-end marker format in `/wrap` Marker prune step** (`templates/project/.claude/commands/wrap.md`): documentation showed `<!-- session-end YYYY-MM-DD HH:MM -->` but `stop.sh` (v1.21.0+) writes `<!-- session-end YYYY-MM-DD HH:MM sid:UUID -->`. Stale format caused agents to emit markers without the UUID, breaking `/wrap` session attribution. Closes #336.
+- **ERRORS.md trim stub direction ambiguity** (`templates/project/.claude/commands/wrap.md`): added `— NEW ENTRIES GO ABOVE THIS LINE` anchor to the archived stub format and explicit prose stating ERRORS.md is always newest-first. Prevents agents from appending new entries below the stub (which inverts sort order and causes the next trim to archive wrong entries). Closes #337.
+- **`commit-msg` bypass hint for maintenance commits** (`templates/project/.husky/commit-msg`): the GitHub issue-reference error now shows both options — `# no-issue` body trailer (per-commit, preferred) and `SKIP_COMMIT_VALIDATION=1` (full bypass). Previously only the full bypass was shown in the error output, despite `# no-issue` being documented in the header comment. Closes #338.
+- **`git add` inside pre-commit hook fails on Git 2.39+** (`templates/project/.rig/processes/UPGRADE_WORKFLOW.md`): added a "Known gotchas when extending hooks" section documenting the index-lock conflict and the `git update-index --add` workaround. The `pre-commit.sh` template already carries this comment (v1.21.0); this adds process-level coverage for users extending hooks. Closes #339.
+
+---
+
 ## [1.21.0] — 2026-07-07
 
 ### Added
