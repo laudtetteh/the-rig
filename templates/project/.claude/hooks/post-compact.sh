@@ -2,8 +2,8 @@
 # post-compact.sh
 #
 # Runs after Claude Code finishes compacting the context (PostCompact event).
-# Reads the checkpoint written by pre-compact.sh and re-injects it as
-# additionalContext so the agent can resume mid-task without losing awareness
+# Reads the checkpoint written by pre-compact.sh and re-injects it as a
+# systemMessage so the agent can resume mid-task without losing awareness
 # of what branch, commit, and step were active before compaction.
 #
 # Falls back to CONTEXT_SNAPSHOT.md if no checkpoint exists.
