@@ -88,6 +88,19 @@ json_assert() {
   [ "$before" = "$(cksum "$CASE_DIR/AGENTS.override.md")" ]
 }
 
+@test "Python 3.9 doctor rejects fallback nested under a project table" {
+  printf '{"schema_version":1,"agents":["codex"]}\n' > "$CASE_DIR/.rig/install-targets.json"
+  mkdir -p "$CASE_DIR/.codex"
+  cat > "$CASE_DIR/.codex/config.toml" <<'EOF'
+[projects."/tmp/example"]
+trust_level = "trusted"
+project_doc_fallback_filenames = ["CLAUDE.md"]
+EOF
+  run env _RIG_TEST_NO_TOMLLIB=1 "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_project_instructions"); assert not c["ok"] and "top-level" in c["detail"]'
+}
+
 @test "GitHub tracker uses safely stubbed auth and detects commit drift" {
   printf 'issue-tracking: github\n' > "$CASE_DIR/CLAUDE.md"
   cat > "$FAKE_BIN/gh" <<'SH'

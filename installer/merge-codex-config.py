@@ -18,6 +18,47 @@ except ImportError:  # Python 3.9 compatibility path is exercised on macOS.
 KEY = "project_doc_fallback_filenames"
 
 
+def first_table_offset(text):
+    """Return the first TOML table header offset, rejecting ambiguous headers."""
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.lstrip(" \t")
+        if not stripped.startswith("["):
+            offset += len(line)
+            continue
+        opening = 2 if stripped.startswith("[[") else 1
+        index = opening
+        quote = None
+        escaped = False
+        closing = None
+        while index < len(stripped):
+            char = stripped[index]
+            if quote:
+                if escaped:
+                    escaped = False
+                elif quote == '"' and char == "\\":
+                    escaped = True
+                elif char == quote:
+                    quote = None
+            elif char in "\"'":
+                quote = char
+            elif char == "]":
+                if opening == 1 or stripped[index : index + 2] == "]]":
+                    closing = index + opening
+                    break
+            index += 1
+        if closing is None or quote:
+            raise ValueError("malformed or ambiguous TOML table header")
+        remainder = stripped[closing:].strip()
+        if remainder and not remainder.startswith("#"):
+            raise ValueError("malformed or ambiguous TOML table header")
+        inner = stripped[opening : closing - opening].strip()
+        if not inner:
+            raise ValueError("empty TOML table header")
+        return offset + len(line) - len(stripped)
+    return None
+
+
 def parse_string_array(source):
     values = []
     index = 1
@@ -65,9 +106,12 @@ def parse_string_array(source):
 
 
 def assignment_span(text):
-    match = re.search(rf"(?m)^[ \t]*{KEY}[ \t]*=", text)
-    if not match:
+    matches = list(re.finditer(rf"(?m)^[ \t]*{KEY}[ \t]*=", text))
+    if len(matches) > 1:
+        raise ValueError(f"multiple {KEY} assignments are ambiguous")
+    if not matches:
         return None
+    match = matches[0]
     start = match.start()
     index = match.end()
     while index < len(text) and text[index].isspace():
@@ -106,10 +150,11 @@ def assignment_span(text):
 
 def merged_text(text):
     span = assignment_span(text)
-    table = re.search(r"(?m)^[ \t]*\[{1,2}[A-Za-z0-9_.\"'-]+\]{1,2}[ \t]*(?:#.*)?$", text)
-    if span and table and span[0] > table.start():
+    table_offset = first_table_offset(text)
+    if span and table_offset is not None and span[0] > table_offset:
         raise ValueError(f"{KEY} must be a top-level setting")
-    if tomllib is not None:
+    use_tomllib = tomllib is not None and os.environ.get("_RIG_TEST_NO_TOMLLIB") != "1"
+    if use_tomllib:
         try:
             data = tomllib.loads(text)
         except tomllib.TOMLDecodeError as exc:
@@ -129,12 +174,12 @@ def merged_text(text):
     if span:
         result = text[: span[0]] + assignment + text[span[1] :]
     else:
-        insertion = table.start() if table else len(text)
+        insertion = table_offset if table_offset is not None else len(text)
         prefix = text[:insertion]
         suffix = text[insertion:]
         separator = "" if not prefix or prefix.endswith("\n") else "\n"
         result = prefix + separator + assignment + "\n" + suffix
-    if tomllib is not None:
+    if use_tomllib:
         try:
             tomllib.loads(result)
         except tomllib.TOMLDecodeError as exc:

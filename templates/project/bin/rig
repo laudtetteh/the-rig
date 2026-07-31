@@ -306,7 +306,7 @@ if "codex" in target_agents:
     fallback_ok = False
     config_error = None
     config_path = root / ".codex" / "config.toml"
-    if tomllib is not None:
+    if tomllib is not None and os.environ.get("_RIG_TEST_NO_TOMLLIB") != "1":
         try:
             with config_path.open("rb") as handle:
                 fallback_names = tomllib.load(handle).get("project_doc_fallback_filenames", [])
@@ -315,12 +315,15 @@ if "codex" in target_agents:
             config_error = str(exc)
     else:
         config_text = read(config_path)
-        match = re.search(r'(?ms)^[ \t]*project_doc_fallback_filenames[ \t]*=[ \t]*\[(.*?)\]', config_text)
-        if match:
+        table_match = re.search(r'(?m)^[ \t]*\[', config_text)
+        matches = list(re.finditer(r'(?ms)^[ \t]*project_doc_fallback_filenames[ \t]*=[ \t]*\[(.*?)\]', config_text))
+        match = matches[0] if len(matches) == 1 else None
+        top_level = match is not None and (table_match is None or match.start() < table_match.start())
+        if top_level:
             fallback_names = re.findall(r'["\']([^"\']+)["\']', match.group(1))
             fallback_ok = "CLAUDE.md" in fallback_names and (root / "CLAUDE.md").is_file()
         else:
-            config_error = "project_doc_fallback_filenames missing or malformed"
+            config_error = "top-level project_doc_fallback_filenames missing, nested, or malformed"
     effective = bool(agents_file) or fallback_ok
     if agents_file:
         detail = f"{agents_file} takes precedence"
