@@ -98,6 +98,60 @@ git branch --show-current
 git status --short
 ```
 
+If the branch needs renaming, use this helper. It detects a case-only change using
+both a bytewise comparison and an ASCII case-folded comparison. Only that special
+case goes through a collision-checked temporary ref; all other renames use Git's
+normal conflict handling.
+
+```bash
+# branch-case-rename:start
+rename_branch_case_safe() {
+  local desired_branch="$1"
+  local current_branch current_folded desired_folded slug temp_base temp_branch suffix rename_status
+
+  current_branch=$(git branch --show-current) || return
+  if [[ -z "$current_branch" ]]; then
+    echo "Cannot rename a detached HEAD." >&2
+    return 1
+  fi
+
+  current_folded=$(printf '%s' "$current_branch" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+  desired_folded=$(printf '%s' "$desired_branch" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+
+  if [[ "$current_branch" != "$desired_branch" && "$current_folded" == "$desired_folded" ]]; then
+    slug=$(printf '%s' "$current_branch" | LC_ALL=C tr -c '[:alnum:]._- ' '-' | tr ' ' '-')
+    temp_base="tmp/${slug}-rename"
+    temp_branch="$temp_base"
+    suffix=0
+    while git show-ref --verify --quiet "refs/heads/$temp_branch"; do
+      suffix=$((suffix + 1))
+      temp_branch="${temp_base}-${suffix}"
+    done
+
+    git branch -m "$temp_branch" || return
+    rename_status=0
+    git branch -m "$desired_branch" || rename_status=$?
+    if [[ "$rename_status" -ne 0 ]]; then
+      if git branch -m "$current_branch"; then
+        echo "Rename to '$desired_branch' failed; restored '$current_branch'." >&2
+      else
+        echo "Rename to '$desired_branch' failed and rollback failed; branch remains '$temp_branch'." >&2
+      fi
+      return "$rename_status"
+    fi
+    return 0
+  fi
+
+  git branch -m "$desired_branch"
+}
+# branch-case-rename:end
+
+rename_branch_case_safe "[desired-branch-name]"
+```
+
+If it fails, stop and surface the error. Do not remove a reported temporary ref;
+it is retained only when rollback failed and protects the user's branch contents.
+
 **If on `main` or `master`:** stop — you cannot commit directly here. Ask:
 > "You're on `main`. Which branch should this go on? I can create `[type/slug]` off `[BASE]`."
 Wait for the user's answer. Before creating the branch, run the stale-main check below.
