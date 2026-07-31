@@ -1,5 +1,9 @@
 # Command: /sprint
 
+> **Work-mode adapter:** Follow `.rig/processes/WORK_MODES.md` as the canonical
+> lifecycle and state contract. Sprint mode coordinates existing task cards;
+> each embedded task retains its own operating mode, checkpoints, and ship gate.
+
 Plan and execute a batch of tasks as a sprint, with conflict detection and
 wave-based ordering to minimize merge friction.
 
