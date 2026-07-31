@@ -422,6 +422,9 @@ the user to confirm or tweak.
 
 ### Step 1 — Find this session's UUID and tentative name
 
+Read `$RIG_DIR/rules/session-naming.md` completely first. Its session-local
+evidence rules are authoritative for this suggestion.
+
 ```bash
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 if [[ -f "$REPO/.rigpath" ]]; then RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath"); else RIG_DIR="$REPO/.rig"; fi
@@ -450,10 +453,10 @@ what enables UUID-keyed session attribution.
 grep "^## .*<!-- sid:${SESSION_UUID} -->" "$RIG_DIR/memory/PROGRESS.md" 2>/dev/null || true
 ```
 
-**Fallback — session-end marker boundary (legacy, no UUID):**
-Find the most recent `<!-- session-end -->` marker; entries above it belong to this session.
-
 **If conversation context and file signals conflict, trust the conversation.**
+Never use `CONTEXT_SNAPSHOT.md`, legacy markers, unrelated session files,
+other-session UUID entries, or general project history as naming evidence. An
+unresolved raw launch fails closed before any name is proposed or written.
 
 ### Step 3 — Build the name
 

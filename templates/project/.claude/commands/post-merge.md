@@ -187,6 +187,9 @@ automatically — present it for the user to confirm or tweak.
 
 ### Step 1 — Find this session's UUID and tentative name
 
+Read `$RIG_DIR/rules/session-naming.md` completely first. Its session-local
+evidence rules are authoritative for this suggestion.
+
 ```bash
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
@@ -211,6 +214,9 @@ grep "^## .*<!-- sid:${SESSION_UUID} -->" "$RIG_DIR/memory/PROGRESS.md" 2>/dev/n
 at the end of the line.** Read UUID from the resolver output above.
 
 If tentative_name is set, use it as the base (refine based on actual outcome).
+Never use `CONTEXT_SNAPSHOT.md`, legacy markers, unrelated session files,
+other-session UUID entries, or general project history as naming evidence. An
+unresolved raw launch fails closed before any name is proposed or written.
 
 ### Step 3 — Build the name
 
