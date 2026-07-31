@@ -547,23 +547,74 @@ written until the next commit creates new unexpanded stubs.
 
 ## Transcript pruning (opt-in)
 
-After flag cleanup, check for the `transcript-retention-days:` field in `$REPO/CLAUDE.md`.
-If present and set to a positive integer, prune old JSONL transcript files to prevent
-`/tmp` (or `~/.claude/projects/`) from filling up:
+After flag cleanup, use the current agent identity already established by the active
+Claude command or Codex skill/session (the shared #342/#343 behavior). Do not add a
+second detector based on installed files, processes, or transcript contents. Replace
+`CURRENT_AGENT` below with the literal `claude` or `codex` for that identity, then run
+the block.
+
+The `transcript-retention-days:` field in `$REPO/CLAUDE.md` enables age-based pruning
+when it is a positive integer. Claude transcripts live under the documented
+`$HOME/.claude/projects` location. Codex active sessions live under
+`${CODEX_HOME:-$HOME/.codex}/sessions`; never read or parse their rollout contents.
+Codex `archived_sessions` is excluded unless
+`transcript-retention-include-archived: true` explicitly opts it in.
 
 ```bash
+# transcript-pruning:start
+TRANSCRIPT_AGENT="CURRENT_AGENT"
 RETENTION_DAYS=$(grep "^transcript-retention-days:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
-if [[ -n "$RETENTION_DAYS" && "$RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
-  PRUNED=$(find ~/.claude/projects/ -name "*.jsonl" -mtime "+${RETENTION_DAYS}" -print 2>/dev/null | wc -l | tr -d ' ')
-  find ~/.claude/projects/ -name "*.jsonl" -mtime "+${RETENTION_DAYS}" -delete 2>/dev/null || true
+INCLUDE_ARCHIVED=$(grep "^transcript-retention-include-archived:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+
+if [[ ! "$RETENTION_DAYS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Transcript pruning skipped: transcript persistence retention is disabled."
+else
+  TRANSCRIPT_DIRS=()
+  case "$TRANSCRIPT_AGENT" in
+    claude)
+      TRANSCRIPT_DIRS+=("$HOME/.claude/projects")
+      ;;
+    codex)
+      CODEX_TRANSCRIPT_HOME="${CODEX_HOME:-$HOME/.codex}"
+      TRANSCRIPT_DIRS+=("$CODEX_TRANSCRIPT_HOME/sessions")
+      if [[ "$INCLUDE_ARCHIVED" == "true" ]]; then
+        TRANSCRIPT_DIRS+=("$CODEX_TRANSCRIPT_HOME/archived_sessions")
+      fi
+      ;;
+    *)
+      echo "Transcript pruning skipped: current agent identity is unavailable."
+      TRANSCRIPT_DIRS=()
+      ;;
+  esac
+
+  EXISTING_TRANSCRIPT_DIRS=()
+  for TRANSCRIPT_DIR in "${TRANSCRIPT_DIRS[@]}"; do
+    if [[ -d "$TRANSCRIPT_DIR" ]]; then
+      EXISTING_TRANSCRIPT_DIRS+=("$TRANSCRIPT_DIR")
+    else
+      echo "Transcript pruning skipped missing path: $TRANSCRIPT_DIR"
+    fi
+  done
+
+  PRUNED=0
+  if [[ "${#EXISTING_TRANSCRIPT_DIRS[@]}" -gt 0 ]]; then
+    while IFS= read -r -d '' TRANSCRIPT_FILE; do
+      if rm -f -- "$TRANSCRIPT_FILE"; then
+        PRUNED=$((PRUNED + 1))
+      fi
+    done < <(find "${EXISTING_TRANSCRIPT_DIRS[@]}" -type f -name "*.jsonl" -mtime "+${RETENTION_DAYS}" -print0 2>/dev/null)
+  fi
   if [[ "$PRUNED" -gt 0 ]]; then
     echo "Pruned ${PRUNED} JSONL transcript file(s) older than ${RETENTION_DAYS} days."
   fi
 fi
+# transcript-pruning:end
 ```
 
-This step is a no-op when `transcript-retention-days:` is absent or commented out.
-Report the pruned count only when files were actually deleted.
+Missing transcript directories and absent, zero, or invalid retention settings skip
+cleanly with an explicit note. Report the pruned count only when files were actually
+deleted. The block only examines paths, file names, types, and modification times; it
+must never inspect transcript contents.
 
 ---
 
