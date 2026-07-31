@@ -27,6 +27,23 @@ fi
 
 if [[ -n "$CHECKPOINT" ]] && [[ -f "$CHECKPOINT" ]]; then
   CONTEXT=$(cat "$CHECKPOINT")
+  STORED_BRANCH=$(sed -n 's/^\*\*Branch:\*\* //p' "$CHECKPOINT" | head -1)
+  STORED_HEAD=$(sed -n 's/^\*\*HEAD SHA:\*\* //p' "$CHECKPOINT" | head -1)
+  LIVE_BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+  LIVE_HEAD=$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)
+  STALE_REASONS=""
+  if [[ -n "$STORED_BRANCH" && -n "$LIVE_BRANCH" && "$STORED_BRANCH" != "$LIVE_BRANCH" ]]; then
+    STALE_REASONS="branch changed from ${STORED_BRANCH} to ${LIVE_BRANCH}"
+  fi
+  if [[ -n "$STORED_HEAD" && -n "$LIVE_HEAD" && "$STORED_HEAD" != "$LIVE_HEAD" ]]; then
+    [[ -n "$STALE_REASONS" ]] && STALE_REASONS+="; "
+    STALE_REASONS+="HEAD changed from ${STORED_HEAD} to ${LIVE_HEAD}"
+  fi
+  if [[ -n "$STALE_REASONS" ]]; then
+    CONTEXT="⚠️ Advisory: compact checkpoint is stale (${STALE_REASONS}). Treat it as historical context and verify live repository state before continuing.
+
+${CONTEXT}"
+  fi
 elif [[ -f "$SNAPSHOT" ]]; then
   CONTEXT=$(cat "$SNAPSHOT")
 else

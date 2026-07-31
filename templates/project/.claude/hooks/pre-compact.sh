@@ -28,9 +28,21 @@ CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint-${SESSION_PID}.md"
 
 # ── Gather context ─────────────────────────────────────────────────────────────
 
-TIMESTAMP=$(date '+%Y-%m-%d %H:%M' 2>/dev/null || true)
+TIMESTAMP=$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || true)
 BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+HEAD_SHA=$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo "unknown")
 LAST_COMMIT=$(git -C "$REPO" log -1 --format="%h — %s" 2>/dev/null || echo "none")
+
+PR_NUMBER="${RIG_PR_NUMBER:-none}"
+if [[ "$PR_NUMBER" == "none" ]]; then
+  _detected_pr=$(git -C "$REPO" log -1 --format='%s' 2>/dev/null \
+    | sed -nE 's/.*\(#([0-9]+)\)$/\1/p' | head -1)
+  [[ -n "$_detected_pr" ]] && PR_NUMBER="$_detected_pr"
+fi
+if [[ "$PR_NUMBER" == "none" ]] && command -v gh >/dev/null 2>&1; then
+  _detected_pr=$(cd "$REPO" && gh pr view --json number --jq '.number' 2>/dev/null || true)
+  [[ "$_detected_pr" =~ ^[0-9]+$ ]] && PR_NUMBER="$_detected_pr"
+fi
 
 ACTIVE_TASK="none"
 if [[ -d "$RIG_DIR/tasks/active" ]]; then
@@ -92,8 +104,11 @@ cat > "$CHECKPOINT" <<CPEOF
 ## Compact checkpoint — ${TIMESTAMP}
 
 **Branch:** ${BRANCH}
+**HEAD SHA:** ${HEAD_SHA}
+**PR number:** ${PR_NUMBER}
 **Last commit:** ${LAST_COMMIT}
 **Active task:** ${ACTIVE_TASK}
+**Captured at:** ${TIMESTAMP}
 **Last progress entry:** ${LAST_PROGRESS}
 **Session anchor:** ${SESSION_ANCHOR}
 **Session tentative name:** ${TENTATIVE_NAME}
