@@ -143,9 +143,11 @@ _fail_with_list() {
   grep -qE "chore\(memory\)" "$COMMAND_DIR/ship.md"
 }
 
-@test "wrap.md: contains transcript pruning bash block with retention-days lookup" {
+@test "wrap.md: transcript pruning uses agent-aware documented locations" {
   grep -q "transcript-retention-days" "$COMMAND_DIR/wrap.md"
-  grep -q "find ~/.claude/projects/" "$COMMAND_DIR/wrap.md"
+  grep -Fq '$HOME/.claude/projects' "$COMMAND_DIR/wrap.md"
+  grep -Fq '${CODEX_HOME:-$HOME/.codex}/sessions' "$COMMAND_DIR/wrap.md"
+  grep -q "transcript-retention-include-archived" "$COMMAND_DIR/wrap.md"
 }
 
 @test "wrap.md: contains Permission scan opt-in section" {
