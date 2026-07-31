@@ -15,7 +15,9 @@ try:
     with open(os.environ["SESSION_F"]) as f: d = json.load(f)
     project = os.environ.get("RIG_PROJECT_NAME", "")
     branch = d.get("branch") or ""
-    title = d.get("final_name") or d.get("tentative_name") or ((project + ": " + branch) if project and branch else project)
+    names = d.get("names", {})
+    branch = d.get("runtime", {}).get("branch") or branch
+    title = names.get("final") or names.get("tentative") or d.get("final_name") or d.get("tentative_name") or ((project + ": " + branch) if project and branch else project)
     # OSC payloads must never contain terminal controls. Preserve printable
     # punctuation literally, normalize line separators, and drop other C0/C1.
     title = str(title).replace("\r\n", " ").replace("\r", " ").replace("\n", " ")

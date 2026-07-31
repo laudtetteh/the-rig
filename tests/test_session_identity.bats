@@ -18,6 +18,9 @@ setup() {
   mkdir -p "$REPO" "$RIG_DIR/memory/sessions" "$RIG_DIR/memory" "$RIG_DIR/tasks/active"
   git -C "$REPO" init -q
   git -C "$REPO" commit --allow-empty -m "initial" -q
+  mkdir -p "$REPO/bin"
+  cp "$(pwd)/templates/project/bin/rig" "$REPO/bin/rig"
+  chmod +x "$REPO/bin/rig"
 
   HOOK_DIR="$TMPDIR/hooks"
   mkdir -p "$HOOK_DIR"
@@ -104,6 +107,33 @@ d = json.load(sys.stdin)
 assert 'hookSpecificOutput' in d
 assert 'additionalContext' in d['hookSpecificOutput']
 "
+}
+
+@test "session-start: documented native ID bootstraps an exact v1 record" {
+  run_hook_exec "session-start.sh" '{"source":"startup","session_id":"claude-native-1"}'
+  SESSION_FILE=$(find "$RIG_DIR/memory/sessions" -name 'session-*.json' -print | head -1)
+  SESSION_F="$SESSION_FILE" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["schema_version"]==1 and d["agent"]=="claude" and d["native"]["session_id"]=="claude-native-1" and d["lifecycle"]["state"]=="active"'
+}
+
+@test "session-start: resume preserves anchor while a new clear ID gets a new anchor" {
+  run_hook_exec "session-start.sh" '{"source":"startup","session_id":"native-old"}'
+  OLD=$(find "$RIG_DIR/memory/sessions" -name 'session-*.json' -exec python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["anchor"])' {} \;)
+  run_hook_exec "session-start.sh" '{"source":"resume","session_id":"native-old"}'
+  RESUMED=$(find "$RIG_DIR/memory/sessions" -name 'session-*.json' -exec python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["anchor"])' {} \;)
+  [ "$OLD" = "$RESUMED" ]
+  unset RIG_SESSION_FILE RIG_SESSION_ANCHOR
+  run_hook_exec "session-start.sh" '{"source":"clear","session_id":"native-new"}'
+  [ "$(find "$RIG_DIR/memory/sessions" -name 'session-*.json' | wc -l | tr -d ' ')" -eq 2 ]
+}
+
+@test "native compact never injects another anchor's checkpoint" {
+  printf 'FOREIGN CHECKPOINT\n' > "$RIG_DIR/memory/.compact-checkpoint-foreign.md"
+  run_hook_exec "session-start.sh" '{"source":"compact","session_id":"native-compact"}'
+  hook_output | python3 -c '
+import json,sys
+ctx=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]
+assert "FOREIGN CHECKPOINT" not in ctx and "# Context Snapshot" in ctx
+'
 }
 
 @test "session-start: resume restores /tmp UUID from existing session file" {
@@ -259,7 +289,7 @@ with open('$TEST_SESSION_FILE', 'w') as f:
 "
   run_hook_exec "pre-compact.sh" '{}'
 
-  CKPT="$RIG_DIR/memory/.compact-checkpoint-$$.md"
+  CKPT="$RIG_DIR/memory/.compact-checkpoint-compuuid.md"
   [ -f "$CKPT" ]
   grep -q "\*\*Session anchor:\*\* compuuid" "$CKPT"
   grep -q "\*\*Session tentative name:\*\* feat phase2" "$CKPT"

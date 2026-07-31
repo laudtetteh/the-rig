@@ -168,9 +168,9 @@ esac
 
 [[ -r "$HOOK" ]] || fail_closed "canonical hook is missing or unreadable: $HOOK"
 if [[ "$EVENT" == "PreToolUse" || "$EVENT" == "PostToolUse" ]]; then
-  OUTPUT=$(printf '%s' "$HOOK_PAYLOAD" | bash "$HOOK" "$TOOL"); STATUS=$?
+  OUTPUT=$(printf '%s' "$HOOK_PAYLOAD" | RIG_AGENT=codex bash "$HOOK" "$TOOL"); STATUS=$?
 else
-  OUTPUT=$(printf '%s' "$PAYLOAD" | bash "$HOOK"); STATUS=$?
+  OUTPUT=$(printf '%s' "$PAYLOAD" | RIG_AGENT=codex bash "$HOOK"); STATUS=$?
 fi
 [[ "$STATUS" -eq 0 ]] || exit "$STATUS"
 translate_output "$EVENT" "$OUTPUT"

@@ -32,14 +32,25 @@ INPUT=$(cat)
 
 # Parse source from stdin JSON
 SOURCE=""
+NATIVE_SESSION_ID=""
+ROOT_SESSION_ID=""
+PARENT_NATIVE_SESSION_ID=""
 if command -v python3 >/dev/null 2>&1; then
-  SOURCE=$(printf '%s' "$INPUT" | python3 -c "
+  _identity_input=$(printf '%s' "$INPUT" | python3 -c "
 import json, sys
 try:
-    print(json.load(sys.stdin).get('source', ''))
+    d=json.load(sys.stdin)
+    print(d.get('source', ''))
+    print(d.get('session_id', ''))
+    print(d.get('root_session_id', d.get('rootSessionId', '')))
+    print(d.get('forked_from_id', d.get('forkedFromId', '')))
 except Exception:
     pass
 " 2>/dev/null || true)
+  SOURCE=$(printf '%s' "$_identity_input" | sed -n '1p')
+  NATIVE_SESSION_ID=$(printf '%s' "$_identity_input" | sed -n '2p')
+  ROOT_SESSION_ID=$(printf '%s' "$_identity_input" | sed -n '3p')
+  PARENT_NATIVE_SESSION_ID=$(printf '%s' "$_identity_input" | sed -n '4p')
 fi
 
 SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
@@ -48,6 +59,18 @@ POST_MERGE_PENDING="$RIG_DIR/memory/.post-merge-pending"
 SESSION_DIR="$RIG_DIR/memory/sessions"
 SESSION_PID="${RIG_SESSION_PID:-$PPID}"
 SESSION_FILE="${RIG_SESSION_FILE:-$SESSION_DIR/session-${SESSION_PID}.json}"
+
+# A documented native hook ID is authoritative. Bind it before any lifecycle
+# work; launcher/PID files are migration hints only and cannot override it.
+if [[ -n "$NATIVE_SESSION_ID" && -x "$REPO/bin/rig" ]]; then
+  BIND_ARGS=(--agent "${RIG_AGENT:-claude}" --native-session-id "$NATIVE_SESSION_ID" --source "$SOURCE")
+  [[ -n "$ROOT_SESSION_ID" ]] && BIND_ARGS+=(--root-session-id "$ROOT_SESSION_ID")
+  [[ -n "$PARENT_NATIVE_SESSION_ID" ]] && BIND_ARGS+=(--parent-native-session-id "$PARENT_NATIVE_SESSION_ID")
+  BIND_RESULT=$(RIG_SESSION_PID="$SESSION_PID" "$REPO/bin/rig" session bind "${BIND_ARGS[@]}" 2>/dev/null) || exit 0
+  SESSION_FILE=$(printf '%s' "$BIND_RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])' 2>/dev/null) || exit 0
+  SESSION_UUID=$(printf '%s' "$BIND_RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])' 2>/dev/null) || exit 0
+  export RIG_SESSION_FILE="$SESSION_FILE" RIG_SESSION_ANCHOR="$SESSION_UUID"
+fi
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -172,7 +195,7 @@ case "$SOURCE" in
     #   B) New process (new tab from compacted context): different PPID, no session
     #      file for this PPID. Fall back to reading anchor from the most recent
     #      compact checkpoint written by pre-compact.sh.
-    SESSION_UUID=""
+    SESSION_UUID="${RIG_SESSION_ANCHOR:-}"
     PRIOR_CKPT=""
     if [[ -f "$SESSION_FILE" ]]; then
       # Scenario A — same process
@@ -235,13 +258,18 @@ print(json.dumps({
       > "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true
     # ─────────────────────────────────────────────────────────────────────────
 
-    COMPACT_CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint-${SESSION_PID}.md"
+    COMPACT_CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint-${SESSION_UUID:-$SESSION_PID}.md"
     if [[ ! -f "$COMPACT_CHECKPOINT" ]]; then
+      if [[ -n "$NATIVE_SESSION_ID" ]]; then
+        # Exact native identity must never consume another session's checkpoint.
+        COMPACT_CHECKPOINT=""
+      else
       # In Scenario B, reuse the checkpoint already found during identity resolution
       # to avoid a second ls scan that could pick a different (possibly wrong) file.
       COMPACT_CHECKPOINT="${PRIOR_CKPT:-}"
       if [[ -z "$COMPACT_CHECKPOINT" ]]; then
         COMPACT_CHECKPOINT=$(ls -t "$RIG_DIR/memory"/.compact-checkpoint-*.md 2>/dev/null | head -1 || true)
+      fi
       fi
     fi
     if [[ -n "$COMPACT_CHECKPOINT" ]] && [[ -f "$COMPACT_CHECKPOINT" ]]; then
