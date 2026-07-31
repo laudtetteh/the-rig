@@ -240,7 +240,8 @@ Step 7: Wrap up — audit plan vs. reality; structured Done notes; move task; up
 Step 0:   Create GitHub issue FIRST — commit must reference [#N]
 Step 1:   Pre-ship checklist (AC, no debug code, no secrets, Docker verification)
 Step 2:   Self-review — does this do ONLY what was asked?
-Step 2.5: Pause — ask user for trigger phrase ("commit approved" / "ship it" / "lgtm" / "go")
+Step 2.4: Derive and run 1–5 task-specific live checks; record results, skips, and risk
+Step 2.5: Show an optional copyable validation card; approval attests to evidence review
 Step 3:   Commit (conventional format, issue reference; sentinel flow via pre-tool.sh)
 Step 4:   Update memory (verify task file accuracy; move task; PROGRESS; SNAPSHOT; ERRORS;
           RIG_GAPS; close GitHub Issue with actual-scope comment)
@@ -529,7 +530,7 @@ Twenty slash commands covering the full development lifecycle:
 ### Ship and debug
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/ship` | `SHIP_WORKFLOW` | Sequential hard gate: task confirm → issue → labels → branch/stale-main check → pre-commit cleanup (removes debug statements, runs linter, runs tests if required) → checklist → local test pause → commit approval → commit → housekeeping → open or update PR |
+| `/ship` | `SHIP_WORKFLOW` | Sequential hard gate: task confirm → issue → labels → branch/stale-main check → pre-commit cleanup (removes debug statements, runs linter, runs tests if required) → checklist → task-specific live validation and evidence → optional manual validation card → commit approval → commit → housekeeping → open or update PR |
 | `/debug` | `DEBUG_WORKFLOW` | Hypothesis before code, mandatory ERRORS.md entry |
 
 ### Release

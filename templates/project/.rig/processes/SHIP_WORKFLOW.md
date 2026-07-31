@@ -95,18 +95,52 @@ If any answer gives you pause, fix it before committing.
 
 ---
 
-## Step 2.5 — Checklist confirmation + pause for local testing
+## Step 2.4 — Live validation plan and evidence
+
+Derive 1–5 exact live validation steps from the acceptance criteria, diff, and
+runtime surface. Keep lint, unit tests, type checks, and static analysis in their
+own results; they do not count as live validation.
+
+Every step must include **Setup**, an exact **Command/action**, the observable
+**Expected** result, and **Cleanup** (or `None`). Run every safe local step,
+record its actual result, fix failures, and rerun it. If a step is skipped or
+unavailable, state why and record the residual risk. Docs-only changes still get
+one minimal relevant step, such as checking changed links, rendering, or command
+examples.
+
+Destructive, production, paid, privileged, or externally visible validation
+requires a separate warning describing the exact impact and separate explicit
+approval before execution. If approval is declined, mark the step skipped with
+its reason and residual risk.
+
+Retain the steps and actual results for the PR **Test plan**.
+
+---
+
+## Step 2.5 — Optional manual validation card + commit pause
 
 **Before presenting this prompt, confirm you have worked through the Step 1 checklist.**
 Do not jump here from Step 0 or mid-implementation — the checklist is not optional.
 
 If you skipped Step 1 for any reason: run through it now before continuing.
 
-Then stop. Do not commit yet.
+Then stop. Do not commit yet. Present the Step 2.4 live steps as a concise,
+copyable card; omit lint, unit, and static checks:
+
+```text
+Optional manual validation (agent results: PASS / SKIPPED as noted)
+1. Setup: <exact setup or None>
+   Run: <exact command or action>
+   Expect: <observable result>
+   Agent result: <PASS / SKIPPED — actual observation, reason/risk if skipped>
+   Cleanup: <exact cleanup or None>
+```
 
 Ask the user:
-> "Pre-ship checklist complete. Test the changes locally, then say **'commit approved'**
-> (or 'ship it', 'lgtm', 'go') and I'll proceed."
+> "Pre-ship checklist and agent validation complete. The card above is optional
+> to repeat. Say **'commit approved'** (or 'ship it', 'lgtm', 'go') to confirm
+> you reviewed the diff and reported evidence. Approval does not claim you
+> personally ran the card."
 
 Wait for one of those trigger phrases (or equivalent clear confirmation).
 This step is **non-negotiable** — it cannot be skipped regardless of autonomy

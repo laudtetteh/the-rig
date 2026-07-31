@@ -297,13 +297,56 @@ This is advisory only.
 
 ---
 
-## Step 5 — Pause for local testing
+## Step 4.9 — Live validation plan and evidence
+
+Before asking for commit approval, derive **1–5 exact live validation steps** from
+the task acceptance criteria, changed paths, and runtime surface. Keep lint,
+unit tests, type checks, and static analysis in the Step 3 results; they are not
+live validation.
+
+Each live step must state:
+
+- **Setup** — fixtures, throwaway repository, service state, or `None`
+- **Command/action** — an exact copyable command or precise UI action
+- **Expected** — the observable result and exit status where applicable
+- **Cleanup** — an exact cleanup action, or `None`
+
+Run every safe, local step yourself. Record the actual result, fix failures, and
+rerun the affected step before continuing. For a skipped or unavailable step,
+record the reason and residual risk. A docs-only diff still needs one minimal
+relevant step, such as rendering or checking the changed links and examples.
+
+Do not run a destructive, production, paid, privileged, or externally visible
+step under this approval. Present it separately with the exact impact and ask
+for explicit approval before running it. Declining that separate approval is a
+skip: record the reason and residual risk.
+
+Retain this validation plan and its actual results. Reuse them in the pull
+request **Test plan** instead of replacing them with a generic test claim.
+
+---
+
+## Step 5 — Optional manual validation card and commit pause
 
 **Stop here.** Do not commit yet.
 
-Say to the user:
-> "Ready to commit. Test the changes locally, then say **'commit approved'**
-> (or 'ship it', 'lgtm', 'go') and I'll proceed."
+Present a concise, copyable card containing the live steps from Step 4.9. Do not
+include lint, unit, or static checks in the card.
+
+```text
+Optional manual validation (agent results: PASS / SKIPPED as noted)
+1. Setup: <exact setup or None>
+   Run: <exact command or action>
+   Expect: <observable result>
+   Agent result: <PASS / SKIPPED — actual observation, reason/risk if skipped>
+   Cleanup: <exact cleanup or None>
+```
+
+Then say:
+> "Ready to commit. The card above is optional to repeat. By saying
+> **'commit approved'** (or 'ship it', 'lgtm', 'go'), you confirm that you
+> reviewed the diff and reported evidence; it does not claim you personally
+> ran the card."
 
 Wait for one of those explicit trigger phrases (or equivalent clear confirmation).
 Do not proceed if the response is ambiguous. This step cannot be skipped
@@ -331,7 +374,9 @@ message is explicitly approved.
 
 ## Step 7 — Commit
 
-The user confirmed local testing at Step 5 and approved the commit message at Step 6.
+The user reviewed the diff and reported validation evidence at Step 5, then
+approved the commit message at Step 6. Do not claim that the user personally ran
+the optional validation card.
 That constitutes explicit go-ahead — create the commit sentinel, then commit:
 
 ```bash
@@ -505,7 +550,7 @@ See `SHIP_WORKFLOW.md` Post-batch audit for full details.
 - Steps 1–6 are **gates** — any failure stops the sequence entirely.
 - The GitHub issue (Step 2) must exist before `/ship` is run, not after.
 - Labels (Step 3) must be verified against the actual repo — never assumed.
-- The local testing pause (Step 5) is non-negotiable regardless of autonomy level.
+- The optional-card commit pause (Step 5) is non-negotiable regardless of autonomy level.
 - The branch check (Step 3.5) is also a gate — never commit directly to main.
 - If the task has multiple commits, summarise all changes in the PR body.
 - The task file is moved to `.rig/tasks/done/` only after a successful commit (Step 8).
