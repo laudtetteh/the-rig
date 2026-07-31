@@ -112,6 +112,7 @@ is_rig_owned() {
 
 MANIFEST_FILE=""        # set during project-layer install (after RIG_DIR is resolved)
 GLOBAL_MANIFEST_FILE="$HOME/.claude/.rig-global-manifest"  # global layer manifest
+CODEX_GLOBAL_MANIFEST_FILE="$HOME/.agents/.rig-global-manifest"
 
 read_manifest_hash() {
   # Returns the recorded hash for a given rel path, or empty string if not found.
@@ -913,6 +914,24 @@ copy_file() {
   esac
 }
 
+# Codex artifacts historically preserved every existing destination outside an
+# Upgrade. Keep that contract for merge/skip/overwrite while establishing a
+# manifest baseline for future manifest-aware upgrades.
+copy_codex_owned_initial() {
+  local src="$1" dest="$2" base="$3" rel="$4" manifest_file="${5:-$MANIFEST_FILE}"
+  mkdir -p "$(dirname "$dest")"
+  if [[ -e "$dest" || -L "$dest" ]]; then
+    info "Preserved existing: ${dest#${base}/}"
+    if [[ -f "$dest" && ! -L "$dest" ]]; then
+      write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file"
+    fi
+    return
+  fi
+  cp "$src" "$dest"
+  success "Created ${dest#${base}/}"
+  write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file"
+}
+
 # ── UPGRADE STRATEGY HANDLER ──────────────────────────────────────────────────
 # Separated for readability. Called by copy_file() when COLLISION_STRATEGY=upgrade.
 #
@@ -1005,10 +1024,16 @@ _copy_upgrade_existing() {
 
   if [[ -z "$manifest_hash" ]]; then
     # No manifest entry. Two cases:
-    #   Rig-owned:  first upgrade before manifest tracking existed → safe to overwrite.
+    #   Rig-owned:  first upgrade before manifest tracking existed → safe to overwrite,
+    #               except newly tracked Codex artifacts whose provenance is unknown.
     #   User-owned: never tracked (e.g. CLAUDE.md, PROJECT_BRIEF.md, memory files).
     #               We can't tell if the user customized it, so skip safely.
-    if [[ "$rig_owned_default" == true ]] || is_rig_owned "$rel"; then
+    if [[ "$rel" == .agents/skills/* || "$rel" == .codex/hooks.json || "$rel" == .codex/hooks/* ]]; then
+      warn "Preserved untracked Codex artifact: ${rel}"
+      info "Recorded its current hash; rerun Upgrade after reviewing it."
+      record_upgrade_result skipped-customized "$rel"
+      write_manifest_entry "$dest_hash" "$rel" "$manifest_file"
+    elif [[ "$rig_owned_default" == true ]] || is_rig_owned "$rel"; then
       if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
       cp "$src" "$dest"
       success "Updated: ${rel}"
@@ -1088,17 +1113,18 @@ _copy_global_file_upgrade() {
   local dest="$2"
   local base="${3:-}"
   local rel="${4:-}"
+  local manifest_file="${5:-$GLOBAL_MANIFEST_FILE}"
 
-  if [[ ! -f "$dest" ]]; then
+  if [[ ! -e "$dest" && ! -L "$dest" ]]; then
     mkdir -p "$(dirname "$dest")"
     cp "$src" "$dest"
     success "Created: ${rel}"
     record_upgrade_result updated "$rel"
-    write_manifest_entry "$(sha256_file "$dest")" "$rel" "$GLOBAL_MANIFEST_FILE"
+    write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file"
     return
   fi
   _copy_upgrade_existing "$src" "$dest" "$base" "$rel" \
-    "$GLOBAL_MANIFEST_FILE" none true
+    "$manifest_file" none true
 }
 
 # ── GLOBAL LAYER ─────────────────────────────────────────────────────────────
@@ -1150,10 +1176,12 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
       _global_codex_rel=".agents/skills/$_global_skill_rel"
       if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
         _copy_global_file_upgrade "$_global_skill_src" \
-          "$HOME/$_global_codex_rel" "$HOME" "$_global_codex_rel"
+          "$HOME/$_global_codex_rel" "$HOME" "$_global_codex_rel" \
+          "$CODEX_GLOBAL_MANIFEST_FILE"
       else
-        copy_file "$_global_skill_src" "$HOME/$_global_codex_rel" \
-          "$HOME" "$_global_codex_rel"
+        copy_codex_owned_initial "$_global_skill_src" \
+          "$HOME/$_global_codex_rel" "$HOME" "$_global_codex_rel" \
+          "$CODEX_GLOBAL_MANIFEST_FILE"
       fi
     done < <(find "$_CODEX_GLOBAL_STAGE" -type f -print0)
     rm -rf "$_CODEX_GLOBAL_STAGE"
@@ -1578,6 +1606,8 @@ if [[ "$DO_PROJECT" == true ]]; then
       rig_rel="${rel#.rig/}"
       dest_file="$EXTERNAL_RIG_DIR/$rig_rel"
       copy_file "$src_file" "$dest_file" "$EXTERNAL_RIG_DIR" "$rel"
+    elif [[ "$rel" == .codex/* && "$COLLISION_STRATEGY" != upgrade ]]; then
+      copy_codex_owned_initial "$src_file" "$TARGET/$rel" "$TARGET" "$rel"
     else
       dest_file="$TARGET/$rel"
       copy_file "$src_file" "$dest_file" "$TARGET" "$rel"
@@ -1610,7 +1640,12 @@ if [[ "$DO_PROJECT" == true ]]; then
 
     while IFS= read -r -d '' _skill_src; do
       _skill_rel=".agents/skills/${_skill_src#"$_CODEX_SKILL_STAGE"/}"
-      copy_file "$_skill_src" "$TARGET/$_skill_rel" "$TARGET" "$_skill_rel"
+      if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+        copy_file "$_skill_src" "$TARGET/$_skill_rel" "$TARGET" "$_skill_rel"
+      else
+        copy_codex_owned_initial "$_skill_src" \
+          "$TARGET/$_skill_rel" "$TARGET" "$_skill_rel"
+      fi
     done < <(find "$_CODEX_SKILL_STAGE" -type f -print0)
     rm -rf "$_CODEX_SKILL_STAGE"
   fi

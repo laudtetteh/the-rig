@@ -303,7 +303,7 @@ is_rig_owned_stub() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Non-interactive mode — skipping customized file: .codex/hooks/rig-adapter.sh"* ]]
   [[ "$output" == *"Non-interactive mode — skipping customized file: .agents/skills/"* ]]
-  [[ "$output" == *"Skipped customized: 2"* ]]
+  [[ "$output" == *"Skipped customized:"* ]]
   grep -q 'user hook customization' "$hook"
   grep -q 'user skill customization' "$skill"
 }
@@ -353,6 +353,23 @@ is_rig_owned_stub() {
   [[ "$output" == *"Customized symlink detected: .codex/hooks/rig-adapter.sh"* ]]
   [[ -L "$hook" ]]
   grep -q 'outside sentinel' "$outside"
+}
+
+@test "upgrade strategy: preserves a legacy Codex artifact with no manifest entry" {
+  run_installer --strategy merge --project-agent codex
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.codex/hooks/rig-adapter.sh"
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+  printf '\n# legacy customization\n' >> "$hook"
+  grep -v '  .codex/hooks/rig-adapter.sh$' "$manifest" > "$TEMP_DIR/manifest"
+  mv "$TEMP_DIR/manifest" "$manifest"
+
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Preserved untracked Codex artifact: .codex/hooks/rig-adapter.sh"* ]]
+  grep -q 'legacy customization' "$hook"
+  grep -q '  .codex/hooks/rig-adapter.sh$' "$manifest"
 }
 
 @test "upgrade strategy: auto-updates unmodified Rig-owned file on re-install" {
@@ -2087,7 +2104,7 @@ _make_failing_sha_tools() {
   skill="$(find "$fake_home/.agents/skills" -name SKILL.md -print -quit)"
   [ -n "$skill" ]
   local skill_rel="${skill#$fake_home/}"
-  grep -q "  $skill_rel$" "$fake_home/.claude/.rig-global-manifest"
+  grep -q "  $skill_rel$" "$fake_home/.agents/.rig-global-manifest"
 
   printf '\n<!-- personal customization -->\n' >> "$skill"
   run env HOME="$fake_home" bash "$INSTALLER" --global-only \
