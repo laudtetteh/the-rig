@@ -11,6 +11,8 @@
 #   Bash       — bats (test runner, local only)
 #   Bash       — bash -n (syntax check, no execution)
 #   Bash       — grep, find (read-only searches)
+#   Bash       — cat, head, tail, wc (read-only inspection), optionally after
+#                a narrow variable-assignment preamble
 #   Edit/Write — any path under $RIG_DIR (Rig's own memory, tasks, docs)
 #                opt-out: touch $RIG_DIR/memory/.rig-strict-permissions
 #
@@ -41,7 +43,7 @@ else
 fi
 
 DECISION=$(printf '%s' "$INPUT" | RIG_DIR="$RIG_DIR" python3 -c "
-import json, sys, re, os
+import json, sys, re, os, shlex
 
 try:
     data = json.load(sys.stdin)
@@ -68,19 +70,84 @@ def allow():
 if tool_name == 'Read':
     allow()
 
-# Bash — check command against safe patterns
+# Bash — validate the complete command. Shell syntax outside this deliberately
+# narrow grammar falls through to normal permission handling.
 if tool_name == 'Bash':
-    cmd = tool_input.get('command', '').lstrip()
-    safe_patterns = [
-        r'^git (log|status|diff|branch|show|describe|tag|remote|stash list)',
-        r'^bats\b',
-        r'^bash\s+-n\b',
-        r'^grep\b',
-        r'^find\b',
-    ]
-    for pattern in safe_patterns:
-        if re.match(pattern, cmd):
-            allow()
+    cmd = tool_input.get('command', '').strip()
+    dollar = chr(36)
+    forbidden = ('|', '&', '<', '>', chr(96), dollar + '(')
+
+    def safe_assignment(segment):
+        if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', segment):
+            return False
+        _, value = segment.split('=', 1)
+        if value == dollar + '(git rev-parse --show-toplevel)':
+            return True
+        # Permit only inert path-like values and simple variable expansion.
+        variable = re.escape(dollar) + r'(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})'
+        value = re.sub(variable, '', value)
+        return bool(value) and re.fullmatch(r'[A-Za-z0-9_./{}\"\x27:+-]+', value) is not None
+
+    def safe_git(tokens):
+        if len(tokens) < 2:
+            return False
+        subcommand, args = tokens[1], tokens[2:]
+        if any(arg.startswith('--output') for arg in args):
+            return False
+        if subcommand in ('log', 'status', 'diff', 'show', 'describe'):
+            return True
+        if subcommand == 'stash':
+            return args == ['list']
+        if subcommand == 'branch':
+            read_flags = ('-a', '--all', '-r', '--remotes', '-v', '-vv', '--verbose', '--color', '--no-color', '--show-current', '--contains', '--no-contains', '--merged', '--no-merged', '--points-at', '--format', '--sort', '--column', '--no-column', '--ignore-case')
+            if not args:
+                return True
+            if args[0] in ('-l', '--list'):
+                return True
+            return all(arg.startswith(read_flags) for arg in args)
+        if subcommand == 'tag':
+            return not args or args[0] in ('-l', '--list')
+        if subcommand == 'remote':
+            return not args or args[0] in ('-v', '--verbose', 'show', 'get-url')
+        return False
+
+    def safe_segment(segment):
+        if not segment or any(op in segment for op in forbidden):
+            return False
+        try:
+            tokens = shlex.split(segment, posix=True)
+        except ValueError:
+            return False
+        if not tokens:
+            return False
+        if tokens[0] == 'git':
+            return safe_git(tokens)
+        if tokens[0] == 'bats':
+            return True
+        if tokens[0] == 'bash':
+            return len(tokens) >= 2 and tokens[1] == '-n'
+        if tokens[0] in ('grep', 'cat', 'head', 'tail', 'wc'):
+            return True
+        if tokens[0] == 'find':
+            write_actions = ('-delete', '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls')
+            return not any(token in write_actions for token in tokens[1:])
+        return False
+
+    # Semicolons and newlines are the only accepted command separators. Each
+    # assignment or command segment must be independently safe.
+    segments = [segment.strip() for segment in re.split(r';[ \t]*\n|;|\n', cmd)]
+    seen_command = False
+    valid = bool(segments)
+    for segment in segments:
+        if not seen_command and safe_assignment(segment):
+            continue
+        if safe_segment(segment):
+            seen_command = True
+            continue
+        valid = False
+        break
+    if valid and seen_command:
+        allow()
 
 # Edit/Write — auto-approve writes to Rig's own directory.
 # Principle: Rig is allowed to manage its own memory, tasks, and docs.

@@ -2613,6 +2613,51 @@ _perm_invoke() {
     bash "$REPO_ROOT/templates/project/.claude/hooks/permission-request.sh" 2>/dev/null
 }
 
+_perm_bash_invoke() {
+  local command="$1"
+  python3 -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}))' "$command" | \
+    bash "$REPO_ROOT/templates/project/.claude/hooks/permission-request.sh" 2>/dev/null
+}
+
+@test "permission-request: read-only assignment preamble and file inspection are auto-approved" {
+  local command result
+  command='REPO=$(git rev-parse --show-toplevel);
+RIG_DIR="$REPO/.rig";
+cat "$RIG_DIR/memory/PROGRESS.md"'
+  result=$(_perm_bash_invoke "$command")
+  [[ "$result" == *'"behavior": "allow"'* ]] || [[ "$result" == *'"behavior":"allow"'* ]]
+}
+
+@test "permission-request: every command in a read-only chain is validated" {
+  local result
+  result=$(_perm_bash_invoke 'git status; grep -n TODO README.md; wc -l README.md')
+  [[ "$result" == *'"behavior": "allow"'* ]] || [[ "$result" == *'"behavior":"allow"'* ]]
+}
+
+@test "permission-request: unsafe suffix after safe prefix is not auto-approved" {
+  local result
+  result=$(_perm_bash_invoke 'git status; touch /tmp/x')
+  [[ -z "$result" ]]
+}
+
+@test "permission-request: ambiguous shell syntax is not auto-approved" {
+  local result
+  result=$(_perm_bash_invoke 'git status && cat README.md')
+  [[ -z "$result" ]]
+}
+
+@test "permission-request: mutating forms of read commands are not auto-approved" {
+  local result
+  result=$(_perm_bash_invoke 'find . -delete')
+  [[ -z "$result" ]]
+
+  result=$(_perm_bash_invoke 'git branch -D feature')
+  [[ -z "$result" ]]
+
+  result=$(_perm_bash_invoke 'git branch feature')
+  [[ -z "$result" ]]
+}
+
 @test "permission-request: Edit to \$RIG_DIR is auto-approved" {
   local rig_dir
   rig_dir=$(mktemp -d)
