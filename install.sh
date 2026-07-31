@@ -71,13 +71,14 @@ sha256_file() {
 # strategy applies manifest-aware logic uniformly. is_rig_owned() is used for
 # messaging/warning decisions only, not as a skip gate.
 #
-# Rig-owned:   .claude/hooks/, .claude/commands/, .rig/processes/, .husky/, .gitleaks.toml
+# Rig-owned:   bin/rig, .claude/hooks/, .claude/commands/, .rig/processes/, .husky/, .gitleaks.toml
 # User-owned:  CLAUDE.md, PROJECT_BRIEF.md, .rig/rules/, .rig/memory/*.md,
 #              .rig/tasks/, .github/
 # Special:     .claude/settings.json (always smart-merged, not manifest-tracked)
 is_rig_owned() {
   local rel="$1"
   case "$rel" in
+    bin/rig|\
     .claude/hooks/*|\
     .claude/commands/*|\
     .claude/agents/*|\
@@ -1481,6 +1482,7 @@ PYEOF
       _stealth_exclude "docs/features/README.md"
       _stealth_exclude ".rig-backup/"
       _stealth_exclude ".rig/"
+      _stealth_exclude "bin/rig"
       # .rigpath is already excluded by the external-mode block above
     else
       warn ".git/info/exclude not found — stealth exclusions could not be applied."
@@ -1521,6 +1523,7 @@ PYEOF
   # ── EXECUTABLE BITS ───────────────────────────────────────────────────────
   HUSKY_DIR="$TARGET/.husky"
   CLAUDE_HOOKS_DIR="$TARGET/.claude/hooks"
+  RIG_DISPATCHER="$TARGET/bin/rig"
 
   if [[ -d "$HUSKY_DIR" ]]; then
     chmod +x "$HUSKY_DIR/"* 2>/dev/null || true
@@ -1530,6 +1533,11 @@ PYEOF
   if [[ -d "$CLAUDE_HOOKS_DIR" ]]; then
     chmod +x "$CLAUDE_HOOKS_DIR/"*.sh 2>/dev/null || true
     success "Set executable bits on .claude/hooks/ scripts"
+  fi
+
+  if [[ -f "$RIG_DISPATCHER" ]]; then
+    chmod +x "$RIG_DISPATCHER"
+    success "Set executable bit on bin/rig"
   fi
 
   # ── HUSKY INITIALIZATION ──────────────────────────────────────────────────

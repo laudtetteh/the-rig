@@ -48,6 +48,7 @@ run_installer() {
 is_rig_owned_stub() {
   local rel="$1"
   case "$rel" in
+    bin/rig|\
     .claude/hooks/*|\
     .claude/commands/*|\
     .rig/processes/*|\
@@ -57,6 +58,10 @@ is_rig_owned_stub() {
     *)
       return 1 ;;
   esac
+}
+
+@test "is_rig_owned: dispatcher is Rig-owned" {
+  is_rig_owned_stub "bin/rig"
 }
 
 @test "is_rig_owned: hook script is Rig-owned" {
@@ -122,6 +127,34 @@ is_rig_owned_stub() {
   [ -f "$TEST_PROJECT/.rig/processes/SHIP_WORKFLOW.md" ]
   [ -f "$TEST_PROJECT/.claude/hooks/pre-tool.sh" ]
   [ -f "$TEST_PROJECT/.rig/memory/RIG_GAPS.md" ]
+  [ -x "$TEST_PROJECT/bin/rig" ]
+  grep -q "  bin/rig$" "$TEST_PROJECT/.rig/memory/.rig-manifest"
+}
+
+@test "dispatcher: help, version, and reserved command stubs follow the contract" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  run "$TEST_PROJECT/bin/rig" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rig session resolve"* ]]
+  run "$TEST_PROJECT/bin/rig" --version
+  [ "$status" -eq 0 ]
+  [ "$output" = "The Rig v$(cat "$REPO_ROOT/VERSION")" ]
+  run "$TEST_PROJECT/bin/rig" memory validate --json
+  [ "$status" -eq 69 ]
+  [ "$output" = '{"ok":false,"command":"memory validate","error":"not_implemented"}' ]
+}
+
+@test "dispatcher: stealth install excludes only bin/rig and reads external version" {
+  local rig_ext="$TEMP_DIR/external-rig"
+  run_installer --strategy skip --tracking stealth --rig-dir "$rig_ext"
+  [ "$status" -eq 0 ]
+  [ -x "$TEST_PROJECT/bin/rig" ]
+  grep -qx "bin/rig" "$TEST_PROJECT/.git/info/exclude"
+  grep -q "  bin/rig$" "$rig_ext/memory/.rig-manifest"
+  run "$TEST_PROJECT/bin/rig" version --json
+  [ "$status" -eq 0 ]
+  [ "$output" = "{\"version\":\"$(cat "$REPO_ROOT/VERSION")\"}" ]
 }
 
 @test "skip strategy: does not overwrite existing files" {
