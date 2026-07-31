@@ -202,6 +202,11 @@ doctor() {
   RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
 import json, os, pathlib, re, subprocess, sys
 
+try:
+    import tomllib
+except ImportError:
+    tomllib = None
+
 root = pathlib.Path(os.environ["RIG_ROOT"])
 rig = pathlib.Path(os.environ["RIG_DIR"])
 checks = []
@@ -286,6 +291,48 @@ if skills.is_dir():
           else "missing skills: " + (", ".join(missing_skills) or "none") + "; extra skills: " + (", ".join(extra_skills) or "none"))
 else:
     check("codex_skill_parity", True, "Codex mirroring not enabled")
+
+# Codex target metadata makes project-instruction visibility a required health
+# check. AGENTS.override.md and AGENTS.md take precedence; CLAUDE.md is effective
+# only when the project config names it as a fallback.
+target_state = rig / "install-targets.json"
+try:
+    target_agents = json.loads(read(target_state)).get("agents", [])
+except (AttributeError, TypeError, ValueError):
+    target_agents = []
+if "codex" in target_agents:
+    agents_file = next((name for name in ("AGENTS.override.md", "AGENTS.md")
+                        if (root / name).is_file()), None)
+    fallback_ok = False
+    config_error = None
+    config_path = root / ".codex" / "config.toml"
+    if tomllib is not None:
+        try:
+            with config_path.open("rb") as handle:
+                fallback_names = tomllib.load(handle).get("project_doc_fallback_filenames", [])
+            fallback_ok = isinstance(fallback_names, list) and "CLAUDE.md" in fallback_names and (root / "CLAUDE.md").is_file()
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            config_error = str(exc)
+    else:
+        config_text = read(config_path)
+        match = re.search(r'(?ms)^[ \t]*project_doc_fallback_filenames[ \t]*=[ \t]*\[(.*?)\]', config_text)
+        if match:
+            fallback_names = re.findall(r'["\']([^"\']+)["\']', match.group(1))
+            fallback_ok = "CLAUDE.md" in fallback_names and (root / "CLAUDE.md").is_file()
+        else:
+            config_error = "project_doc_fallback_filenames missing or malformed"
+    effective = bool(agents_file) or fallback_ok
+    if agents_file:
+        detail = f"{agents_file} takes precedence"
+    elif fallback_ok:
+        detail = "CLAUDE.md loaded through project_doc_fallback_filenames"
+    else:
+        detail = "no effective AGENTS file or CLAUDE.md fallback"
+        if config_error:
+            detail += ": " + config_error
+    check("codex_project_instructions", effective, detail)
+else:
+    check("codex_project_instructions", True, "Codex project target not enabled")
 
 claude_md = read(root / "CLAUDE.md")
 matches = re.findall(r"(?m)^issue-tracking:\s*([^\s#]+)", claude_md)

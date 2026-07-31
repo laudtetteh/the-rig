@@ -64,6 +64,30 @@ json_assert() {
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert "ship" in c["detail"] and "unrelated" in c["detail"]'
 }
 
+@test "Codex target requires an effective project instruction source" {
+  printf '{"schema_version":1,"agents":["codex"]}\n' > "$CASE_DIR/.rig/install-targets.json"
+  mkdir -p "$CASE_DIR/.codex"
+  printf 'project_doc_fallback_filenames = ["OTHER.md"]\n' > "$CASE_DIR/.codex/config.toml"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_project_instructions"); assert not c["ok"] and "no effective" in c["detail"]'
+
+  printf 'project_doc_fallback_filenames = ["OTHER.md", "CLAUDE.md"]\n' > "$CASE_DIR/.codex/config.toml"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_project_instructions"); assert c["ok"] and "CLAUDE.md" in c["detail"]'
+}
+
+@test "native AGENTS files take precedence for Codex without being modified" {
+  printf '{"schema_version":1,"agents":["codex"]}\n' > "$CASE_DIR/.rig/install-targets.json"
+  printf 'native guidance\n' > "$CASE_DIR/AGENTS.override.md"
+  before="$(cksum "$CASE_DIR/AGENTS.override.md")"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_project_instructions"); assert c["ok"] and "AGENTS.override.md takes precedence" == c["detail"]'
+  [ "$before" = "$(cksum "$CASE_DIR/AGENTS.override.md")" ]
+}
+
 @test "GitHub tracker uses safely stubbed auth and detects commit drift" {
   printf 'issue-tracking: github\n' > "$CASE_DIR/CLAUDE.md"
   cat > "$FAKE_BIN/gh" <<'SH'

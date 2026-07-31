@@ -50,6 +50,13 @@ removes files from an earlier install.
 When every enabled layer explicitly resolves to `none`, the command is a verified
 no-op: it reports the matrix and writes neither destination files nor target metadata.
 
+When the project target includes Codex, the installer preserves `CLAUDE.md` as the
+single project-brain source and adds it to Codex's
+`project_doc_fallback_filenames` in `.codex/config.toml`. Existing fallback names
+and unrelated Codex settings are preserved. Codex's native `AGENTS.override.md`
+and `AGENTS.md` files take precedence over configured fallback names; the installer
+does not replace, rename, or remove either file.
+
 Run a read-only machine check before automation:
 
 ```bash

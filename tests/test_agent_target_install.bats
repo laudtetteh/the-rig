@@ -23,6 +23,9 @@ teardown() { rm -rf "$TEST_ROOT"; }
   run env HOME="$TEST_HOME" bash "$INSTALLER" --project-only --project-agent codex --target "$TEST_PROJECT" --strategy merge --tracking repo
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_PROJECT/.claude/settings.json" ]
+  [ -f "$TEST_PROJECT/CLAUDE.md" ]
+  [ -f "$TEST_PROJECT/.codex/config.toml" ]
+  python3 -c 'import ast,pathlib,re,sys; t=pathlib.Path(sys.argv[1]).read_text(); assert ast.literal_eval(re.search(r"project_doc_fallback_filenames\s*=\s*(\[[^]]*\])", t).group(1)) == ["CLAUDE.md"]' "$TEST_PROJECT/.codex/config.toml"
   [ -x "$TEST_PROJECT/bin/rig" ]
   /usr/bin/grep -q '"agents":\["codex"\]' "$TEST_PROJECT/.rig/install-targets.json"
 }
