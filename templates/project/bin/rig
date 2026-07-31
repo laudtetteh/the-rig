@@ -9,13 +9,13 @@ usage() {
 Usage: rig <command> [subcommand] [options]
 
 Commands:
-  doctor                Diagnose a Rig installation
-  session resolve       Resolve the current session identity
-  session-name set      Set the current session name
-  memory validate       Validate Rig memory files
-  codex                 Launch Codex with Rig context
-  claude                Launch Claude Code with Rig context
-  version               Print the installed Rig version
+  rig doctor                Diagnose a Rig installation
+  rig session resolve       Resolve the current session identity
+  rig session-name set      Set the current session name
+  rig memory validate       Validate Rig memory files
+  rig codex                 Launch Codex with Rig context
+  rig claude                Launch Claude Code with Rig context
+  rig version               Print the installed Rig version
 
 Common options:
   --json                 Emit machine-readable JSON where supported
