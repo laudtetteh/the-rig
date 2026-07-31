@@ -881,6 +881,19 @@ copy_file() {
   esac
 }
 
+# Codex-generated paths remain user-unowned until #365 defines their upgrade
+# and manifest contract. Create missing files, but never record or replace them.
+copy_unowned_codex_file() {
+  local src="$1" dest="$2" base="$3"
+  mkdir -p "$(dirname "$dest")"
+  if [[ -e "$dest" || -L "$dest" ]]; then
+    info "Preserved existing: ${dest#${base}/}"
+  else
+    cp "$src" "$dest"
+    success "Created ${dest#${base}/}"
+  fi
+}
+
 # ── UPGRADE STRATEGY HANDLER ──────────────────────────────────────────────────
 # Separated for readability. Called by copy_file() when COLLISION_STRATEGY=upgrade.
 #
@@ -1105,7 +1118,7 @@ _copy_global_file_upgrade() {
 
 # ── GLOBAL LAYER ─────────────────────────────────────────────────────────────
 if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
-  bold "── Global layer (~/.claude/) ──"
+  bold "── Global layer ──"
   echo ""
 
   CLAUDE_DIR="$HOME/.claude"
@@ -1136,6 +1149,23 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
       copy_file "$skill_src" "$skill_dest" "$SKILLS_DIR" "skills/$skill_name"
     fi
   done
+  fi
+
+  if has_agent "$GLOBAL_AGENT" codex; then
+    _CODEX_GLOBAL_STAGE="$(mktemp -d /tmp/rig-codex-global-skills-XXXXXX)"
+    if ! python3 "$SCRIPT_DIR/installer/generate-codex-skills.py" \
+      --output "$_CODEX_GLOBAL_STAGE" --base-branch main \
+      --global-skills-source "$GLOBAL_TEMPLATES/skills"; then
+      rm -rf "$_CODEX_GLOBAL_STAGE"
+      error "Could not generate global Codex skills."
+      exit 1
+    fi
+    while IFS= read -r -d '' _global_skill_src; do
+      _global_skill_rel="${_global_skill_src#$_CODEX_GLOBAL_STAGE/}"
+      copy_unowned_codex_file "$_global_skill_src" \
+        "$HOME/.agents/skills/$_global_skill_rel" "$HOME/.agents/skills"
+    done < <(find "$_CODEX_GLOBAL_STAGE" -type f -print0)
+    rm -rf "$_CODEX_GLOBAL_STAGE"
   fi
 
   # Restore manifest pointer
@@ -1465,10 +1495,12 @@ if [[ "$DO_PROJECT" == true ]]; then
       .rig/memory/*)                       [[ "$INSTALL_MEMORY" == true ]]         ;;
       .rig/tasks/*)                        [[ "$INSTALL_TASKS" == true ]]          ;;
       .rig/processes/*)                    [[ "$INSTALL_PROCESSES" == true ]]      ;;
-      .rig/rules/protected-paths.txt)      [[ "$INSTALL_CLAUDE_HOOKS" == true ]]   ;;
+      .rig/rules/protected-paths.txt)      [[ "$INSTALL_CLAUDE_HOOKS" == true ]] || has_agent "$PROJECT_AGENT" codex ;;
       .rig/rules/*)                        [[ "$INSTALL_RULES" == true ]]          ;;
-      .claude/hooks/subagent-start.sh)     [[ "$INSTALL_SUBAGENTS" == true ]]      ;;
-      .claude/hooks/*|.claude/settings*)   [[ "$INSTALL_CLAUDE_HOOKS" == true ]]   ;;
+      .claude/hooks/subagent-start.sh)     [[ "$INSTALL_SUBAGENTS" == true ]] || has_agent "$PROJECT_AGENT" codex ;;
+      .claude/hooks/*)                     [[ "$INSTALL_CLAUDE_HOOKS" == true ]] || has_agent "$PROJECT_AGENT" codex ;;
+      .claude/settings*)                   [[ "$INSTALL_CLAUDE_HOOKS" == true ]]   ;;
+      .codex/*)                            has_agent "$PROJECT_AGENT" codex        ;;
       .claude/commands/doc-feature.md|\
       .claude/commands/doc-list.md|\
       .claude/commands/feature-context.md|\
@@ -1481,6 +1513,26 @@ if [[ "$DO_PROJECT" == true ]]; then
       .husky/*|.gitleaks.toml)             [[ "$INSTALL_GIT_HOOKS" == true ]]      ;;
       .github/*)                           [[ "$INSTALL_GITHUB" == true ]]         ;;
       *)                                   return 0 ;;  # install unknown files by default
+    esac
+  }
+
+  # Codex skills use the same component choices as Claude commands, but do not
+  # require the Claude command destination itself to be enabled.
+  should_install_codex_command() {
+    local rel="$1"
+    case "$rel" in
+      .claude/commands/doc-feature.md|\
+      .claude/commands/doc-list.md|\
+      .claude/commands/feature-context.md|\
+      .claude/commands/refresh-feature-doc.md)
+        [[ "$INSTALL_FEATURE_DOCS" == true ]] ;;
+      .claude/commands/rig-gaps.md|\
+      .claude/commands/rig-propose.md)
+        [[ "$INSTALL_CONTRIBUTE" == true ]] ;;
+      .claude/commands/*)
+        return 0 ;;
+      *)
+        return 1 ;;
     esac
   }
 
@@ -1535,11 +1587,45 @@ if [[ "$DO_PROJECT" == true ]]; then
       rig_rel="${rel#.rig/}"
       dest_file="$EXTERNAL_RIG_DIR/$rig_rel"
       copy_file "$src_file" "$dest_file" "$EXTERNAL_RIG_DIR" "$rel"
+    elif [[ "$rel" == .codex/* ]]; then
+      dest_file="$TARGET/$rel"
+      copy_unowned_codex_file "$src_file" "$dest_file" "$TARGET"
     else
       dest_file="$TARGET/$rel"
       copy_file "$src_file" "$dest_file" "$TARGET" "$rel"
     fi
   done < <(find "$PROJECT_TEMPLATES" -type f -print0)
+
+  # Codex discovers repository skills under .agents/skills/. Generate one
+  # skill per selected Rig command from the canonical Claude command body so
+  # the two agent targets do not acquire independently maintained workflows.
+  # Generation happens in a staging directory. Until #365 lands ownership and
+  # upgrade rules, only missing Codex files are created and none are tracked.
+  if has_agent "$PROJECT_AGENT" codex; then
+    _CODEX_SKILL_STAGE="$(mktemp -d /tmp/rig-codex-skills-XXXXXX)"
+    _CODEX_COMMAND_SOURCES=()
+    while IFS= read -r -d '' _command_src; do
+      _command_rel="${_command_src#$PROJECT_TEMPLATES/}"
+      if should_install_codex_command "$_command_rel"; then
+        _CODEX_COMMAND_SOURCES+=("$_command_src")
+      fi
+    done < <(find "$PROJECT_TEMPLATES/.claude/commands" -maxdepth 1 -type f -name '*.md' -print0)
+
+    if ! python3 "$SCRIPT_DIR/installer/generate-codex-skills.py" \
+      --output "$_CODEX_SKILL_STAGE" --base-branch "$BASE_BRANCH" \
+      --skills-source "$PROJECT_TEMPLATES/.claude/skills" \
+      "${_CODEX_COMMAND_SOURCES[@]}"; then
+      rm -rf "$_CODEX_SKILL_STAGE"
+      error "Could not generate Codex command skills."
+      exit 1
+    fi
+
+    while IFS= read -r -d '' _skill_src; do
+      _skill_rel=".agents/skills/${_skill_src#$_CODEX_SKILL_STAGE/}"
+      copy_unowned_codex_file "$_skill_src" "$TARGET/$_skill_rel" "$TARGET"
+    done < <(find "$_CODEX_SKILL_STAGE" -type f -print0)
+    rm -rf "$_CODEX_SKILL_STAGE"
+  fi
 
   # Codex supports CLAUDE.md as a project-instruction fallback. Merge the
   # supported setting without replacing existing user fallback names or other
@@ -1716,6 +1802,10 @@ PYEOF
       _stealth_exclude "CLAUDE.md"
       _stealth_exclude "PROJECT_BRIEF.md"
       _stealth_exclude ".claude/"
+      _stealth_exclude ".agents/"
+      _stealth_exclude ".codex/"
+      _stealth_exclude ".mcp.json"
+      _stealth_exclude ".playwright-mcp/"
       _stealth_exclude ".github/"
       _stealth_exclude ".gitleaks.toml"
       _stealth_exclude "docs/features/README.md"
@@ -1725,7 +1815,7 @@ PYEOF
       # .rigpath is already excluded by the external-mode block above
     else
       warn ".git/info/exclude not found — stealth exclusions could not be applied."
-      warn "Add manually: CLAUDE.md, PROJECT_BRIEF.md, .claude/, .github/, .gitleaks.toml, docs/features/README.md, .rigpath"
+      warn "Add manually: CLAUDE.md, PROJECT_BRIEF.md, .claude/, .agents/, .codex/, .mcp.json, .playwright-mcp/, .github/, .gitleaks.toml, docs/features/README.md, .rigpath"
     fi
 
     # Copy .husky/ hook scripts directly to .git/hooks/ (Husky-free, per-clone)
@@ -1762,6 +1852,7 @@ PYEOF
   # ── EXECUTABLE BITS ───────────────────────────────────────────────────────
   HUSKY_DIR="$TARGET/.husky"
   CLAUDE_HOOKS_DIR="$TARGET/.claude/hooks"
+  CODEX_HOOKS_DIR="$TARGET/.codex/hooks"
   RIG_DISPATCHER="$TARGET/bin/rig"
 
   if [[ -d "$HUSKY_DIR" ]]; then
@@ -1772,6 +1863,11 @@ PYEOF
   if [[ -d "$CLAUDE_HOOKS_DIR" ]]; then
     chmod +x "$CLAUDE_HOOKS_DIR/"*.sh 2>/dev/null || true
     success "Set executable bits on .claude/hooks/ scripts"
+  fi
+
+  if has_agent "$PROJECT_AGENT" codex && [[ -d "$CODEX_HOOKS_DIR" ]]; then
+    chmod +x "$CODEX_HOOKS_DIR/"*.sh 2>/dev/null || true
+    success "Set executable bits on Codex hook adapters"
   fi
 
   if [[ -f "$RIG_DISPATCHER" ]]; then
@@ -1922,10 +2018,15 @@ echo "Postflight smoke results: manifest-derived checks passed."
 echo "The Rig is installed. Next steps:"
 echo ""
 
-if [[ "$DO_GLOBAL" == true ]]; then
+if [[ "$DO_GLOBAL" == true ]] && has_agent "$GLOBAL_AGENT" claude; then
   echo "  1. Fill in ~/.claude/CLAUDE.md:"
   echo "     - '## Personal context' — your name, role, stack, and working style"
   echo "     - '## Stack defaults' — the languages and frameworks you use"
+  echo ""
+fi
+
+if [[ "$DO_GLOBAL" == true ]] && has_agent "$GLOBAL_AGENT" codex; then
+  echo "  Codex personal skills are installed under ~/.agents/skills/."
   echo ""
 fi
 
@@ -1933,12 +2034,19 @@ if [[ "$DO_PROJECT" == true ]]; then
   echo "  3. Fill in ${TARGET:-your-project}/CLAUDE.md"
   echo "     (stack, conventions, off-limits paths)"
   echo ""
-  echo "  4. Open a Claude Code session in your project and run /kickoff or /task"
-  echo ""
+  if has_agent "$PROJECT_AGENT" claude; then
+    echo "  4. Open a Claude Code session in your project and run /kickoff or /task"
+    echo ""
+  fi
+  if has_agent "$PROJECT_AGENT" codex; then
+    echo "  4. Open a Codex session in your project and run \$kickoff or \$task"
+    echo ""
+  fi
 fi
 
 if has_agent "$GLOBAL_AGENT" codex || has_agent "$PROJECT_AGENT" codex; then
   echo "  Codex: launch 'codex' and verify native project guidance."
+  echo "  Codex hooks: open /hooks, review The Rig project hooks, and trust their current definitions."
 fi
 
 echo "Documentation: https://github.com/laudtetteh/the-rig"

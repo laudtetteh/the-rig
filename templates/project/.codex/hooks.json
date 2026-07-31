@@ -1,0 +1,16 @@
+{
+  "description": "The Rig lifecycle bridge for Codex.",
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/rig-adapter.sh\"", "additionalContextLimit": 5000}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/rig-adapter.sh\"", "timeout": 3}]}],
+    "SubagentStart": [{"hooks": [{"type": "command", "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/rig-adapter.sh\"", "additionalContextLimit": 5000}]}],
+    "SubagentStop": [{"hooks": [{"type": "command", "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/rig-adapter.sh\""}]}],
+    "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/rig-adapter.sh\""}]}],
+    "PermissionRequest": [{"matcher": "*", "hooks": [{"type": "command", "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/rig-adapter.sh\""}]}],
+    "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/rig-adapter.sh\""}]}],
+    "PreCompact": [{"matcher": "manual|auto", "hooks": [{"type": "command", "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/rig-adapter.sh\""}]}],
+    "PostCompact": [{"matcher": "manual|auto", "hooks": [{"type": "command", "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/rig-adapter.sh\""}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/rig-adapter.sh\"", "additionalContextLimit": 5000}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/rig-adapter.sh\""}]}]
+  }
+}
