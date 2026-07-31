@@ -216,6 +216,11 @@ identifies it when rollback also fails, preserving the user's work for recovery.
 4. Follow `.rig/processes/NEW_TASK_WORKFLOW.md` from Step 0 (GitHub issue first).
 5. Execute according to the configured autonomy level.
 
+When this workflow records completion in `.rig/memory/PROGRESS.md`, insert the new
+entry immediately after the `## Format` section, at the fixed top-insertion anchor.
+Never anchor the insertion to the agent's own prior PROGRESS edit from the same
+session.
+
 ### Autonomy level execution guide
 
 **Low (Guided)**

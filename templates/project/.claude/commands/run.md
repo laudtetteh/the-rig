@@ -124,7 +124,9 @@ For each task in the confirmed queue:
 5. **Complete the task.** When all acceptance criteria are met:
    - Fill in `## Done notes` in the task file
    - Move the task file from `.rig/tasks/active/` (or `.rig/tasks/backlog/`) to `.rig/tasks/done/`
-   - Append an entry to `.rig/memory/PROGRESS.md`
+   - Add an entry to `.rig/memory/PROGRESS.md` immediately after the `## Format`
+     section, at the fixed top-insertion anchor. Never anchor the insertion to the
+     agent's own prior PROGRESS edit from the same session.
    - Run the pre-ship checklist (`/ship`) before opening any PR
 
 6. **Decide whether to continue.** See chaining rules below.

@@ -137,7 +137,7 @@ is_rig_owned_stub() {
   grep -q "  bin/rig$" "$TEST_PROJECT/.rig/memory/.rig-manifest"
 }
 
-@test "dispatcher: help, version, and reserved command stubs follow the contract" {
+@test "dispatcher: help, version, and memory validation follow the contract" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
   run "$TEST_PROJECT/bin/rig" --help
@@ -147,8 +147,8 @@ is_rig_owned_stub() {
   [ "$status" -eq 0 ]
   [ "$output" = "The Rig v$(cat "$REPO_ROOT/VERSION")" ]
   run "$TEST_PROJECT/bin/rig" memory validate --json
-  [ "$status" -eq 69 ]
-  [ "$output" = '{"ok":false,"command":"memory validate","error":"not_implemented"}' ]
+  [ "$status" -eq 0 ]
+  [[ "$output" == '{"ok":true,"command":"memory validate"'* ]]
 }
 
 @test "dispatcher: stealth install excludes only bin/rig and reads external version" {
