@@ -21,4 +21,4 @@ jobs:
           sudo apt-get install -y bats
 
       - name: Run tests
-        run: bats tests/test_install.bats
+        run: bats tests/
