@@ -389,6 +389,30 @@ run_capability_smoke() {
   return "$status"
 }
 
+# Upgrade-only run accounting. Keep this separate from per-file output so an
+# automated caller can determine whether a successful run still needs review.
+UPGRADE_UPDATED_COUNT=0
+UPGRADE_MERGED_COUNT=0
+UPGRADE_SKIPPED_CUSTOMIZED_COUNT=0
+UPGRADE_SKIPPED_UNTRACKED_COUNT=0
+UPGRADE_SKIPPED_CUSTOMIZED_FILES=()
+
+record_upgrade_result() {
+  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  local result="$1" rel="${2:-}"
+  case "$result" in
+    updated) UPGRADE_UPDATED_COUNT=$((UPGRADE_UPDATED_COUNT + 1)) ;;
+    merged) UPGRADE_MERGED_COUNT=$((UPGRADE_MERGED_COUNT + 1)) ;;
+    skipped-customized)
+      UPGRADE_SKIPPED_CUSTOMIZED_COUNT=$((UPGRADE_SKIPPED_CUSTOMIZED_COUNT + 1))
+      UPGRADE_SKIPPED_CUSTOMIZED_FILES[${#UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]}]="$rel"
+      ;;
+    skipped-untracked)
+      UPGRADE_SKIPPED_UNTRACKED_COUNT=$((UPGRADE_SKIPPED_UNTRACKED_COUNT + 1))
+      ;;
+  esac
+}
+
 # ── Portable in-place sed ─────────────────────────────────────────────────────
 # GNU sed uses -i ""; macOS BSD sed uses -i ''
 sed_inplace() {
@@ -803,6 +827,7 @@ copy_file() {
     # No collision — always install
     cp "$src" "$dest"
     success "Created ${dest#${base}/}"
+    record_upgrade_result updated "${rel:-${dest#${base}/}}"
     # Record ALL files in the manifest (not just Rig-owned) so the Upgrade
     # strategy can later detect whether any file has been customized.
     # settings.json is excluded — it's always smart-merged, not hash-tracked.
@@ -943,6 +968,7 @@ _copy_upgrade_existing() {
     if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged"; then
       cp "$tmp_merged" "$dest"
       success "Merged .claude/settings.json"
+      record_upgrade_result merged "$rel"
     else
       info "Skipped settings.json (merge failed — see warning above)"
     fi
@@ -965,8 +991,10 @@ _copy_upgrade_existing() {
         if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
         cp "$src" "$dest"
         success "Updated: ${rel}"
+        record_upgrade_result updated "$rel"
       else
         info "Skipped: ${rel}"
+        record_upgrade_result skipped-customized "$rel"
       fi
     fi
     return
@@ -989,9 +1017,11 @@ _copy_upgrade_existing() {
       if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
       cp "$src" "$dest"
       success "Updated: ${rel}"
+      record_upgrade_result updated "$rel"
       write_manifest_entry "$new_hash" "$rel" "$manifest_file"
     else
       info "Skipped (user-owned, no prior manifest entry): ${rel}"
+      record_upgrade_result skipped-untracked "$rel"
       # Record the current hash so future upgrades can detect customizations.
       write_manifest_entry "$dest_hash" "$rel" "$manifest_file"
     fi
@@ -1000,6 +1030,7 @@ _copy_upgrade_existing() {
     if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
     cp "$src" "$dest"
     success "Updated: ${rel}"
+    record_upgrade_result updated "$rel"
     write_manifest_entry "$new_hash" "$rel" "$manifest_file"
   else
     # dest_hash differs from manifest_hash — user has customized this file.
@@ -1013,6 +1044,7 @@ _copy_upgrade_existing() {
     if [[ ! -t 0 ]]; then
       info "Non-interactive mode — skipping customized file: ${rel}"
       info "Run the installer interactively to review and update this file."
+      record_upgrade_result skipped-customized "$rel"
       return
     fi
     local choice
@@ -1023,11 +1055,13 @@ _copy_upgrade_existing() {
           if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
           cp "$src" "$dest"
           success "Updated (overwritten): ${rel}"
+          record_upgrade_result updated "$rel"
           write_manifest_entry "$new_hash" "$rel" "$manifest_file"
           break
           ;;
         s|S)
           info "Skipped (kept your version): ${rel}"
+          record_upgrade_result skipped-customized "$rel"
           break
           ;;
         d|D)
@@ -1064,6 +1098,7 @@ _copy_global_file_upgrade() {
     mkdir -p "$(dirname "$dest")"
     cp "$src" "$dest"
     success "Created: ${rel}"
+    record_upgrade_result updated "$rel"
     write_manifest_entry "$(sha256_file "$dest")" "$rel" "$GLOBAL_MANIFEST_FILE"
     return
   fi
@@ -1960,17 +1995,48 @@ fi
 
 # ── DONE ──────────────────────────────────────────────────────────────────────
 echo ""
+UPGRADE_REVIEW_REQUIRED=0
+if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+  bold "── Upgrade summary ──"
+  echo "Updated: $UPGRADE_UPDATED_COUNT"
+  echo "Merged: $UPGRADE_MERGED_COUNT"
+  echo "Skipped customized: $UPGRADE_SKIPPED_CUSTOMIZED_COUNT"
+  echo "Skipped untracked user-owned: $UPGRADE_SKIPPED_UNTRACKED_COUNT"
+  if [[ "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" -gt 0 ]]; then
+    UPGRADE_REVIEW_REQUIRED=1
+    echo "Customized files requiring manual review:"
+    for _skipped_file in "${UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]}"; do
+      echo "  - $_skipped_file"
+    done
+  fi
+  python3 -c 'import json,sys
+d=json.load(sys.stdin)
+missing=[x["id"] for x in d["dependencies"] if x["status"] != "ok" and x["classification"] != "optional"]
+print("Selected agents: global=%s project=%s" % (sys.argv[1], sys.argv[2]))
+print("Missing prerequisites: " + (", ".join(missing) or "none"))
+print("Degraded/skipped capabilities: " + (", ".join(d["degraded_features"]) or "none"))
+print("Exact next steps: " + ("; ".join(d["next_steps"]) or "none"))' "$GLOBAL_AGENT" "$PROJECT_AGENT" <<< "$_preflight_json"
+  [[ "$DO_GLOBAL" == true ]] && echo "Global smoke tests (expected signal: passed): ${_global_smoke:-none}"
+  [[ "$DO_PROJECT" == true ]] && echo "Project smoke tests (expected signal: passed): ${_project_smoke:-none}"
+  echo ""
+fi
 bold "── Done ──"
 echo ""
-echo "Target matrix: global=$GLOBAL_AGENT project=$PROJECT_AGENT"
-echo "Missing required prerequisites: none"
-if [[ "$GITLEAKS_OK" == true ]]; then echo "Degraded features: none"; else echo "Degraded features: secret-scanning (gitleaks missing)"; fi
+if [[ "$COLLISION_STRATEGY" != upgrade ]]; then
+  echo "Target matrix: global=$GLOBAL_AGENT project=$PROJECT_AGENT"
+  echo "Missing required prerequisites: none"
+  if [[ "$GITLEAKS_OK" == true ]]; then echo "Degraded features: none"; else echo "Degraded features: secret-scanning (gitleaks missing)"; fi
+fi
 [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" == none ]] && echo "Preserved deselected global agent files (no cleanup performed)."
 [[ "$DO_PROJECT" == true && "$PROJECT_AGENT" == none ]] && echo "Preserved deselected project agent files (no cleanup performed)."
 [[ -n "${PREVIOUS_GLOBAL_AGENT:-}" && "$PREVIOUS_GLOBAL_AGENT" != "$GLOBAL_AGENT" ]] && echo "Preserved prior global target files: $PREVIOUS_GLOBAL_AGENT."
 [[ -n "${PREVIOUS_PROJECT_AGENT:-}" && "$PREVIOUS_PROJECT_AGENT" != "$PROJECT_AGENT" ]] && echo "Preserved prior project target files: $PREVIOUS_PROJECT_AGENT."
-echo "Postflight smoke results: manifest-derived checks passed."
-echo "The Rig is installed. Next steps:"
+[[ "$COLLISION_STRATEGY" != upgrade ]] && echo "Postflight smoke results: manifest-derived checks passed."
+if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+  echo "The Rig upgrade is complete. Next steps:"
+else
+  echo "The Rig is installed. Next steps:"
+fi
 echo ""
 
 if [[ "$DO_GLOBAL" == true ]] && has_agent "$GLOBAL_AGENT" claude; then
@@ -2006,3 +2072,6 @@ fi
 
 echo "Documentation: https://github.com/laudtetteh/the-rig"
 echo ""
+if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+  echo "RIG_UPGRADE_REVIEW_REQUIRED=$UPGRADE_REVIEW_REQUIRED"
+fi

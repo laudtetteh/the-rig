@@ -2063,6 +2063,65 @@ _make_failing_sha_tools() {
 
 # ── commit-msg: # no-issue trailer ───────────────────────────────────────────
 
+@test "fresh install keeps install completion distinct and omits upgrade summary" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy skip"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"The Rig is installed. Next steps:"* ]]
+  [[ "$output" != *"── Upgrade summary ──"* ]]
+  [[ "$output" != *"RIG_UPGRADE_REVIEW_REQUIRED="* ]]
+}
+
+@test "upgrade summary counts an untracked user-owned file separately" {
+  run_installer --strategy overwrite
+  [ "$status" -eq 0 ]
+  printf 'MY UNTRACKED PROJECT CONTEXT\n' > "$TEST_PROJECT/CLAUDE.md"
+  grep -v '  CLAUDE.md$' "$TEST_PROJECT/.rig/memory/.rig-manifest" > "$TEMP_DIR/manifest"
+  mv "$TEMP_DIR/manifest" "$TEST_PROJECT/.rig/memory/.rig-manifest"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Skipped untracked user-owned: 1"* ]]
+  grep -q 'MY UNTRACKED PROJECT CONTEXT' "$TEST_PROJECT/CLAUDE.md"
+}
+
+@test "upgrade summary reports resolved targets smoke checks and no-review signal" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy skip"
+  [ "$status" -eq 0 ]
+
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy upgrade"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"── Upgrade summary ──"* ]]
+  [[ "$output" == *"Skipped customized: 0"* ]]
+  [[ "$output" == *"Selected agents: global=claude project=claude"* ]]
+  [[ "$output" == *"Missing prerequisites: none"* ]]
+  [[ "$output" == *"Degraded/skipped capabilities:"* ]]
+  [[ "$output" == *"Exact next steps:"* ]]
+  [[ "$output" == *"Global smoke tests (expected signal: passed):"* ]]
+  [[ "$output" == *"The Rig upgrade is complete. Next steps:"* ]]
+  [[ "${lines[$((${#lines[@]} - 1))]}" == "RIG_UPGRADE_REVIEW_REQUIRED=0" ]]
+}
+
+@test "upgrade summary lists customized skips and sets manual-review signal" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy skip"
+  [ "$status" -eq 0 ]
+  printf '\n# retained customization\n' >> "$fake_home/.claude/CLAUDE.md"
+
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy upgrade"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Skipped customized: 1"* ]]
+  [[ "$output" == *"Customized files requiring manual review:"* ]]
+  [[ "$output" == *"  - CLAUDE.md"* ]]
+  grep -q '# retained customization' "$fake_home/.claude/CLAUDE.md"
+  [[ "${lines[$((${#lines[@]} - 1))]}" == "RIG_UPGRADE_REVIEW_REQUIRED=1" ]]
+}
+
 @test "commit-msg: # no-issue trailer skips issue ref check for github tracker" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
