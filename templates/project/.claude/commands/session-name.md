@@ -53,7 +53,7 @@ SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; d=json
 SESSION_UUID=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("anchor") or "")' 2>/dev/null || true)
 TENTATIVE_NAME=""
 if [[ -n "$SESSION_FILE" ]]; then
-  TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; print(json.load(open(os.environ["SESSION_F"])).get("tentative_name") or "")')
+  TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); print(d.get("names",{}).get("tentative") or d.get("tentative_name") or "")')
 fi
 ```
 

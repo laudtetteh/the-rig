@@ -65,6 +65,15 @@ CONTEXT_HEADER=""
 
 # ── Read session identity from session file (UUID model) ──────────────────────
 SESSION_FILE="${RIG_SESSION_FILE:-$RIG_DIR/memory/sessions/session-${SESSION_PID}.json}"
+NATIVE_SESSION_ID=""
+INPUT=$(cat)
+if command -v python3 >/dev/null 2>&1; then
+  NATIVE_SESSION_ID=$(printf '%s' "$INPUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("session_id", ""))' 2>/dev/null || true)
+fi
+if [[ -n "$NATIVE_SESSION_ID" && -x "$REPO/bin/rig" ]]; then
+  _resolved=$("$REPO/bin/rig" session resolve --agent "${RIG_AGENT:-claude}" --native-session-id "$NATIVE_SESSION_ID" --json 2>/dev/null) || exit 0
+  SESSION_FILE=$(printf '%s' "$_resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])' 2>/dev/null) || exit 0
+fi
 if [[ -f "$SESSION_FILE" ]]; then
   # Single python3 call for both fields — halves subprocess cost and avoids
   # a race where the file changes between two sequential reads.
@@ -73,7 +82,8 @@ import json, os, sys
 try:
     d = json.load(open(os.environ['SESSION_F']))
     sys.stdout.write((d.get('anchor') or 'none') + '\n')
-    sys.stdout.write((d.get('tentative_name') or 'none') + '\n')
+    names=d.get('names', {})
+    sys.stdout.write((names.get('tentative') or d.get('tentative_name') or 'none') + '\n')
 except Exception:
     sys.stdout.write('none\nnone\n')
 " 2>/dev/null || printf 'none\nnone\n')
@@ -81,6 +91,9 @@ except Exception:
   TENTATIVE_NAME=$(printf '%s' "$_session_data" | tail -n +2 | head -1)
   [[ -z "$SESSION_ANCHOR" ]] && SESSION_ANCHOR="none"
   [[ -z "$TENTATIVE_NAME" ]] && TENTATIVE_NAME="none"
+  if [[ "$SESSION_ANCHOR" != "none" ]]; then
+    CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint-${SESSION_ANCHOR}.md"
+  fi
 elif [[ -f "$SNAPSHOT" ]]; then
   # Backward-compat: session started before UUID system was installed.
   # Try to read the legacy "Session name:" field written by old /wrap.
@@ -100,7 +113,8 @@ fi
 
 # ── Write checkpoint ───────────────────────────────────────────────────────────
 
-cat > "$CHECKPOINT" <<CPEOF
+CHECKPOINT_TMP=$(mktemp "${CHECKPOINT}.tmp.XXXXXX") || exit 0
+cat > "$CHECKPOINT_TMP" <<CPEOF
 ## Compact checkpoint — ${TIMESTAMP}
 
 **Branch:** ${BRANCH}
@@ -117,6 +131,7 @@ cat > "$CHECKPOINT" <<CPEOF
 
 ${CONTEXT_HEADER}
 CPEOF
+mv "$CHECKPOINT_TMP" "$CHECKPOINT" || exit 0
 
 # ── Output checkpoint as systemMessage ────────────────────────────────────────
 

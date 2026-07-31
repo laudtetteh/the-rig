@@ -410,30 +410,73 @@ PY
 
 session_resolve() {
   RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
-import json, os, pathlib, subprocess, sys
+import hashlib, json, os, pathlib, subprocess, sys
 root = pathlib.Path(os.environ["RIG_ROOT"])
 session_dir = pathlib.Path(os.environ["RIG_DIR"]) / "memory" / "sessions"
+args = sys.argv[1:]
+def option(name):
+    try: return args[args.index(name) + 1]
+    except (ValueError, IndexError): return ""
+agent, native_id = option("--agent"), option("--native-session-id")
+verbose = "--verbose" in args
+def project_identity():
+    try:
+        common = subprocess.check_output(["git", "-C", str(root), "rev-parse", "--git-common-dir"], text=True, stderr=subprocess.DEVNULL).strip()
+        common = pathlib.Path(common if os.path.isabs(common) else root / common).resolve()
+        return hashlib.sha256(str(common).encode()).hexdigest()
+    except (OSError, subprocess.SubprocessError):
+        return hashlib.sha256(str(root.resolve()).encode()).hexdigest()
+project_id = project_identity()
 def load(path):
     try:
         data = json.loads(path.read_text())
-        if data.get("status") != "active" or "done" in path.parts: return None
+        if not isinstance(data, dict): return None
         return data
     except (OSError, ValueError, TypeError): return None
 def emit(path, data, confidence, reason):
-    out = {"session_file": str(path) if path else None, "anchor": data.get("anchor") if data else None,
-           "branch": data.get("branch") if data else None, "status": data.get("status") if data else None,
-           "confidence": confidence, "reason": reason}
+    lifecycle = data.get("lifecycle", {}) if data else {}
+    out = {"ok": confidence == "exact", "schema_version": 1,
+           "session_file": str(path) if path else None, "anchor": data.get("anchor") if data else None,
+           "agent": data.get("agent") if data else None,
+           "branch": (data.get("runtime", {}).get("branch") or data.get("branch")) if data else None,
+           "state": lifecycle.get("state", data.get("status")) if data else None,
+           "confidence": confidence, "reason": reason,
+           "native_session_id": (data.get("native", {}).get("session_id") if verbose and data else None),
+           "revision": data.get("revision") if data else None, "warnings": []}
     print(json.dumps(out) if "--json" in sys.argv[1:] else (str(path) if path else ""))
+if bool(agent) != bool(native_id) or (agent and agent not in ("claude", "codex")):
+    emit(None, None, "none", "invalid_input"); raise SystemExit(3)
+records = []
+malformed = False
+unsupported = False
+for base in (session_dir, session_dir / "done"):
+    if base.is_dir():
+        for p in base.glob("session-*.json"):
+            d = load(p)
+            if d is None: malformed = True
+            elif isinstance(d.get("schema_version"), int) and d["schema_version"] > 1: unsupported = True
+            else: records.append((p, d))
+if native_id:
+    if unsupported: emit(None, None, "none", "unsupported_schema"); raise SystemExit(4)
+    if malformed: emit(None, None, "none", "malformed_record"); raise SystemExit(4)
+    matches = [(p,d) for p,d in records if d.get("schema_version") == 1 and
+               d.get("project", {}).get("identity") == project_id and d.get("agent") == agent and
+               d.get("native", {}).get("session_id") == native_id]
+    if len(matches) > 1: emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
+    if len(matches) == 1:
+        p,d = matches[0]
+        if "done" in p.parts or d.get("lifecycle", {}).get("state") == "complete":
+            emit(None, None, "none", "ended_record"); raise SystemExit(3)
+        emit(p,d,"exact","native_id"); raise SystemExit(0)
+    cross = [(p,d) for p,d in records if d.get("schema_version") == 1 and d.get("agent") == agent and d.get("native", {}).get("session_id") == native_id]
+    emit(None, None, "none", "cross_project" if cross else "not_found"); raise SystemExit(3 if cross else 1)
 env_file = os.environ.get("RIG_SESSION_FILE")
 if "RIG_SESSION_FILE" in os.environ:
     p = pathlib.Path(env_file); d = load(p)
-    if d: emit(p, d, "exact", "launcher_file"); raise SystemExit(0)
+    state = d.get("lifecycle", {}).get("state", d.get("status")) if d else None
+    if d and state == "active" and "done" not in p.parts: emit(p, d, "exact", "launcher_file"); raise SystemExit(0)
     emit(None, None, "none", "invalid_launcher_file"); raise SystemExit(3)
-files = []
-if session_dir.is_dir():
-    for p in session_dir.glob("session-*.json"):
-        d = load(p)
-        if d: files.append((p, d))
+files = [(p,d) for p,d in records if "done" not in p.parts and d.get("lifecycle", {}).get("state", d.get("status")) == "active"]
 explicit_anchor = "RIG_SESSION_ANCHOR" in os.environ
 anchor = os.environ.get("RIG_SESSION_ANCHOR", "")
 pid_text = os.environ.get("RIG_SESSION_PID") or str(os.getppid())
@@ -450,15 +493,96 @@ elif explicit_anchor:
 if pid_text.isdigit():
     direct = session_dir / ("session-" + pid_text + ".json"); d = load(direct)
     if d: emit(direct, d, "exact", "pid"); raise SystemExit(0)
-branch = os.environ.get("RIG_SESSION_BRANCH", "")
-if not branch:
-    try: branch = subprocess.check_output(["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], text=True, stderr=subprocess.DEVNULL).strip()
-    except (OSError, subprocess.SubprocessError): pass
-matches = [(p,d) for p,d in files if d.get("status") == "active" and branch and d.get("branch") == branch]
-if len(matches) == 1: emit(*matches[0], "inferred", "unique_active_branch"); raise SystemExit(0)
-if len(matches) > 1 or len(files) > 1: emit(None, None, "ambiguous", "multiple_active_sessions"); raise SystemExit(2)
-if len(files) == 1: emit(*files[0], "low", "only_active_session"); raise SystemExit(0)
 emit(None, None, "none", "not_found"); raise SystemExit(1)
+PY
+}
+
+session_bind() {
+  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
+import datetime, fcntl, hashlib, json, os, pathlib, subprocess, sys, tempfile, uuid
+args=sys.argv[1:]
+def option(name, default=""):
+    try: return args[args.index(name)+1]
+    except (ValueError, IndexError): return default
+agent=option("--agent"); native_id=option("--native-session-id"); source=option("--source", "hook")
+root_native=option("--root-session-id") or native_id; parent=option("--parent-native-session-id") or None
+if agent not in ("claude","codex") or not native_id:
+    print(json.dumps({"ok":False,"reason":"invalid_input"})); raise SystemExit(3)
+root=pathlib.Path(os.environ["RIG_ROOT"]).resolve(); rig=pathlib.Path(os.environ["RIG_DIR"]); sessions=rig/"memory"/"sessions"; sessions.mkdir(parents=True,exist_ok=True)
+lock=open(sessions/".bind.lock","a+"); fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
+try:
+    common=subprocess.check_output(["git","-C",str(root),"rev-parse","--git-common-dir"],text=True,stderr=subprocess.DEVNULL).strip()
+    common=pathlib.Path(common if os.path.isabs(common) else root/common).resolve()
+except (OSError,subprocess.SubprocessError): common=root
+project_id=hashlib.sha256(str(common).encode()).hexdigest(); now=datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec="seconds")
+def read(p):
+    try:
+        d=json.loads(p.read_text()); return d if isinstance(d,dict) else None
+    except (OSError,ValueError,TypeError): return None
+records=[]
+for base in (sessions,sessions/"done"):
+    if base.is_dir():
+        for p in base.glob("session-*.json"):
+            d=read(p)
+            if d is None:
+                print(json.dumps({"ok":False,"reason":"malformed_record"})); raise SystemExit(4)
+            if isinstance(d.get("schema_version"),int) and d["schema_version"]>1:
+                print(json.dumps({"ok":False,"reason":"unsupported_schema"})); raise SystemExit(4)
+            records.append((p,d))
+matches=[(p,d) for p,d in records if d.get("schema_version")==1 and d.get("project",{}).get("identity")==project_id and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id]
+if len(matches)>1:
+    print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
+hint=os.environ.get("RIG_SESSION_FILE","")
+if matches:
+    p,d=matches[0]
+    if hint and pathlib.Path(hint).resolve()!=p.resolve():
+        print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
+    if "done" in p.parts or d.get("lifecycle",{}).get("state")=="complete":
+        print(json.dumps({"ok":False,"reason":"ended_record"})); raise SystemExit(3)
+else:
+    cross=[d for _,d in records if d.get("schema_version")==1 and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id]
+    if cross:
+        print(json.dumps({"ok":False,"reason":"cross_project"})); raise SystemExit(3)
+    p=pathlib.Path(hint) if hint else None; d=read(p) if p else None
+    if d and d.get("schema_version")==1 and d.get("native",{}).get("session_id") not in (None,""):
+        print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
+    if d and d.get("agent") not in (None,agent):
+        print(json.dumps({"ok":False,"reason":"agent_conflict"})); raise SystemExit(3)
+    anchor=(d or {}).get("anchor") or str(uuid.uuid4())
+    if any(other.get("anchor")==anchor for op,other in records if p is None or op.resolve()!=p.resolve()):
+        print(json.dumps({"ok":False,"reason":"duplicate_anchor"})); raise SystemExit(2)
+    p=p or sessions/("session-"+anchor+".json")
+    legacy=d or {}; created=legacy.get("created_at") or legacy.get("started_at") or now
+    parent_matches=[other for _,other in records if other.get("schema_version")==1 and other.get("project",{}).get("identity")==project_id and other.get("agent")==agent and other.get("native",{}).get("session_id")==parent]
+    if len(parent_matches)>1:
+        print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
+    parent_anchor=parent_matches[0].get("anchor") if len(parent_matches)==1 else None
+    d={"schema_version":1,"anchor":anchor,"agent":agent,
+       "native":{"session_id":native_id,"root_session_id":root_native,"bound_at":now,"source":"launcher_hint" if hint else "hook"},
+       "project":{"root_realpath":str(root),"identity":project_id,"worktree_realpath":str(root)},
+       "created_at":created,"updated_at":now,
+       "runtime":{"pid":int(os.environ.get("RIG_SESSION_PID",os.getppid())),"launcher":"rig" if hint else "raw","cwd":os.getcwd(),"branch":"unknown","head":None},
+       "lineage":{"parent_anchor":parent_anchor,"parent_native_session_id":parent,"kind":"fork" if parent else "root"},
+       "names":{"tentative":legacy.get("tentative_name"),"final":legacy.get("final_name"),"native_title":None,"display_title":None,"native_sync":"unknown"},
+       "lifecycle":{"state":"active","last_event":"session_start","last_event_at":now,"end_reason":None},
+       "flags":{"wrap_needed":False,"post_merge_pending":False},
+       "migration":{"legacy_anchor":legacy.get("anchor") if legacy else None,"legacy_pid":legacy.get("pid") if legacy else None,"migrated_at":now if legacy else None},"revision":1}
+try: d["runtime"]["branch"]=subprocess.check_output(["git","-C",str(root),"rev-parse","--abbrev-ref","HEAD"],text=True,stderr=subprocess.DEVNULL).strip()
+except (OSError,subprocess.SubprocessError): pass
+if matches:
+    d["updated_at"]=now; d["runtime"].update({"pid":int(os.environ.get("RIG_SESSION_PID",os.getppid())),"cwd":os.getcwd()}); d["project"]["worktree_realpath"]=str(root)
+    d["lifecycle"].update({"state":"active","last_event":"session_start","last_event_at":now,"end_reason":None}); d["revision"]=int(d.get("revision",0))+1
+fd,tmp=tempfile.mkstemp(prefix=".session-",suffix=".tmp",dir=str(p.parent))
+try:
+    with os.fdopen(fd,"w") as f: json.dump(d,f,indent=2); f.write("\n"); f.flush(); os.fsync(f.fileno())
+    os.replace(tmp,p)
+finally:
+    try: os.unlink(tmp)
+    except FileNotFoundError: pass
+sentinel=pathlib.Path("/tmp")/(".rig-session-"+str(d["runtime"]["pid"])+".uuid")
+try: sentinel.write_text(d["anchor"])
+except OSError: pass
+print(json.dumps({"ok":True,"schema_version":1,"session_file":str(p),"anchor":d["anchor"],"agent":agent,"state":"active","confidence":"exact","reason":"native_id","native_session_id":None,"revision":d["revision"],"warnings":[]}))
 PY
 }
 
@@ -482,12 +606,20 @@ session_name_set() {
   [[ -n "$file" ]] || return "$RIG_EXIT_UNAVAILABLE"
   if [[ "$complete" == true ]]; then done_dir="$(rig_dir)/memory/sessions/done"; mkdir -p "$done_dir"; dest="$done_dir/session-$(date +%Y%m%d)-${anchor:-unknown}.json"; fi
   SESSION_F="$file" SESSION_NAME="$name" SESSION_TENTATIVE="$tentative" SESSION_COMPLETE="$complete" SESSION_DEST="$dest" python3 <<'PY'
-import json, os, tempfile
+import fcntl, json, os, tempfile
 p = os.environ["SESSION_F"]
+lock=open(p+".lock","a+"); fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
 with open(p) as f: d = json.load(f)
-if os.environ["SESSION_TENTATIVE"] == "true": d["tentative_name"] = os.environ["SESSION_NAME"]
-else: d["final_name"] = os.environ["SESSION_NAME"]; d["tentative_name"] = None
-if os.environ["SESSION_COMPLETE"] == "true": d["status"] = "complete"
+if d.get("schema_version") == 1:
+    names=d.setdefault("names", {})
+    if os.environ["SESSION_TENTATIVE"] == "true": names["tentative"] = os.environ["SESSION_NAME"]
+    else: names["final"] = os.environ["SESSION_NAME"]; names["tentative"] = None
+    if os.environ["SESSION_COMPLETE"] == "true": d["lifecycle"]["state"] = "complete"
+    d["revision"] = int(d.get("revision", 0)) + 1
+else:
+    if os.environ["SESSION_TENTATIVE"] == "true": d["tentative_name"] = os.environ["SESSION_NAME"]
+    else: d["final_name"] = os.environ["SESSION_NAME"]; d["tentative_name"] = None
+    if os.environ["SESSION_COMPLETE"] == "true": d["status"] = "complete"
 dest = os.environ["SESSION_DEST"] or p
 fd, tmp = tempfile.mkstemp(prefix=".session-", suffix=".tmp", dir=os.path.dirname(dest))
 try:
@@ -496,8 +628,9 @@ try:
     if dest != p:
         try: os.unlink(p)
         except FileNotFoundError: pass
-    if os.environ["SESSION_COMPLETE"] == "true" and str(d.get("pid", "")).isdigit():
-        try: os.unlink("/tmp/.rig-session-" + str(d["pid"]) + ".uuid")
+    pid=d.get("runtime", {}).get("pid", d.get("pid"))
+    if os.environ["SESSION_COMPLETE"] == "true" and str(pid).isdigit():
+        try: os.unlink("/tmp/.rig-session-" + str(pid) + ".uuid")
         except FileNotFoundError: pass
 finally:
     try: os.unlink(tmp)
@@ -542,6 +675,7 @@ PY
 }
 
 launch_codex() {
+  export RIG_SESSION_PID="${RIG_SESSION_PID:-$$}"
   [[ "${1:-}" == -- ]] && shift
   exec codex "$@"
 }
@@ -558,7 +692,7 @@ main() {
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help "$command"; return; fi
       subcommand="${1:-}"; shift || true
-      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
+      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
     *) shift; usage_error "unknown command: $command" "$@";;
   esac
 }

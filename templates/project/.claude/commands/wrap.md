@@ -434,7 +434,7 @@ SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
 }
 SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
 SESSION_UUID=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
-TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; print(json.load(open(os.environ["SESSION_F"])).get("tentative_name") or "")')
+TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); print(d.get("names",{}).get("tentative") or d.get("tentative_name") or "")')
 ```
 
 ### Step 2 — Collect this session's work
@@ -499,9 +499,9 @@ After completing this session, scan `$SESSION_DIR` for remaining `.json` files
 ```bash
 for f in "$SESSION_DIR"/session-*.json; do
   [[ -f "$f" ]] || continue
-  STATUS=$(python3 -c "import json; print(json.load(open('$f')).get('status',''))" 2>/dev/null)
+  STATUS=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('lifecycle',{}).get('state') or d.get('status',''))" 2>/dev/null)
   STARTED=$(python3 -c "import json; print(json.load(open('$f')).get('started_at','?'))" 2>/dev/null)
-  NAME=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('tentative_name') or d.get('anchor','?'))" 2>/dev/null)
+  NAME=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('names',{}).get('tentative') or d.get('tentative_name') or d.get('anchor','?'))" 2>/dev/null)
   if [[ "$STATUS" == "active" ]]; then
     echo "⚠ Orphan session (active, unwrapped): $NAME (started $STARTED, file: $(basename $f))"
   elif [[ "$STATUS" == "complete" ]]; then

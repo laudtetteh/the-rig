@@ -24,13 +24,13 @@ write_session() {
   [[ "$output" == *'"anchor": "launcher"'* && "$output" == *'"confidence": "exact"'* ]]
 }
 
-@test "resolver reports ambiguity and never selects done" {
+@test "resolver never infers from branch or lone active records" {
   write_session "$CASE_DIR/.rig/memory/sessions/session-1.json" one feat/current
   write_session "$CASE_DIR/.rig/memory/sessions/session-2.json" two feat/current
   write_session "$CASE_DIR/.rig/memory/sessions/done/session-old.json" done feat/current complete
   run env RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
-  [ "$status" -eq 2 ]
-  [[ "$output" == *'"confidence": "ambiguous"'* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"reason": "not_found"'* ]]
   [[ "$output" != *'/done/'* ]]
 }
 
@@ -117,7 +117,71 @@ write_session() {
   printf '#!/usr/bin/env bash\nprintf "codex:%%s watcher:%%s\\n" "$*" "${RIG_SESSION_FILE:-unset}"\n' > "$BATS_TEST_TMPDIR/fakebin/codex"
   chmod +x "$BATS_TEST_TMPDIR/fakebin/codex"
   run env PATH="$BATS_TEST_TMPDIR/fakebin:$PATH" "$CASE_DIR/bin/rig" codex -- --help
-  [ "$status" -eq 0 ]; [ "$output" = 'codex:--help watcher:unset' ]
+  [ "$status" -eq 0 ]; [[ "$output" == 'codex:--help watcher:'* ]]
+}
+
+@test "native bind creates a redacted versioned record and exact resolve is read-only" {
+  run "$CASE_DIR/bin/rig" session bind --agent codex --native-session-id thread-secret --source startup
+  [ "$status" -eq 0 ]
+  local file
+  file=$(printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["native_session_id"] is None; print(d["session_file"])')
+  SESSION_F="$file" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["schema_version"]==1 and d["agent"]=="codex" and d["native"]["session_id"]=="thread-secret" and d["lifecycle"]["state"]=="active"'
+  local before after
+  before=$(cksum "$file")
+  run "$CASE_DIR/bin/rig" session resolve --agent codex --native-session-id thread-secret --json
+  [ "$status" -eq 0 ]; [[ "$output" == *'"reason": "native_id"'* && "$output" != *'thread-secret'* ]]
+  after=$(cksum "$file"); [ "$before" = "$after" ]
+}
+
+@test "native resolver fails closed on wrong project and duplicate bindings" {
+  run "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id native-a --source startup
+  [ "$status" -eq 0 ]
+  local file duplicate
+  file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  duplicate="$CASE_DIR/.rig/memory/sessions/session-duplicate.json"
+  cp "$file" "$duplicate"
+  run "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id native-a --json
+  [ "$status" -eq 2 ]; [[ "$output" == *'"reason": "duplicate_native_id"'* ]]
+}
+
+@test "native binding rejects a launcher hint already bound to another ID without writing" {
+  run "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id native-a --source startup
+  [ "$status" -eq 0 ]
+  local file before after
+  file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  before=$(cksum "$file")
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id native-b --source startup
+  [ "$status" -eq 3 ]; [[ "$output" == *'"reason": "native_conflict"'* ]]
+  after=$(cksum "$file"); [ "$before" = "$after" ]
+}
+
+@test "native resolution rejects malformed and future records without writes" {
+  local bad="$CASE_DIR/.rig/memory/sessions/session-bad.json" before after
+  printf '{bad json' > "$bad"; before=$(cksum "$bad")
+  run "$CASE_DIR/bin/rig" session resolve --agent codex --native-session-id missing --json
+  [ "$status" -eq 4 ]; [[ "$output" == *'"reason": "malformed_record"'* ]]
+  after=$(cksum "$bad"); [ "$before" = "$after" ]
+}
+
+@test "session-name mutates v1 names and revision through exact launcher record" {
+  run "$CASE_DIR/bin/rig" session bind --agent codex --native-session-id native-name --source startup
+  [ "$status" -eq 0 ]
+  local file
+  file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session-name set --final 'fix exact identity'
+  [ "$status" -eq 0 ]
+  SESSION_F="$file" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["names"]["final"]=="fix exact identity" and d["revision"]==2 and "final_name" not in d'
+}
+
+@test "concurrent bootstrap for one native ID converges on one record" {
+  run env RIG_BIN="$CASE_DIR/bin/rig" OUT_A="$BATS_TEST_TMPDIR/a" OUT_B="$BATS_TEST_TMPDIR/b" bash -c '
+    "$RIG_BIN" session bind --agent codex --native-session-id concurrent --source startup >"$OUT_A" & a=$!
+    "$RIG_BIN" session bind --agent codex --native-session-id concurrent --source startup >"$OUT_B" & b=$!
+    wait "$a"; wait "$b"
+  '
+  [ "$status" -eq 0 ]
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -name 'session-*.json' | wc -l | tr -d ' ')" -eq 1 ]
+  A="$BATS_TEST_TMPDIR/a" B="$BATS_TEST_TMPDIR/b" python3 -c 'import json,os; a=json.load(open(os.environ["A"])); b=json.load(open(os.environ["B"])); assert a["anchor"]==b["anchor"]'
 }
 
 @test "claude launcher creates identity and exports exact resolver context" {
@@ -137,6 +201,6 @@ write_session() {
   printf '# Progress\n' > "$CASE_DIR/.rig/memory/PROGRESS.md"
   run env RIG_SESSION_FILE="$file" RIG_SESSION_PID=424242 bash -c 'cd "$1" && bash "$2"' _ "$CASE_DIR" "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/pre-compact.sh"
   [ "$status" -eq 0 ]
-  [ -f "$CASE_DIR/.rig/memory/.compact-checkpoint-424242.md" ]
-  /usr/bin/grep -q 'Session anchor:\*\* env-anchor' "$CASE_DIR/.rig/memory/.compact-checkpoint-424242.md"
+  [ -f "$CASE_DIR/.rig/memory/.compact-checkpoint-env-anchor.md" ]
+  /usr/bin/grep -q 'Session anchor:\*\* env-anchor' "$CASE_DIR/.rig/memory/.compact-checkpoint-env-anchor.md"
 }

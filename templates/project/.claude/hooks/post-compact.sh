@@ -19,9 +19,18 @@ else
 fi
 
 SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
+INPUT=$(cat)
+NATIVE_SESSION_ID=""
+if command -v python3 >/dev/null 2>&1; then
+  NATIVE_SESSION_ID=$(printf '%s' "$INPUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("session_id", ""))' 2>/dev/null || true)
+fi
 
 CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint-${PPID}.md"
-if [[ ! -f "$CHECKPOINT" ]]; then
+if [[ -n "$NATIVE_SESSION_ID" && -x "$REPO/bin/rig" ]]; then
+  _resolved=$("$REPO/bin/rig" session resolve --agent "${RIG_AGENT:-claude}" --native-session-id "$NATIVE_SESSION_ID" --json 2>/dev/null) || exit 0
+  _anchor=$(printf '%s' "$_resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])' 2>/dev/null) || exit 0
+  CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint-${_anchor}.md"
+elif [[ ! -f "$CHECKPOINT" ]]; then
   CHECKPOINT=$(ls -t "$RIG_DIR/memory"/.compact-checkpoint-*.md 2>/dev/null | head -1 || true)
 fi
 

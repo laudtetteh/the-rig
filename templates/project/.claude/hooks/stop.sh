@@ -39,14 +39,19 @@ INPUT=$(cat)
 
 # Parse source — present only in SessionEnd payloads; empty for Stop
 SOURCE=""
+NATIVE_SESSION_ID=""
 if command -v python3 >/dev/null 2>&1; then
-  SOURCE=$(printf '%s' "$INPUT" | python3 -c "
+  _identity_input=$(printf '%s' "$INPUT" | python3 -c "
 import json, sys
 try:
-    print(json.load(sys.stdin).get('source', ''))
+    d=json.load(sys.stdin)
+    print(d.get('source', ''))
+    print(d.get('session_id', ''))
 except Exception:
     pass
 " 2>/dev/null || true)
+  SOURCE=$(printf '%s' "$_identity_input" | sed -n '1p')
+  NATIVE_SESSION_ID=$(printf '%s' "$_identity_input" | sed -n '2p')
 fi
 
 SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
@@ -57,6 +62,11 @@ SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session-$(basename "$REPO").log}"
 NOW_FULL=$(date "+%Y-%m-%d %H:%M" 2>/dev/null || true)
 SESSION_PID="${RIG_SESSION_PID:-$PPID}"
 SESSION_FILE="${RIG_SESSION_FILE:-$RIG_DIR/memory/sessions/session-${SESSION_PID}.json}"
+if [[ -n "$NATIVE_SESSION_ID" && -x "$REPO/bin/rig" ]]; then
+  _resolved=$("$REPO/bin/rig" session resolve --agent "${RIG_AGENT:-claude}" --native-session-id "$NATIVE_SESSION_ID" --json 2>/dev/null) || exit 0
+  SESSION_FILE=$(printf '%s' "$_resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])' 2>/dev/null) || exit 0
+  RIG_SESSION_ANCHOR=$(printf '%s' "$_resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])' 2>/dev/null) || exit 0
+fi
 
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 
@@ -136,15 +146,21 @@ case "$SOURCE" in
     rm -f "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true
 
     if [[ -f "$SESSION_FILE" ]]; then
-      SESSION_F="$SESSION_FILE" python3 -c "
-import json, os
+      SESSION_F="$SESSION_FILE" WRAP_F="$WRAP_NEEDED" END_SOURCE="$SOURCE" python3 -c "
+import datetime, fcntl, json, os, tempfile
 try:
     p = os.environ['SESSION_F']
+    lock=open(p+'.lock','a+'); fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
     with open(p) as f:
         d = json.load(f)
-    d['status'] = 'ended-no-wrap'
-    with open(p, 'w') as f:
-        json.dump(d, f, indent=2)
+    if d.get('schema_version') == 1:
+        now=datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec='seconds')
+        d['updated_at']=now; d['revision']=int(d.get('revision',0))+1
+        d['lifecycle'].update({'state':'ended_no_wrap' if os.path.exists(os.environ['WRAP_F']) else 'inactive','last_event':'session_end','last_event_at':now,'end_reason':os.environ['END_SOURCE']})
+    else: d['status'] = 'ended-no-wrap'
+    fd,tmp=tempfile.mkstemp(prefix='.session-',suffix='.tmp',dir=os.path.dirname(p))
+    with os.fdopen(fd,'w') as f: json.dump(d,f,indent=2); f.write('\n'); f.flush(); os.fsync(f.fileno())
+    os.replace(tmp,p)
 except Exception:
     pass
 " 2>/dev/null || true

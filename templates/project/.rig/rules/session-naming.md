@@ -7,7 +7,8 @@ generated Codex `$session-name` skill proposes or updates a name.
 ## Authoritative evidence
 
 1. Current conversation context is authoritative.
-2. A `tentative_name` in the session file resolved for this launch may recover
+2. A `names.tentative` value (or legacy `tentative_name`) in the exact session
+   file resolved for this launch may recover
    current-session intent after compaction.
 3. PROGRESS entries tagged with the resolved current session UUID may
    cross-check the conversation.
