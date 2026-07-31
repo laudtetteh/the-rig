@@ -119,6 +119,6 @@ EOF
   run_install upgrade
   [ "$status" -eq 0 ]
   grep -Fq 'legacy customized session naming' "$codex"
-  [[ "$output" == *'Preserved customized/stale Codex artifact: .agents/skills/session-name/references/command.md'* ]]
-  [[ "$output" == *'Review the generated replacement and update this file manually.'* ]]
+  [[ "$output" == *'Non-interactive mode — skipping customized file: .agents/skills/session-name/references/command.md'* ]]
+  [[ "$output" == *'Run the installer interactively to review and update this file.'* ]]
 }

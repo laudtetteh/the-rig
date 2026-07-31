@@ -51,6 +51,10 @@ is_rig_owned_stub() {
     bin/rig|\
     .claude/hooks/*|\
     .claude/commands/*|\
+    .claude/agents/*|\
+    .agents/skills/*|\
+    .codex/hooks.json|\
+    .codex/hooks/*|\
     .rig/processes/*|\
     .rig/rules/protected-paths.txt|\
     .husky/*|\
@@ -93,6 +97,18 @@ is_rig_owned_stub() {
 @test "is_rig_owned: gitleaks config is Rig-owned" {
   is_rig_owned_stub ".gitleaks.toml"
   [ "$?" -eq 0 ]
+}
+
+@test "is_rig_owned: generated Codex skill is Rig-owned" {
+  is_rig_owned_stub ".agents/skills/ship/SKILL.md"
+}
+
+@test "is_rig_owned: Codex hook registry is Rig-owned" {
+  is_rig_owned_stub ".codex/hooks.json"
+}
+
+@test "is_rig_owned: Codex hook adapter is Rig-owned" {
+  is_rig_owned_stub ".codex/hooks/rig-adapter.sh"
 }
 
 @test "is_rig_owned: CLAUDE.md is user-owned" {
@@ -261,6 +277,99 @@ is_rig_owned_stub() {
 
   # Manifest should have an entry for a known Rig-owned file
   grep -q ".claude/hooks/pre-tool.sh" "$TEST_PROJECT/.rig/memory/.rig-manifest"
+}
+
+@test "upgrade strategy: manifest tracks generated Codex hooks and skills" {
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+  grep -q '  .codex/hooks.json$' "$manifest"
+  grep -q '  .codex/hooks/rig-adapter.sh$' "$manifest"
+  grep -q '  .agents/skills/.*/SKILL.md$' "$manifest"
+}
+
+@test "upgrade strategy: preserves customized generated Codex artifacts" {
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.codex/hooks/rig-adapter.sh"
+  local skill
+  skill="$(find "$TEST_PROJECT/.agents/skills" -name SKILL.md -print -quit)"
+  printf '\n# user hook customization\n' >> "$hook"
+  printf '\n<!-- user skill customization -->\n' >> "$skill"
+
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Non-interactive mode — skipping customized file: .codex/hooks/rig-adapter.sh"* ]]
+  [[ "$output" == *"Non-interactive mode — skipping customized file: .agents/skills/"* ]]
+  [[ "$output" == *"Skipped customized:"* ]]
+  grep -q 'user hook customization' "$hook"
+  grep -q 'user skill customization' "$skill"
+}
+
+@test "upgrade strategy: regenerates unmodified stale Codex artifacts" {
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+  local hook="$TEST_PROJECT/.codex/hooks/rig-adapter.sh"
+  local hook_rel=".codex/hooks/rig-adapter.sh"
+  local skill
+  skill="$(find "$TEST_PROJECT/.agents/skills" -name SKILL.md -print -quit)"
+  local skill_rel="${skill#$TEST_PROJECT/}"
+  printf '# stale generated hook\n' > "$hook"
+  printf '# stale generated skill\n' > "$skill"
+
+  local hook_hash skill_hash
+  hook_hash="$(_sha256 "$hook")"
+  skill_hash="$(_sha256 "$skill")"
+  awk -v hook_hash="$hook_hash" -v hook_rel="$hook_rel" \
+      -v skill_hash="$skill_hash" -v skill_rel="$skill_rel" \
+      '$2 == hook_rel { sub($1, hook_hash) } $2 == skill_rel { sub($1, skill_hash) } { print }' \
+      "$manifest" > "$TEMP_DIR/updated-manifest"
+  mv "$TEMP_DIR/updated-manifest" "$manifest"
+
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Updated: $hook_rel"* ]]
+  [[ "$output" == *"Updated: $skill_rel"* ]]
+  ! grep -q 'stale generated hook' "$hook"
+  ! grep -q 'stale generated skill' "$skill"
+}
+
+@test "upgrade strategy: does not follow a Codex artifact symlink" {
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.codex/hooks/rig-adapter.sh"
+  local outside="$TEMP_DIR/outside-hook.sh"
+  printf '# outside sentinel\n' > "$outside"
+  rm "$hook"
+  ln -s "$outside" "$hook"
+
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Customized symlink detected: .codex/hooks/rig-adapter.sh"* ]]
+  [[ -L "$hook" ]]
+  grep -q 'outside sentinel' "$outside"
+}
+
+@test "upgrade strategy: preserves a legacy Codex artifact with no manifest entry" {
+  run_installer --strategy merge --project-agent codex
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.codex/hooks/rig-adapter.sh"
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+  printf '\n# legacy customization\n' >> "$hook"
+  grep -v '  .codex/hooks/rig-adapter.sh$' "$manifest" > "$TEMP_DIR/manifest"
+  mv "$TEMP_DIR/manifest" "$manifest"
+
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Preserved untracked Codex artifact: .codex/hooks/rig-adapter.sh"* ]]
+  grep -q 'legacy customization' "$hook"
+  grep -q '  .codex/hooks/rig-adapter.sh$' "$manifest"
 }
 
 @test "upgrade strategy: auto-updates unmodified Rig-owned file on re-install" {
@@ -1982,6 +2091,27 @@ _make_failing_sha_tools() {
   printf '#!/usr/bin/env bash\nexit 127\n' > "$FAKE_SHA_BIN/sha256sum"
   printf '#!/usr/bin/env bash\nexit 127\n' > "$FAKE_SHA_BIN/shasum"
   chmod +x "$FAKE_SHA_BIN/sha256sum" "$FAKE_SHA_BIN/shasum"
+}
+
+@test "upgrade strategy: global Codex skills are manifest tracked and customization safe" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+
+  run env HOME="$fake_home" bash "$INSTALLER" --global-only \
+    --global-agent codex --strategy upgrade
+  [ "$status" -eq 0 ]
+  local skill
+  skill="$(find "$fake_home/.agents/skills" -name SKILL.md -print -quit)"
+  [ -n "$skill" ]
+  local skill_rel="${skill#$fake_home/}"
+  grep -q "  $skill_rel$" "$fake_home/.agents/.rig-global-manifest"
+
+  printf '\n<!-- personal customization -->\n' >> "$skill"
+  run env HOME="$fake_home" bash "$INSTALLER" --global-only \
+    --global-agent codex --strategy upgrade
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Non-interactive mode — skipping customized file: $skill_rel"* ]]
+  grep -q 'personal customization' "$skill"
 }
 
 @test "upgrade strategy: global Rig-owned file updated when hash matches manifest" {

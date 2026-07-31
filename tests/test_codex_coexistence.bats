@@ -125,7 +125,8 @@ run_install() {
   run_install codex upgrade
   [ "$status" -eq 0 ]
   grep -Fq 'user customization' "$TEST_PROJECT/.agents/skills/status/references/command.md"
-  ! grep -Fq '.agents/skills/' "$TEST_PROJECT/.rig/memory/.rig-manifest"
+  grep -Fq '.agents/skills/status/references/command.md' "$TEST_PROJECT/.rig/memory/.rig-manifest"
+  [[ "$output" == *'Non-interactive mode — skipping customized file: .agents/skills/status/references/command.md'* ]]
 }
 
 @test "global Codex target installs valid personal skills without Claude assets" {
