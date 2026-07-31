@@ -11,13 +11,14 @@ Performs the session-end housekeeping that prevents state loss between sessions:
 3. **Trims `.rig/memory/PROGRESS.md`** if it has grown beyond 20 entries (see Trim step below)
 4. **Prunes stale session-end markers** from `PROGRESS.md` (see Marker prune step below)
 5. Checks `.rig/memory/ERRORS.md` — prompts you to log anything unexpected; **checks archive before logging** to prevent duplicate entries (see ERRORS.md logging step below)
-6. **Self-improvement check** — scans for Rig workflow gaps and logs them to `.rig/memory/RIG_GAPS.md`
-7. **Trims `.rig/memory/ERRORS.md`** if it has grown beyond 30 entries (see Trim step below)
-8. Reports what's in `.rig/tasks/active/` so you know what's in flight
-9. **Suggests a session name** — derives a name from this session's work via `/session-name` logic (see Session naming step below)
-10. Surfaces the next priority from `.rig/tasks/backlog/` and asks: "What's next?"
-11. **Cleans up housekeeping flags** — deletes `.rig/memory/.wrap-needed` if present
-12. **(opt-in) Auto-scans JSONL transcripts** for frequent Bash patterns and appends new `permissions.allow` entries to `.claude/settings.json` — enable with `touch $RIG_DIR/memory/.fewer-prompts-enabled`
+6. Checks for significant architectural, product, or process decisions made this session and logs new ones to `.rig/memory/DECISIONS.md` (see DECISIONS.md logging step below)
+7. **Self-improvement check** — scans for Rig workflow gaps and logs them to `.rig/memory/RIG_GAPS.md`
+8. **Trims `.rig/memory/ERRORS.md`** if it has grown beyond 30 entries (see Trim step below)
+9. Reports what's in `.rig/tasks/active/` so you know what's in flight
+10. **Suggests a session name** — derives a name from this session's work via `/session-name` logic (see Session naming step below)
+11. Surfaces the next priority from `.rig/tasks/backlog/` and asks: "What's next?"
+12. **Cleans up housekeeping flags** — deletes `.rig/memory/.wrap-needed` if present
+13. **(opt-in) Auto-scans JSONL transcripts** for frequent Bash patterns and appends new `permissions.allow` entries to `.claude/settings.json` — enable with `touch $RIG_DIR/memory/.fewer-prompts-enabled`
 
 ## Usage
 
@@ -61,7 +62,7 @@ fi
 touch "$SNAP_LOCK"
 ```
 
-Create the sentinel immediately. Delete it at the very end of `/wrap` (step 11,
+Create the sentinel immediately. Delete it at the very end of `/wrap` (step 12,
 after flag cleanup). Locks older than 30 minutes are automatically expired on the
 next run — they are from crashed sessions. Locks under 30 minutes block and require
 the other session to finish (or the lock deleted manually if that session is gone).
@@ -112,9 +113,10 @@ Gather all findings silently — no output yet:
 2. **Session-end markers** — count stale markers (all but the most recent)
 3. **"This session" summary** — from conversation context: PRs merged or opened, tasks completed, issues resolved, significant changes made. Conversation context is the primary signal; PROGRESS.md markers are cross-reference only.
 4. **ERRORS.md additions** — infer from session context whether any unexpected behaviors, footguns, or non-obvious pitfalls should be added (see ERRORS.md logging step below)
-5. **Feature doc overlaps** — files changed this session vs. documented feature entry points (see Feature doc freshness step below)
-6. **Active tasks** — read `.rig/tasks/active/`
-7. **Session identity** — run `bin/rig session resolve --json`; extract its session file,
+5. **DECISIONS.md additions** — infer whether the session produced any significant adopted architectural, product, or process decisions (see DECISIONS.md logging step below)
+6. **Feature doc overlaps** — files changed this session vs. documented feature entry points (see Feature doc freshness step below)
+7. **Active tasks** — read `.rig/tasks/active/`
+8. **Session identity** — run `bin/rig session resolve --json`; extract its session file,
    `anchor`, and `tentative_name`. Stop on ambiguous identity.
 
 ### Report
@@ -132,6 +134,7 @@ Print a single structured report before executing anything:
 **PROGRESS.md:** [N entries → trimming X to archive (topics: CI setup, stealth mode, ...) | N entries, no trim needed]
 **Session-end markers:** [pruned N stale markers | none to prune]
 **ERRORS.md:** [N new entries: short-title-1, short-title-2 | no new entries]
+**DECISIONS.md:** [N new entries: short-title-1, short-title-2 | no new entries]
 **Feature docs:** [⚠ overlap detected — run /refresh-feature-doc X | no overlaps]
 **Active tasks:** [task-slug | none]
 
@@ -145,6 +148,7 @@ After printing the report, **execute all automatic actions without further promp
 - Trim PROGRESS.md if count > 20
 - Prune stale session-end markers
 - Add inferred ERRORS.md entries (if any)
+- Add inferred DECISIONS.md entries (if any)
 - Trim ERRORS.md if count > 30
 - Write CONTEXT_SNAPSHOT.md (project state only — no Session name field)
 - Write final session name to session file and move to `sessions/done/` — only if user confirms the suggested name
@@ -318,6 +322,41 @@ If there are entries to add, **before creating any new entry**:
 
 ---
 
+## DECISIONS.md logging step
+
+Based on this session's context, infer whether a **significant adopted** architectural,
+product, or process decision was made. A decision is significant when it is non-obvious,
+closes off meaningful alternatives, or would surprise a future reader. Discussion of an
+option, a rejected proposal, routine implementation detail, or a choice not actually
+adopted is not a decision to log.
+
+For each significant adopted decision:
+
+1. Search `.rig/memory/DECISIONS.md` for the title, chosen approach, and rejected
+   alternatives. Treat semantically equivalent entries as duplicates even when wording
+   differs.
+2. If the decision is already recorded, do not add another entry. Update the existing
+   entry only when this session materially changed its rationale or consequences.
+3. If it is genuinely new, add an entry at the top of `DECISIONS.md`, below its
+   introductory text and format example, using the file's standard format:
+   ```markdown
+   ## [YYYY-MM-DD] — [Short title]
+
+   **Context**: Why this decision needed to be made
+   **Decision**: What was chosen
+   **Rejected**: What was considered and not chosen
+   **Rationale**: Why
+   **Consequences**: What this decision implies going forward
+   ```
+   When adding the first decision, remove the `No decisions logged yet` placeholder.
+4. Include the resulting count and short titles in the Wrap report.
+
+If no significant adopted decision occurred, report `no new entries` and make no change.
+Do not ask for confirmation and do not turn decision logging into a required gate; it is
+part of the automatic actions that follow the existing Wrap report.
+
+---
+
 ## Trim step — ERRORS.md
 
 After checking `.rig/memory/ERRORS.md`, count the number of `## ` entry headers in the file.
@@ -478,7 +517,7 @@ skip the naming step silently but still run the orphan scan.
 
 ---
 
-## Flag cleanup (step 11)
+## Flag cleanup (step 12)
 
 After suggesting a session name and before asking "What's next?", run both cleanups:
 
