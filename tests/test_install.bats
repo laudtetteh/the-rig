@@ -326,7 +326,7 @@ is_rig_owned_stub() {
   skill_hash="$(_sha256 "$skill")"
   awk -v hook_hash="$hook_hash" -v hook_rel="$hook_rel" \
       -v skill_hash="$skill_hash" -v skill_rel="$skill_rel" \
-      '$2 == hook_rel { $1 = hook_hash } $2 == skill_rel { $1 = skill_hash } { print }' \
+      '$2 == hook_rel { sub($1, hook_hash) } $2 == skill_rel { sub($1, skill_hash) } { print }' \
       "$manifest" > "$TEMP_DIR/updated-manifest"
   mv "$TEMP_DIR/updated-manifest" "$manifest"
 
