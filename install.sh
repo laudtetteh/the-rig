@@ -52,13 +52,14 @@ confirm() {
 sha256_file() {
   local file="$1"
   [[ -f "$file" ]] || { echo ""; return; }
+  local hash=""
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$file" | awk '{print $1}'
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$file" | awk '{print $1}'
-  else
-    echo ""
+    hash="$(sha256sum "$file" 2>/dev/null | awk '{print $1}' || true)"
   fi
+  if [[ -z "$hash" ]] && command -v shasum >/dev/null 2>&1; then
+    hash="$(shasum -a 256 "$file" 2>/dev/null | awk '{print $1}' || true)"
+  fi
+  printf '%s\n' "$hash"
 }
 
 # ── Rig-owned file classification ─────────────────────────────────────────────
@@ -111,29 +112,31 @@ GLOBAL_MANIFEST_FILE="$HOME/.claude/.rig-global-manifest"  # global layer manife
 read_manifest_hash() {
   # Returns the recorded hash for a given rel path, or empty string if not found.
   local rel="$1"
-  [[ -f "$MANIFEST_FILE" ]] || { echo ""; return 0; }
+  local manifest_file="${2:-$MANIFEST_FILE}"
+  [[ -f "$manifest_file" ]] || { echo ""; return 0; }
   # grep exits 1 when no match; suppress it so set -eo pipefail doesn't kill the installer.
-  grep "  ${rel}$" "$MANIFEST_FILE" 2>/dev/null | awk '{print $1}' | head -1 || true
+  grep "  ${rel}$" "$manifest_file" 2>/dev/null | awk '{print $1}' | head -1 || true
 }
 
 write_manifest_entry() {
   # Upsert: remove any existing entry for $rel, then append the new hash.
   local hash="$1"
   local rel="$2"
-  [[ -z "$hash" || -z "$MANIFEST_FILE" ]] && return
-  mkdir -p "$(dirname "$MANIFEST_FILE")"
-  if [[ ! -f "$MANIFEST_FILE" ]]; then
+  local manifest_file="${3:-$MANIFEST_FILE}"
+  [[ -z "$hash" || -z "$manifest_file" ]] && return
+  mkdir -p "$(dirname "$manifest_file")"
+  if [[ ! -f "$manifest_file" ]]; then
     {
       echo "# The Rig manifest"
       echo "# Records the SHA256 of each Rig-owned file at last install."
       echo "# Used by the Upgrade strategy to detect user customizations."
       echo "# Committed to the repo. Do not edit manually."
-    } > "$MANIFEST_FILE"
+    } > "$manifest_file"
   fi
   local tmp; tmp="$(mktemp)"
-  grep -v "  ${rel}$" "$MANIFEST_FILE" > "$tmp" 2>/dev/null || true
+  grep -v "  ${rel}$" "$manifest_file" > "$tmp" 2>/dev/null || true
   echo "${hash}  ${rel}" >> "$tmp"
-  mv "$tmp" "$MANIFEST_FILE"
+  mv "$tmp" "$manifest_file"
 }
 
 # ── Locate the script's own directory (works with symlinks) ───────────────────
@@ -912,14 +915,17 @@ copy_unowned_codex_file() {
 #
 # SHA256 unavailable: falls back to byte-level cmp(1). If files differ and
 # sha256 is absent, prompts without a diff (can't reliably detect customization).
-_copy_file_upgrade() {
+_copy_upgrade_existing() {
   local src="$1"
   local dest="$2"
   local base="${3:-}"
   local rel="${4:-}"
+  local manifest_file="$5"
+  local settings_mode="$6"
+  local rig_owned_default="$7"
 
   # ── settings.json: always smart-merge ──────────────────────────────────────
-  if [[ "$(basename "$dest")" == "settings.json" && "$dest" == *".claude/settings.json" ]]; then
+  if [[ "$settings_mode" == "smart-merge" && "$(basename "$dest")" == "settings.json" && "$dest" == *".claude/settings.json" ]]; then
     local tmp_merged tmp_src_subst abs_target escaped_target
     tmp_merged="$(mktemp /tmp/rig-settings-merged-XXXXXX.json)"
     # Substitute [REPO_ROOT] before merging so dedup compares real paths,
@@ -966,29 +972,29 @@ _copy_file_upgrade() {
     return
   fi
 
-  manifest_hash="$(read_manifest_hash "$rel")"
+  manifest_hash="$(read_manifest_hash "$rel" "$manifest_file")"
 
   if [[ -z "$manifest_hash" ]]; then
     # No manifest entry. Two cases:
     #   Rig-owned:  first upgrade before manifest tracking existed → safe to overwrite.
     #   User-owned: never tracked (e.g. CLAUDE.md, PROJECT_BRIEF.md, memory files).
     #               We can't tell if the user customized it, so skip safely.
-    if is_rig_owned "$rel"; then
+    if [[ "$rig_owned_default" == true ]] || is_rig_owned "$rel"; then
       if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
       cp "$src" "$dest"
       success "Updated: ${rel}"
-      write_manifest_entry "$new_hash" "$rel"
+      write_manifest_entry "$new_hash" "$rel" "$manifest_file"
     else
       info "Skipped (user-owned, no prior manifest entry): ${rel}"
       # Record the current hash so future upgrades can detect customizations.
-      write_manifest_entry "$dest_hash" "$rel"
+      write_manifest_entry "$dest_hash" "$rel" "$manifest_file"
     fi
   elif [[ "$dest_hash" == "$manifest_hash" ]]; then
     # Matches manifest → unmodified since install. Safe to overwrite.
     if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
     cp "$src" "$dest"
     success "Updated: ${rel}"
-    write_manifest_entry "$new_hash" "$rel"
+    write_manifest_entry "$new_hash" "$rel" "$manifest_file"
   else
     # dest_hash differs from manifest_hash — user has customized this file.
     # Show what changed and ask before overwriting.
@@ -1011,7 +1017,7 @@ _copy_file_upgrade() {
           if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
           cp "$src" "$dest"
           success "Updated (overwritten): ${rel}"
-          write_manifest_entry "$new_hash" "$rel"
+          write_manifest_entry "$new_hash" "$rel" "$manifest_file"
           break
           ;;
         s|S)
@@ -1033,11 +1039,15 @@ _copy_file_upgrade() {
   fi
 }
 
+_copy_file_upgrade() {
+  _copy_upgrade_existing "$1" "$2" "${3:-}" "${4:-}" \
+    "$MANIFEST_FILE" smart-merge false
+}
+
 # ── GLOBAL UPGRADE HANDLER ───────────────────────────────────────────────────
-# Like _copy_file_upgrade() but for global-layer files (~/.claude/).
+# Thin global-layer wrapper around the shared existing-file upgrade handler.
 # All files passed here are treated as Rig-owned — the caller never passes
 # PROFILE.md (personal data that must never be auto-overwritten).
-# Caller sets MANIFEST_FILE="$GLOBAL_MANIFEST_FILE" before calling.
 _copy_global_file_upgrade() {
   local src="$1"
   local dest="$2"
@@ -1048,72 +1058,11 @@ _copy_global_file_upgrade() {
     mkdir -p "$(dirname "$dest")"
     cp "$src" "$dest"
     success "Created: ${rel}"
-    write_manifest_entry "$(sha256_file "$dest")" "$rel"
+    write_manifest_entry "$(sha256_file "$dest")" "$rel" "$GLOBAL_MANIFEST_FILE"
     return
   fi
-
-  local new_hash dest_hash manifest_hash
-  new_hash="$(sha256_file "$src")"
-  dest_hash="$(sha256_file "$dest")"
-
-  if [[ -z "$new_hash" ]]; then
-    if cmp -s "$src" "$dest"; then
-      info "Up to date: ${rel}"
-    else
-      warn "sha256 unavailable — cannot detect customizations in: ${rel}"
-    fi
-    return
-  fi
-
-  if [[ "$dest_hash" == "$new_hash" ]]; then
-    info "Up to date: ${rel}"
-    return
-  fi
-
-  manifest_hash="$(read_manifest_hash "$rel")"
-
-  if [[ -z "$manifest_hash" || "$dest_hash" == "$manifest_hash" ]]; then
-    # No prior manifest entry (first upgrade — treat as unmodified) OR
-    # hash matches manifest (unmodified since install) → safe to auto-update.
-    if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
-    cp "$src" "$dest"
-    success "Updated: ${rel}"
-    write_manifest_entry "$new_hash" "$rel"
-  else
-    # dest_hash differs from manifest_hash — user has customized this file.
-    echo ""
-    warn "Customized file detected: ${rel}"
-    echo "  Your version differs from what The Rig originally installed."
-    echo "  The new Rig version also modifies this file."
-    echo ""
-    if [[ ! -t 0 ]]; then
-      info "Non-interactive mode — skipping customized file: ${rel}"
-      info "Run the installer interactively to review and update this file."
-      return
-    fi
-    local choice
-    while true; do
-      read -r -p "$(echo -e "  ${BOLD}?${RESET} (o)verwrite  (s)kip  (d)iff  [o/s/d]: ")" choice
-      case "${choice:-}" in
-        o|O)
-          if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
-          cp "$src" "$dest"
-          success "Updated (overwritten): ${rel}"
-          write_manifest_entry "$new_hash" "$rel"
-          break ;;
-        s|S)
-          info "Skipped (kept your version): ${rel}"
-          break ;;
-        d|D)
-          echo ""
-          echo "  ── diff: your version (a) → new Rig version (b) ──"
-          diff -u "$dest" "$src" | head -100 || true
-          echo "  ── end diff ──"
-          echo "" ;;
-        *) echo "  Please enter o, s, or d." ;;
-      esac
-    done
-  fi
+  _copy_upgrade_existing "$src" "$dest" "$base" "$rel" \
+    "$GLOBAL_MANIFEST_FILE" none true
 }
 
 # ── GLOBAL LAYER ─────────────────────────────────────────────────────────────

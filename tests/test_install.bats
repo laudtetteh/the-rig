@@ -1976,6 +1976,14 @@ _sha256() {
   sha256sum "$1" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$1" | awk '{print $1}'
 }
 
+_make_failing_sha_tools() {
+  FAKE_SHA_BIN="$TEMP_DIR/fake-sha-bin"
+  mkdir -p "$FAKE_SHA_BIN"
+  printf '#!/usr/bin/env bash\nexit 127\n' > "$FAKE_SHA_BIN/sha256sum"
+  printf '#!/usr/bin/env bash\nexit 127\n' > "$FAKE_SHA_BIN/shasum"
+  chmod +x "$FAKE_SHA_BIN/sha256sum" "$FAKE_SHA_BIN/shasum"
+}
+
 @test "upgrade strategy: global Rig-owned file updated when hash matches manifest" {
   local fake_home="$TEMP_DIR/fake-home"
   mkdir -p "$fake_home"
@@ -2021,6 +2029,36 @@ _sha256() {
   run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy upgrade"
   [ "$status" -eq 0 ]
   grep -q '# user customization' "$fake_home/.claude/CLAUDE.md"
+}
+
+@test "upgrade strategy: global file prompts and updates when SHA256 tools fail" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy skip"
+  [ "$status" -eq 0 ]
+
+  printf '# stale global version\n' > "$fake_home/.claude/CLAUDE.md"
+  _make_failing_sha_tools
+  run env HOME="$fake_home" PATH="$FAKE_SHA_BIN:$PATH" \
+    bash -c "echo '' | bash '$INSTALLER' --global-only --strategy upgrade"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sha256 unavailable — cannot detect customizations in: CLAUDE.md"* ]]
+  [[ "$output" == *"Updated: CLAUDE.md"* ]]
+  ! grep -q '# stale global version' "$fake_home/.claude/CLAUDE.md"
+}
+
+@test "upgrade strategy: identical global file stays quiet when SHA256 tools fail" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy skip"
+  [ "$status" -eq 0 ]
+
+  _make_failing_sha_tools
+  run env HOME="$fake_home" PATH="$FAKE_SHA_BIN:$PATH" \
+    bash -c "echo '' | bash '$INSTALLER' --global-only --strategy upgrade"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"sha256 unavailable"* ]]
+  [[ "$output" == *"Up to date: CLAUDE.md"* ]]
 }
 
 # ── commit-msg: # no-issue trailer ───────────────────────────────────────────
