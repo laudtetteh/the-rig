@@ -281,6 +281,70 @@ temporary ref. A rename to a genuinely different existing branch remains an erro
 
 ---
 
+## `gh` uses the wrong account or reports unexpected authentication failures
+
+**Symptom:** `gh` uses a different account than `gh auth status` shows as active,
+or a command fails even though the expected account is logged in through the
+system keychain.
+
+**Cause:** An inherited `GH_TOKEN` or `GITHUB_TOKEN` environment variable takes
+precedence over stored credentials. A stale token can therefore shadow the account
+selected in the keychain. Check whether either variable is set without printing its
+value:
+
+```bash
+env | grep -E '^(GH_TOKEN|GITHUB_TOKEN)=' >/dev/null \
+  && echo "A GitHub token variable is set"
+```
+
+**Fix:** Remove both variables from the current shell, select the intended stored
+account, and identify the repository explicitly when the working directory or
+remote could be ambiguous:
+
+```bash
+unset GH_TOKEN GITHUB_TOKEN
+gh auth switch --user YOUR_GITHUB_LOGIN
+gh issue list --repo owner/name
+```
+
+For a single command, remove the variables only from that command's environment:
+
+```bash
+env -u GH_TOKEN -u GITHUB_TOKEN gh issue list --repo owner/name
+```
+
+If the token variables return in a new shell, remove or update the exports in your
+shell profile, environment manager, or parent process.
+
+---
+
+## Yarn 4 aborts because `YARN_NO_PROXY` maps to legacy `noProxy`
+
+**Symptom:** A Yarn 4 command exits during configuration loading and reports that
+`noProxy` is an unrecognized or legacy configuration setting.
+
+**Cause:** Yarn converts inherited `YARN_*` environment variables into Yarn
+configuration keys. `YARN_NO_PROXY` becomes the legacy `noProxy` key, so Yarn can
+abort before it runs the requested script. This variable is often inherited from a
+shell profile, proxy setup, IDE, or parent process rather than from the project.
+
+**Fix:** Remove `YARN_NO_PROXY` from the Yarn command's environment:
+
+```bash
+env -u YARN_NO_PROXY yarn <script>
+```
+
+For example:
+
+```bash
+env -u YARN_NO_PROXY yarn test
+```
+
+If that works, remove or scope the `YARN_NO_PROXY` export at its source. Unsetting
+only this variable preserves other proxy variables that unrelated tools may need.
+
+---
+
 ## Still stuck?
 
 Check the session log first (`/tmp/the-rig-session.log`). If the log shows the hook
