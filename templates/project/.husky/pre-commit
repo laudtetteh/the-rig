@@ -104,7 +104,7 @@ for f in $STAGED_FILES; do
   case "$f" in
     *.png|*.jpg|*.jpeg|*.gif|*.ico|*.svg|*.woff|*.woff2|*.ttf|*.eot|\
     *.pdf|*.zip|*.tar|*.gz|*.mp4|*.mp3|*.mov) continue ;;
-    .husky/*|.claude/hooks/*) continue ;;
+    .husky/*|.claude/hooks/*|.claude/commands/*|.claude/agents/*|.rig/processes/*) continue ;;
   esac
 
   # Skip paths matching .rig-debug-scan-exclude glob patterns
