@@ -71,8 +71,9 @@ sha256_file() {
 # strategy applies manifest-aware logic uniformly. is_rig_owned() is used for
 # messaging/warning decisions only, not as a skip gate.
 #
-# Rig-owned:   bin/rig, .claude/hooks/, .claude/commands/, .rig/processes/, .husky/, .gitleaks.toml
-# User-owned:  CLAUDE.md, PROJECT_BRIEF.md, .rig/rules/, .rig/memory/*.md,
+# Rig-owned:   bin/rig, .claude/hooks/, .claude/commands/, .rig/processes/,
+#              .rig/rules/protected-paths.txt, .husky/, .gitleaks.toml
+# User-owned:  CLAUDE.md, PROJECT_BRIEF.md, other .rig/rules/, .rig/memory/*.md,
 #              .rig/tasks/, .github/
 # Special:     .claude/settings.json (always smart-merged, not manifest-tracked)
 is_rig_owned() {
@@ -83,6 +84,7 @@ is_rig_owned() {
     .claude/commands/*|\
     .claude/agents/*|\
     .rig/processes/*|\
+    .rig/rules/protected-paths.txt|\
     .husky/*|\
     .gitleaks.toml)
       return 0 ;;
@@ -1240,6 +1242,7 @@ if [[ "$DO_PROJECT" == true ]]; then
       .rig/memory/*)                       [[ "$INSTALL_MEMORY" == true ]]         ;;
       .rig/tasks/*)                        [[ "$INSTALL_TASKS" == true ]]          ;;
       .rig/processes/*)                    [[ "$INSTALL_PROCESSES" == true ]]      ;;
+      .rig/rules/protected-paths.txt)      [[ "$INSTALL_CLAUDE_HOOKS" == true ]]   ;;
       .rig/rules/*)                        [[ "$INSTALL_RULES" == true ]]          ;;
       .claude/hooks/subagent-start.sh)     [[ "$INSTALL_SUBAGENTS" == true ]]      ;;
       .claude/hooks/*|.claude/settings*)   [[ "$INSTALL_CLAUDE_HOOKS" == true ]]   ;;

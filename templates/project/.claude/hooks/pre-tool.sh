@@ -206,13 +206,36 @@ sys.stderr.write('Redirected write from worktree path to main repo: ' + new_path
   #
   # Uses absolute paths so the block works whether .rig/ is inside the repo
   # or at an external location (see .rigpath / install.sh --rig-dir).
-  RIG_PROTECTED=(
-    "$RIG_DIR/processes/"
-    "$RIG_DIR/rules/"
-    "$REPO/.husky/"
-    "$REPO/CLAUDE.md"
-    "$REPO/.claude/hooks/"
-  )
+  PROTECTED_PATH_POLICY="$RIG_DIR/rules/protected-paths.txt"
+  if [[ ! -r "$PROTECTED_PATH_POLICY" ]]; then
+    echo "Blocked: The Rig protected-path policy is missing or unreadable:" >&2
+    echo "  $PROTECTED_PATH_POLICY" >&2
+    echo "Restore it with The Rig installer before attempting writes." >&2
+    exit 1
+  fi
+
+  RIG_PROTECTED=()
+  while IFS= read -r protected || [[ -n "$protected" ]]; do
+    # Allow comments and whitespace-only lines, but keep path fragments literal.
+    [[ "$protected" =~ ^[[:space:]]*$ || "$protected" =~ ^[[:space:]]*# ]] && continue
+    case "$protected" in
+      '[RIG_DIR]/'*) protected="$RIG_DIR/${protected#\[RIG_DIR\]/}" ;;
+      '[REPO]/'*)    protected="$REPO/${protected#\[REPO\]/}" ;;
+      *)
+        echo "Blocked: The Rig protected-path policy is malformed:" >&2
+        echo "  $PROTECTED_PATH_POLICY" >&2
+        echo "Every path must begin with [RIG_DIR]/ or [REPO]/." >&2
+        exit 1
+        ;;
+    esac
+    RIG_PROTECTED+=("$protected")
+  done < "$PROTECTED_PATH_POLICY"
+
+  if [[ "${#RIG_PROTECTED[@]}" -eq 0 ]]; then
+    echo "Blocked: The Rig protected-path policy contains no paths:" >&2
+    echo "  $PROTECTED_PATH_POLICY" >&2
+    exit 1
+  fi
 
   for protected in "${RIG_PROTECTED[@]}"; do
     if [[ "$PATH_ARG" == *"$protected"* ]]; then

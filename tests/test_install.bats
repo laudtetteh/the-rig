@@ -52,6 +52,7 @@ is_rig_owned_stub() {
     .claude/hooks/*|\
     .claude/commands/*|\
     .rig/processes/*|\
+    .rig/rules/protected-paths.txt|\
     .husky/*|\
     .gitleaks.toml)
       return 0 ;;
@@ -76,6 +77,11 @@ is_rig_owned_stub() {
 
 @test "is_rig_owned: process file is Rig-owned" {
   is_rig_owned_stub ".rig/processes/SHIP_WORKFLOW.md"
+  [ "$?" -eq 0 ]
+}
+
+@test "is_rig_owned: protected-path policy is Rig-owned" {
+  is_rig_owned_stub ".rig/rules/protected-paths.txt"
   [ "$?" -eq 0 ]
 }
 
@@ -180,6 +186,12 @@ is_rig_owned_stub() {
   [ "$status" -eq 0 ]
   [ -f "$TEST_PROJECT/.claude/commands/rig-status.md" ]
   grep -q "^# Command: /rig-status" "$TEST_PROJECT/.claude/commands/rig-status.md"
+}
+
+@test "skip strategy: installs protected-path policy with hooks" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_PROJECT/.rig/rules/protected-paths.txt" ]
 }
 
 # ── Overwrite strategy ────────────────────────────────────────────────────────
@@ -1226,6 +1238,50 @@ _is_rig_protected() {
 @test "path blocking: task file write is allowed" {
   run _is_rig_protected "/repo/.rig/tasks/active/TASK_my-feature.md"
   [ "$status" -ne 0 ]
+}
+
+_run_pre_tool_write() {
+  local file_path="$1"
+  local input
+  input=$(printf '{"file_path":"%s"}' "$file_path")
+  run bash -c 'cd "$1" && printf "%s" "$2" | RIG_SESSION_LOG="$3" bash "$4" Write' \
+    _ "$TEST_PROJECT" "$input" "$TEMP_DIR/session.log" \
+    "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh"
+}
+
+_install_protected_path_policy() {
+  mkdir -p "$TEST_PROJECT/.rig/rules"
+  cp "$REPO_ROOT/templates/project/.rig/rules/protected-paths.txt" \
+    "$TEST_PROJECT/.rig/rules/protected-paths.txt"
+}
+
+@test "path policy: real hook blocks protected target" {
+  _install_protected_path_policy
+  local repo_root
+  repo_root=$(git -C "$TEST_PROJECT" rev-parse --show-toplevel)
+  _run_pre_tool_write "$repo_root/CLAUDE.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is a The Rig governance file"* ]]
+}
+
+@test "path policy: real hook allows unprotected target" {
+  _install_protected_path_policy
+  _run_pre_tool_write "$TEST_PROJECT/src/app.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "path policy: real hook fails closed when policy is missing" {
+  _run_pre_tool_write "$TEST_PROJECT/src/app.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"policy is missing or unreadable"* ]]
+}
+
+@test "path policy: real hook fails closed when policy is malformed" {
+  mkdir -p "$TEST_PROJECT/.rig/rules"
+  printf 'relative/path\n' > "$TEST_PROJECT/.rig/rules/protected-paths.txt"
+  _run_pre_tool_write "$TEST_PROJECT/src/app.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"policy is malformed"* ]]
 }
 
 # ── Self-install detector ─────────────────────────────────────────────────────

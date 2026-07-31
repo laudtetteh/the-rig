@@ -1,0 +1,10 @@
+# The Rig governance paths protected from agent writes.
+#
+# One path fragment per line. Blank lines and lines beginning with # are ignored.
+# Every entry must begin with [RIG_DIR]/ or [REPO]/; pre-tool.sh expands those
+# placeholders after resolving the current project's locations.
+[RIG_DIR]/processes/
+[RIG_DIR]/rules/
+[REPO]/.husky/
+[REPO]/CLAUDE.md
+[REPO]/.claude/hooks/
