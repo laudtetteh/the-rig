@@ -11,12 +11,18 @@ The Rig itself — for review and optional submission.
 2. Scans `.rig/memory/ERRORS.md` for any Rig-related issues not yet captured in `RIG_GAPS.md`
 3. Formats a consolidated report with copy-paste instructions
 4. Offers to mark entries as submitted (adds `[submitted]` tag to entry headers)
+5. With `--collect`, scans every Rig project and produces a deduplicated triage report
 
 ## Usage
 
 ```
 /rig-gaps
+/rig-gaps --collect
 ```
+
+Use `/rig-gaps --collect` from any project to review unsubmitted gaps across all
+projects registered below `~/.rig/projects/`. Collector mode is read-only: it does
+not modify source logs, mark entries submitted, or create GitHub issues.
 
 > **RIG_DIR resolution (stealth mode):** Before reading any `.rig/` path, resolve
 > where `.rig/` actually lives. If `.rigpath` exists at the project root, read it —
@@ -27,6 +33,128 @@ Run this:
 - When you want to report accumulated feedback to The Rig developer
 - Before a major project milestone (so gaps get fixed before the next phase)
 - Periodically — once every few weeks of active use
+
+---
+
+## Entry scope
+
+Every new gap entry must include an explicit scope directly after `Severity`:
+
+```markdown
+**Scope**: project | rig-core
+```
+
+Choose `project` when the problem belongs to the current project's code, setup,
+or decisions. Choose `rig-core` only when the same behavior could affect other Rig
+projects (commands, hooks, installer, templates, or the Rig workflow itself).
+
+Existing entries without `Scope` remain valid historical data. Normal mode should
+add `**Scope**: project` when it synthesizes an entry from `ERRORS.md`. Collector
+mode must retain an entry with a missing or invalid scope, label it `needs-review`,
+and never silently guess that it is a Rig-core issue.
+
+---
+
+## Collector mode (`--collect`)
+
+If the user says **"collect"**, **"--collect"**, or **"collect across projects"**,
+run this flow instead of Steps 1–4. Do not run push or submit mode as part of it.
+
+Run the reference collector below exactly as a single Bash script. Its path glob
+selects only each project's canonical `memory/RIG_GAPS.md`; it cannot descend into
+`backups/` directories or include files such as `RIG_GAPS.md.bak`.
+
+<!-- rig-gaps-collector:start -->
+```bash
+set -eu
+
+projects_root="${HOME}/.rig/projects"
+tmp_entries="$(mktemp "${TMPDIR:-/tmp}/rig-gaps-entries.XXXXXX")"
+trap 'rm -f "$tmp_entries"' EXIT HUP INT TERM
+
+found=0
+for gap_file in "$projects_root"/*/memory/RIG_GAPS.md; do
+  [ -f "$gap_file" ] || continue
+  found=1
+  project="${gap_file#"$projects_root"/}"
+  project="${project%%/*}"
+
+  awk -v project="$project" '
+    function emit() {
+      if (entry == "" || header ~ /\[submitted([: ][^]]*)?\]/) return
+      scope = "needs-review"
+      if (entry ~ /\*\*Scope\*\*:[[:space:]]*project([[:space:]]|$)/) scope = "project"
+      if (entry ~ /\*\*Scope\*\*:[[:space:]]*rig-core([[:space:]]|$)/) scope = "rig-core"
+      title = header
+      sub(/^##[[:space:]]*\[[^]]+\][[:space:]]*[—-][[:space:]]*/, "", title)
+      if (title == header) sub(/^##[[:space:]]*/, "", title)
+      printf "@@ENTRY@@\n@@PROJECT@@%s\n@@SCOPE@@%s\n@@TITLE@@%s\n%s\n", project, scope, title, entry
+    }
+    /^##[[:space:]]*\[[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\]/ {
+      emit()
+      header = $0
+      entry = $0
+      next
+    }
+    header != "" { entry = entry "\n" $0 }
+    END { emit() }
+  ' "$gap_file" >> "$tmp_entries"
+done
+
+if [ "$found" -eq 0 ]; then
+  echo "No project RIG_GAPS.md files found below $projects_root."
+  exit 0
+fi
+
+awk '
+  function flush() {
+    if (title == "") return
+    key = tolower(title)
+    gsub(/[^[:alnum:]]+/, " ", key)
+    gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+    key = scope SUBSEP key
+    if (seen[key]++) {
+      projects[key] = projects[key] ", " project
+      duplicates[key]++
+      return
+    }
+    order[++count] = key
+    projects[key] = project
+    scopes[key] = scope
+    titles[key] = title
+    bodies[key] = body
+  }
+  /^@@ENTRY@@$/ { flush(); project = scope = title = body = ""; next }
+  /^@@PROJECT@@/ { project = substr($0, 12); next }
+  /^@@SCOPE@@/ { scope = substr($0, 10); next }
+  /^@@TITLE@@/ { title = substr($0, 10); next }
+  { body = body (body == "" ? "" : "\n") $0 }
+  END {
+    flush()
+    print "## Cross-project Rig Gaps — triage report"
+    print ""
+    print count " unique unsubmitted candidate(s). Near-identical titles are grouped within the same scope."
+    for (i = 1; i <= count; i++) {
+      key = order[i]
+      print ""
+      print "### [" scopes[key] "] " titles[key]
+      print "- Projects: " projects[key]
+      print "- Duplicate matches: " (duplicates[key] + 1)
+      print "- Triage: " (scopes[key] == "rig-core" ? "candidate for Rig core" : scopes[key] == "project" ? "route to project owner" : "needs-review (missing or invalid Scope)")
+      print ""
+      print bodies[key]
+    }
+  }
+' "$tmp_entries"
+```
+<!-- rig-gaps-collector:end -->
+
+The normalized key is `scope + title`, lowercased with punctuation and repeated
+whitespace removed. This deliberately groups case/punctuation variants while
+keeping equally named project and Rig-core gaps separate. The report includes
+source projects, duplicate count, full representative entry, and an explicit
+triage route. Review `needs-review` entries before acting. Automatic issue creation
+is out of scope; use the separately gated `--submit` flow only after human review.
 
 ---
 
@@ -50,7 +178,8 @@ workflow rather than project-specific bugs. Examples of Rig-related errors:
 - "Hook fired when it shouldn't have / didn't fire when it should"
 
 For each Rig-related ERRORS.md entry NOT already reflected in `RIG_GAPS.md`:
-- Synthesize it into a gap entry using the standard format
+- Synthesize it into a gap entry using the standard format, including
+  `**Scope**: project` (do not infer `rig-core` without explicit evidence)
 - Append it to `RIG_GAPS.md` automatically (no confirmation needed — this is non-destructive)
 - Note how many new entries were synthesized
 
