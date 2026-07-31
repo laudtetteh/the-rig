@@ -87,6 +87,22 @@
 
 ---
 
+## Work checkpoint
+
+> Update before a pause, mode transition, or agent handoff. This is the task's
+> authoritative resume state under `.rig/processes/WORK_MODES.md`.
+
+**Mode**: `task` | `sprint (embedded)`
+**Phase**: `inspect` | `plan` | `approve` | `execute` | `validate` | `ship` | `closeout`
+**Work status**: `proposed` | `ready` | `active` | `blocked` | `partial` | `complete` | `cancelled`
+**Last completed**: [step and evidence]
+**Next action**: [one exact resumable action]
+**Blocker/unblock condition**: [owner and condition, or "none"]
+**Approved scope changes**: [changes and approval, or "none"]
+**Execution identity**: [branch/worktree/PR, or "not launched"]
+
+---
+
 ## Operating mode
 
 > Set by the `/task` intake wizard. This is the source of truth for how the agent

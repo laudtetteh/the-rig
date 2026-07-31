@@ -297,6 +297,24 @@ all resolve this path automatically.
 
 ---
 
+## Work-mode routing
+
+Use `.rig/processes/WORK_MODES.md` as the canonical lifecycle, state,
+transition, approval, and resume contract. Route intent to the smallest mode:
+
+- New project with no established backlog: `/kickoff` (project mode).
+- Define or configure one unit of work: `/task` (task intake).
+- Execute one task or a simple ordered queue: `/run` (task mode).
+- Coordinate multiple tasks with conflicts/dependencies: `/sprint` (sprint mode).
+
+Supported compositions are project -> task, project -> sprint, task -> sprint,
+and sprint -> isolated task. A task embedded in `/run` or `/sprint` keeps the
+same task card, operating mode, checkpoint, and ship gate. Never treat a mode
+transition as execution approval; checkpoint the source artifact and obtain the
+receiving mode's required approval.
+
+---
+
 ## Imported rules
 
 @.rig/rules/coding-standards.md

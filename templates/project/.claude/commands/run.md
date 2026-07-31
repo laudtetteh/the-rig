@@ -1,5 +1,9 @@
 # Command: /run
 
+> **Work-mode adapter:** Follow `.rig/processes/WORK_MODES.md` as the canonical
+> lifecycle and state contract. `/run` selects and executes task mode; it does
+> not create a parallel task state or bypass launch and mutation approvals.
+
 Trigger this command to start executing the task backlog.
 
 `/run` surveys what's ready to work, proposes an execution order, and drives tasks

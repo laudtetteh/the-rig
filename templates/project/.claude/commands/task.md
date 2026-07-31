@@ -1,5 +1,9 @@
 # Command: /task
 
+> **Work-mode adapter:** Follow `.rig/processes/WORK_MODES.md` as the canonical
+> lifecycle and state contract. This command supplies task-mode intake only;
+> execution uses the same task card and requires its own approved launch.
+
 Trigger this command to start any unit of work — a ticket, a feature, a bug fix, a
 maintenance task, or a support request. It opens an intake wizard that captures what
 you want built *and* how you want the agent to behave while building it.

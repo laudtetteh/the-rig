@@ -1,5 +1,9 @@
 # Command: /kickoff
 
+> **Work-mode adapter:** Follow `.rig/processes/WORK_MODES.md` as the canonical
+> lifecycle and state contract. This command supplies project-mode intake and
+> outputs only; the shared contract governs approvals, transitions, and resume.
+
 > **Run once, at project creation.** After `/kickoff` completes, this command has no further use — you can delete `.claude/commands/kickoff.md` from your project.
 
 Trigger this command to bootstrap a brand new project from scratch.
