@@ -40,7 +40,60 @@ it from the template and ask you to fill it in, then stop and wait.
 
 ## Kickoff flow
 
-### Step 0 — Check for PROJECT_BRIEF.md
+### Step 0 — Guard against running in an established repository
+
+Before reading or creating `PROJECT_BRIEF.md`, inspect several independent maturity
+signals. Run this probe from anywhere inside the repository (the marker comments are
+used by the focused guard tests; keep the commands between them executable):
+
+```bash
+# kickoff-maturity-probe-start
+REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
+if [[ -f "$REPO/.rigpath" ]]; then
+  RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+else
+  RIG_DIR="$REPO/.rig"
+fi
+
+commit_count=$(git -C "$REPO" rev-list --count HEAD 2>/dev/null || printf '0')
+release_tag_count=$(git -C "$REPO" tag -l 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null | wc -l | tr -d '[:space:]')
+claude_filled=0
+if [[ -s "$REPO/CLAUDE.md" ]] && ! /usr/bin/grep -q '\[' "$REPO/CLAUDE.md"; then
+  claude_filled=1
+fi
+backlog_nonempty=0
+if [[ -d "$RIG_DIR/tasks" ]] && find "$RIG_DIR/tasks" -type f -print -quit 2>/dev/null | /usr/bin/grep -q .; then
+  backlog_nonempty=1
+fi
+
+maturity_signals=0
+(( commit_count >= 2 )) && ((maturity_signals += 1))
+(( release_tag_count >= 1 )) && ((maturity_signals += 1))
+(( claude_filled == 1 )) && ((maturity_signals += 1))
+(( backlog_nonempty == 1 )) && ((maturity_signals += 1))
+printf 'commits=%s release_tags=%s claude_filled=%s backlog_nonempty=%s signals=%s\n' \
+  "$commit_count" "$release_tag_count" "$claude_filled" "$backlog_nonempty" "$maturity_signals"
+# kickoff-maturity-probe-end
+```
+
+The repository looks established only when **two or more** independent signals are
+present. A lone signal is ambiguous (for example, a starter repository may already
+have several commits), so do not interrupt the greenfield flow for one signal alone.
+
+If `signals` is 2 or greater, show the evidence from the probe and warn:
+
+> "This repository appears to be established. `/kickoff` can overwrite project
+> guidance and create a duplicate backlog; `/task` is the safer next step. Reply
+> **continue kickoff** to proceed anyway, or say **run task** and I'll hand off to
+> `/task`."
+
+Stop and wait. Continue only after the user gives the exact explicit confirmation
+`continue kickoff`. If they choose `run task`, hand off directly to `/task`. Do not
+interpret a general acknowledgement such as "okay" or "go ahead" as confirmation.
+
+If fewer than two signals are present, continue without prompting.
+
+### Step 1 — Check for PROJECT_BRIEF.md
 
 Look for `PROJECT_BRIEF.md` in the repo root.
 
@@ -99,7 +152,7 @@ them in before continuing.
 
 ---
 
-### Step 1 — Read and reflect
+### Step 2 — Read and reflect
 
 Read `PROJECT_BRIEF.md` in full. Then state back to the user:
 
@@ -121,7 +174,7 @@ Wait for confirmation or corrections. Incorporate any feedback before moving for
 
 ---
 
-### Step 2 — Resolve open questions
+### Step 3 — Resolve open questions
 
 For each open question (from the brief + any the agent identified):
 - Offer a concrete recommendation with a one-sentence rationale
@@ -135,7 +188,7 @@ Record all decisions in `PROJECT_BRIEF.md` under the relevant section (or under
 
 ---
 
-### Step 3 — Confirm the build plan
+### Step 4 — Confirm the build plan
 
 Present the full scaffolding plan before touching any files:
 
@@ -154,12 +207,12 @@ Wait for explicit go-ahead.
 
 ---
 
-### Step 4 — Scaffold
+### Step 5 — Scaffold
 
 Execute the build plan in order. For each item, confirm completion before moving to
 the next.
 
-#### 4a. Fill in CLAUDE.md
+#### 5a. Fill in CLAUDE.md
 
 Replace every placeholder in `CLAUDE.md` with real content from the brief:
 - Project name and description
@@ -171,7 +224,7 @@ Replace every placeholder in `CLAUDE.md` with real content from the brief:
 
 Do not leave any `[PLACEHOLDER]` lines in the final file.
 
-#### 4b. Generate task backlog
+#### 5b. Generate task backlog
 
 For each MVP feature in the brief, create a task file in `.rig/tasks/backlog/` using the
 task template. Each task file must have:
@@ -185,7 +238,7 @@ task template. Each task file must have:
 Order tasks by dependency: foundational work (auth, data layer, core models) before
 features that build on them.
 
-#### 4c. Open GitHub issues
+#### 5c. Open GitHub issues
 
 For each task file, open a GitHub issue:
 - Title: matches the task goal
@@ -193,7 +246,7 @@ For each task file, open a GitHub issue:
 - Labels: `type: feat` + the most relevant area label
 - Update the task file's `## GitHub issue` field with the issue number
 
-#### 4d. Update .rig/memory/PROGRESS.md
+#### 5d. Update .rig/memory/PROGRESS.md
 
 Append a dated entry:
 
@@ -210,7 +263,7 @@ Append a dated entry:
 
 ---
 
-### Step 5 — Hand off
+### Step 6 — Hand off
 
 After scaffolding is complete:
 
