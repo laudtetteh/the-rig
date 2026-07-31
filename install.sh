@@ -1608,6 +1608,24 @@ if [[ "$DO_PROJECT" == true ]]; then
     done
   fi
 
+  # A non-interactive upgrade cannot ask which opt-in components to retain.
+  # Warn when project instructions still reference a component that the unset
+  # flag would skip, so the operator can rerun with the matching explicit flag.
+  if [[ "$COLLISION_STRATEGY" == upgrade && -f "$TARGET/CLAUDE.md" ]]; then
+    if [[ "$INSTALL_FEATURE_DOCS" != true ]] && \
+       grep -Eq 'doc-feature|doc-list|feature-context|refresh-feature-doc|docs/features' "$TARGET/CLAUDE.md"; then
+      warn "CLAUDE.md references feature-docs files that Upgrade will skip; rerun with --feature-docs."
+    fi
+    if [[ "$INSTALL_CONTRIBUTE" != true ]] && \
+       grep -Eq 'rig-gaps|rig-propose' "$TARGET/CLAUDE.md"; then
+      warn "CLAUDE.md references contribute files that Upgrade will skip; rerun with --contribute."
+    fi
+    if [[ "$INSTALL_SUBAGENTS" != true ]] && \
+       grep -Fq 'subagent-start.sh' "$TARGET/CLAUDE.md"; then
+      warn "CLAUDE.md references subagent files that Upgrade will skip; rerun with --subagents."
+    fi
+  fi
+
   # ── COPY PROJECT FILES ────────────────────────────────────────────────────
   while IFS= read -r -d '' src_file; do
     rel="${src_file#$PROJECT_TEMPLATES/}"
