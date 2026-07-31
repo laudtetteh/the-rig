@@ -10,6 +10,10 @@ Usage: rig <command> [subcommand] [options]
 Commands:
   rig doctor                Diagnose a Rig installation
   rig session resolve       Resolve the current session identity
+  rig session current       Show the exact current session safely
+  rig session list          List redacted public session summaries
+  rig session doctor        Check session-record integrity and privacy
+  rig session repair        Preview or confirm explicit orphan repair
   rig session-name set      Set the current session name atomically
   rig memory validate       Validate Rig memory files
   rig memory repair-markers Reposition unambiguous Rig memory markers
@@ -36,7 +40,14 @@ version() {
 command_help() {
   case "$1" in
     doctor) printf 'Usage: rig doctor [--json]\n';;
-    session) printf 'Usage: rig session resolve [--json]\n';;
+    session) cat <<'EOF'
+Usage: rig session <resolve|current|list|doctor|repair> [options]
+
+Native IDs are redacted unless --verbose is explicitly supplied.
+Repair is preview-only unless --confirm TOKEN and --reason REASON are supplied.
+Content matching is never part of normal resolution.
+EOF
+      ;;
     session-name) printf 'Usage: rig session-name set [--tentative|--final] [--complete] [--json] <name>\n';;
     memory) printf 'Usage: rig memory <validate|repair-markers> [--json]\n';;
     codex) printf 'Usage: rig codex [-- <codex arguments>]\n';;
@@ -586,6 +597,174 @@ print(json.dumps({"ok":True,"schema_version":1,"session_file":str(p),"anchor":d[
 PY
 }
 
+session_current() {
+  local json=false arg resolved original=("$@")
+  for arg in "${original[@]}"; do [[ "$arg" == --json ]] && json=true; done
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --json) json=true; shift;;
+      --verbose) shift;;
+      --agent|--native-session-id) [[ "$#" -ge 2 ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }; shift 2;;
+      *) [[ "$json" == true ]] && printf '{"ok":false,"reason":"invalid_input"}\n' || printf 'invalid_input\n' >&2; return 3;;
+    esac
+  done
+  resolved=$(session_resolve --json "${original[@]}") || return $?
+  if [[ "$json" == true ]]; then
+    printf '%s\n' "$resolved"
+  else
+    printf '%s' "$resolved" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("%s  %s  %s  %s" % (d.get("anchor") or "-", d.get("agent") or "legacy", d.get("state") or "unknown", d.get("branch") or "-"))'
+  fi
+}
+
+session_inspect() {
+  local action="$1"; shift
+  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$action" "$@" <<'PY'
+import hashlib, json, os, pathlib, stat, subprocess, sys
+action=sys.argv[1]; args=sys.argv[2:]
+if any(arg not in ("--json","--verbose") for arg in args):
+    print(json.dumps({"ok":False,"reason":"invalid_input"}) if "--json" in args else "invalid_input"); raise SystemExit(3)
+root=pathlib.Path(os.environ["RIG_ROOT"]).resolve(); sessions=pathlib.Path(os.environ["RIG_DIR"])/"memory"/"sessions"
+verbose="--verbose" in args; as_json="--json" in args
+def project_identity():
+    try:
+        common=subprocess.check_output(["git","-C",str(root),"rev-parse","--git-common-dir"],text=True,stderr=subprocess.DEVNULL).strip()
+        common=pathlib.Path(common if os.path.isabs(common) else root/common).resolve()
+    except (OSError,subprocess.SubprocessError): common=root
+    return hashlib.sha256(str(common).encode()).hexdigest()
+project_id=project_identity(); records=[]; errors=[]
+for base in (sessions,sessions/"done"):
+    if not base.is_dir(): continue
+    for p in sorted(base.glob("session-*.json")):
+        try:
+            d=json.loads(p.read_text())
+            if not isinstance(d,dict): raise ValueError("not an object")
+            records.append((p,d))
+        except (OSError,ValueError,TypeError): errors.append({"file":p.name,"reason":"malformed_record"})
+def summary(p,d):
+    names=d.get("names",{}); lifecycle=d.get("lifecycle",{}); runtime=d.get("runtime",{}); project=d.get("project",{})
+    out={"anchor":d.get("anchor"),"agent":d.get("agent") or "legacy","state":lifecycle.get("state",d.get("status","unknown")),
+         "project_matches":project.get("identity") in (None,project_id),"worktree":project.get("worktree_realpath"),
+         "branch":runtime.get("branch",d.get("branch")),"name":names.get("final") or names.get("tentative") or d.get("final_name") or d.get("tentative_name"),
+         "revision":d.get("revision"),"location":"done" if "done" in p.parts else "active"}
+    if verbose: out["native_session_id"]=d.get("native",{}).get("session_id")
+    return out
+if action=="list":
+    rows=[summary(p,d) for p,d in records]
+    if as_json: print(json.dumps({"ok":not errors,"sessions":rows,"errors":errors}))
+    else:
+        for row in rows: print("{anchor}  {agent}  {state}  {branch}  {name}".format(**{k:(v if v is not None else "-") for k,v in row.items()}))
+        for error in errors: print("ERROR  %s  %s"%(error["file"],error["reason"]),file=sys.stderr)
+    raise SystemExit(0 if not errors else 2)
+if action=="doctor":
+    checks=[]
+    def check(name,ok,detail): checks.append({"name":name,"ok":bool(ok),"detail":detail})
+    check("record_syntax",not errors,"valid" if not errors else "%d malformed"%len(errors))
+    future=[p.name for p,d in records if isinstance(d.get("schema_version"),int) and d["schema_version"]>1]
+    check("schema_support",not future,"supported" if not future else "%d future schema"%len(future))
+    invalid=[]
+    for p,d in records:
+        if d.get("schema_version")==1 and not (d.get("anchor") and d.get("agent") in ("claude","codex") and d.get("native",{}).get("session_id") and d.get("project",{}).get("identity") and d.get("lifecycle",{}).get("state") and isinstance(d.get("revision"),int)):
+            invalid.append(p.name)
+    check("v1_required_fields",not invalid,"present" if not invalid else "%d invalid"%len(invalid))
+    anchors={}; natives={}
+    for p,d in records:
+        anchors.setdefault(d.get("anchor"),[]).append(p.name)
+        native=d.get("native",{}).get("session_id")
+        if native: natives.setdefault((d.get("project",{}).get("identity"),d.get("agent"),native),[]).append(p.name)
+    dup_a=[k for k,v in anchors.items() if k and len(v)>1]; dup_n=[k for k,v in natives.items() if len(v)>1]
+    check("unique_anchors",not dup_a,"unique" if not dup_a else "%d duplicates"%len(dup_a))
+    check("unique_native_bindings",not dup_n,"unique" if not dup_n else "%d duplicates"%len(dup_n))
+    audit=sessions/"repair-audit.jsonl"; audit_ok=True; audit_detail="absent"
+    if audit.exists():
+        audit_detail="valid"
+        try:
+            if stat.S_IMODE(audit.stat().st_mode) & 0o077: audit_ok=False; audit_detail="permissions too broad"
+            for line in audit.read_text().splitlines():
+                item=json.loads(line)
+                if any(key in item for key in ("prompt","transcript","native_session_id")): audit_ok=False; audit_detail="sensitive field present"
+        except (OSError,ValueError,TypeError): audit_ok=False; audit_detail="malformed"
+    check("repair_audit_privacy",audit_ok,audit_detail)
+    result={"ok":all(c["ok"] for c in checks),"checks":checks,"errors":errors}
+    if as_json: print(json.dumps(result))
+    else:
+        for c in checks: print(("PASS" if c["ok"] else "FAIL")+"  "+c["name"]+": "+c["detail"])
+    raise SystemExit(0 if result["ok"] else 2)
+raise SystemExit(3)
+PY
+}
+
+session_repair() {
+  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
+import datetime, fcntl, hashlib, json, os, pathlib, subprocess, sys, tempfile
+args=sys.argv[1:]
+valued={"--anchor","--agent","--native-session-id","--reason","--confirm","--exported-text"}; flags={"--json","--authorize-last-resort","--match-prompt","--match-transcript"}
+i=0
+while i<len(args):
+    if args[i] in flags: i+=1; continue
+    if args[i] in valued and i+1<len(args): i+=2; continue
+    print(json.dumps({"ok":False,"reason":"invalid_input"}) if "--json" in args else "invalid_input"); raise SystemExit(3)
+def option(name):
+    try: return args[args.index(name)+1]
+    except (ValueError,IndexError): return ""
+anchor=option("--anchor"); agent=option("--agent"); native_id=option("--native-session-id"); reason=option("--reason"); confirm=option("--confirm")
+as_json="--json" in args
+last_resort=any(x in args for x in ("--authorize-last-resort","--exported-text","--match-prompt","--match-transcript"))
+def emit(ok,why,extra=None,code=0):
+    out={"ok":ok,"reason":why}; out.update(extra or {})
+    print(json.dumps(out) if as_json else (why+((": "+str(extra)) if extra else "")))
+    raise SystemExit(code)
+if last_resort:
+    if "--authorize-last-resort" not in args: emit(False,"last_resort_not_authorized",code=3)
+    emit(False,"documented_export_surface_unavailable",{"no_write":True},4)
+if not anchor or agent not in ("claude","codex") or not native_id: emit(False,"invalid_input",code=3)
+if reason and (len(reason)>120 or native_id in reason or anchor in reason): emit(False,"unsafe_reason",{"no_write":True},3)
+root=pathlib.Path(os.environ["RIG_ROOT"]).resolve(); sessions=pathlib.Path(os.environ["RIG_DIR"])/"memory"/"sessions"; sessions.mkdir(parents=True,exist_ok=True)
+try:
+    common=subprocess.check_output(["git","-C",str(root),"rev-parse","--git-common-dir"],text=True,stderr=subprocess.DEVNULL).strip(); common=pathlib.Path(common if os.path.isabs(common) else root/common).resolve()
+except (OSError,subprocess.SubprocessError): common=root
+project_id=hashlib.sha256(str(common).encode()).hexdigest(); lock=open(sessions/".bind.lock","a+"); fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
+records=[]
+for base in (sessions,sessions/"done"):
+    if not base.is_dir(): continue
+    for p in base.glob("session-*.json"):
+        try: d=json.loads(p.read_text())
+        except (OSError,ValueError,TypeError): emit(False,"malformed_record",{"no_write":True},4)
+        if isinstance(d.get("schema_version"),int) and d["schema_version"]>1: emit(False,"unsupported_schema",{"no_write":True},4)
+        records.append((p,d))
+candidates=[(p,d) for p,d in records if d.get("anchor")==anchor]
+if len(candidates)!=1: emit(False,"not_found" if not candidates else "duplicate_anchor",{"no_write":True},1 if not candidates else 2)
+p,d=candidates[0]
+if "done" in p.parts or d.get("lifecycle",{}).get("state")=="complete": emit(False,"ended_record",{"no_write":True},3)
+if d.get("project",{}).get("identity") not in (None,project_id): emit(False,"cross_project",{"no_write":True},3)
+bound=d.get("native",{}).get("session_id")
+if bound and bound!=native_id: emit(False,"native_conflict",{"no_write":True},3)
+if bound==native_id: emit(True,"already_bound",{"anchor":anchor,"no_write":True})
+if d.get("agent") not in (None,agent): emit(False,"agent_conflict",{"no_write":True},3)
+collisions=[q for q,o in records if q!=p and o.get("schema_version")==1 and o.get("project",{}).get("identity")==project_id and o.get("agent")==agent and o.get("native",{}).get("session_id")==native_id]
+if collisions: emit(False,"duplicate_native_id",{"no_write":True},2)
+record_hash=hashlib.sha256(p.read_bytes()).hexdigest(); confirmation_token=hashlib.sha256((anchor+"\0"+native_id+"\0"+record_hash).encode()).hexdigest()[:16]
+preview={"anchor":anchor,"agent":agent,"native_session_id":"redacted","record":p.name,"changes":{"native.session_id":"set","native.source":"repair","lifecycle.state":"active"},"confirmation_token":confirmation_token,"no_write":True}
+if not confirm: emit(True,"repair_preview",preview)
+if confirm!=confirmation_token or not reason: emit(False,"confirmation_required",preview,3)
+before_bytes=p.read_bytes(); previous_hash=hashlib.sha256(before_bytes).hexdigest(); previous_revision=int(d.get("revision",0)); now=datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec="seconds")
+if d.get("schema_version")!=1: emit(False,"migration_required",{"no_write":True},4)
+d.setdefault("native",{}).update({"session_id":native_id,"root_session_id":d.get("native",{}).get("root_session_id") or native_id,"bound_at":now,"source":"repair"})
+d["agent"]=agent; d["updated_at"]=now; d.setdefault("lifecycle",{}).update({"state":"active","last_event":"repair","last_event_at":now,"end_reason":None}); d["revision"]=previous_revision+1
+fd,tmp=tempfile.mkstemp(prefix=".session-",suffix=".tmp",dir=str(p.parent))
+try:
+    with os.fdopen(fd,"w") as f: json.dump(d,f,indent=2); f.write("\n"); f.flush(); os.fsync(f.fileno())
+    os.replace(tmp,p)
+finally:
+    try: os.unlink(tmp)
+    except FileNotFoundError: pass
+audit={"timestamp":now,"action":"bind_orphan","anchor_hash":hashlib.sha256(anchor.encode()).hexdigest()[:16],"native_id_hash":hashlib.sha256(native_id.encode()).hexdigest()[:16],"previous_hash":previous_hash,"previous_revision":previous_revision,"new_revision":d["revision"],"reason":reason}
+audit_path=sessions/"repair-audit.jsonl"; audit_lock=open(str(audit_path)+".lock","a+"); fcntl.flock(audit_lock.fileno(),fcntl.LOCK_EX)
+audit_fd=os.open(audit_path,os.O_WRONLY|os.O_CREAT|os.O_APPEND,0o600); os.chmod(audit_path,0o600)
+with os.fdopen(audit_fd,"a") as f: f.write(json.dumps(audit,separators=(",",":"))+"\n"); f.flush(); os.fsync(f.fileno())
+emit(True,"repair_applied",{"anchor":anchor,"revision":d["revision"],"audit":"repair-audit.jsonl"})
+PY
+}
+
 session_name_set() {
   local tentative=false complete=false json=false name="" arg resolved file anchor done_dir dest="" end_options=false
   for arg in "$@"; do
@@ -692,7 +871,7 @@ main() {
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help "$command"; return; fi
       subcommand="${1:-}"; shift || true
-      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
+      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:repair) session_repair "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
     *) shift; usage_error "unknown command: $command" "$@";;
   esac
 }
