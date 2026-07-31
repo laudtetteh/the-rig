@@ -890,7 +890,13 @@ copy_unowned_codex_file() {
   local src="$1" dest="$2" base="$3"
   mkdir -p "$(dirname "$dest")"
   if [[ -e "$dest" || -L "$dest" ]]; then
-    info "Preserved existing: ${dest#${base}/}"
+    if [[ "$COLLISION_STRATEGY" == "upgrade" ]] && \
+       { [[ -L "$dest" ]] || ! cmp -s "$src" "$dest"; }; then
+      warn "Preserved customized/stale Codex artifact: ${dest#${base}/}"
+      info "Review the generated replacement and update this file manually."
+    else
+      info "Preserved existing: ${dest#${base}/}"
+    fi
   else
     cp "$src" "$dest"
     success "Created ${dest#${base}/}"

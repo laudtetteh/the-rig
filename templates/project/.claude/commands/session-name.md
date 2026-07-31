@@ -7,13 +7,16 @@ suggestion. Can be run at any point in the session — not just at wrap time.
 
 ## What this does
 
-1. Resolves this session with `bin/rig session resolve --json` (launcher identity
-   first, then the legacy PPID sentinel)
-2. Reads any existing `tentative_name` from the session file
-3. Derives a name in the standard `type short-desc #N | ...` format using conversation
+1. Reads `$RIG_DIR/rules/session-naming.md` and applies it as the canonical
+   session-local evidence contract
+2. Resolves this session with `bin/rig session resolve --json` (launcher identity
+   first, then the legacy PPID sentinel); unresolved raw launches use conversation
+   context only
+3. Reads any existing `tentative_name` from the resolved current session file
+4. Derives a name in the standard `type short-desc #N | ...` format using conversation
    context as the primary signal and UUID-tagged PROGRESS entries as cross-reference
-4. Presents it as output — does **not** run anything automatically
-5. After you confirm, writes the name to the session file (`tentative_name` if called
+5. Presents it as output — does **not** run anything automatically
+6. After you confirm, writes the name to the session file (`tentative_name` if called
    early, `final_name` if called at session end). Never writes to CONTEXT_SNAPSHOT.md.
 
 This is the same logic used by `/wrap` and `/post-merge`, but callable at any time
@@ -38,17 +41,20 @@ No arguments. Run it whenever you want to name or re-name the current session.
 
 ## Steps
 
-### 0 — Find this session's file
+### 0 — Load the canonical contract and find this session's file
+
+Read `$RIG_DIR/rules/session-naming.md` completely before collecting naming
+evidence. It is authoritative for evidence eligibility and contamination checks.
 
 ```bash
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
-SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
-  echo "Unable to resolve this session unambiguously; stop and ask the user."
-  exit 1
-}
-SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
-SESSION_UUID=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
-TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; print(json.load(open(os.environ["SESSION_F"])).get("tentative_name") or "")')
+SESSION_JSON=$("$REPO/bin/rig" session resolve --json 2>/dev/null || true)
+SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("session_file") or "")' 2>/dev/null || true)
+SESSION_UUID=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("anchor") or "")' 2>/dev/null || true)
+TENTATIVE_NAME=""
+if [[ -n "$SESSION_FILE" ]]; then
+  TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; print(json.load(open(os.environ["SESSION_F"])).get("tentative_name") or "")')
+fi
 ```
 
 ### 1 — Determine what happened this session
@@ -57,12 +63,15 @@ TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; print(jso
 merged, tasks completed. If called early in the session to set a tentative name, use
 the stated intent as the basis.
 
-File signals are cross-reference only:
+File signals from the resolved current session are cross-reference only:
 - **UUID-tagged PROGRESS entries** — `grep "^## .*<!-- sid:${SESSION_UUID} -->"` to find entries from this session
 - **`tentative_name` in session file** — set pre-compaction; use as the base if context was lost to compaction
-- **`<!-- session-end -->` markers** — entries above the most recent marker as legacy fallback when no UUID
 
 **If conversation context and file signals conflict, trust the conversation.**
+Never use `CONTEXT_SNAPSHOT.md`, legacy markers, unrelated session files,
+other-session UUID entries, or general project history as naming evidence. If
+resolution failed, use conversation context only. An unresolved raw launch must
+never inherit unrelated prior-session work.
 
 ### 2 — Check for an existing tentative name
 
@@ -172,9 +181,8 @@ If writing a final name, add a note at the top of PROGRESS.md:
 
 - If called early with no work done yet, still write a tentative name if the user
   states intent — that anchor is more valuable than nothing.
-- If the session file does not exist (session predates this change), fall back to
-  deriving a name from PROGRESS.md session-end markers and legacy CONTEXT_SNAPSHOT
-  `Session name` field.
+- If the session file does not exist or cannot be resolved, derive only from the
+  current conversation. Do not recover a name from project history.
 - **Setting tentative names early** is encouraged — the tentative name survives
   compaction and gives post-compaction agents a reliable anchor without needing to
   reconstruct work from file signals alone.
