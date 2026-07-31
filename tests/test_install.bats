@@ -450,6 +450,28 @@ is_rig_owned_stub() {
   grep -q "MY BESPOKE PROJECT CONFIG" "$TEST_PROJECT/CLAUDE.md"
 }
 
+@test "upgrade strategy: warns when CLAUDE.md references unset opt-in components" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  printf '\n@.claude/commands/doc-feature.md\n@.claude/commands/rig-gaps.md\n@.claude/hooks/subagent-start.sh\n' >> "$TEST_PROJECT/CLAUDE.md"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rerun with --feature-docs"* ]]
+  [[ "$output" == *"rerun with --contribute"* ]]
+  [[ "$output" == *"rerun with --subagents"* ]]
+}
+
+@test "upgrade strategy: does not warn when referenced opt-in components are enabled" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  printf '\n@.claude/commands/doc-feature.md\n@.claude/commands/rig-gaps.md\n@.claude/hooks/subagent-start.sh\n' >> "$TEST_PROJECT/CLAUDE.md"
+
+  run_installer --strategy upgrade --feature-docs --contribute --subagents
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Upgrade will skip"* ]]
+}
+
 @test "overwrite strategy: skips user-modified user-owned file in non-interactive mode" {
   # First install establishes manifest
   run_installer --strategy upgrade
