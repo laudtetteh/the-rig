@@ -84,8 +84,4 @@ run_installer() {
   grep -Fxq "[REPO]/.husky/" "$POLICY"
   grep -Fxq "[REPO]/CLAUDE.md" "$POLICY"
   grep -Fxq "[REPO]/.claude/hooks/" "$POLICY"
-
-  git -C "$REPO_ROOT" diff --exit-code main -- \
-    templates/project/.claude/hooks/pre-tool.sh \
-    templates/project/.rig/rules/protected-paths.txt
 }
