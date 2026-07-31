@@ -21,7 +21,7 @@ commit_file() {
 run_probe() {
   local probe
   probe="$(sed -n '/# kickoff-maturity-probe-start/,/# kickoff-maturity-probe-end/p' "$KICKOFF")"
-  run bash -c "cd \"\$1\" && $probe" _ "$TEST_REPO"
+  run bash -o pipefail -c "cd \"\$1\" && $probe" _ "$TEST_REPO"
 }
 
 @test "kickoff guard: genuine greenfield repository has no maturity signals" {
@@ -66,6 +66,17 @@ run_probe() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"release_tags=1"* ]]
   [[ "$output" == *"signals=1" ]]
+}
+
+@test "kickoff guard: semver-like glob matches are rejected" {
+  commit_file one
+  git -C "$TEST_REPO" tag v1foo.2bar.3bad
+  git -C "$TEST_REPO" tag v1.2.3-rc1
+  git -C "$TEST_REPO" tag release-v1.2.3
+  run_probe
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"release_tags=0"* ]]
+  [[ "$output" == *"signals=0" ]]
 }
 
 @test "kickoff guard: placeholder CLAUDE.md is not considered filled" {

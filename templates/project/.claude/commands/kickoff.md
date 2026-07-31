@@ -56,7 +56,10 @@ else
 fi
 
 commit_count=$(git -C "$REPO" rev-list --count HEAD 2>/dev/null || printf '0')
-release_tag_count=$(git -C "$REPO" tag -l 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null | wc -l | tr -d '[:space:]')
+release_tag_count=$(git -C "$REPO" tag -l 2>/dev/null \
+  | { /usr/bin/grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
+  | wc -l \
+  | tr -d '[:space:]')
 claude_filled=0
 if [[ -s "$REPO/CLAUDE.md" ]] && ! /usr/bin/grep -q '\[' "$REPO/CLAUDE.md"; then
   claude_filled=1
