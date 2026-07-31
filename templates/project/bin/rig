@@ -12,6 +12,7 @@ Commands:
   rig session resolve       Resolve the current session identity
   rig session-name set      Set the current session name atomically
   rig memory validate       Validate Rig memory files
+  rig memory repair-markers Reposition unambiguous Rig memory markers
   rig codex                 Launch Codex with Rig context
   rig claude                Launch Claude Code with Rig context
   rig version               Print the installed Rig version
@@ -37,13 +38,161 @@ command_help() {
     doctor) printf 'Usage: rig doctor [--json]\n';;
     session) printf 'Usage: rig session resolve [--json]\n';;
     session-name) printf 'Usage: rig session-name set [--tentative|--final] [--complete] [--json] <name>\n';;
-    memory) printf 'Usage: rig memory validate [--json]\n';;
+    memory) printf 'Usage: rig memory <validate|repair-markers> [--json]\n';;
     codex) printf 'Usage: rig codex [-- <codex arguments>]\n';;
     claude) printf 'Usage: rig claude [-- <claude arguments>]\n';;
   esac
 }
 unavailable() { local command="$1"; shift; if json_requested "$@"; then printf '{"ok":false,"command":"%s","error":"not_implemented"}\n' "$command"; else printf 'rig: %s is not implemented in this version\n' "$command" >&2; fi; return "$RIG_EXIT_UNAVAILABLE"; }
 usage_error() { local message="$1"; shift; if json_requested "$@"; then printf '{"ok":false,"error":"usage","message":"%s"}\n' "$message"; else printf 'rig: %s\nTry "rig --help" for usage.\n' "$message" >&2; fi; return "$RIG_EXIT_USAGE"; }
+
+memory_markers() {
+  local action="$1" arg
+  shift
+  for arg in "$@"; do
+    [[ "$arg" == --json ]] || { usage_error "unknown memory option: $arg" "$@"; return; }
+  done
+  RIG_DIR="$(rig_dir)" MEMORY_ACTION="$action" python3 - "$@" <<'PY'
+import json, os, pathlib, re, stat, sys, tempfile
+
+rig_dir = pathlib.Path(os.environ["RIG_DIR"])
+action = os.environ["MEMORY_ACTION"]
+json_output = "--json" in sys.argv[1:]
+date_heading = re.compile(r"^##\s+(?:\[)?(\d{4}-\d{2}-\d{2})(?:\])?(?:\s|$)")
+
+specs = (
+    ("PROGRESS.md", "<!-- Add entries above this line, newest first -->", "above"),
+    ("ERRORS.md", "<!-- Add new entries below this line, newest first -->", "below"),
+)
+
+def inspect(name, marker, direction):
+    path = rig_dir / "memory" / name
+    result = {"file": name, "ok": False, "marker_line": None,
+              "first_entry_line": None, "issues": []}
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        result["issues"].append("unreadable: " + str(exc))
+        return path, None, result, None
+
+    lines = text.splitlines(keepends=True)
+    marker_indexes = [i for i, line in enumerate(lines) if line.rstrip("\r\n") == marker]
+    marker_like = [i for i, line in enumerate(lines)
+                   if "Add " in line and "entries" in line and "newest first" in line]
+    format_indexes = []
+    entries = []
+    fenced = False
+    for index, line in enumerate(lines):
+        stripped = line.rstrip("\r\n")
+        if stripped.startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if stripped == "## Format":
+            format_indexes.append(index)
+        match = date_heading.match(stripped)
+        if match:
+            entries.append((index, match.group(1)))
+
+    if len(marker_indexes) != 1:
+        result["issues"].append("marker_missing" if not marker_indexes else "marker_duplicated")
+    if len(marker_like) != len(marker_indexes):
+        result["issues"].append("marker_ambiguous")
+    if len(format_indexes) != 1:
+        result["issues"].append("format_missing" if not format_indexes else "format_duplicated")
+
+    marker_index = marker_indexes[0] if len(marker_indexes) == 1 else None
+    format_index = format_indexes[0] if len(format_indexes) == 1 else None
+    result["marker_line"] = marker_index + 1 if marker_index is not None else None
+    result["first_entry_line"] = entries[0][0] + 1 if entries else None
+
+    if format_index is not None and marker_index is not None and marker_index <= format_index:
+        result["issues"].append("marker_before_format")
+    if entries:
+        if format_index is not None and entries[0][0] <= format_index:
+            result["issues"].append("entry_before_format")
+        if marker_index is not None:
+            indexes = [item[0] for item in entries]
+            correctly_placed = marker_index > max(indexes) if direction == "above" else marker_index < min(indexes)
+            if not correctly_placed:
+                result["issues"].append("marker_mispositioned")
+        dates = [item[1] for item in entries]
+        if dates != sorted(dates, reverse=True):
+            result["issues"].append("entries_not_newest_first")
+
+    result["ok"] = not result["issues"]
+    return path, lines, result, (marker_index, format_index, entries, marker)
+
+def repair(path, lines, result, parsed):
+    if result["ok"] or lines is None or parsed is None:
+        return False
+    marker_index, format_index, entries, marker = parsed
+    repairable = result["issues"] == ["marker_mispositioned"]
+    if not repairable or marker_index is None or format_index is None or not entries:
+        return False
+
+    marker_line = lines.pop(marker_index)
+    if not marker_line.endswith(("\n", "\r")):
+        newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
+        marker_line += newline
+    entry_indexes = [index - (1 if index > marker_index else 0) for index, _ in entries]
+    if path.name == "PROGRESS.md":
+        target = len(lines)
+        for index in range(max(entry_indexes) + 1, len(lines)):
+            if lines[index].startswith("## "):
+                target = index
+                break
+    else:
+        target = min(entry_indexes)
+    lines.insert(target, marker_line)
+
+    original_mode = stat.S_IMODE(path.stat().st_mode)
+    fd, temporary = tempfile.mkstemp(prefix=".memory-marker-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.writelines(lines)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, original_mode)
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+    return True
+
+inspections = []
+for name, marker, direction in specs:
+    inspections.append(inspect(name, marker, direction))
+
+changed = []
+if action == "repair-markers":
+    safe = all(result["ok"] or result["issues"] == ["marker_mispositioned"]
+               for _, _, result, _ in inspections)
+    if safe:
+        for path, lines, result, parsed in inspections:
+            if repair(path, lines, result, parsed):
+                changed.append(path.name)
+
+results = [inspect(name, marker, direction)[2] for name, marker, direction in specs]
+
+ok = all(result["ok"] for result in results)
+payload = {"ok": ok, "command": "memory " + action, "changed": changed, "files": results}
+if json_output:
+    print(json.dumps(payload, separators=(",", ":")))
+else:
+    for result in results:
+        if result["ok"]:
+            print("PASS  " + result["file"])
+        else:
+            print("WARN  " + result["file"] + ": " + ", ".join(result["issues"]))
+    if changed:
+        print("Repositioned markers: " + ", ".join(changed))
+raise SystemExit(0 if ok else 1)
+PY
+}
 
 doctor() {
   local arg
@@ -359,7 +508,7 @@ main() {
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help "$command"; return; fi
       subcommand="${1:-}"; shift || true
-      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session-name:set) session_name_set "$@";; memory:validate) unavailable "memory validate" "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
+      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
     *) shift; usage_error "unknown command: $command" "$@";;
   esac
 }

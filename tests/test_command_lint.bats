@@ -113,6 +113,14 @@ _fail_with_list() {
   grep -q "execute POST_MERGE_WORKFLOW steps" "$COMMAND_DIR/post-merge.md"
 }
 
+@test "task and run use the fixed PROGRESS top-insertion anchor" {
+  for command in task run; do
+    grep -q 'immediately after the `## Format`' "$COMMAND_DIR/$command.md"
+    grep -q "Never anchor the insertion to the" "$COMMAND_DIR/$command.md"
+    grep -q "own prior PROGRESS edit from the same" "$COMMAND_DIR/$command.md"
+  done
+}
+
 # ── PR description freshness ───────────────────────────────────────────────────
 
 @test "wrap.md: contains PR description freshness step" {
