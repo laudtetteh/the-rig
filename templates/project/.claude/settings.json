@@ -6,8 +6,8 @@
       "Bash(git branch*)",
       "Bash(git diff*)",
       "Bash(git rev-parse*)",
-      "Write(/tmp/*.md)",
-      "Write(/tmp/*.txt)"
+      "Edit(/tmp/*.md)",
+      "Edit(/tmp/*.txt)"
     ],
     "deny": [
       "Bash(rm -rf *)",
