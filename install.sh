@@ -789,10 +789,31 @@ for event, incoming_hooks in incoming.get("hooks", {}).items():
                 existing_commands.add(cmd)  # rig-debug-ok
                 break  # each entry is a unit; add it once
 
+# Migrate the two legacy Rig-owned /tmp grants. Match exact strings so user
+# permissions and similar-looking Write patterns remain untouched. If the Edit
+# replacement is already present, remove only the obsolete Write entry.
+legacy_allow_replacements = {
+    "Write(/tmp/*.md)": "Edit(/tmp/*.md)",
+    "Write(/tmp/*.txt)": "Edit(/tmp/*.txt)",
+}
+existing_permissions = existing.get("permissions", {})
+existing_allow = existing_permissions.get("allow", []) or []
+existing_allow_values = set(existing_allow)
+migrated_allow = []
+for pattern in existing_allow:
+    replacement = legacy_allow_replacements.get(pattern)
+    if replacement:
+        if replacement not in existing_allow_values and replacement not in migrated_allow:
+            migrated_allow.append(replacement)
+    else:
+        migrated_allow.append(pattern)
+if migrated_allow != existing_allow:
+    existing.setdefault("permissions", {})["allow"] = migrated_allow
+
 # Merge permissions.allow (dedup by pattern string)
 incoming_allow = incoming.get("permissions", {}).get("allow", [])
 if incoming_allow:
-    existing_allow = existing.get("permissions", {}).get("allow", [])
+    existing_allow = existing.get("permissions", {}).get("allow", []) or []
     existing_allow_set = set(existing_allow)
     new_patterns = [p for p in incoming_allow if p not in existing_allow_set]
     if new_patterns:

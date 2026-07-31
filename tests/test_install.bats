@@ -3013,9 +3013,102 @@ cat "$RIG_DIR/memory/PROGRESS.md"'
   [[ -z "$result" ]]
 }
 
-@test "fresh install: settings.json includes /tmp/ write patterns" {
+@test "fresh install: settings.json includes /tmp/ Edit patterns only" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
-  grep -q '"Write(/tmp/\*.md)"' "$TEST_PROJECT/.claude/settings.json"
-  grep -q '"Write(/tmp/\*.txt)"' "$TEST_PROJECT/.claude/settings.json"
+  grep -q '"Edit(/tmp/\*.md)"' "$TEST_PROJECT/.claude/settings.json"
+  grep -q '"Edit(/tmp/\*.txt)"' "$TEST_PROJECT/.claude/settings.json"
+  run grep -q '"Write(/tmp/\*\.\(md\|txt\))"' "$TEST_PROJECT/.claude/settings.json"
+  [ "$status" -ne 0 ]
+}
+
+@test "merge: migrates only exact legacy /tmp Write permissions and is idempotent" {
+  mkdir -p "$TEST_PROJECT/.claude"
+  cat > "$TEST_PROJECT/.claude/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": [
+      "Write(/tmp/*.md)",
+      "Write(/tmp/*.txt)",
+      "Write(/tmp/*.markdown)",
+      "Write(/tmp/subdir/*.md)",
+      "Write(/private/tmp/*.txt)",
+      "Write(/tmp/*.MD)",
+      "Edit(/tmp/*.md)",
+      "Bash(custom command*)"
+    ]
+  }
+}
+EOF
+
+  run_installer --strategy merge
+  [ "$status" -eq 0 ]
+  run_installer --strategy merge
+  [ "$status" -eq 0 ]
+
+  run python3 - "$TEST_PROJECT/.claude/settings.json" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f:
+    allow = json.load(f)["permissions"]["allow"]
+assert allow.count("Edit(/tmp/*.md)") == 1
+assert allow.count("Edit(/tmp/*.txt)") == 1
+assert "Write(/tmp/*.md)" not in allow
+assert "Write(/tmp/*.txt)" not in allow
+for unchanged in (
+    "Write(/tmp/*.markdown)",
+    "Write(/tmp/subdir/*.md)",
+    "Write(/private/tmp/*.txt)",
+    "Write(/tmp/*.MD)",
+    "Bash(custom command*)",
+):
+    assert unchanged in allow
+PYEOF
+  [ "$status" -eq 0 ]
+}
+
+@test "upgrade: migrates exact legacy /tmp Write permissions and preserves other settings" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  python3 - "$TEST_PROJECT/.claude/settings.json" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    settings = json.load(f)
+allow = settings["permissions"]["allow"]
+allow.remove("Edit(/tmp/*.md)")
+allow.remove("Edit(/tmp/*.txt)")
+allow.extend(["Write(/tmp/*.md)", "Write(/tmp/*.txt)", "Write(src/*.md)"])
+settings["permissions"]["deny"].append("Write(secrets/**)")
+settings["userSetting"] = {"preserve": True}
+with open(path, "w") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\n")
+PYEOF
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  run python3 - "$TEST_PROJECT/.claude/settings.json" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f:
+    settings = json.load(f)
+allow = settings["permissions"]["allow"]
+assert "Write(/tmp/*.md)" not in allow
+assert "Write(/tmp/*.txt)" not in allow
+assert allow.count("Edit(/tmp/*.md)") == 1
+assert allow.count("Edit(/tmp/*.txt)") == 1
+assert "Write(src/*.md)" in allow
+assert "Write(secrets/**)" in settings["permissions"]["deny"]
+assert settings["userSetting"] == {"preserve": True}
+PYEOF
+  [ "$status" -eq 0 ]
+}
+
+@test "merge: malformed settings fail without overwriting the existing file" {
+  mkdir -p "$TEST_PROJECT/.claude"
+  printf '%s\n' '{ not valid json' > "$TEST_PROJECT/.claude/settings.json"
+
+  run_installer --strategy merge
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Skipped settings.json (merge failed"* ]]
+  [ "$(cat "$TEST_PROJECT/.claude/settings.json")" = "{ not valid json" ]
 }
