@@ -20,12 +20,14 @@
 ## Format
 
 ```markdown
-## [YYYY-MM-DD] — [one-line summary]
+## [YYYY-MM-DD] — [one-line summary] <!-- sid:UUID -->
 
 - [bullet: what was built]
 - [bullet: what was verified or tested]
 - PR #N merged — branch: type/description
 ```
+
+Read the current session's UUID from `/tmp/.rig-session-${PPID}.uuid`.
 
 ---
 
