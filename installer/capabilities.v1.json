@@ -1,0 +1,34 @@
+{
+  "schema": "https://the-rig.dev/schemas/installer-capabilities/v1",
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "global-claude-context",
+      "layer": "global",
+      "agents": ["claude"],
+      "artifacts": [
+        {"path": "CLAUDE.md", "type": "file", "required": true},
+        {"path": "skills", "type": "dir", "required": true}
+      ],
+      "dependencies": ["claude"],
+      "smoke": [{"id": "global-claude-md", "type": "exists", "target": "CLAUDE.md", "required": true}]
+    },
+    {
+      "id": "project-rig-core",
+      "layer": "project",
+      "always": true,
+      "agents": ["claude", "codex"],
+      "artifacts": [{"path": "bin/rig", "type": "file", "required": true}],
+      "dependencies": ["git"],
+      "smoke": [{"id": "rig-dispatcher", "type": "executable", "target": "bin/rig", "required": true}]
+    },
+    {
+      "id": "project-claude-integration",
+      "layer": "project",
+      "agents": ["claude"],
+      "artifacts": [{"path": ".claude/settings.json", "type": "file", "required": true}],
+      "dependencies": ["claude"],
+      "smoke": [{"id": "claude-settings", "type": "exists", "target": ".claude/settings.json", "required": true}]
+    }
+  ]
+}
