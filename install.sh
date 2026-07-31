@@ -1418,7 +1418,6 @@ if [[ "$DO_PROJECT" == true ]]; then
   INSTALL_PROJECT_BRIEF=true
 
   if ! has_agent "$PROJECT_AGENT" claude; then
-    INSTALL_CLAUDE_MD=false
     INSTALL_CLAUDE_HOOKS=false
     INSTALL_COMMANDS=false
     INSTALL_SUBAGENTS=false
@@ -1541,6 +1540,19 @@ if [[ "$DO_PROJECT" == true ]]; then
       copy_file "$src_file" "$dest_file" "$TARGET" "$rel"
     fi
   done < <(find "$PROJECT_TEMPLATES" -type f -print0)
+
+  # Codex supports CLAUDE.md as a project-instruction fallback. Merge the
+  # supported setting without replacing existing user fallback names or other
+  # project configuration. Existing AGENTS.md files remain untouched and take
+  # precedence according to Codex's instruction discovery order.
+  if has_agent "$PROJECT_AGENT" codex; then
+    _CODEX_CONFIG="$TARGET/.codex/config.toml"
+    if ! _codex_merge_result="$(python3 "$SCRIPT_DIR/installer/merge-codex-config.py" "$_CODEX_CONFIG")"; then
+      error "Codex project config was not changed. Fix $_CODEX_CONFIG and retry."
+      exit 1
+    fi
+    success "Codex project instructions: CLAUDE.md fallback ${_codex_merge_result}"
+  fi
 
   # ── REMOVE SCRIPTS MERGED INTO OTHER HOOKS (upgrade cleanup) ─────────────
   # session-end.sh was merged into stop.sh in v1.21.0. Remove it from existing

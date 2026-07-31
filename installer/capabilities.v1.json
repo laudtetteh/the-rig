@@ -29,6 +29,20 @@
       "artifacts": [{"path": ".claude/settings.json", "type": "file", "required": true}],
       "dependencies": ["claude"],
       "smoke": [{"id": "claude-settings", "type": "exists", "target": ".claude/settings.json", "required": true}]
+    },
+    {
+      "id": "project-codex-instructions",
+      "layer": "project",
+      "agents": ["codex"],
+      "artifacts": [
+        {"path": "CLAUDE.md", "type": "file", "required": true},
+        {"path": ".codex/config.toml", "type": "file", "required": true}
+      ],
+      "dependencies": ["codex"],
+      "smoke": [
+        {"id": "codex-claude-fallback", "type": "exists", "target": ".codex/config.toml", "required": true},
+        {"id": "codex-project-brain", "type": "exists", "target": "CLAUDE.md", "required": true}
+      ]
     }
   ]
 }
