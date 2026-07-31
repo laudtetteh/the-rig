@@ -36,12 +36,18 @@
       "agents": ["codex"],
       "artifacts": [
         {"path": "CLAUDE.md", "type": "file", "required": true},
-        {"path": ".codex/config.toml", "type": "file", "required": true}
+        {"path": ".codex/config.toml", "type": "file", "required": true},
+        {"path": ".codex/hooks.json", "type": "file", "required": true},
+        {"path": ".codex/hooks/rig-adapter.sh", "type": "file", "required": true},
+        {"path": ".agents/skills", "type": "dir", "required": true}
       ],
       "dependencies": ["codex"],
       "smoke": [
         {"id": "codex-claude-fallback", "type": "exists", "target": ".codex/config.toml", "required": true},
-        {"id": "codex-project-brain", "type": "exists", "target": "CLAUDE.md", "required": true}
+        {"id": "codex-project-brain", "type": "exists", "target": "CLAUDE.md", "required": true},
+        {"id": "codex-hooks", "type": "exists", "target": ".codex/hooks.json", "required": true},
+        {"id": "codex-adapter", "type": "executable", "target": ".codex/hooks/rig-adapter.sh", "required": true},
+        {"id": "codex-skills", "type": "exists", "target": ".agents/skills", "required": true}
       ]
     }
   ]
