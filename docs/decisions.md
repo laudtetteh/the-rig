@@ -183,3 +183,31 @@ Why The Rig is built the way it is. Each entry covers what was decided, what was
 **Rationale:** `$PPID` (parent PID — the Claude Code process that spawned the hook) is stable across all hook invocations within a session. `pre-compact.sh` and `post-compact.sh` share the same PPID, so they can reliably find each other's files. `session-start.sh` (source=compact) falls back to `ls -t .compact-checkpoint-*.md | head -1` when no PPID-scoped file exists (new session after compaction has a different PPID).
 
 **Consequences:** Compact checkpoints are now PPID-scoped and isolated per session. Concurrent sessions compacting simultaneously no longer clobber each other's checkpoint. `stop.sh` (handling the SessionEnd event) deletes the PPID-scoped checkpoint on close. The `/wrap` proactive-run rule in `CLAUDE.md` is still valid as a belt-and-suspenders safeguard.
+
+---
+
+## 16. One project-local `rig` dispatcher
+
+**Decided:** Ship one project-local executable at `bin/rig`. Features attach as
+subcommands: `rig doctor`, `rig session resolve`, `rig session-name set`,
+`rig memory validate`, `rig codex`, and `rig claude`. The dispatcher also owns
+`rig version`, `rig --version`, consistent help, and `--json` output for
+scriptable commands.
+
+**Rejected:** Independent top-level scripts for each feature and one globally
+installed dispatcher shared by every project.
+
+**Rationale:** One entry point gives users and automation a stable interface
+and prevents independently built features from competing over executable names.
+Keeping it project-local allows projects to safely use different Rig versions.
+
+**Distribution contract:** `templates/project/bin/rig` installs to `bin/rig` in
+both in-repository and stealth modes. Stealth mode excludes only `bin/rig`, not
+the whole `bin/` directory. The executable is Rig-owned and manifest-tracked,
+so upgrades replace an unchanged dispatcher while preserving customizations for
+review. Successful help/version calls exit 0, usage errors exit 64, and reserved
+stubs exit 69. With `--json`, scriptable commands emit one JSON object.
+
+**Tradeoff accepted:** The dispatcher initially contains unavailable stubs.
+Downstream tickets replace their reserved branch instead of introducing a new
+entry point.

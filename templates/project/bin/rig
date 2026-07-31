@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly RIG_EXIT_USAGE=64
+readonly RIG_EXIT_UNAVAILABLE=69
+
+usage() {
+  cat <<'EOF'
+Usage: rig <command> [subcommand] [options]
+
+Commands:
+  rig doctor                Diagnose a Rig installation
+  rig session resolve       Resolve the current session identity
+  rig session-name set      Set the current session name
+  rig memory validate       Validate Rig memory files
+  rig codex                 Launch Codex with Rig context
+  rig claude                Launch Claude Code with Rig context
+  rig version               Print the installed Rig version
+
+Common options:
+  --json                 Emit machine-readable JSON where supported
+  -h, --help             Show help
+  -v, --version          Print the installed Rig version
+
+Subcommands are reserved by the dispatcher and may be unavailable until their
+feature is installed. Run "rig <command> --help" for command-specific usage.
+EOF
+}
+
+json_requested() {
+  local arg
+  for arg in "$@"; do
+    [[ "$arg" == "--json" ]] && return 0
+  done
+  return 1
+}
+
+rig_root() { cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd; }
+
+rig_dir() {
+  local root path
+  root="$(rig_root)"
+  if [[ -f "$root/.rigpath" ]]; then
+    IFS= read -r path < "$root/.rigpath" || true
+    if [[ -n "$path" ]]; then
+      case "$path" in
+        /*) printf '%s\n' "$path" ;;
+        *) printf '%s\n' "$root/$path" ;;
+      esac
+      return
+    fi
+  fi
+  printf '%s\n' "$root/.rig"
+}
+
+version() {
+  local version_file value
+  version_file="$(rig_dir)/VERSION"
+  value="unknown"
+  if [[ -f "$version_file" ]]; then
+    IFS= read -r value < "$version_file" || true
+    [[ -n "$value" ]] || value="unknown"
+  fi
+  if json_requested "$@"; then
+    printf '{"version":"%s"}\n' "$value"
+  else
+    printf 'The Rig v%s\n' "$value"
+  fi
+}
+
+command_help() {
+  case "$1" in
+    doctor)       printf 'Usage: rig doctor [--json]\n' ;;
+    session)      printf 'Usage: rig session resolve [--json]\n' ;;
+    session-name) printf 'Usage: rig session-name set <name> [--json]\n' ;;
+    memory)       printf 'Usage: rig memory validate [--json]\n' ;;
+    codex)        printf 'Usage: rig codex [--json] [-- <codex arguments>]\n' ;;
+    claude)       printf 'Usage: rig claude [--json] [-- <claude arguments>]\n' ;;
+  esac
+}
+
+unavailable() {
+  local command="$1"
+  shift
+  if json_requested "$@"; then
+    printf '{"ok":false,"command":"%s","error":"not_implemented"}\n' "$command"
+  else
+    printf 'rig: %s is not implemented in this version\n' "$command" >&2
+  fi
+  return "$RIG_EXIT_UNAVAILABLE"
+}
+
+usage_error() {
+  local message="$1"
+  shift
+  if json_requested "$@"; then
+    printf '{"ok":false,"error":"usage","message":"%s"}\n' "$message"
+  else
+    printf 'rig: %s\nTry "rig --help" for usage.\n' "$message" >&2
+  fi
+  return "$RIG_EXIT_USAGE"
+}
+
+main() {
+  local command="${1:-}"
+  case "$command" in
+    ""|-h|--help) usage ;;
+    -v|--version|version)
+      [[ "$command" == "version" ]] && shift
+      version "$@"
+      ;;
+    doctor|codex|claude)
+      shift
+      if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        command_help "$command"
+      else
+        unavailable "$command" "$@"
+      fi
+      ;;
+    session|session-name|memory)
+      shift
+      if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        command_help "$command"
+      elif [[ "$command:${1:-}" == "session:resolve" || "$command:${1:-}" == "session-name:set" || "$command:${1:-}" == "memory:validate" ]]; then
+        local subcommand="${1:-}"
+        shift
+        unavailable "$command $subcommand" "$@"
+      else
+        case "$command" in
+          session) usage_error 'expected "session resolve"' "$@" ;;
+          session-name) usage_error 'expected "session-name set"' "$@" ;;
+          memory) usage_error 'expected "memory validate"' "$@" ;;
+        esac
+      fi
+      ;;
+    *)
+      shift
+      usage_error "unknown command: $command" "$@"
+      ;;
+  esac
+}
+
+main "$@"
