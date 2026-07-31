@@ -25,13 +25,21 @@ echo ""
 # Write a flag file so the next Claude Code session detects the skipped /post-merge.
 # Resolved via .rigpath if present (external .rig/), otherwise defaults to .rig/.
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
-if [[ -n "$REPO" ]]; then
-  if [[ -f "$REPO/.rigpath" ]]; then
+if [ -n "$REPO" ]; then
+  if [ -f "$REPO/.rigpath" ]; then
     RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
   else
     RIG_DIR="$REPO/.rig"
   fi
-  if [[ -d "$RIG_DIR/memory" ]]; then
-    touch "$RIG_DIR/memory/.post-merge-pending"
+  if [ -d "$RIG_DIR/memory" ]; then
+    MERGE_SHA=$(git -C "$REPO" rev-parse HEAD 2>/dev/null || printf 'unknown')
+    MERGED_AT=$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || printf 'unknown')
+    PENDING="$RIG_DIR/memory/.post-merge-pending"
+    PENDING_TMP="${PENDING}.tmp.$$"
+    if printf 'merge_sha=%s\nmerged_at=%s\n' "$MERGE_SHA" "$MERGED_AT" > "$PENDING_TMP"; then
+      mv "$PENDING_TMP" "$PENDING"
+    else
+      rm -f "$PENDING_TMP"
+    fi
   fi
 fi

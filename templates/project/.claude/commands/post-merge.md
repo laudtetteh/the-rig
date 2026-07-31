@@ -256,8 +256,10 @@ rm -f "$RIG_DIR/memory/.post-merge-pending" 2>/dev/null || true
 ```
 
 The `.post-merge-pending` flag is written by `.husky/post-merge` after every merge
-and detected at the next session start. Clearing it here confirms `/post-merge` ran
-successfully. The `.snapshot-write-in-progress` lock is cleared to unblock any
+with the triggering merge SHA and timestamp, then detected by freshness hooks.
+Saying “skip for current task” leaves the reminder and its merge metadata intact;
+clearing it here confirms `/post-merge` ran successfully. The
+`.snapshot-write-in-progress` lock is cleared to unblock any
 concurrent `/wrap` or `/post-merge` waiting to run.
 
 ---

@@ -58,7 +58,13 @@ flag_warnings() {
   fi
   if [[ -f "$POST_MERGE_PENDING" ]]; then
     [[ -n "$w" ]] && w+=$'\n\n'
-    w+="⚠️ A merge landed since /post-merge was last run. Memory may not reflect the merged state. Run /post-merge now — or say 'skip post-merge' to proceed anyway."
+    local merge_sha merged_at merge_detail=""
+    merge_sha=$(sed -n 's/^merge_sha=//p' "$POST_MERGE_PENDING" 2>/dev/null | head -1)
+    merged_at=$(sed -n 's/^merged_at=//p' "$POST_MERGE_PENDING" 2>/dev/null | head -1)
+    [[ -n "$merge_sha" ]] && merge_detail=" Merge: ${merge_sha}"
+    [[ -n "$merged_at" ]] && merge_detail+=" at ${merged_at}."
+    [[ -n "$merge_detail" && "$merge_detail" != *. ]] && merge_detail+="."
+    w+="⚠️ A merge landed since /post-merge was last run.${merge_detail} Memory may not reflect the merged state. Run /post-merge now — or say 'skip for current task' to proceed without clearing the reminder."
   fi
   printf '%s' "$w"
 }

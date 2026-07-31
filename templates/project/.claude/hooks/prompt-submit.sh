@@ -40,7 +40,13 @@ if [[ -f "$WRAP_NEEDED" ]]; then
 fi
 if [[ -f "$POST_MERGE_PENDING" ]]; then
   [[ -n "$WARNINGS" ]] && WARNINGS+=$'\n\n'
-  WARNINGS+="⚠️ A merge landed since /post-merge was last run. Memory may not reflect the merged state. Run /post-merge now — or say 'skip post-merge' to proceed anyway."
+  MERGE_SHA=$(sed -n 's/^merge_sha=//p' "$POST_MERGE_PENDING" 2>/dev/null | head -1)
+  MERGED_AT=$(sed -n 's/^merged_at=//p' "$POST_MERGE_PENDING" 2>/dev/null | head -1)
+  MERGE_DETAIL=""
+  [[ -n "$MERGE_SHA" ]] && MERGE_DETAIL=" Merge: ${MERGE_SHA}"
+  [[ -n "$MERGED_AT" ]] && MERGE_DETAIL+=" at ${MERGED_AT}."
+  [[ -n "$MERGE_DETAIL" && "$MERGE_DETAIL" != *. ]] && MERGE_DETAIL+="."
+  WARNINGS+="⚠️ A merge landed since /post-merge was last run.${MERGE_DETAIL} Memory may not reflect the merged state. Run /post-merge now — or say 'skip for current task' to proceed without clearing the reminder."
 fi
 
 # Permission nudge — once per project when allowlist is sparse
