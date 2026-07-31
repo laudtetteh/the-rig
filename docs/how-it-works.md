@@ -173,7 +173,7 @@ Session ends
 
 ## The memory system
 
-Six files, six purposes:
+Seven files, seven purposes:
 
 ### .rig/memory/CONTEXT_SNAPSHOT.md
 - **The primary orientation file** — written at session end via `/wrap`
@@ -200,6 +200,15 @@ Six files, six purposes:
 - Format per entry: Context → Decision → Rejected → Rationale → Consequences
 - Committed (unlike CONTEXT_SNAPSHOT) — decisions are project history, not session state
 - Skimmed at session start; the agent logs to it when a non-obvious choice is made
+
+### .rig/memory/PROJECT_CONVENTIONS.md
+- Current, durable project operating rules and preferences only
+- Every addition, removal, or material change requires explicit user approval
+- Agent-writable and committed so approved conventions follow the project across machines
+- Always read at session start, even when `CONTEXT_SNAPSHOT.md` is current
+- Excludes secrets, transient state, copied governance policy, historical rationale,
+  and inferred or merely suggested preferences
+- Consequential choices and their alternatives/rationale remain in `DECISIONS.md`
 
 ### .rig/memory/RIG_GAPS.md
 - Self-improvement feedback log — committed to every project repo
@@ -455,6 +464,7 @@ load — the agent cannot skip them:
 | Project `CLAUDE.md` | ~6 KB | Stack, structure, off-limits |
 | `.rig/rules/` (4 files, via `@`) | ~11 KB | Coding standards, git, security, verification |
 | `docs/features/README.md` (via `@`) | ~1 KB | Feature index |
+| `PROJECT_CONVENTIONS.md` | ~1.5 KB initially | Explicitly approved current rules/preferences |
 | `CONTEXT_SNAPSHOT.md` | ~2 KB | Session state — the most important gate |
 
 **Session-start baseline: ~30 KB (~7,000 tokens).** Well within Claude's usable window.

@@ -66,9 +66,10 @@
 
 ## Key conventions
 
-- [Project-specific convention — e.g. "Never call the LLM API directly from a route — always go through the service layer"]
-- [Project-specific convention]
-- [Project-specific convention]
+Current, explicitly approved project operating rules and preferences live in
+`.rig/memory/PROJECT_CONVENTIONS.md`. Read it at the start of every session.
+Never add, remove, or materially change a convention without explicit user
+approval, and do not infer preferences from observed behavior or one-off requests.
 
 ---
 
@@ -248,13 +249,17 @@ docker compose up
 
 When starting a new session, read in this order:
 
-1. `.rig/memory/CONTEXT_SNAPSHOT.md` — **if this exists, it is sufficient for orientation.
+1. `.rig/memory/PROJECT_CONVENTIONS.md` — current, explicitly user-approved
+   operating rules and preferences. Always load this file; it is not replaced by
+   the context snapshot.
+2. `.rig/memory/CONTEXT_SNAPSHOT.md` — **if this exists, it is sufficient for orientation.
    Stop here unless the task requires deeper history.**
-2. `.rig/memory/PROGRESS.md` — only if `CONTEXT_SNAPSHOT.md` is absent or more than one
+3. `.rig/memory/PROGRESS.md` — only if `CONTEXT_SNAPSHOT.md` is absent or more than one
    session old. Load the most recent entries only (last 20 `##` sections).
-3. `.rig/memory/ERRORS.md` — known pitfalls
-4. `.rig/memory/DECISIONS.md` — architectural and process decisions (skim only)
-5. `.rig/tasks/active/` — current in-flight task(s)
+4. `.rig/memory/ERRORS.md` — known pitfalls
+5. `.rig/memory/DECISIONS.md` — consequential decisions, alternatives, rationale,
+   and consequences (skim only)
+6. `.rig/tasks/active/` — current in-flight task(s)
 
 **After reading context, check for pending housekeeping flags:**
 
