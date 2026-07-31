@@ -148,7 +148,7 @@ Agent is oriented. Hooks are live. Ready to work.
      │  After the agent's final message each turn:
      │  └─ stop.sh (Stop)
      │       Updates "Last updated:" date in CONTEXT_SNAPSHOT.md
-     │       Appends <!-- session-end YYYY-MM-DD HH:MM --> to PROGRESS.md
+     │       Appends a UUID-tagged session-end marker to PROGRESS.md
      │       (lightweight; idempotent — safe to run after every response)
      │
      ▼
@@ -157,7 +157,7 @@ Agent is oriented. Hooks are live. Ready to work.
      │  Expands PROGRESS.md stubs; trims if > 20 entries
      │  Logs ERRORS.md and RIG_GAPS.md entries
      │  Trims ERRORS.md if > 30 entries
-     │  Suggests session name (derives name from session-end markers)
+     │  Suggests a name from current conversation and resolved current-session evidence
      └─ Surfaces next priority
      │
      ▼
@@ -185,7 +185,7 @@ Seven files, seven purposes:
 ### .rig/memory/PROGRESS.md
 - Append-only build log, one entry per meaningful unit of work
 - Auto-stubbed by `post-tool.sh` after every git commit — stub exists even if the agent forgets
-- `stop.sh` appends `<!-- session-end YYYY-MM-DD HH:MM -->` boundary markers automatically; `/wrap` and `/post-merge` use these to identify which entries belong to the current session when suggesting a session name
+- `stop.sh` appends UUID-tagged session-end markers for housekeeping. Naming never uses legacy marker ranges, snapshots, unrelated session files, or project history; current conversation context is authoritative and only the resolved current session's UUID-tagged entries may cross-check it.
 - Most recent entry at the top
 - **Trim convention:** capped at 20 entries. `/wrap` moves older entries to `.rig/memory/PROGRESS_archive.md` (gitignored, disk-only) when the cap is exceeded. Keeps session startup cost low indefinitely.
 
@@ -535,7 +535,7 @@ Twenty slash commands covering the full development lifecycle:
 |---|---|---|
 | `/task` | `NEW_TASK_WORKFLOW` | Three-part intake wizard: goal → autonomy/check-ins/risk/testing configuration → confirmation. Persists operating mode and test requirement in task file. |
 | `/run` | Task execution loop | Executes the active task respecting its stored operating mode. If `## Operating mode` is absent from the task file, surfaces an inline wizard to configure it before proceeding. Chains automatically at High autonomy. |
-| `/sprint` | Conflict-aware planner | Groups tasks into conflict-free waves by analysing `## Files likely affected`; runs waves in sequence. Accepts `/sprint [slug …]` or `/sprint --issues #N …` for a targeted set. |
+| `/sprint` | Conflict-aware planner | Current implementation groups already-qualified tasks into conflict-free waves. Full tracker audit/repair, durable resumable planning, and `rig sprint ... --json` remain planned in issue #378. |
 
 ### Ship and debug
 | Command | Triggers | Key behaviour |
@@ -568,7 +568,7 @@ Twenty slash commands covering the full development lifecycle:
 |---|---|---|
 | `/post-merge` | `POST_MERGE_WORKFLOW` | Post-merge hygiene: pull base branch, update PROGRESS, move task file, housekeeping commit, suggest session name, surface next priority |
 | `/rig-propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
-| `/session-name` | Session naming | Derives a session name from current PROGRESS entries and presents it as a suggestion — callable at any time, not just at wrap |
+| `/session-name` | Session naming | Derives a name from current conversation/session evidence only; unrelated snapshots, markers, session records, and project history are rejected |
 | `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, captures in-flight task state, updates PROGRESS, trims PROGRESS/ERRORS, suggests session name, surfaces next priority. Concurrent session guard prevents race conditions on PROGRESS.md. |
 | `/rig-gaps` | Self-improvement | _(Rig contributors)_ Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats report for review and optional submission. `--push` appends directly to the local Rig repo (requires `rig-gaps-push-target:` in `CLAUDE.md`); `--submit` creates public GitHub issues in `laudtetteh/the-rig` (opt-in; requires `.rig-contribute-enabled` sentinel + `gh` auth) |
 | `/rig-upgrade` | Upgrade workflow | Pulls latest Rig source and re-runs `install.sh` with `--strategy upgrade`. `--version` prints the project version, global installer version, and the latest tagged release from GitHub (via `gh`), warning if any are out of sync. `--scope=project\|global\|both` limits which layers are upgraded. |

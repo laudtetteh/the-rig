@@ -1,8 +1,8 @@
 # The Rig
 
-**An opinionated agentic coding system for Claude Code.**
+**An opinionated agentic coding system for Claude Code and Codex.**
 
-The Rig wraps Claude Code with structured memory, enforced workflows, automated safety hooks, and a commit history discipline — so AI-assisted development stays consistent across sessions, projects, and months.
+The Rig wraps Claude Code and Codex with shared structured memory, enforced workflows, automated safety hooks, and commit-history discipline — so AI-assisted development stays consistent across sessions, agents, projects, and months.
 
 Built and refined across 100+ pull requests on a real production project.
 
@@ -10,7 +10,7 @@ Built and refined across 100+ pull requests on a real production project.
 
 ## The problem it solves
 
-Claude Code is powerful but stateless. Without structure, every session:
+Coding agents are powerful but session-local. Without structure, every session:
 
 - Starts cold — repeats decisions already made, re-asks questions already answered
 - Drifts — different conventions each session, silently violated rules
@@ -27,7 +27,7 @@ The Rig has two layers that load in sequence at every session start:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  GLOBAL LAYER  (~/.claude/)                                     │
+│  GLOBAL LAYER  (~/.claude/ plus selected Codex integrations)    │
 │  Installed once. Applies to every project on the machine.       │
 │                                                                 │
 │  CLAUDE.md          ← identity, hard rules, working style,      │
@@ -46,7 +46,9 @@ The Rig has two layers that load in sequence at every session start:
 │  .rig/rules/        ← coding standards, git, security, verify   │
 │  .rig/memory/       ← PROGRESS, ERRORS, DECISIONS, SNAPSHOT      │
 │  .rig/tasks/        ← active / backlog / done lifecycle         │
-│  .claude/           ← hook wiring + slash commands              │
+│  .claude/           ← Claude hook wiring + slash commands       │
+│  .agents/skills/    ← generated Codex skills from commands      │
+│  .codex/            ← Codex hook manifest + adapter             │
 │  .husky/            ← secret scanning + tool footer cleanup     │
 │  .github/           ← PR template + issue templates             │
 └─────────────────────────────────────────────────────────────────┘
@@ -61,11 +63,11 @@ The Rig has two layers that load in sequence at every session start:
 | Global identity | `templates/global/CLAUDE.md` | Hard rules, working style, memory discipline, and a `## Personal context` section to fill in once — loads at every session |
 | Skills (5) | `templates/global/skills/` | Reusable prompt scripts for debug, review, refactor, tests, explain |
 | Project brain | `templates/project/CLAUDE.md` | Project-specific identity, stack, conventions, off-limits paths |
-| Processes (5) | `templates/project/.rig/processes/` | Step-by-step workflows: new-task, ship, debug, post-merge, upgrade |
-| Rules (4) | `templates/project/.rig/rules/` | Coding standards, git conventions, security rules, verification protocol |
+| Processes (6) | `templates/project/.rig/processes/` | Step-by-step workflows: work modes, new-task, ship, debug, post-merge, upgrade |
+| Rules (5) | `templates/project/.rig/rules/` | Coding, git, security, verification, and session-naming contracts |
 | Memory system | `templates/project/.rig/memory/` | PROGRESS log, ERRORS log, DECISIONS log, CONTEXT_SNAPSHOT (session state), RIG_GAPS (self-improvement feedback) |
 | Task lifecycle | `templates/project/.rig/tasks/` | Structured task files through backlog → active → done |
-| Claude Code hooks | `templates/project/.claude/` | Pre/post-tool enforcement + 22 slash commands |
+| Claude/Codex adapters | `templates/project/.claude/`, `.codex/`, generated `.agents/skills/` | Shared command behavior and protected-path enforcement across both agents |
 | Feature docs | `templates/project/docs/features/` | README index + `/doc-feature` and `/refresh-feature-doc` commands for capturing and maintaining business-critical feature knowledge |
 | Git hooks | `templates/project/.husky/` | Secret scanning (gitleaks) + auto-injected tool footer removal |
 | GitHub templates | `templates/project/.github/` | PR template + 3 issue templates |
@@ -274,7 +276,7 @@ reset one tip, remove its `.rig/memory/tips/.tip-<id>-shown` file; remove the
 /task              →  intake wizard: goal + autonomy/check-ins/risk/testing configuration
 /run               →  execute active task; surfaces operating mode wizard if absent; chains at High autonomy
 /run [slug]        →  run a single specific task
-/sprint            →  conflict-aware sprint planner: groups tasks into waves, runs wave by wave
+/sprint            →  current conflict-aware wave planner for already-qualified task files
 /sprint [slug …]   →  sprint over a specific set of tasks only
 ```
 
@@ -310,7 +312,7 @@ reset one tip, remove its `.rig/memory/tips/.tip-<id>-shown` file; remove the
 ```
 /post-merge        →  post-merge hygiene: pull main, update memory, move task file, housekeeping commit
 /rig-propose       →  submit a change to governance files for human approval before anything is touched
-/session-name      →  derive a session name from current work and present it as a suggestion
+/session-name      →  derive a name strictly from the current conversation/session and present it as a suggestion
 /wrap              →  write CONTEXT_SNAPSHOT, capture in-flight task state, ensure memory is current
 /rig-gaps          →  compile workflow friction from RIG_GAPS.md + ERRORS.md; format for submission
 /rig-gaps --push   →  append unsubmitted entries to local Rig repo (requires rig-gaps-push-target: in CLAUDE.md)

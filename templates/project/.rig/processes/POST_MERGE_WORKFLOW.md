@@ -58,7 +58,7 @@ Add an entry at the **top** of `.rig/memory/PROGRESS.md` (below the header):
 
 1. Move the completed task file: `.rig/tasks/active/TASK_[name].md` → `.rig/tasks/done/TASK_[name].md`
 2. Update its `**Status**` field to `done`
-3. Verify `.rig/tasks/active/` is clean — only `.gitkeep` should re[BASE_BRANCH] if all tasks are done
+3. Verify `.rig/tasks/active/` is clean — only `.gitkeep` should remain if all tasks are done
 
 ---
 
@@ -145,22 +145,12 @@ for the user to confirm or tweak.
 
 ### How to determine what belongs to this session
 
-1. **Look for `<!-- session-end -->` markers in `.rig/memory/PROGRESS.md`.**
-   Entries between the most recent marker and the top of the file belong to this session.
-2. If no markers exist, read the `**Last updated:**` line from `.rig/memory/CONTEXT_SNAPSHOT.md`
-   and collect entries added since that date.
-
-### Check for an existing session name
-
-Read the `**Session name:**` field from `.rig/memory/CONTEXT_SNAPSHOT.md`.
-
-- **If blank / absent:** suggest a fresh name covering this session's work.
-- **If already set:** suggest **appending** the merged PR to the existing name rather
-  than replacing it:
-
-  > **Session already named:** `feat dashboard ui #49`
-  > **Merged this run:** PR #51 (fix null user on profile fetch)
-  > **Updated suggestion:** `feat dashboard ui #49 | fix null user profile fetch #51`
+Read `.rig/rules/session-naming.md` completely. Current conversation context is
+authoritative. A tentative name from the resolver-selected current session file and
+PROGRESS entries tagged with that same session UUID may cross-check it. Never use
+`CONTEXT_SNAPSHOT.md`, legacy marker ranges, unrelated session files, other UUIDs,
+or general project history as naming evidence. Write-capable workflows fail closed
+when the current session cannot be resolved unambiguously.
 
 ### Format
 
@@ -181,8 +171,9 @@ Then invite the user to apply it:
 
 > To apply: run `/session-name` or say "use that name".
 
-After the user confirms, **update the `**Session name:**` field in
-`.rig/memory/CONTEXT_SNAPSHOT.md`** to match.
+After the user confirms, use `bin/rig session-name set --final --complete` with the
+confirmed name as one opaque argument. Session names belong in session files; never
+write them to `CONTEXT_SNAPSHOT.md`.
 
 If no meaningful work shipped (pure housekeeping, no PRs), skip this step silently.
 
