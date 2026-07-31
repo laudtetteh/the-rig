@@ -45,6 +45,170 @@ command_help() {
 unavailable() { local command="$1"; shift; if json_requested "$@"; then printf '{"ok":false,"command":"%s","error":"not_implemented"}\n' "$command"; else printf 'rig: %s is not implemented in this version\n' "$command" >&2; fi; return "$RIG_EXIT_UNAVAILABLE"; }
 usage_error() { local message="$1"; shift; if json_requested "$@"; then printf '{"ok":false,"error":"usage","message":"%s"}\n' "$message"; else printf 'rig: %s\nTry "rig --help" for usage.\n' "$message" >&2; fi; return "$RIG_EXIT_USAGE"; }
 
+doctor() {
+  local arg
+  for arg in "$@"; do
+    [[ "$arg" == --json ]] || { usage_error "unknown doctor option: $arg" "$@"; return; }
+  done
+  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
+import json, os, pathlib, re, subprocess, sys
+
+root = pathlib.Path(os.environ["RIG_ROOT"])
+rig = pathlib.Path(os.environ["RIG_DIR"])
+checks = []
+
+def check(name, ok, detail):
+    checks.append({"name": name, "ok": bool(ok), "detail": str(detail)})
+
+def read(path):
+    try:
+        return path.read_text(errors="replace")
+    except OSError:
+        return ""
+
+def run(command):
+    try:
+        return subprocess.run(command, cwd=root, text=True, capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None
+
+# Path resolution must be both usable and recognisably a Rig data directory.
+marker = rig / "memory"
+check("rig_directory", rig.is_dir() and os.access(rig, os.R_OK) and marker.is_dir(),
+      f"resolved {rig}" if rig.is_dir() else f"missing {rig}")
+rigpath = root / ".rigpath"
+if rigpath.exists():
+    raw_text = read(rigpath)
+    raw = raw_text.strip()
+    check("rigpath", bool(raw) and len(raw_text.splitlines()) == 1 and rig.is_dir(),
+          f"resolves to {rig}" if raw else "empty .rigpath")
+else:
+    check("rigpath", rig == root / ".rig", "using local .rig")
+
+# Stealth exclusions are required only for stealth installs. Future Codex paths
+# become required when the corresponding integration is detectable.
+if rigpath.exists():
+    exclude = read(root / ".git" / "info" / "exclude").splitlines()
+    entries = {line.strip().rstrip("/") for line in exclude if line.strip() and not line.lstrip().startswith("#")}
+    required = ["CLAUDE.md", "PROJECT_BRIEF.md", ".claude", ".rigpath"]
+    for candidate in [".agents", ".codex", ".mcp.json", ".playwright-mcp"]:
+        if (root / candidate).exists(): required.append(candidate)
+    missing = [item for item in required if item.rstrip("/") not in entries]
+    check("stealth_exclusions", not missing, "complete" if not missing else "missing: " + ", ".join(missing))
+else:
+    check("stealth_exclusions", True, "not a stealth install")
+
+json_files = [root / ".claude" / "settings.json"]
+hooks = root / ".codex" / "hooks.json"
+if hooks.exists(): json_files.append(hooks)
+bad_json = []
+for path in json_files:
+    try:
+        with path.open() as handle: json.load(handle)
+    except (OSError, ValueError) as exc:
+        bad_json.append(f"{path.relative_to(root)}: {exc}")
+check("settings_json", not bad_json, "valid" if not bad_json else "; ".join(bad_json))
+
+# The per-install manifest records exactly which optional commands were selected.
+manifest = rig / "memory" / ".rig-manifest"
+expected = []
+for line in read(manifest).splitlines():
+    fields = line.split(None, 1)
+    if len(fields) == 2 and fields[1].startswith(".claude/commands/") and fields[1].endswith(".md"):
+        expected.append(fields[1])
+command_dir = root / ".claude" / "commands"
+if expected:
+    missing = [item for item in expected if not (root / item).is_file()]
+    detail = f"{len(expected) - len(missing)}/{len(expected)} manifest commands present"
+else:
+    present = sorted(command_dir.glob("*.md")) if command_dir.is_dir() else []
+    missing = [] if present else [".claude/commands/*.md"]
+    detail = f"{len(present)} commands present (no manifest baseline)"
+check("claude_commands", not missing, detail if not missing else "missing: " + ", ".join(missing))
+
+skills = root / ".agents" / "skills"
+if skills.is_dir():
+    command_names = {p.stem for p in command_dir.glob("*.md")}
+    skill_names = {p.parent.name for p in skills.glob("*/SKILL.md")}
+    missing_skills = sorted(command_names - skill_names)
+    extra_skills = sorted(skill_names - command_names)
+    check("codex_skill_parity", not missing_skills and not extra_skills,
+          f"{len(skill_names)}/{len(command_names)} mirrored" if not missing_skills and not extra_skills
+          else "missing skills: " + (", ".join(missing_skills) or "none") + "; extra skills: " + (", ".join(extra_skills) or "none"))
+else:
+    check("codex_skill_parity", True, "Codex mirroring not enabled")
+
+claude_md = read(root / "CLAUDE.md")
+matches = re.findall(r"(?m)^issue-tracking:\s*([^\s#]+)", claude_md)
+tracker = matches[-1].lower() if matches else "github"
+supported = {"github", "linear", "trello", "gus", "none"}
+check("issue_tracking", len(matches) <= 1 and tracker in supported,
+      f"configured: {tracker}" if tracker in supported else f"unsupported: {tracker}")
+
+if tracker == "github":
+    auth = run(["gh", "auth", "status"])
+    authenticated = auth is not None and auth.returncode == 0
+    check("github_auth", authenticated, "authenticated" if authenticated else "gh authentication unavailable")
+else:
+    check("github_auth", True, f"not required for {tracker}")
+
+# Command guidance is checked separately from repository history: command files
+# must describe the selected tracker, while commits use the generic reference
+# syntax. PR titles are not required to carry commit-only [#N] suffixes.
+guidance = read(command_dir / "task.md") + "\n" + read(command_dir / "ship.md")
+tokens = {"github": "issue-tracking: github", "linear": "issue-tracking: linear",
+          "trello": "issue-tracking: trello", "gus": "issue-tracking: gus", "none": "issue-tracking: none"}
+check("tracker_command_guidance", tokens.get(tracker, "") in guidance,
+      f"command guidance covers {tracker}" if tokens.get(tracker, "") in guidance else f"command guidance missing {tracker}")
+
+log = run(["git", "log", "-20", "--pretty=%s"])
+subjects = log.stdout.splitlines() if log is not None and log.returncode == 0 else []
+if tracker == "github": pattern = re.compile(r"\[#\d+\]")
+elif tracker == "linear": pattern = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")
+elif tracker == "trello": pattern = re.compile(r"\btrello:[A-Za-z0-9_-]+\b", re.I)
+elif tracker == "gus": pattern = re.compile(r"\bW-\d+\b", re.I)
+else: pattern = None
+if pattern and subjects:
+    drift = [subject for subject in subjects if not pattern.search(subject)]
+    check("recent_commit_references", not drift, f"{len(subjects)-len(drift)}/{len(subjects)} match {tracker}; first drift: {drift[0]}" if drift else f"{len(subjects)}/{len(subjects)} match {tracker}")
+else:
+    check("recent_commit_references", True, "no convention required" if pattern is None else "no commits to inspect")
+
+# Query PRs only when this is a GitHub-backed checkout and auth already passed;
+# this avoids surprising network activity in ordinary local/non-GitHub projects.
+remote = run(["git", "remote", "get-url", "origin"])
+remote_url = remote.stdout.strip() if remote is not None and remote.returncode == 0 else ""
+if tracker == "github" and "github.com" in remote_url and authenticated:
+    prs = run(["gh", "pr", "list", "--state", "all", "--limit", "20", "--json", "title,body"])
+    try:
+        pr_data = json.loads(prs.stdout) if prs is not None and prs.returncode == 0 else None
+    except (TypeError, ValueError):
+        pr_data = None
+    if pr_data is None:
+        check("recent_pr_references", False, "unable to inspect GitHub PRs")
+    else:
+        # A project may use conventional PR titles without the commit-only [#N]
+        # suffix. Accept an issue reference or close keyword in either title/body.
+        unlinked = [pr.get("title", "") for pr in pr_data
+                    if not re.search(r"(?i)(?:\[#\d+\]|\b(?:closes|fixes|resolves)\s+#\d+\b)",
+                                     pr.get("title", "") + "\n" + (pr.get("body") or ""))]
+        check("recent_pr_references", not unlinked,
+              f"{len(pr_data)-len(unlinked)}/{len(pr_data)} linked; first drift: {unlinked[0]}" if unlinked else f"{len(pr_data)}/{len(pr_data)} linked")
+else:
+    reason = "not a GitHub remote" if tracker == "github" else f"not required for {tracker}"
+    check("recent_pr_references", True, reason)
+
+result = {"ok": all(item["ok"] for item in checks), "command": "doctor", "root": str(root), "rig_dir": str(rig), "checks": checks}
+if "--json" in sys.argv[1:]:
+    print(json.dumps(result, separators=(",", ":")))
+else:
+    for item in checks:
+        print(("PASS" if item["ok"] else "FAIL") + f"  {item['name']}: {item['detail']}")
+    print("Rig doctor: " + ("healthy" if result["ok"] else "problems found"))
+raise SystemExit(0 if result["ok"] else 1)
+PY
+}
+
 session_resolve() {
   RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
 import json, os, pathlib, subprocess, sys
@@ -190,7 +354,7 @@ main() {
     -v|--version|version) [[ "$command" == version ]] && shift; version "$@";;
     claude) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help claude; else launch_claude "$@"; fi;;
     codex) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help codex; else launch_codex "$@"; fi;;
-    doctor) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help doctor; else unavailable doctor "$@"; fi;;
+    doctor) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help doctor; else doctor "$@"; fi;;
     session|session-name|memory)
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help "$command"; return; fi
