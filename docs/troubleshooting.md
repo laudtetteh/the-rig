@@ -266,6 +266,21 @@ housekeeping commits.
 
 ---
 
+## Case-only branch rename says the branch already exists
+
+**Symptom:** Renaming a branch only to change capitalization (for example,
+`bweb-241` to `BWEB-241`) reports that the target branch already exists.
+
+**Cause:** On a case-insensitive filesystem, a direct `git branch -m` can resolve
+the old and new spellings to the same ref path.
+
+**Fix:** Use `/task` or `/ship`'s branch rename helper. It moves the branch through
+a collision-checked `tmp/<slug>-rename` ref and then to the desired spelling. If the
+second move fails, it attempts to restore the original name and reports any retained
+temporary ref. A rename to a genuinely different existing branch remains an error.
+
+---
+
 ## Still stuck?
 
 Check the session log first (`/tmp/the-rig-session.log`). If the log shows the hook

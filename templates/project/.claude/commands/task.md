@@ -150,6 +150,62 @@ Wait for explicit go-ahead before proceeding.
 
 ## After confirmation
 
+### Branch-name normalization
+
+When the requested branch name differs from the current branch only by letter case,
+do not rely on a direct rename. Case-insensitive filesystems can make Git mistake the
+current ref for an existing target. Use this helper for any requested rename; it keeps
+ordinary rename conflicts visible and uses a temporary ref only for a case-only change.
+
+```bash
+# branch-case-rename:start
+rename_branch_case_safe() {
+  local desired_branch="$1"
+  local current_branch current_folded desired_folded slug temp_base temp_branch suffix rename_status
+
+  current_branch=$(git branch --show-current) || return
+  if [[ -z "$current_branch" ]]; then
+    echo "Cannot rename a detached HEAD." >&2
+    return 1
+  fi
+
+  current_folded=$(printf '%s' "$current_branch" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+  desired_folded=$(printf '%s' "$desired_branch" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+
+  if [[ "$current_branch" != "$desired_branch" && "$current_folded" == "$desired_folded" ]]; then
+    slug=$(printf '%s' "$current_branch" | LC_ALL=C tr -c '[:alnum:]._- ' '-' | tr ' ' '-')
+    temp_base="tmp/${slug}-rename"
+    temp_branch="$temp_base"
+    suffix=0
+    while git show-ref --verify --quiet "refs/heads/$temp_branch"; do
+      suffix=$((suffix + 1))
+      temp_branch="${temp_base}-${suffix}"
+    done
+
+    git branch -m "$temp_branch" || return
+    rename_status=0
+    git branch -m "$desired_branch" || rename_status=$?
+    if [[ "$rename_status" -ne 0 ]]; then
+      if git branch -m "$current_branch"; then
+        echo "Rename to '$desired_branch' failed; restored '$current_branch'." >&2
+      else
+        echo "Rename to '$desired_branch' failed and rollback failed; branch remains '$temp_branch'." >&2
+      fi
+      return "$rename_status"
+    fi
+    return 0
+  fi
+
+  git branch -m "$desired_branch"
+}
+# branch-case-rename:end
+
+rename_branch_case_safe "[desired-branch-name]"
+```
+
+If the helper reports a failure, stop. Do not delete the temporary ref: the message
+identifies it when rollback also fails, preserving the user's work for recovery.
+
 1. Create a task file in `.rig/tasks/backlog/` using the task template.
 2. Fill in `## Goal`, `## Context`, and `## Operating mode` from the wizard answers.
 3. Move the task file to `.rig/tasks/active/`.
