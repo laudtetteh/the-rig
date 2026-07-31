@@ -20,6 +20,8 @@
 
 ---
 
+<!-- Add new entries below this line, newest first -->
+
 ## Example entry
 
 ## [YYYY-MM-DD] — Example: dependency not found after container rebuild
@@ -35,7 +37,3 @@ keeps using the stale anonymous volume — the new package is never visible.
 
 **Watch for**: Any time you add a dependency and the container is already running.
 Always verify with a test import after any dependency change.
-
----
-
-<!-- Add new entries above this line, newest first -->
