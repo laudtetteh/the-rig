@@ -724,7 +724,7 @@ assert 'test-branch' in d['systemMessage']
   echo "$output" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
-ctx = d['hookSpecificOutput']['additionalContext']
+ctx = d['systemMessage']
 assert 'wrong-session' not in ctx, 'Got stale checkpoint from wrong session: ' + ctx
 assert 'Branch:' in ctx, 'Expected branch info in checkpoint: ' + ctx
 " 2>/dev/null
