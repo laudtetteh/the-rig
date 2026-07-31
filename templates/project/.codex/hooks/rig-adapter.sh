@@ -127,6 +127,21 @@ for value in re.findall(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$"
 
 PAYLOAD=$(normalize_payload) || fail_closed "hook payload could not be normalized."
 TOOL=$(printf '%s' "$PAYLOAD" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_name", ""))')
+HOOK_PAYLOAD="$PAYLOAD"
+
+# Claude's PreToolUse hook receives the tool input object directly, while Codex
+# wraps that object in its event envelope. Delegate the equivalent shape so the
+# canonical hook sees the same command/file fields on both agent paths.
+if [[ "$EVENT" == "PreToolUse" ]]; then
+  HOOK_PAYLOAD=$(printf '%s' "$PAYLOAD" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+tool_input = data.get("tool_input", {})
+if not isinstance(tool_input, dict):
+    raise SystemExit(1)
+print(json.dumps(tool_input))
+') || fail_closed "PreToolUse payload has invalid tool input."
+fi
 
 if [[ "$EVENT" == "PreToolUse" && "$TOOL" == "apply_patch" ]]; then
   validate_apply_patch
@@ -153,7 +168,7 @@ esac
 
 [[ -r "$HOOK" ]] || fail_closed "canonical hook is missing or unreadable: $HOOK"
 if [[ "$EVENT" == "PreToolUse" || "$EVENT" == "PostToolUse" ]]; then
-  OUTPUT=$(printf '%s' "$PAYLOAD" | bash "$HOOK" "$TOOL"); STATUS=$?
+  OUTPUT=$(printf '%s' "$HOOK_PAYLOAD" | bash "$HOOK" "$TOOL"); STATUS=$?
 else
   OUTPUT=$(printf '%s' "$PAYLOAD" | bash "$HOOK"); STATUS=$?
 fi
