@@ -20,5 +20,10 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y bats
 
+      - name: Configure test Git identity
+        run: |
+          git config --global user.name "CI Test Runner"
+          git config --global user.email "ci-tests@example.invalid"
+
       - name: Run tests
-        run: bats tests/test_install.bats
+        run: bats tests/
