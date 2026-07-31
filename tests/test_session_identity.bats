@@ -26,6 +26,14 @@ setup() {
   cp "$(pwd)/templates/project/.claude/hooks/pre-compact.sh"   "$HOOK_DIR/pre-compact.sh"
   chmod +x "$HOOK_DIR"/*.sh
 
+  # Session-start sources the project-local shared tip catalog and suppresses
+  # tips whose commands are unavailable. Mirror those installed fixtures.
+  cp "$(pwd)/templates/project/.rig/contextual-tips.sh" "$RIG_DIR/contextual-tips.sh"
+  mkdir -p "$REPO/.claude/commands"
+  for command in debug rig-gaps code-review sprint task session-name; do
+    cp "$(pwd)/templates/project/.claude/commands/$command.md" "$REPO/.claude/commands/$command.md"
+  done
+
   # Minimal CONTEXT_SNAPSHOT so startup case does not exit early
   cat > "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md" <<'EOF'
 # Context Snapshot

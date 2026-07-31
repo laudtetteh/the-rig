@@ -240,7 +240,7 @@ settings.json wiring, and pending flags in one pass. See
 
 When you open Claude Code in a project using The Rig, hooks fire automatically:
 
-1. **`session-start.sh`** injects `CONTEXT_SNAPSHOT.md` and any pending flag warnings as hook context — before the first user turn
+1. **`session-start.sh`** injects `CONTEXT_SNAPSHOT.md`, pending flag warnings, and at most one applicable feature tip as hook context — before the first user turn
 2. The agent reads `~/.claude/CLAUDE.md` — who it is, how to behave, and your personal context
 3. The agent reads `./CLAUDE.md` — what this project is
 4. The agent reads `./.rig/memory/CONTEXT_SNAPSHOT.md` — **if present, this is sufficient; the agent stops here**
@@ -249,6 +249,14 @@ When you open Claude Code in a project using The Rig, hooks fire automatically:
 7. `./.rig/tasks/active/` — what's currently in flight
 
 On every user prompt, `prompt-submit.sh` re-checks for pending flag warnings and re-injects them if still present. No re-briefing. No repeating context. Every session picks up exactly where the last one left off.
+
+Feature tips use only local project signals (such as recorded errors, workflow
+gaps, branch history, sessions, and issue references). A shared deterministic
+catalog selects the highest-priority applicable tip, suppresses commands that
+are unavailable or already used, and records a one-time sentinel under
+`.rig/memory/tips/`. To opt out, create `.rig/memory/.rig-tips-disabled`. To
+reset one tip, remove its `.rig/memory/tips/.tip-<id>-shown` file; remove the
+`tips/` directory to reset all tips.
 
 **At session end**, `session-end.sh` fires (Claude Code's `SessionEnd` event) and writes `.wrap-needed` + a minimal auto-checkpoint. The `stop.sh` hook fires after every agent turn (the `Stop` event) to keep `CONTEXT_SNAPSHOT.md`'s timestamp current. Run `/wrap` before closing Claude Code for a full snapshot — the hooks are a safety net, not a replacement.
 
