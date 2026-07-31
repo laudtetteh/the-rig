@@ -517,6 +517,7 @@ def option(name, default=""):
     except (ValueError, IndexError): return default
 agent=option("--agent"); native_id=option("--native-session-id"); source=option("--source", "hook")
 root_native=option("--root-session-id") or native_id; parent=option("--parent-native-session-id") or None
+native_title=option("--native-title") or None
 if agent not in ("claude","codex") or not native_id:
     print(json.dumps({"ok":False,"reason":"invalid_input"})); raise SystemExit(3)
 root=pathlib.Path(os.environ["RIG_ROOT"]).resolve(); rig=pathlib.Path(os.environ["RIG_DIR"]); sessions=rig/"memory"/"sessions"; sessions.mkdir(parents=True,exist_ok=True)
@@ -573,8 +574,8 @@ else:
        "project":{"root_realpath":str(root),"identity":project_id,"worktree_realpath":str(root)},
        "created_at":created,"updated_at":now,
        "runtime":{"pid":int(os.environ.get("RIG_SESSION_PID",os.getppid())),"launcher":"rig" if hint else "raw","cwd":os.getcwd(),"branch":"unknown","head":None},
-       "lineage":{"parent_anchor":parent_anchor,"parent_native_session_id":parent,"kind":"fork" if parent else "root"},
-       "names":{"tentative":legacy.get("tentative_name"),"final":legacy.get("final_name"),"native_title":None,"display_title":None,"native_sync":"unknown"},
+       "lineage":{"parent_anchor":parent_anchor,"parent_native_session_id":parent,"kind":"fork" if source=="fork" or parent else "root"},
+       "names":{"tentative":legacy.get("tentative_name"),"final":legacy.get("final_name"),"native_title":native_title,"display_title":legacy.get("final_name") or legacy.get("tentative_name") or native_title,"native_sync":"in-sync" if native_title and not (legacy.get("final_name") or legacy.get("tentative_name")) else ("suggested" if native_title else "unknown")},
        "lifecycle":{"state":"active","last_event":"session_start","last_event_at":now,"end_reason":None},
        "flags":{"wrap_needed":False,"post_merge_pending":False},
        "migration":{"legacy_anchor":legacy.get("anchor") if legacy else None,"legacy_pid":legacy.get("pid") if legacy else None,"migrated_at":now if legacy else None},"revision":1}
@@ -583,6 +584,10 @@ except (OSError,subprocess.SubprocessError): pass
 if matches:
     d["updated_at"]=now; d["runtime"].update({"pid":int(os.environ.get("RIG_SESSION_PID",os.getppid())),"cwd":os.getcwd()}); d["project"]["worktree_realpath"]=str(root)
     d["lifecycle"].update({"state":"active","last_event":"session_start","last_event_at":now,"end_reason":None}); d["revision"]=int(d.get("revision",0))+1
+    if native_title:
+        names=d.setdefault("names",{}); names["native_title"]=native_title
+        if not (names.get("final") or names.get("tentative") or names.get("display_title")): names["display_title"]=native_title
+        names["native_sync"]="in-sync" if names.get("display_title")==native_title else "suggested"
 fd,tmp=tempfile.mkstemp(prefix=".session-",suffix=".tmp",dir=str(p.parent))
 try:
     with os.fdopen(fd,"w") as f: json.dump(d,f,indent=2); f.write("\n"); f.flush(); os.fsync(f.fileno())
@@ -793,6 +798,8 @@ if d.get("schema_version") == 1:
     names=d.setdefault("names", {})
     if os.environ["SESSION_TENTATIVE"] == "true": names["tentative"] = os.environ["SESSION_NAME"]
     else: names["final"] = os.environ["SESSION_NAME"]; names["tentative"] = None
+    names["display_title"] = os.environ["SESSION_NAME"]
+    names["native_sync"] = "in-sync" if names.get("native_title") == os.environ["SESSION_NAME"] else "suggested"
     if os.environ["SESSION_COMPLETE"] == "true": d["lifecycle"]["state"] = "complete"
     d["revision"] = int(d.get("revision", 0)) + 1
 else:

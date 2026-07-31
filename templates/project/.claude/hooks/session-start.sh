@@ -35,22 +35,29 @@ SOURCE=""
 NATIVE_SESSION_ID=""
 ROOT_SESSION_ID=""
 PARENT_NATIVE_SESSION_ID=""
+NATIVE_TITLE=""
+AGENT_ID=""
 if command -v python3 >/dev/null 2>&1; then
   _identity_input=$(printf '%s' "$INPUT" | python3 -c "
 import json, sys
 try:
     d=json.load(sys.stdin)
-    print(d.get('source', ''))
-    print(d.get('session_id', ''))
-    print(d.get('root_session_id', d.get('rootSessionId', '')))
-    print(d.get('forked_from_id', d.get('forkedFromId', '')))
+    def text(value): return value if isinstance(value, str) else ''
+    print(json.dumps([
+        text(d.get('source')), text(d.get('session_id')),
+        text(d.get('root_session_id', d.get('rootSessionId'))),
+        text(d.get('forked_from_id', d.get('forkedFromId'))),
+        text(d.get('session_title')), text(d.get('agent_id'))
+    ]))
 except Exception:
     pass
 " 2>/dev/null || true)
-  SOURCE=$(printf '%s' "$_identity_input" | sed -n '1p')
-  NATIVE_SESSION_ID=$(printf '%s' "$_identity_input" | sed -n '2p')
-  ROOT_SESSION_ID=$(printf '%s' "$_identity_input" | sed -n '3p')
-  PARENT_NATIVE_SESSION_ID=$(printf '%s' "$_identity_input" | sed -n '4p')
+  SOURCE=$(printf '%s' "$_identity_input" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0])' 2>/dev/null || true)
+  NATIVE_SESSION_ID=$(printf '%s' "$_identity_input" | python3 -c 'import json,sys; print(json.load(sys.stdin)[1])' 2>/dev/null || true)
+  ROOT_SESSION_ID=$(printf '%s' "$_identity_input" | python3 -c 'import json,sys; print(json.load(sys.stdin)[2])' 2>/dev/null || true)
+  PARENT_NATIVE_SESSION_ID=$(printf '%s' "$_identity_input" | python3 -c 'import json,sys; print(json.load(sys.stdin)[3])' 2>/dev/null || true)
+  NATIVE_TITLE=$(printf '%s' "$_identity_input" | python3 -c 'import json,sys; print(json.load(sys.stdin)[4])' 2>/dev/null || true)
+  AGENT_ID=$(printf '%s' "$_identity_input" | python3 -c 'import json,sys; print(json.load(sys.stdin)[5])' 2>/dev/null || true)
 fi
 
 SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
@@ -62,10 +69,18 @@ SESSION_FILE="${RIG_SESSION_FILE:-$SESSION_DIR/session-${SESSION_PID}.json}"
 
 # A documented native hook ID is authoritative. Bind it before any lifecycle
 # work; launcher/PID files are migration hints only and cannot override it.
-if [[ -n "$NATIVE_SESSION_ID" && -x "$REPO/bin/rig" ]]; then
+if [[ -n "$NATIVE_SESSION_ID" && -n "$AGENT_ID" && -x "$REPO/bin/rig" ]]; then
+  # Provider-documented subagent hooks retain the root session ID and add
+  # agent_id. Resolve read-only: a child must never bootstrap or rename a root.
+  BIND_RESULT=$("$REPO/bin/rig" session resolve --agent "${RIG_AGENT:-claude}" --native-session-id "$NATIVE_SESSION_ID" --json 2>/dev/null) || exit 0
+  SESSION_FILE=$(printf '%s' "$BIND_RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])' 2>/dev/null) || exit 0
+  SESSION_UUID=$(printf '%s' "$BIND_RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])' 2>/dev/null) || exit 0
+  export RIG_SESSION_FILE="$SESSION_FILE" RIG_SESSION_ANCHOR="$SESSION_UUID"
+elif [[ -n "$NATIVE_SESSION_ID" && -x "$REPO/bin/rig" ]]; then
   BIND_ARGS=(--agent "${RIG_AGENT:-claude}" --native-session-id "$NATIVE_SESSION_ID" --source "$SOURCE")
   [[ -n "$ROOT_SESSION_ID" ]] && BIND_ARGS+=(--root-session-id "$ROOT_SESSION_ID")
   [[ -n "$PARENT_NATIVE_SESSION_ID" ]] && BIND_ARGS+=(--parent-native-session-id "$PARENT_NATIVE_SESSION_ID")
+  [[ -n "$NATIVE_TITLE" ]] && BIND_ARGS+=(--native-title "$NATIVE_TITLE")
   BIND_RESULT=$(RIG_SESSION_PID="$SESSION_PID" "$REPO/bin/rig" session bind "${BIND_ARGS[@]}" 2>/dev/null) || exit 0
   SESSION_FILE=$(printf '%s' "$BIND_RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])' 2>/dev/null) || exit 0
   SESSION_UUID=$(printf '%s' "$BIND_RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])' 2>/dev/null) || exit 0
@@ -96,7 +111,7 @@ emit_context() {
   local ctx="$1"
   if command -v python3 >/dev/null 2>&1; then
     printf '%s' "$ctx" | python3 -c "
-import json, sys
+import json, os, sys
 ctx = sys.stdin.read()
 out = {
     'hookSpecificOutput': {
@@ -104,6 +119,9 @@ out = {
         'additionalContext': ctx
     }
 }
+title = os.environ.get('RIG_PUBLIC_SESSION_TITLE', '')
+if title:
+    out['hookSpecificOutput']['sessionTitle'] = title
 print(json.dumps(out))
 " 2>/dev/null || true
   fi
@@ -163,7 +181,7 @@ except Exception:
 # ── Dispatch by source ────────────────────────────────────────────────────────
 
 case "$SOURCE" in
-  startup|resume)
+  startup|resume|fork)
     [[ ! -f "$SNAPSHOT" ]] && exit 0
 
     # ── Create or restore session identity ───────────────────────────────────
@@ -185,6 +203,10 @@ case "$SOURCE" in
     FULL_CTX="$CONTEXT"
     [[ -n "$WARNINGS" ]] && FULL_CTX="${WARNINGS}"$'\n\n---\n\n'"${FULL_CTX}"
     [[ -n "$TIPS" ]]    && FULL_CTX="${FULL_CTX}"$'\n\n---\n\n'"${TIPS}"
+    if [[ -z "$AGENT_ID" && "${RIG_AGENT:-claude}" == "claude" && -f "$SESSION_FILE" ]]; then
+      RIG_PUBLIC_SESSION_TITLE=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); n=d.get("names",{}); print(n.get("display_title") or n.get("final") or n.get("tentative") or "")' 2>/dev/null || true)
+      export RIG_PUBLIC_SESSION_TITLE
+    fi
     emit_context "$FULL_CTX"
     ;;
 
