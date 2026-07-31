@@ -1290,6 +1290,7 @@ _install_protected_path_policy() {
   local rig_dir="$TEMP_DIR/rig-self"
   mkdir -p "$rig_dir"
   cp "$INSTALLER" "$rig_dir/install.sh"
+  cp -r "$REPO_ROOT/installer" "$rig_dir/installer"
   cp -r "$REPO_ROOT/templates" "$rig_dir/templates"
   git -C "$rig_dir" init -q
   git -C "$rig_dir" config user.email "test@test.com"
@@ -1311,6 +1312,7 @@ _install_protected_path_policy() {
   local rig_dir="$TEMP_DIR/rig-self"
   mkdir -p "$rig_dir"
   cp "$INSTALLER" "$rig_dir/install.sh"
+  cp -r "$REPO_ROOT/installer" "$rig_dir/installer"
   cp -r "$REPO_ROOT/templates" "$rig_dir/templates"
   git -C "$rig_dir" init -q
   git -C "$rig_dir" config user.email "test@test.com"

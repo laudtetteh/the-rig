@@ -13,6 +13,10 @@ The installer is interactive by default; the flags below bypass all prompts.
 |---|---|---|
 | `--global-only` | — | Install only the global layer (`~/.claude/`) |
 | `--project-only` | — | Install only the project layer (target repo) |
+| `--global-agent` | `claude` \| `codex` \| `both` \| `none` | Select global integrations independently |
+| `--project-agent` | `claude` \| `codex` \| `both` \| `none` | Select project integrations independently |
+| `--preflight` | — | Validate the resolved matrix and prerequisites without writing |
+| `--json` | — | With `--preflight`, emit schema-versioned JSON only |
 | `--target <path>` | absolute path | Project directory to install into |
 | `--tracking` | `repo` \| `local` \| `external` \| `stealth` | How `.rig/` is tracked in git |
 | `--strategy` | `merge` \| `upgrade` \| `overwrite` \| `skip` | How to handle existing files |
@@ -37,6 +41,27 @@ The installer is interactive by default; the flags below bypass all prompts.
 | `upgrade` | Updates Rig-owned files if unchanged; detects customizations | Upgrading an existing install |
 | `overwrite` | Replaces all Rig-owned files unconditionally | Repair/reset |
 | `skip` | Never overwrites anything | Safe read-only test |
+
+If agent selectors are omitted, fresh installs retain the historical Claude-only
+default. Upgrades reuse the last successful selection from
+`~/.rig/install-targets.json` and the resolved project `.rig/install-targets.json`.
+Explicit selectors take precedence. Selecting `none` or deselecting an agent never
+removes files from an earlier install.
+When every enabled layer explicitly resolves to `none`, the command is a verified
+no-op: it reports the matrix and writes neither destination files nor target metadata.
+
+Run a read-only machine check before automation:
+
+```bash
+./install.sh --project-only --project-agent both --target /path/to/project \
+  --strategy upgrade --preflight --json
+```
+
+Exit 0 means required checks passed (optional features may still be degraded),
+exit 1 means a prerequisite failed, and exit 2 means the invocation or metadata
+schema is invalid. The installer never installs external dependencies itself.
+The same preflight evaluation runs automatically before every normal install and
+aborts before the first destination write when a required prerequisite is missing.
 
 ---
 

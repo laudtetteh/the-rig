@@ -29,6 +29,15 @@ gated — survey before touching anything, confirm before committing.
 /rig-upgrade --scope=both     # upgrade both layers without prompting (same as default but explicit)
 ```
 
+Before invoking the installer, resolve and confirm agent targets independently
+for every selected layer. Accepted values are `claude`, `codex`, `both`, and
+`none`; pass them as `--global-agent VALUE` and `--project-agent VALUE`.
+When the user does not request a change, omit the selector so the installer can
+reuse its versioned install-target metadata. Never delete integration files when
+an agent is deselected. For agent-driven/noninteractive execution, ask the user
+for any unresolved choice before invoking the installer, then run the same
+command through `--preflight --json` and stop on a nonzero result.
+
 ### `--version` flag (early exit)
 
 If the user passes `--version`, skip all phases and print version info only:

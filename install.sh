@@ -141,6 +141,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GLOBAL_TEMPLATES="$SCRIPT_DIR/templates/global"
 PROJECT_TEMPLATES="$SCRIPT_DIR/templates/project"
 INSTALLER_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "unknown")"
+CAPABILITY_MANIFEST="${_RIG_CAPABILITY_MANIFEST:-$SCRIPT_DIR/installer/capabilities.v1.json}"
+_EARLY_PREFLIGHT=false
+_EARLY_PREFLIGHT_JSON=false
+for _early_arg in "$@"; do
+  [[ "$_early_arg" == --preflight ]] && _EARLY_PREFLIGHT=true
+  [[ "$_early_arg" == --json ]] && _EARLY_PREFLIGHT_JSON=true
+done
 
 # ── Installer branch drift check ─────────────────────────────────────────────
 # If the installer lives inside a git repo, check whether it's behind its
@@ -148,7 +155,7 @@ INSTALLER_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "unknown")"
 # Runs silently if there's no remote, no network, or no git.
 # Tests can override _RIG_DRIFT_DIR to point to a mock repo.
 _DRIFT_DIR="${_RIG_DRIFT_DIR:-$SCRIPT_DIR}"
-if git -C "$_DRIFT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+if [[ "$_EARLY_PREFLIGHT" != true ]] && git -C "$_DRIFT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$_DRIFT_DIR" fetch --quiet 2>/dev/null || true
   _TRACKING=$(git -C "$_DRIFT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
   if [[ -n "$_TRACKING" ]]; then
@@ -203,6 +210,10 @@ SKIP_GIT_HOOKS=false       # set via --skip-git-hooks    (stealth: skip .git/hoo
 INSTALL_FEATURE_DOCS=false # set via --feature-docs      (gates doc-feature/feature-context/etc.)
 INSTALL_SUBAGENTS=false    # set via --subagents          (gates subagent-start.sh + SubagentStart hook)
 INSTALL_CONTRIBUTE=false   # set via --contribute         (gates rig-gaps.md + rig-propose.md)
+_FLAG_GLOBAL_AGENT=""
+_FLAG_PROJECT_AGENT=""
+PREFLIGHT_ONLY=false
+JSON_OUTPUT=false
 
 for arg in "$@"; do
   case "$arg" in
@@ -212,6 +223,10 @@ for arg in "$@"; do
     --feature-docs)     INSTALL_FEATURE_DOCS=true ;;
     --subagents)        INSTALL_SUBAGENTS=true ;;
     --contribute)       INSTALL_CONTRIBUTE=true ;;
+    --preflight)        PREFLIGHT_ONLY=true ;;
+    --json)             JSON_OUTPUT=true ;;
+    --global-agent|--project-agent)
+      ;;
     --rig-dir|--strategy|--target|--project-name|--base-branch|--tracking)
       # two-arg flags; value captured in the loop below
       ;;
@@ -232,6 +247,10 @@ for arg in "$@"; do
       echo "Layer flags (override the intent menu):"
       echo "  --global-only         Install ~/.claude/ layer only (CLAUDE.md + skills)"
       echo "  --project-only        Scaffold project layer only"
+      echo "  --global-agent <name> Global agent target: claude | codex | both | none"
+      echo "  --project-agent <name> Project agent target: claude | codex | both | none"
+      echo "  --preflight           Validate targets and prerequisites without writing"
+      echo "  --json                Emit JSON (valid only with --preflight)"
       echo ""
       echo "Non-interactive flags (bypass all prompts — useful for scripting and CI):"
       echo "  --strategy <name>     Set strategy directly."
@@ -280,6 +299,13 @@ done
 # Capture two-argument flag values
 args=("$@")
 for (( i=0; i<${#args[@]}; i++ )); do
+  case "${args[$i]}" in
+    --global-agent|--project-agent)
+      if [[ $((i+1)) -ge ${#args[@]} || "${args[$((i+1))]}" == --* ]]; then
+        error "${args[$i]} requires a value"
+        exit 2
+      fi ;;
+  esac
   if [[ "${args[$i]}" == "--rig-dir" && $((i+1)) -lt ${#args[@]} ]]; then
     EXTERNAL_RIG_DIR="${args[$((i+1))]}"
   fi
@@ -298,7 +324,67 @@ for (( i=0; i<${#args[@]}; i++ )); do
   if [[ "${args[$i]}" == "--tracking" && $((i+1)) -lt ${#args[@]} ]]; then
     _FLAG_TRACKING="${args[$((i+1))]}"
   fi
+  if [[ "${args[$i]}" == "--global-agent" && $((i+1)) -lt ${#args[@]} ]]; then
+    _FLAG_GLOBAL_AGENT="${args[$((i+1))]}"
+  fi
+  if [[ "${args[$i]}" == "--project-agent" && $((i+1)) -lt ${#args[@]} ]]; then
+    _FLAG_PROJECT_AGENT="${args[$((i+1))]}"
+  fi
 done
+
+# Agent-target contract. Selectors are intentionally separate from layer flags.
+if [[ "$JSON_OUTPUT" == true && "$PREFLIGHT_ONLY" != true ]]; then
+  error "--json is valid only with --preflight"
+  exit 2
+fi
+if [[ "$DO_GLOBAL" != true && -n "$_FLAG_GLOBAL_AGENT" ]] ||
+   [[ "$DO_PROJECT" != true && -n "$_FLAG_PROJECT_AGENT" ]]; then
+  error "An agent selector was supplied for a disabled layer"
+  exit 2
+fi
+for _agent_value in "${_FLAG_GLOBAL_AGENT:-claude}" "${_FLAG_PROJECT_AGENT:-claude}"; do
+  case "$_agent_value" in claude|codex|both|none) ;; *)
+    error "Invalid agent target '$_agent_value' (expected claude, codex, both, or none)"
+    exit 2 ;;
+  esac
+done
+GLOBAL_AGENT="${_FLAG_GLOBAL_AGENT:-claude}"
+PROJECT_AGENT="${_FLAG_PROJECT_AGENT:-claude}"
+
+agent_json() {
+  case "$1" in
+    claude) printf '["claude"]' ;;
+    codex) printf '["codex"]' ;;
+    both) printf '["claude","codex"]' ;;
+    none) printf '[]' ;;
+  esac
+}
+has_agent() { [[ "$1" == "$2" || "$1" == both ]]; }
+
+read_agent_state() {
+  local state_file="$1"
+  [[ -f "$state_file" ]] || return 1
+  python3 "$SCRIPT_DIR/installer/read-target-state.py" "$state_file"
+}
+
+write_agent_state() {
+  local state_file="$1" layer="$2" selection="$3" tmp
+  mkdir -p "$(dirname "$state_file")"
+  tmp="$(mktemp "${state_file}.tmp.XXXXXX")"
+  printf '{"schema":"https://the-rig.dev/schemas/install-targets/v1","schema_version":1,"layer":"%s","agents":%s,"updated_by":{"installer_version":"%s"}}\n' \
+    "$layer" "$(agent_json "$selection")" "$INSTALLER_VERSION" > "$tmp"
+  mv "$tmp" "$state_file"
+}
+
+run_capability_smoke() {
+  local layer="$1" selection="$2" root="$3" agents result status
+  agents="$(agent_json "$selection" | tr -d '[]"' | tr -d ' ')"
+  set +e
+  result="$(python3 "$SCRIPT_DIR/installer/check-capabilities.py" "$CAPABILITY_MANIFEST" --layer "$layer" --agents "$agents" --root "$root")"; status=$?
+  set -e
+  printf '%s' "$result"
+  return "$status"
+}
 
 # ── Portable in-place sed ─────────────────────────────────────────────────────
 # GNU sed uses -i ""; macOS BSD sed uses -i ''
@@ -313,11 +399,13 @@ sed_inplace() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-echo ""
-bold "╔══════════════════════════════════════╗"
-bold "║         The Rig — Installer          ║"
-bold "╚══════════════════════════════════════╝"
-echo ""
+if [[ "$JSON_OUTPUT" != true ]]; then
+  echo ""
+  bold "╔══════════════════════════════════════╗"
+  bold "║         The Rig — Installer          ║"
+  bold "╚══════════════════════════════════════╝"
+  echo ""
+fi
 
 # ── INSTALL INTENT ────────────────────────────────────────────────────────────
 # Ask what the user is trying to do, then derive strategy and layer flags from
@@ -351,6 +439,10 @@ if [[ -n "$_FLAG_STRATEGY" ]]; then
       COLLISION_STRATEGY="interactive"
       ;;
   esac
+  _SKIP_COMPONENT_SELECTION=true
+elif [[ "$PREFLIGHT_ONLY" == true ]]; then
+  # Read-only preflight must never enter the interactive intent flow.
+  COLLISION_STRATEGY="merge"
   _SKIP_COMPONENT_SELECTION=true
 else
   echo "What are you doing?"
@@ -429,9 +521,113 @@ else
   esac
 fi
 
-echo ""
-info "Strategy: ${COLLISION_STRATEGY}"
-echo ""
+[[ "$JSON_OUTPUT" != true ]] && echo ""
+if [[ "$JSON_OUTPUT" != true ]]; then info "Strategy: ${COLLISION_STRATEGY}"; echo ""; fi
+
+choose_agent_target() {
+  local layer="$1" choice
+  echo "Agent target for the $layer layer:" >&2
+  echo "  1) Claude  2) Codex  3) Both  4) None" >&2
+  read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3/4] (default: 1): ")" choice
+  case "${choice:-1}" in 1) echo claude;; 2) echo codex;; 3) echo both;; 4) echo none;; *) error "Invalid target choice"; return 2;; esac
+}
+_INTERACTIVE_AGENT_CHOICE=false
+if [[ -t 0 && "$PREFLIGHT_ONLY" != true ]]; then
+  [[ "$DO_GLOBAL" == true && -z "$_FLAG_GLOBAL_AGENT" ]] && GLOBAL_AGENT="$(choose_agent_target global)"
+  [[ "$DO_PROJECT" == true && -z "$_FLAG_PROJECT_AGENT" ]] && PROJECT_AGENT="$(choose_agent_target project)"
+  _INTERACTIVE_AGENT_CHOICE=true
+  echo "Target matrix: global=$GLOBAL_AGENT project=$PROJECT_AGENT"
+  confirm "Continue with this target matrix?" "y" || exit 0
+fi
+
+GLOBAL_TARGET_STATE="$HOME/.rig/install-targets.json"
+_GLOBAL_STATE_FUTURE=false
+_GLOBAL_STATE_ERROR=""
+PREVIOUS_GLOBAL_AGENT=""
+if [[ "$COLLISION_STRATEGY" == upgrade && "$DO_GLOBAL" == true && -f "$GLOBAL_TARGET_STATE" ]]; then
+  _saved_global="$(read_agent_state "$GLOBAL_TARGET_STATE")" || _state_status=$?
+  PREVIOUS_GLOBAL_AGENT="${_saved_global:-}"
+  if [[ "${_state_status:-0}" -eq 3 ]]; then
+    _GLOBAL_STATE_FUTURE=true
+    [[ -n "$_FLAG_GLOBAL_AGENT" ]] || _GLOBAL_STATE_ERROR="future global metadata requires explicit selector"
+  elif [[ "${_state_status:-0}" -eq 2 ]]; then _GLOBAL_STATE_ERROR="malformed global target metadata"
+  elif [[ -z "$_FLAG_GLOBAL_AGENT" && "$_INTERACTIVE_AGENT_CHOICE" != true ]]; then GLOBAL_AGENT="$_saved_global"
+  fi
+fi
+[[ "$JSON_OUTPUT" != true ]] && info "Agent targets: global=${GLOBAL_AGENT} project=${PROJECT_AGENT}"
+
+{
+  _preflight_target="${_FLAG_TARGET:-$(pwd)}"
+  _repo_state="$_preflight_target/.rig/install-targets.json"
+  _stealth_state="$HOME/.rig/projects/${_FLAG_PROJECT_NAME:-$(basename "$_preflight_target")}/install-targets.json"
+  _pointer_state=""
+  [[ -f "$_preflight_target/.rigpath" ]] && _pointer_state="$(sed -n '1p' "$_preflight_target/.rigpath")/install-targets.json"
+  _preflight_project_state="$_repo_state"
+  _state_discovery_error=""
+  if [[ "${_FLAG_TRACKING:-}" == repo || "${_FLAG_TRACKING:-}" == local ]]; then
+    _preflight_project_state="$_repo_state"
+  elif [[ "${_FLAG_TRACKING:-}" == external || "${_FLAG_TRACKING:-}" == stealth ]]; then
+    _preflight_rig_dir="${EXTERNAL_RIG_DIR:-$HOME/.rig/projects/${_FLAG_PROJECT_NAME:-$(basename "$_preflight_target")}}"
+    _preflight_project_state="$_preflight_rig_dir/install-targets.json"
+  elif [[ -n "$EXTERNAL_RIG_DIR" ]]; then
+    _preflight_project_state="$EXTERNAL_RIG_DIR/install-targets.json"
+  elif [[ -n "$_pointer_state" ]]; then
+    _preflight_project_state="$_pointer_state"
+  elif [[ -d "$_preflight_target/.rig" && -n "$(git -C "$_preflight_target" ls-files -- ".rig/" 2>/dev/null)" ]]; then
+    _preflight_project_state="$_repo_state"
+  elif [[ -d "$_preflight_target/.rig" ]] &&
+       { /usr/bin/grep -qF '.rig/' "$_preflight_target/.git/info/exclude" 2>/dev/null ||
+         /usr/bin/grep -qF '.rig/' "$_preflight_target/.gitignore" 2>/dev/null; }; then
+    _preflight_project_state="$_repo_state"
+  else
+    # With no conclusive tracking evidence, compare all surviving candidates.
+    _discovered_state=""
+    for _candidate in "$_pointer_state" "$_repo_state" "$_stealth_state"; do
+      [[ -n "$_candidate" && -f "$_candidate" ]] || continue
+      if [[ -z "$_discovered_state" ]]; then _discovered_state="$_candidate"
+      elif ! cmp -s "$_discovered_state" "$_candidate"; then
+        _state_discovery_error="conflicting project target metadata: $_discovered_state and $_candidate"
+      fi
+    done
+    if [[ -n "$_discovered_state" ]]; then _preflight_project_state="$_discovered_state"
+    else _preflight_project_state="${_pointer_state:-$_stealth_state}"
+    fi
+  fi
+  _state_args=()
+  [[ -n "$_GLOBAL_STATE_ERROR" ]] && _state_args+=(--state-error "$_GLOBAL_STATE_ERROR")
+  [[ -n "$_state_discovery_error" ]] && _state_args+=(--state-error "$_state_discovery_error")
+  if [[ "$COLLISION_STRATEGY" == upgrade && "$DO_PROJECT" == true && -f "$_preflight_project_state" ]]; then
+    _saved_project="$(read_agent_state "$_preflight_project_state")" || _project_state_status=$?
+    if [[ "${_project_state_status:-0}" -eq 3 ]]; then
+      [[ -n "$_FLAG_PROJECT_AGENT" ]] || { [[ "$JSON_OUTPUT" == true ]] || error "Future project target metadata requires --project-agent"; _state_args+=(--state-error "future project metadata requires explicit selector"); }
+    elif [[ "${_project_state_status:-0}" -eq 2 ]]; then _state_args+=(--state-error "malformed project target metadata")
+    elif [[ -z "$_FLAG_PROJECT_AGENT" ]]; then PROJECT_AGENT="$_saved_project"
+    fi
+  fi
+  _render_args=(--manifest "$CAPABILITY_MANIFEST" --version "$INSTALLER_VERSION" --operation "$COLLISION_STRATEGY" --global-agent "$GLOBAL_AGENT" --project-agent "$PROJECT_AGENT" --global-destination "$HOME/.claude" --project-destination "$_preflight_target")
+  [[ "$DO_GLOBAL" == true ]] && _render_args+=(--global-enabled)
+  [[ "$DO_PROJECT" == true ]] && _render_args+=(--project-enabled)
+  [[ "$DO_PROJECT" == true && "$PROJECT_AGENT" != none && -f "$_preflight_target/package.json" ]] && _render_args+=(--project-husky)
+  set +e
+  _preflight_json="$(python3 "$SCRIPT_DIR/installer/render-preflight.py" "${_render_args[@]}" ${_state_args[@]+"${_state_args[@]}"})"; _preflight_status=$?
+  set -e
+  if [[ "$JSON_OUTPUT" == true ]]; then printf '%s\n' "$_preflight_json"
+  else
+    echo "Target matrix: global=$GLOBAL_AGENT project=$PROJECT_AGENT"
+    python3 -c 'import json,sys; d=json.load(sys.stdin); print("Missing prerequisites: " + (", ".join(x["id"] for x in d["dependencies"] if x["status"] != "ok" and x["classification"] != "optional") or "none")); print("Degraded features: " + (", ".join(d["degraded_features"]) or "none")); print("Next steps: " + (", ".join(d["next_steps"]) or "none"))' <<< "$_preflight_json"
+  fi
+  [[ "$PREFLIGHT_ONLY" == true ]] && exit "$_preflight_status"
+  if [[ "$_preflight_status" -ne 0 ]]; then error "Required preflight checks failed before writes."; exit "$_preflight_status"; fi
+}
+if [[ -n "$_GLOBAL_STATE_ERROR" ]]; then error "$_GLOBAL_STATE_ERROR"; [[ "$_GLOBAL_STATE_FUTURE" == true ]] && exit 2 || exit 1; fi
+
+_all_enabled_none=true
+[[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]] && _all_enabled_none=false
+[[ "$DO_PROJECT" == true && "$PROJECT_AGENT" != none ]] && _all_enabled_none=false
+if [[ "$_all_enabled_none" == true ]]; then
+  success "All enabled layers selected none; no files or metadata were written."
+  exit 0
+fi
 
 # ── BACKUP HELPER ─────────────────────────────────────────────────────────────
 # Used by overwrite strategy. In stealth/external mode, backs up to
@@ -908,7 +1104,7 @@ _copy_global_file_upgrade() {
 }
 
 # ── GLOBAL LAYER ─────────────────────────────────────────────────────────────
-if [[ "$DO_GLOBAL" == true ]]; then
+if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   bold "── Global layer (~/.claude/) ──"
   echo ""
 
@@ -920,6 +1116,7 @@ if [[ "$DO_GLOBAL" == true ]]; then
   _SAVED_MANIFEST_FILE="$MANIFEST_FILE"
   MANIFEST_FILE="$GLOBAL_MANIFEST_FILE"
 
+  if has_agent "$GLOBAL_AGENT" claude; then
   mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR"
 
   # ── CLAUDE.md ──────────────────────────────────────────────────────────────
@@ -939,11 +1136,18 @@ if [[ "$DO_GLOBAL" == true ]]; then
       copy_file "$skill_src" "$skill_dest" "$SKILLS_DIR" "skills/$skill_name"
     fi
   done
+  fi
 
   # Restore manifest pointer
   MANIFEST_FILE="$_SAVED_MANIFEST_FILE"
 
   echo ""
+fi
+
+if [[ "$DO_GLOBAL" == true ]]; then
+  _global_smoke="$(run_capability_smoke global "$GLOBAL_AGENT" "$HOME/.claude")" || { error "Postflight smoke failed: $_global_smoke"; exit 1; }
+  [[ "$_GLOBAL_STATE_FUTURE" == true ]] || write_agent_state "$GLOBAL_TARGET_STATE" global "$GLOBAL_AGENT"
+  success "Postflight targets: global=$GLOBAL_AGENT; smoke=$_global_smoke"
 fi
 
 # Reset backup dir between layers so each layer uses its own base path.
@@ -1156,6 +1360,19 @@ if [[ "$DO_PROJECT" == true ]]; then
   else
     MANIFEST_FILE="$TARGET/.rig/memory/.rig-manifest"
   fi
+  PROJECT_TARGET_STATE="$(dirname "$(dirname "$MANIFEST_FILE")")/install-targets.json"
+  _PROJECT_STATE_FUTURE=false
+  PREVIOUS_PROJECT_AGENT=""
+  if [[ "$COLLISION_STRATEGY" == upgrade && -f "$PROJECT_TARGET_STATE" ]]; then
+    _saved_project="$(read_agent_state "$PROJECT_TARGET_STATE")" || _project_state_status=$?
+    PREVIOUS_PROJECT_AGENT="${_saved_project:-}"
+    if [[ "${_project_state_status:-0}" -eq 3 ]]; then
+      _PROJECT_STATE_FUTURE=true
+      [[ -n "$_FLAG_PROJECT_AGENT" ]] || { error "Future project target metadata requires --project-agent"; exit 2; }
+    elif [[ "${_project_state_status:-0}" -eq 2 ]]; then error "Malformed project target metadata: $PROJECT_TARGET_STATE"; exit 1
+    elif [[ -z "$_FLAG_PROJECT_AGENT" && "$_INTERACTIVE_AGENT_CHOICE" != true ]]; then PROJECT_AGENT="$_saved_project"
+    fi
+  fi
 
   # ── BREAKING CHANGE GATE (upgrade only) ───────────────────────────────────
   # Read the project's installed Rig version and surface any breaking changes
@@ -1199,6 +1416,13 @@ if [[ "$DO_PROJECT" == true ]]; then
   INSTALL_GIT_HOOKS=true
   INSTALL_GITHUB=true
   INSTALL_PROJECT_BRIEF=true
+
+  if ! has_agent "$PROJECT_AGENT" claude; then
+    INSTALL_CLAUDE_MD=false
+    INSTALL_CLAUDE_HOOKS=false
+    INSTALL_COMMANDS=false
+    INSTALL_SUBAGENTS=false
+  fi
 
   if [[ "$component_choice" == "b" ]]; then
     # Show context-aware paths for .rig/ components
@@ -1594,6 +1818,11 @@ PYEOF
     fi
   fi
 
+  # Persist only after the selected layer and its required smoke checks succeed.
+  _project_smoke="$(run_capability_smoke project "$PROJECT_AGENT" "$TARGET")" || { error "Postflight smoke failed: $_project_smoke"; exit 1; }
+  [[ "$_PROJECT_STATE_FUTURE" == true ]] || write_agent_state "$PROJECT_TARGET_STATE" project "$PROJECT_AGENT"
+  success "Postflight targets: project=$PROJECT_AGENT; smoke=$_project_smoke"
+
   echo ""
 fi
 
@@ -1670,6 +1899,14 @@ fi
 echo ""
 bold "── Done ──"
 echo ""
+echo "Target matrix: global=$GLOBAL_AGENT project=$PROJECT_AGENT"
+echo "Missing required prerequisites: none"
+if [[ "$GITLEAKS_OK" == true ]]; then echo "Degraded features: none"; else echo "Degraded features: secret-scanning (gitleaks missing)"; fi
+[[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" == none ]] && echo "Preserved deselected global agent files (no cleanup performed)."
+[[ "$DO_PROJECT" == true && "$PROJECT_AGENT" == none ]] && echo "Preserved deselected project agent files (no cleanup performed)."
+[[ -n "${PREVIOUS_GLOBAL_AGENT:-}" && "$PREVIOUS_GLOBAL_AGENT" != "$GLOBAL_AGENT" ]] && echo "Preserved prior global target files: $PREVIOUS_GLOBAL_AGENT."
+[[ -n "${PREVIOUS_PROJECT_AGENT:-}" && "$PREVIOUS_PROJECT_AGENT" != "$PROJECT_AGENT" ]] && echo "Preserved prior project target files: $PREVIOUS_PROJECT_AGENT."
+echo "Postflight smoke results: manifest-derived checks passed."
 echo "The Rig is installed. Next steps:"
 echo ""
 
@@ -1686,6 +1923,10 @@ if [[ "$DO_PROJECT" == true ]]; then
   echo ""
   echo "  4. Open a Claude Code session in your project and run /kickoff or /task"
   echo ""
+fi
+
+if has_agent "$GLOBAL_AGENT" codex || has_agent "$PROJECT_AGENT" codex; then
+  echo "  Codex: launch 'codex' and verify native project guidance."
 fi
 
 echo "Documentation: https://github.com/laudtetteh/the-rig"
