@@ -6,6 +6,12 @@ improve the system. Governance files — `.rig/processes/`, `.rig/rules/`, `.hus
 
 This command is the approved path for proposing changes to them.
 
+Project conventions are different. Current, explicitly approved operating rules
+and preferences belong in `.rig/memory/PROJECT_CONVENTIONS.md`, which is
+agent-writable. They still require explicit user approval before the agent adds,
+removes, or materially changes one. This command does not create a bypass for
+governance files and does not apply governance proposals.
+
 ---
 
 ## What this does
@@ -34,6 +40,9 @@ Option B — the agent generates a ready-to-paste block:
 
 After applying: tell the agent it's done. It will log the change in
 `.rig/memory/PROGRESS.md` and clean up `/tmp/rig-proposal-[name].md`.
+
+There is no approved-apply helper. Approval does not make a protected path
+agent-writable; `pre-tool.sh` continues to block governance writes unconditionally.
 
 ---
 
@@ -67,11 +76,27 @@ Use `/rig-propose` when you've noticed:
 
 Do not use `/rig-propose` for:
 - Application code changes — edit those directly
-- Memory files (`PROGRESS.md`, `ERRORS.md`, `CONTEXT_SNAPSHOT.md`) — update those directly
+- Completed work, failures, session state, or Rig feedback — use `PROGRESS.md`,
+  `ERRORS.md`, `CONTEXT_SNAPSHOT.md`, or `RIG_GAPS.md` as appropriate
+- A durable project operating rule or preference that the user explicitly
+  approves — record the current convention in `PROJECT_CONVENTIONS.md`
 - Task files — manage those directly
 - Project documentation (`docs/`, `README.md`) — edit those directly
 
 Only governance files require the proposal gate.
+
+Before writing `PROJECT_CONVENTIONS.md`, confirm all of the following:
+
+- The user explicitly approved the exact convention; observed behavior, a
+  one-off request, or an agent suggestion is not approval.
+- It is a durable current rule or preference, not transient project/session state.
+- It contains no secret or sensitive value.
+- It does not copy or paraphrase governance policy.
+- It states only the current convention. Consequential rationale, alternatives,
+  and consequences belong in `DECISIONS.md`.
+
+If any check fails, do not write the convention. Ask for approval when that is
+the only missing requirement; otherwise route the content to the correct file.
 
 ---
 
