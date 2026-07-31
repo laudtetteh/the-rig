@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -u
+
+# Claude-only terminal title fallback. The launcher supplies the exact session.
+SESSION_FILE="${RIG_SESSION_FILE:-}"
+TTY_PATH="${RIG_TITLE_TTY:-/dev/tty}"
+INTERVAL="${RIG_TITLE_INTERVAL:-1}"
+[[ -n "$SESSION_FILE" && -r "$SESSION_FILE" && -w "$TTY_PATH" ]] || exit 0
+
+last=""
+while [[ -r "$SESSION_FILE" && -w "$TTY_PATH" ]]; do
+  title=$(SESSION_F="$SESSION_FILE" RIG_PROJECT_NAME="${RIG_PROJECT_NAME:-}" python3 <<'PY' 2>/dev/null || true
+import json, os
+try:
+    with open(os.environ["SESSION_F"]) as f: d = json.load(f)
+    project = os.environ.get("RIG_PROJECT_NAME", "")
+    branch = d.get("branch") or ""
+    title = d.get("final_name") or d.get("tentative_name") or ((project + ": " + branch) if project and branch else project)
+    # OSC payloads must never contain terminal controls. Preserve printable
+    # punctuation literally, normalize line separators, and drop other C0/C1.
+    title = str(title).replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+    title = "".join(ch for ch in title if ord(ch) >= 0x20 and not 0x7f <= ord(ch) <= 0x9f)
+    print(title)
+except Exception:
+    pass
+PY
+)
+  if [[ -n "$title" && "$title" != "$last" ]]; then
+    printf '\033]0;%s\007' "$title" > "$TTY_PATH" 2>/dev/null || exit 0
+    last="$title"
+  fi
+  [[ "${RIG_TITLE_ONCE:-0}" == 1 ]] && exit 0
+  sleep "$INTERVAL" 2>/dev/null || exit 0
+done
+exit 0

@@ -23,7 +23,8 @@ fi
 
 [[ ! -d "$RIG_DIR/memory" ]] && exit 0
 
-CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint-${PPID}.md"
+SESSION_PID="${RIG_SESSION_PID:-$PPID}"
+CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint-${SESSION_PID}.md"
 
 # ── Gather context ─────────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ TENTATIVE_NAME="none"
 CONTEXT_HEADER=""
 
 # ── Read session identity from session file (UUID model) ──────────────────────
-SESSION_FILE="$RIG_DIR/memory/sessions/session-${PPID}.json"
+SESSION_FILE="${RIG_SESSION_FILE:-$RIG_DIR/memory/sessions/session-${SESSION_PID}.json}"
 if [[ -f "$SESSION_FILE" ]]; then
   # Single python3 call for both fields — halves subprocess cost and avoids
   # a race where the file changes between two sequential reads.

@@ -46,7 +46,8 @@ SNAPSHOT="$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
 WRAP_NEEDED="$RIG_DIR/memory/.wrap-needed"
 POST_MERGE_PENDING="$RIG_DIR/memory/.post-merge-pending"
 SESSION_DIR="$RIG_DIR/memory/sessions"
-SESSION_FILE="$SESSION_DIR/session-${PPID}.json"
+SESSION_PID="${RIG_SESSION_PID:-$PPID}"
+SESSION_FILE="${RIG_SESSION_FILE:-$SESSION_DIR/session-${SESSION_PID}.json}"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -89,7 +90,8 @@ create_session_identity() {
     || printf '%s' "$(date +%s)" | md5sum 2>/dev/null | cut -c1-8 \
     || date +%s)
   started=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S)
-  RIG_ANC="$uuid" RIG_PID="$PPID" RIG_STARTED="$started" RIG_BRANCH="$branch" \
+  [[ -n "${RIG_SESSION_ANCHOR:-}" ]] && uuid="$RIG_SESSION_ANCHOR"
+  RIG_ANC="$uuid" RIG_PID="$SESSION_PID" RIG_STARTED="$started" RIG_BRANCH="$branch" \
   python3 -c "
 import json, os
 print(json.dumps({
@@ -102,7 +104,7 @@ print(json.dumps({
     'status': 'active'
 }, indent=2))
 " 2>/dev/null > "$SESSION_FILE" || true
-  printf '%s' "$uuid" > "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true
+  printf '%s' "$uuid" > "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true
 }
 
 # Returns tip text if the named tip should fire (and hasn't fired before).
@@ -187,7 +189,7 @@ try:
 except Exception:
     pass
 " 2>/dev/null || true)
-  [[ -n "$existing_uuid" ]] && printf '%s' "$existing_uuid" > "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true
+  [[ -n "$existing_uuid" ]] && printf '%s' "$existing_uuid" > "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true
 }
 
 # ── Dispatch by source ────────────────────────────────────────────────────────
@@ -266,7 +268,7 @@ except Exception:
         # Uses env vars to avoid injection risk from branch names or tentative names.
         compact_branch=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
         compact_started=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S)
-        RIG_ANC="$SESSION_UUID" RIG_PID="$PPID" RIG_STARTED="$compact_started" \
+        RIG_ANC="$SESSION_UUID" RIG_PID="$SESSION_PID" RIG_STARTED="$compact_started" \
         RIG_BRANCH="$compact_branch" RIG_TENT="${PRIOR_TENTATIVE:-}" \
         python3 -c "
 import json, os
@@ -285,10 +287,10 @@ print(json.dumps({
       fi
     fi
     [[ -n "$SESSION_UUID" ]] && printf '%s' "$SESSION_UUID" \
-      > "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true
+      > "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true
     # ─────────────────────────────────────────────────────────────────────────
 
-    COMPACT_CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint-${PPID}.md"
+    COMPACT_CHECKPOINT="$RIG_DIR/memory/.compact-checkpoint-${SESSION_PID}.md"
     if [[ ! -f "$COMPACT_CHECKPOINT" ]]; then
       # In Scenario B, reuse the checkpoint already found during identity resolution
       # to avoid a second ls scan that could pick a different (possibly wrong) file.

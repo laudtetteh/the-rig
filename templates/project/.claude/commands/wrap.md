@@ -114,7 +114,8 @@ Gather all findings silently — no output yet:
 4. **ERRORS.md additions** — infer from session context whether any unexpected behaviors, footguns, or non-obvious pitfalls should be added (see ERRORS.md logging step below)
 5. **Feature doc overlaps** — files changed this session vs. documented feature entry points (see Feature doc freshness step below)
 6. **Active tasks** — read `.rig/tasks/active/`
-7. **Session identity** — read session file at `$RIG_DIR/memory/sessions/session-${PPID}.json`; extract `anchor` UUID and `tentative_name`. If session file absent, fall back to session-end marker boundary.
+7. **Session identity** — run `bin/rig session resolve --json`; extract its session file,
+   `anchor`, and `tentative_name`. Stop on ambiguous identity.
 
 ### Report
 
@@ -175,7 +176,7 @@ Never delete entries — only move them.
 ## Marker prune step — PROGRESS.md session-end markers
 
 `stop.sh` appends `<!-- session-end YYYY-MM-DD HH:MM sid:UUID -->` after every agent turn
-(where `UUID` is the session anchor written to `/tmp/.rig-session-$PPID.uuid` at session start;
+(where `UUID` is the session anchor returned by `bin/rig session resolve --json`;
 omitted on pre-v1.21.0 installs that lack the UUID system).
 Over time these accumulate in PROGRESS.md without bound — they are not covered by
 the `## ` header trim above.
@@ -385,29 +386,13 @@ the user to confirm or tweak.
 ```bash
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 if [[ -f "$REPO/.rigpath" ]]; then RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath"); else RIG_DIR="$REPO/.rig"; fi
-SESSION_DIR="$RIG_DIR/memory/sessions"
-SESSION_FILE="$SESSION_DIR/session-${PPID}.json"
-
-# Primary: /tmp sentinel written by session-start.sh
-SESSION_UUID=$(cat "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true)
-TENTATIVE_NAME=""
-
-# Read session file for UUID (if /tmp sentinel missing) and tentative name
-if [[ -f "$SESSION_FILE" ]]; then
-  [[ -z "$SESSION_UUID" ]] && \
-    SESSION_UUID=$(python3 -c "import json; print(json.load(open('$SESSION_FILE')).get('anchor') or '')" 2>/dev/null || true)
-  TENTATIVE_NAME=$(python3 -c "import json; print(json.load(open('$SESSION_FILE')).get('tentative_name') or '')" 2>/dev/null || true)
-fi
-
-# Fallback: scan sessions/ for most recently modified active session
-if [[ -z "$SESSION_UUID" ]] && [[ -d "$SESSION_DIR" ]]; then
-  FALLBACK_FILE=$(ls -t "$SESSION_DIR"/session-*.json 2>/dev/null \
-    | xargs grep -l '"status": "active"' 2>/dev/null | head -1 || true)
-  if [[ -n "$FALLBACK_FILE" ]]; then
-    SESSION_UUID=$(python3 -c "import json; print(json.load(open('$FALLBACK_FILE')).get('anchor') or '')" 2>/dev/null || true)
-    SESSION_FILE="$FALLBACK_FILE"
-  fi
-fi
+SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
+  echo "Unable to resolve this session unambiguously; stop before writing snapshot state."
+  exit 1
+}
+SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+SESSION_UUID=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
+TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; print(json.load(open(os.environ["SESSION_F"])).get("tentative_name") or "")')
 ```
 
 ### Step 2 — Collect this session's work
@@ -418,7 +403,7 @@ always the most accurate signal. The tentative name (if set) is a pre-compaction
 anchor from earlier in this session — use it as a starting point if context was lost.
 
 **Every `## ` entry header you write to PROGRESS.md must include `<!-- sid:UUID -->`
-at the end of the line** (read UUID from `/tmp/.rig-session-${PPID}.uuid`). This is
+at the end of the line** (read UUID from the resolver output above). This is
 what enables UUID-keyed session attribution.
 
 **File signal — UUID-keyed PROGRESS entries:**
@@ -454,31 +439,11 @@ Keep under ~100 characters.
 
 ### Step 5 — After confirmation: write to session file, move to done/
 
-Write the final data atomically — write to a temp file, then rename to the
-destination in a single `os.rename` call. This prevents a crash between the
-write and the move from leaving a `status: complete` file stranded in `sessions/`
-(which the orphan scan would never surface, since it only looks for `status: active`).
+Use the shared atomic writer. Pass the confirmed name as one opaque argument;
+never interpolate it into shell or Python source.
 
 ```bash
-CONFIRMED_NAME="<the confirmed name>"
-DONE_DIR="$SESSION_DIR/done"
-mkdir -p "$DONE_DIR"
-DEST="$DONE_DIR/session-$(date +%Y%m%d)-${SESSION_UUID}.json"
-
-python3 - <<PYEOF
-import json, os
-with open("$SESSION_FILE") as f:
-    d = json.load(f)
-d["final_name"] = "$CONFIRMED_NAME"
-d["status"] = "complete"
-tmp = "$DEST" + ".tmp"
-with open(tmp, "w") as f:
-    json.dump(d, f, indent=2)
-os.rename(tmp, "$DEST")
-PYEOF
-
-rm -f "$SESSION_FILE" 2>/dev/null || true
-rm -f "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true
+"$REPO/bin/rig" session-name set --final --complete "$CONFIRMED_NAME"
 ```
 
 **Do NOT write Session name to CONTEXT_SNAPSHOT.md.** CONTEXT_SNAPSHOT contains
@@ -528,7 +493,7 @@ rm -f "$RIG_DIR/memory/.snapshot-write-in-progress" 2>/dev/null || true
 rm -f "$RIG_DIR/memory/.compact-checkpoint-${PPID}.md" 2>/dev/null || true
 
 # Clear /tmp UUID sentinel (session file already moved to done/ by naming step)
-rm -f "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true
+# The atomic session-name writer removes the matching legacy sentinel on completion.
 ```
 
 Log: "`.wrap-needed` cleared. Concurrent session lock released. Compact checkpoint cleared. UUID sentinel cleared."

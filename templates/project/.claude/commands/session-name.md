@@ -7,8 +7,8 @@ suggestion. Can be run at any point in the session — not just at wrap time.
 
 ## What this does
 
-1. Reads this session's UUID from `/tmp/.rig-session-${PPID}.uuid` and its session
-   file from `$RIG_DIR/memory/sessions/session-${PPID}.json`
+1. Resolves this session with `bin/rig session resolve --json` (launcher identity
+   first, then the legacy PPID sentinel)
 2. Reads any existing `tentative_name` from the session file
 3. Derives a name in the standard `type short-desc #N | ...` format using conversation
    context as the primary signal and UUID-tagged PROGRESS entries as cross-reference
@@ -42,17 +42,13 @@ No arguments. Run it whenever you want to name or re-name the current session.
 
 ```bash
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
-if [[ -f "$REPO/.rigpath" ]]; then RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath"); else RIG_DIR="$REPO/.rig"; fi
-SESSION_DIR="$RIG_DIR/memory/sessions"
-SESSION_FILE="$SESSION_DIR/session-${PPID}.json"
-
-SESSION_UUID=$(cat "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true)
-TENTATIVE_NAME=""
-if [[ -f "$SESSION_FILE" ]]; then
-  [[ -z "$SESSION_UUID" ]] && \
-    SESSION_UUID=$(python3 -c "import json; print(json.load(open('$SESSION_FILE')).get('anchor') or '')" 2>/dev/null || true)
-  TENTATIVE_NAME=$(python3 -c "import json; print(json.load(open('$SESSION_FILE')).get('tentative_name') or '')" 2>/dev/null || true)
-fi
+SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
+  echo "Unable to resolve this session unambiguously; stop and ask the user."
+  exit 1
+}
+SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+SESSION_UUID=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
+TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; print(json.load(open(os.environ["SESSION_F"])).get("tentative_name") or "")')
 ```
 
 ### 1 — Determine what happened this session
@@ -152,30 +148,12 @@ When the user confirms the name:
 
 **5b — Write to session file.**
 
+Pass the confirmed name as one opaque argument to the atomic writer. Never interpolate
+it into shell or Python source:
+
 ```bash
-IS_TENTATIVE=false  # set to true if called early
-CONFIRMED_NAME="<the confirmed name>"
-
-python3 - <<PYEOF
-import json
-
-session_file = "$SESSION_FILE"
-try:
-    with open(session_file) as f:
-        d = json.load(f)
-except FileNotFoundError:
-    d = {"anchor": "$SESSION_UUID", "pid": $PPID, "status": "active",
-         "tentative_name": None, "final_name": None}
-
-if "$IS_TENTATIVE" == "true":
-    d["tentative_name"] = "$CONFIRMED_NAME [tentative]"
-else:
-    d["final_name"] = "$CONFIRMED_NAME"
-    d["tentative_name"] = None   # final supersedes tentative
-
-with open(session_file, "w") as f:
-    json.dump(d, f, indent=2)
-PYEOF
+"$REPO/bin/rig" session-name set --tentative "$CONFIRMED_NAME" # early
+"$REPO/bin/rig" session-name set --final "$CONFIRMED_NAME"     # mid-session/final
 ```
 
 **Do NOT write Session name to CONTEXT_SNAPSHOT.md.** CONTEXT_SNAPSHOT is

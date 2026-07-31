@@ -4,140 +4,199 @@ set -euo pipefail
 readonly RIG_EXIT_USAGE=64
 readonly RIG_EXIT_UNAVAILABLE=69
 
-usage() {
-  cat <<'EOF'
+usage() { cat <<'EOF'
 Usage: rig <command> [subcommand] [options]
 
 Commands:
   rig doctor                Diagnose a Rig installation
   rig session resolve       Resolve the current session identity
-  rig session-name set      Set the current session name
+  rig session-name set      Set the current session name atomically
   rig memory validate       Validate Rig memory files
   rig codex                 Launch Codex with Rig context
   rig claude                Launch Claude Code with Rig context
   rig version               Print the installed Rig version
-
-Common options:
-  --json                 Emit machine-readable JSON where supported
-  -h, --help             Show help
-  -v, --version          Print the installed Rig version
-
-Subcommands are reserved by the dispatcher and may be unavailable until their
-feature is installed. Run "rig <command> --help" for command-specific usage.
 EOF
 }
-
-json_requested() {
-  local arg
-  for arg in "$@"; do
-    [[ "$arg" == "--json" ]] && return 0
-  done
-  return 1
-}
-
+json_requested() { local arg; for arg in "$@"; do [[ "$arg" == --json ]] && return 0; done; return 1; }
 rig_root() { cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd; }
-
 rig_dir() {
-  local root path
-  root="$(rig_root)"
+  local root path; root="$(rig_root)"
   if [[ -f "$root/.rigpath" ]]; then
     IFS= read -r path < "$root/.rigpath" || true
-    if [[ -n "$path" ]]; then
-      case "$path" in
-        /*) printf '%s\n' "$path" ;;
-        *) printf '%s\n' "$root/$path" ;;
-      esac
-      return
-    fi
+    if [[ -n "$path" ]]; then case "$path" in /*) printf '%s\n' "$path";; *) printf '%s\n' "$root/$path";; esac; return; fi
   fi
   printf '%s\n' "$root/.rig"
 }
-
 version() {
-  local version_file value
-  version_file="$(rig_dir)/VERSION"
-  value="unknown"
-  if [[ -f "$version_file" ]]; then
-    IFS= read -r value < "$version_file" || true
-    [[ -n "$value" ]] || value="unknown"
-  fi
-  if json_requested "$@"; then
-    printf '{"version":"%s"}\n' "$value"
-  else
-    printf 'The Rig v%s\n' "$value"
-  fi
+  local value=unknown file; file="$(rig_dir)/VERSION"
+  [[ -f "$file" ]] && { IFS= read -r value < "$file" || true; }; [[ -n "$value" ]] || value=unknown
+  if json_requested "$@"; then printf '{"version":"%s"}\n' "$value"; else printf 'The Rig v%s\n' "$value"; fi
 }
-
 command_help() {
   case "$1" in
-    doctor)       printf 'Usage: rig doctor [--json]\n' ;;
-    session)      printf 'Usage: rig session resolve [--json]\n' ;;
-    session-name) printf 'Usage: rig session-name set <name> [--json]\n' ;;
-    memory)       printf 'Usage: rig memory validate [--json]\n' ;;
-    codex)        printf 'Usage: rig codex [--json] [-- <codex arguments>]\n' ;;
-    claude)       printf 'Usage: rig claude [--json] [-- <claude arguments>]\n' ;;
+    doctor) printf 'Usage: rig doctor [--json]\n';;
+    session) printf 'Usage: rig session resolve [--json]\n';;
+    session-name) printf 'Usage: rig session-name set [--tentative|--final] [--complete] [--json] <name>\n';;
+    memory) printf 'Usage: rig memory validate [--json]\n';;
+    codex) printf 'Usage: rig codex [-- <codex arguments>]\n';;
+    claude) printf 'Usage: rig claude [-- <claude arguments>]\n';;
   esac
 }
+unavailable() { local command="$1"; shift; if json_requested "$@"; then printf '{"ok":false,"command":"%s","error":"not_implemented"}\n' "$command"; else printf 'rig: %s is not implemented in this version\n' "$command" >&2; fi; return "$RIG_EXIT_UNAVAILABLE"; }
+usage_error() { local message="$1"; shift; if json_requested "$@"; then printf '{"ok":false,"error":"usage","message":"%s"}\n' "$message"; else printf 'rig: %s\nTry "rig --help" for usage.\n' "$message" >&2; fi; return "$RIG_EXIT_USAGE"; }
 
-unavailable() {
-  local command="$1"
-  shift
-  if json_requested "$@"; then
-    printf '{"ok":false,"command":"%s","error":"not_implemented"}\n' "$command"
-  else
-    printf 'rig: %s is not implemented in this version\n' "$command" >&2
-  fi
-  return "$RIG_EXIT_UNAVAILABLE"
+session_resolve() {
+  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
+import json, os, pathlib, subprocess, sys
+root = pathlib.Path(os.environ["RIG_ROOT"])
+session_dir = pathlib.Path(os.environ["RIG_DIR"]) / "memory" / "sessions"
+def load(path):
+    try:
+        data = json.loads(path.read_text())
+        if data.get("status") != "active" or "done" in path.parts: return None
+        return data
+    except (OSError, ValueError, TypeError): return None
+def emit(path, data, confidence, reason):
+    out = {"session_file": str(path) if path else None, "anchor": data.get("anchor") if data else None,
+           "branch": data.get("branch") if data else None, "status": data.get("status") if data else None,
+           "confidence": confidence, "reason": reason}
+    print(json.dumps(out) if "--json" in sys.argv[1:] else (str(path) if path else ""))
+env_file = os.environ.get("RIG_SESSION_FILE")
+if "RIG_SESSION_FILE" in os.environ:
+    p = pathlib.Path(env_file); d = load(p)
+    if d: emit(p, d, "exact", "launcher_file"); raise SystemExit(0)
+    emit(None, None, "none", "invalid_launcher_file"); raise SystemExit(3)
+files = []
+if session_dir.is_dir():
+    for p in session_dir.glob("session-*.json"):
+        d = load(p)
+        if d: files.append((p, d))
+explicit_anchor = "RIG_SESSION_ANCHOR" in os.environ
+anchor = os.environ.get("RIG_SESSION_ANCHOR", "")
+pid_text = os.environ.get("RIG_SESSION_PID") or str(os.getppid())
+if not anchor and pid_text.isdigit():
+    try: anchor = (pathlib.Path("/tmp") / (".rig-session-" + pid_text + ".uuid")).read_text().strip()
+    except OSError: pass
+if anchor:
+    matches = [(p,d) for p,d in files if d.get("anchor") == anchor]
+    if len(matches) == 1: emit(*matches[0], "exact", "anchor"); raise SystemExit(0)
+    if len(matches) > 1: emit(None, None, "ambiguous", "duplicate_anchor"); raise SystemExit(2)
+    if explicit_anchor: emit(None, None, "none", "launcher_anchor_not_found"); raise SystemExit(3)
+elif explicit_anchor:
+    emit(None, None, "none", "invalid_launcher_anchor"); raise SystemExit(3)
+if pid_text.isdigit():
+    direct = session_dir / ("session-" + pid_text + ".json"); d = load(direct)
+    if d: emit(direct, d, "exact", "pid"); raise SystemExit(0)
+branch = os.environ.get("RIG_SESSION_BRANCH", "")
+if not branch:
+    try: branch = subprocess.check_output(["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], text=True, stderr=subprocess.DEVNULL).strip()
+    except (OSError, subprocess.SubprocessError): pass
+matches = [(p,d) for p,d in files if d.get("status") == "active" and branch and d.get("branch") == branch]
+if len(matches) == 1: emit(*matches[0], "inferred", "unique_active_branch"); raise SystemExit(0)
+if len(matches) > 1 or len(files) > 1: emit(None, None, "ambiguous", "multiple_active_sessions"); raise SystemExit(2)
+if len(files) == 1: emit(*files[0], "low", "only_active_session"); raise SystemExit(0)
+emit(None, None, "none", "not_found"); raise SystemExit(1)
+PY
 }
 
-usage_error() {
-  local message="$1"
-  shift
-  if json_requested "$@"; then
-    printf '{"ok":false,"error":"usage","message":"%s"}\n' "$message"
-  else
-    printf 'rig: %s\nTry "rig --help" for usage.\n' "$message" >&2
+session_name_set() {
+  local tentative=false complete=false json=false name="" arg resolved file anchor done_dir dest="" end_options=false
+  for arg in "$@"; do
+    if [[ "$end_options" == false ]]; then
+      case "$arg" in
+        --) end_options=true; continue;; --tentative) tentative=true; continue;;
+        --final) tentative=false; continue;; --complete) complete=true; continue;; --json) json=true; continue;;
+        -*) usage_error "unknown session-name option: $arg" "$@"; return;;
+      esac
+    fi
+    [[ -z "$name" ]] || { usage_error "session name must be one argument" "$@"; return; }
+    name="$arg"
+  done
+  [[ -n "$name" ]] || { usage_error "session name is required" "$@"; return; }
+  resolved=$(session_resolve --json) || return $?
+  file=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")')
+  anchor=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
+  [[ -n "$file" ]] || return "$RIG_EXIT_UNAVAILABLE"
+  if [[ "$complete" == true ]]; then done_dir="$(rig_dir)/memory/sessions/done"; mkdir -p "$done_dir"; dest="$done_dir/session-$(date +%Y%m%d)-${anchor:-unknown}.json"; fi
+  SESSION_F="$file" SESSION_NAME="$name" SESSION_TENTATIVE="$tentative" SESSION_COMPLETE="$complete" SESSION_DEST="$dest" python3 <<'PY'
+import json, os, tempfile
+p = os.environ["SESSION_F"]
+with open(p) as f: d = json.load(f)
+if os.environ["SESSION_TENTATIVE"] == "true": d["tentative_name"] = os.environ["SESSION_NAME"]
+else: d["final_name"] = os.environ["SESSION_NAME"]; d["tentative_name"] = None
+if os.environ["SESSION_COMPLETE"] == "true": d["status"] = "complete"
+dest = os.environ["SESSION_DEST"] or p
+fd, tmp = tempfile.mkstemp(prefix=".session-", suffix=".tmp", dir=os.path.dirname(dest))
+try:
+    with os.fdopen(fd, "w") as f: json.dump(d, f, indent=2); f.write("\n"); f.flush(); os.fsync(f.fileno())
+    os.replace(tmp, dest)
+    if dest != p:
+        try: os.unlink(p)
+        except FileNotFoundError: pass
+    if os.environ["SESSION_COMPLETE"] == "true" and str(d.get("pid", "")).isdigit():
+        try: os.unlink("/tmp/.rig-session-" + str(d["pid"]) + ".uuid")
+        except FileNotFoundError: pass
+finally:
+    try: os.unlink(tmp)
+    except FileNotFoundError: pass
+PY
+  [[ "$json" == true ]] && printf '{"ok":true,"session_file":"%s"}\n' "${dest:-$file}"
+  return 0
+}
+
+launch_claude() {
+  local resolved watcher session_dir session_file session_anchor branch started
+  # The launcher is the authority for a new Claude process. Create its identity
+  # before the SessionStart hook so the watcher and hook share the exact file.
+  export RIG_SESSION_PID="${RIG_SESSION_PID:-$$}"
+  local resolve_status=0
+  resolved=$(session_resolve --json) || resolve_status=$?
+  if [[ "$resolve_status" -ne 0 ]]; then
+    [[ "$resolve_status" -eq 1 ]] || { printf 'rig: unable to resolve an unambiguous Claude session\n' >&2; return "$RIG_EXIT_UNAVAILABLE"; }
+    session_dir="$(rig_dir)/memory/sessions"; mkdir -p "$session_dir"
+    session_anchor=$(python3 -c 'import uuid; print(str(uuid.uuid4())[:8])')
+    session_file="$session_dir/session-${RIG_SESSION_PID}-${session_anchor}.json"
+    branch=$(git -C "$(rig_root)" rev-parse --abbrev-ref HEAD 2>/dev/null || printf unknown)
+    started=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S)
+    SESSION_F="$session_file" SESSION_ANCHOR="$session_anchor" SESSION_PID="$RIG_SESSION_PID" SESSION_BRANCH="$branch" SESSION_STARTED="$started" python3 <<'PY'
+import json, os
+with open(os.environ["SESSION_F"], "x") as f:
+    json.dump({"anchor": os.environ["SESSION_ANCHOR"], "pid": int(os.environ["SESSION_PID"]),
+               "started_at": os.environ["SESSION_STARTED"], "branch": os.environ["SESSION_BRANCH"],
+               "tentative_name": None, "final_name": None, "status": "active"}, f, indent=2)
+    f.write("\n")
+PY
+    export RIG_SESSION_FILE="$session_file" RIG_SESSION_ANCHOR="$session_anchor"
+    resolved=$(session_resolve --json)
   fi
-  return "$RIG_EXIT_USAGE"
+  export RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID RIG_PROJECT_NAME
+  RIG_SESSION_FILE=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  RIG_SESSION_ANCHOR=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
+  RIG_SESSION_PID="${RIG_SESSION_PID:-$PPID}"; RIG_PROJECT_NAME="${RIG_PROJECT_NAME:-$(basename "$(rig_root)")}"
+  watcher="$(dirname "${BASH_SOURCE[0]}")/rig-tab-title-watch"; [[ -x "$watcher" ]] && "$watcher" >/dev/null 2>&1 &
+  [[ "${1:-}" == -- ]] && shift
+  exec claude "$@"
+}
+
+launch_codex() {
+  [[ "${1:-}" == -- ]] && shift
+  exec codex "$@"
 }
 
 main() {
-  local command="${1:-}"
+  local command="${1:-}" subcommand
   case "$command" in
-    ""|-h|--help) usage ;;
-    -v|--version|version)
-      [[ "$command" == "version" ]] && shift
-      version "$@"
-      ;;
-    doctor|codex|claude)
-      shift
-      if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-        command_help "$command"
-      else
-        unavailable "$command" "$@"
-      fi
-      ;;
+    ""|-h|--help) usage;;
+    -v|--version|version) [[ "$command" == version ]] && shift; version "$@";;
+    claude) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help claude; else launch_claude "$@"; fi;;
+    codex) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help codex; else launch_codex "$@"; fi;;
+    doctor) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help doctor; else unavailable doctor "$@"; fi;;
     session|session-name|memory)
       shift
-      if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-        command_help "$command"
-      elif [[ "$command:${1:-}" == "session:resolve" || "$command:${1:-}" == "session-name:set" || "$command:${1:-}" == "memory:validate" ]]; then
-        local subcommand="${1:-}"
-        shift
-        unavailable "$command $subcommand" "$@"
-      else
-        case "$command" in
-          session) usage_error 'expected "session resolve"' "$@" ;;
-          session-name) usage_error 'expected "session-name set"' "$@" ;;
-          memory) usage_error 'expected "memory validate"' "$@" ;;
-        esac
-      fi
-      ;;
-    *)
-      shift
-      usage_error "unknown command: $command" "$@"
-      ;;
+      if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help "$command"; return; fi
+      subcommand="${1:-}"; shift || true
+      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session-name:set) session_name_set "$@";; memory:validate) unavailable "memory validate" "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
+    *) shift; usage_error "unknown command: $command" "$@";;
   esac
 }
-
 main "$@"

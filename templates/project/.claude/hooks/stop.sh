@@ -55,6 +55,8 @@ WRAP_NEEDED="$RIG_DIR/memory/.wrap-needed"
 SNAP_LOCK="$RIG_DIR/memory/.snapshot-write-in-progress"
 SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session-$(basename "$REPO").log}"
 NOW_FULL=$(date "+%Y-%m-%d %H:%M" 2>/dev/null || true)
+SESSION_PID="${RIG_SESSION_PID:-$PPID}"
+SESSION_FILE="${RIG_SESSION_FILE:-$RIG_DIR/memory/sessions/session-${SESSION_PID}.json}"
 
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 
@@ -85,7 +87,7 @@ case "$SOURCE" in
         active_task=$(ls "$RIG_DIR/tasks/active"/*.md 2>/dev/null \
           | head -1 | xargs basename 2>/dev/null || true)
       fi
-      session_anchor=$(cat "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true)
+      session_anchor="${RIG_SESSION_ANCHOR:-$(cat "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true)}"
       {
         echo "# Context Snapshot — session-end checkpoint"
         echo ""
@@ -130,10 +132,9 @@ case "$SOURCE" in
 
     [[ "$NEEDS_WRAP" == true ]] && write_minimal_checkpoint
 
-    rm -f "$RIG_DIR/memory/.compact-checkpoint-${PPID}.md" 2>/dev/null || true
-    rm -f "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true
+    rm -f "$RIG_DIR/memory/.compact-checkpoint-${SESSION_PID}.md" 2>/dev/null || true
+    rm -f "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true
 
-    SESSION_FILE="$RIG_DIR/memory/sessions/session-${PPID}.json"
     if [[ -f "$SESSION_FILE" ]]; then
       SESSION_F="$SESSION_FILE" python3 -c "
 import json, os
@@ -180,7 +181,7 @@ except Exception:
 
     # Append session-end marker to PROGRESS.md
     if [[ -f "$PROGRESS" ]]; then
-      SESSION_UUID=$(cat "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true)
+      SESSION_UUID="${RIG_SESSION_ANCHOR:-$(cat "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true)}"
       LAST_MEANINGFUL=$(grep -v '^[[:space:]]*$' "$PROGRESS" | tail -1)
       if [[ "$LAST_MEANINGFUL" != "<!-- session-end"* ]]; then
         if [[ -n "$SESSION_UUID" ]]; then

@@ -189,17 +189,13 @@ automatically — present it for the user to confirm or tweak.
 
 ```bash
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
-if [[ -f "$REPO/.rigpath" ]]; then RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath"); else RIG_DIR="$REPO/.rig"; fi
-SESSION_DIR="$RIG_DIR/memory/sessions"
-SESSION_FILE="$SESSION_DIR/session-${PPID}.json"
-
-SESSION_UUID=$(cat "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true)
-TENTATIVE_NAME=""
-if [[ -f "$SESSION_FILE" ]]; then
-  [[ -z "$SESSION_UUID" ]] && \
-    SESSION_UUID=$(python3 -c "import json; print(json.load(open('$SESSION_FILE')).get('anchor') or '')" 2>/dev/null || true)
-  TENTATIVE_NAME=$(python3 -c "import json; print(json.load(open('$SESSION_FILE')).get('tentative_name') or '')" 2>/dev/null || true)
-fi
+SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
+  echo "Unable to resolve this session unambiguously; stop before writing session state."
+  exit 1
+}
+SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+SESSION_UUID=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
+TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; print(json.load(open(os.environ["SESSION_F"])).get("tentative_name") or "")')
 ```
 
 ### Step 2 — Collect this session's work
@@ -212,7 +208,7 @@ grep "^## .*<!-- sid:${SESSION_UUID} -->" "$RIG_DIR/memory/PROGRESS.md" 2>/dev/n
 ```
 
 **Every `## ` entry header written to PROGRESS.md must include `<!-- sid:UUID -->`
-at the end of the line.** Read UUID from `/tmp/.rig-session-${PPID}.uuid`.
+at the end of the line.** Read UUID from the resolver output above.
 
 If tentative_name is set, use it as the base (refine based on actual outcome).
 
@@ -235,29 +231,10 @@ Keep under ~100 characters.
 
 ### Step 5 — After confirmation: write to session file, move to done/
 
-Write atomically — temp file then rename — so a crash between write and move does
-not leave a `status: complete` file stranded in `sessions/` outside of `done/`.
+Use the shared atomic writer, passing the confirmed name as one opaque argument.
 
 ```bash
-CONFIRMED_NAME="<the confirmed name>"
-DONE_DIR="$SESSION_DIR/done"
-mkdir -p "$DONE_DIR"
-DEST="$DONE_DIR/session-$(date +%Y%m%d)-${SESSION_UUID}.json"
-
-python3 - <<PYEOF
-import json, os
-with open("$SESSION_FILE") as f:
-    d = json.load(f)
-d["final_name"] = "$CONFIRMED_NAME"
-d["status"] = "complete"
-tmp = "$DEST" + ".tmp"
-with open(tmp, "w") as f:
-    json.dump(d, f, indent=2)
-os.rename(tmp, "$DEST")
-PYEOF
-
-rm -f "$SESSION_FILE" 2>/dev/null || true
-rm -f "/tmp/.rig-session-${PPID}.uuid" 2>/dev/null || true
+"$REPO/bin/rig" session-name set --final --complete "$CONFIRMED_NAME"
 ```
 
 **Do NOT write Session name to CONTEXT_SNAPSHOT.md.** Session names live in session files.
