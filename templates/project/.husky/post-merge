@@ -36,8 +36,11 @@ if [ -n "$REPO" ]; then
     MERGED_AT=$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || printf 'unknown')
     PENDING="$RIG_DIR/memory/.post-merge-pending"
     PENDING_TMP="${PENDING}.tmp.$$"
-    if printf 'merge_sha=%s\nmerged_at=%s\n' "$MERGE_SHA" "$MERGED_AT" > "$PENDING_TMP"; then
+    if printf 'merge_sha=%s\nmerged_at=%s\nanchor=%s\n' "$MERGE_SHA" "$MERGED_AT" "${RIG_SESSION_ANCHOR:-}" > "$PENDING_TMP"; then
       mv "$PENDING_TMP" "$PENDING"
+      if [ -x "$REPO/bin/rig" ] && { [ -n "${RIG_SESSION_FILE:-}" ] || [ -n "${RIG_SESSION_ANCHOR:-}" ]; }; then
+        "$REPO/bin/rig" session obligation mark --kind post-merge --merge-sha "$MERGE_SHA" --json >/dev/null 2>&1 || true
+      fi
     else
       rm -f "$PENDING_TMP"
     fi
