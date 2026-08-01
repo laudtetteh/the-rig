@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install bats-core
         run: |
@@ -27,3 +27,60 @@ jobs:
 
       - name: Run tests
         run: bats tests/
+
+  static:
+    name: shell and static checks
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install static tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends shellcheck python3
+
+      - name: Check Bash syntax
+        run: |
+          find . -type f -name '*.sh' -print0 \
+            | xargs -0 -r -n1 bash -n
+          bash -n templates/project/bin/rig
+
+      - name: Check Python syntax
+        run: |
+          PYTHONPYCACHEPREFIX="${RUNNER_TEMP}/pycache" \
+            python3 -m compileall -q -f --invalidation-mode unchecked-hash \
+            installer templates tests
+
+      - name: Run ShellCheck
+        run: |
+          find . -type f -name '*.sh' -print0 \
+            | xargs -0 -r shellcheck --severity=error
+          shellcheck --severity=error templates/project/bin/rig
+
+      - name: Check diff whitespace
+        run: git diff --check
+
+  security-recovery:
+    name: security and recovery gates
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install focused test tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bats jq
+
+      - name: Run focused security and recovery tests
+        run: bats tests/test_security_recovery_gates.bats
+
+      - name: Scan repository for secrets
+        uses: gitleaks/gitleaks-action@v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
