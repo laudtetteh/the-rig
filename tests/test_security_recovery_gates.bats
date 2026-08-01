@@ -7,7 +7,8 @@ setup() {
   export CASE_DIR="$BATS_TEST_TMPDIR/project"
   mkdir -p "$CASE_DIR/bin" "$CASE_DIR/.rig/memory/sessions/done"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
-  chmod 755 "$CASE_DIR/bin/rig"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-connector-preflight" "$CASE_DIR/bin/rig-connector-preflight"
+  chmod 755 "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-connector-preflight"
   git -C "$CASE_DIR" init -q
   unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID
 }
@@ -38,13 +39,13 @@ setup() {
 }
 
 @test "runtime source does not use provider-private state as normal evidence" {
-  ! rg -n --glob '*.sh' --glob 'rig' \
+  ! grep -REn \
     '(\.claude|\.codex).*(sqlite|rollout|index)|sqlite.*(\.claude|\.codex)' \
-    templates/project/bin templates/project/.claude templates/project/.codex
+    templates/project/bin templates/project/.claude/hooks templates/project/.codex/hooks
 }
 
 @test "release verification requires atomic-write and recovery evidence" {
-  run rg -n \
+  run grep -En \
     'atomic|interrupted|rollback|recovery|symlink|redact|gitleaks|shellcheck' \
     docs/release-verification.md
   [ "$status" -eq 0 ]
