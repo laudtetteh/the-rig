@@ -485,6 +485,9 @@ Use the shared atomic writer. Pass the confirmed name as one opaque argument;
 never interpolate it into shell or Python source.
 
 ```bash
+# Clear only this exact session's wrap obligation while its active record is
+# still resolvable. --adopt-legacy explicitly migrates an older unscoped marker.
+"$REPO/bin/rig" session obligation clear --kind wrap --adopt-legacy --json
 "$REPO/bin/rig" session-name set --final --complete "$CONFIRMED_NAME"
 ```
 
@@ -525,8 +528,7 @@ skip the naming step silently but still run the orphan scan.
 After suggesting a session name and before asking "What's next?", run both cleanups:
 
 ```bash
-# Clear the wrap-needed flag
-rm -f "$RIG_DIR/memory/.wrap-needed" 2>/dev/null || true
+# The exact wrap obligation was cleared in Step 5 before the record moved to done/.
 
 # Release the concurrent session lock
 rm -f "$RIG_DIR/memory/.snapshot-write-in-progress" 2>/dev/null || true
@@ -540,8 +542,9 @@ rm -f "$RIG_DIR/memory/.compact-checkpoint-${PPID}.md" 2>/dev/null || true
 
 Log: "`.wrap-needed` cleared. Concurrent session lock released. Compact checkpoint cleared. UUID sentinel cleared."
 
-`.wrap-needed` signals to `stop.sh` that `/wrap` has run and no flag should be
-written until the next commit creates new unexpanded stubs.
+`.wrap-needed` may contain multiple `anchor=` entries. The exact-session clear
+removes only the current anchor and deletes the reminder only when no scoped or
+unadopted legacy obligation remains.
 `.snapshot-write-in-progress` signals to concurrent sessions that this snapshot write is complete.
 `.compact-checkpoint-{PPID}.md` is cleared so the next session reads the authoritative
 `CONTEXT_SNAPSHOT.md` rather than a stale post-compaction checkpoint.

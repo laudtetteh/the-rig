@@ -240,6 +240,11 @@ Keep under ~100 characters.
 Use the shared atomic writer, passing the confirmed name as one opaque argument.
 
 ```bash
+# Acknowledge only the pending merge SHA while this exact active record remains
+# resolvable. A changed SHA fails closed and leaves the reminder visible.
+PENDING_MERGE_SHA=$(sed -n 's/^merge_sha=//p' "$RIG_DIR/memory/.post-merge-pending" 2>/dev/null | head -1)
+[[ -n "$PENDING_MERGE_SHA" ]] && \
+  "$REPO/bin/rig" session obligation clear --kind post-merge --merge-sha "$PENDING_MERGE_SHA" --json
 "$REPO/bin/rig" session-name set --final --complete "$CONFIRMED_NAME"
 ```
 
@@ -257,14 +262,15 @@ After step 8 ("What's next?"), run all cleanups:
 # Release the concurrent session lock
 rm -f "$RIG_DIR/memory/.snapshot-write-in-progress" 2>/dev/null || true
 
-# Clear the post-merge-pending flag
-rm -f "$RIG_DIR/memory/.post-merge-pending" 2>/dev/null || true
+# The exact merge acknowledgement was recorded in Step 5 before the session
+# record moved to done/.
 ```
 
 The `.post-merge-pending` flag is written by `.husky/post-merge` after every merge
 with the triggering merge SHA and timestamp, then detected by freshness hooks.
 Saying “skip for current task” leaves the reminder and its merge metadata intact;
-clearing it here confirms `/post-merge` ran successfully. The
+the exact-session acknowledgement confirms `/post-merge` ran successfully for
+that merge SHA. A mismatch leaves the reminder intact. The
 `.snapshot-write-in-progress` lock is cleared to unblock any
 concurrent `/wrap` or `/post-merge` waiting to run.
 

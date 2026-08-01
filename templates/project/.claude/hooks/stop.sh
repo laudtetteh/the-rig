@@ -77,7 +77,13 @@ case "$SOURCE" in
     # Helpers scoped to this branch
     write_wrap_needed() {
       local reason="$1"
-      touch "$WRAP_NEEDED" 2>/dev/null || true
+      if [[ -n "$NATIVE_SESSION_ID" && -x "$REPO/bin/rig" ]]; then
+        RIG_SESSION_FILE="$SESSION_FILE" "$REPO/bin/rig" session obligation mark --kind wrap --json >/dev/null 2>&1 || return
+      else
+        # Legacy sessions have no exact native binding. Preserve the unscoped
+        # reminder for explicit migration/adoption by a later /wrap.
+        touch "$WRAP_NEEDED" 2>/dev/null || true
+      fi
       echo "[$(date +%H:%M:%S)] SESSION_END: .wrap-needed written (${reason})" \
         >> "$SESSION_LOG" 2>/dev/null || true
     }
@@ -156,7 +162,7 @@ try:
     if d.get('schema_version') == 1:
         now=datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec='seconds')
         d['updated_at']=now; d['revision']=int(d.get('revision',0))+1
-        d['lifecycle'].update({'state':'ended_no_wrap' if os.path.exists(os.environ['WRAP_F']) else 'inactive','last_event':'session_end','last_event_at':now,'end_reason':os.environ['END_SOURCE']})
+        d['lifecycle'].update({'state':'ended_no_wrap' if d.get('flags',{}).get('wrap_needed') else 'inactive','last_event':'session_end','last_event_at':now,'end_reason':os.environ['END_SOURCE']})
     else: d['status'] = 'ended-no-wrap'
     fd,tmp=tempfile.mkstemp(prefix='.session-',suffix='.tmp',dir=os.path.dirname(p))
     with os.fdopen(fd,'w') as f: json.dump(d,f,indent=2); f.write('\n'); f.flush(); os.fsync(f.fileno())
