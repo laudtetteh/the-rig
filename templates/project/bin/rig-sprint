@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""Public, provider-neutral sprint audit/plan/status engine."""
+import argparse, datetime, fcntl, fnmatch, hashlib, json, os, pathlib, re, subprocess, sys, tempfile, uuid
+
+SCHEMA="https://the-rig.dev/schemas/sprint-result/v1"
+DOC_SCHEMA="https://the-rig.dev/schemas/sprint-document/v1"
+EVIDENCE_SCHEMA="https://the-rig.dev/schemas/sprint-tracker-evidence/v1"
+
+def now(): return datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec="seconds")
+def digest(value): return "sha256:"+hashlib.sha256(json.dumps(value,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+def emit(command,ok,result=None,code=0,**extra):
+    out={"schema":SCHEMA,"schema_version":1,"ok":ok,"command":command,"mode":extra.pop("mode",None),"sprint_id":extra.pop("sprint_id",None),"document_revision":extra.pop("document_revision",None),"document_digest":extra.pop("document_digest",None),"session":extra.pop("session",None),"result":result or {},"warnings":extra.pop("warnings",[]),"errors":extra.pop("errors",[])}
+    out.update(extra); print(json.dumps(out,indent=2)); raise SystemExit(code)
+def root(): return pathlib.Path(__file__).resolve().parent.parent
+def rig_dir():
+    r=root(); p=r/".rigpath"
+    if p.exists():
+        value=p.read_text().strip(); return pathlib.Path(value if os.path.isabs(value) else r/value)
+    return r/".rig"
+def section(text,name):
+    match=re.search(r"(?ms)^## "+re.escape(name)+r"\s*$\n(.*?)(?=^## |\Z)",text)
+    return match.group(1).strip() if match else ""
+def metadata(text,key):
+    match=re.search(r"(?mi)^\*\*"+re.escape(key)+r"\*\*:\s*(.+)$",text); return match.group(1).strip() if match else ""
+def bullets(value):
+    return [re.sub(r"\s+(?:—|#).*?$","",m.group(1).strip()).strip().strip("`'\"") for m in re.finditer(r"(?m)^-\s+(.+)$",value)]
+def task_record(path,done_refs):
+    text=path.read_text(); issue=metadata(text,"GitHub issue") or metadata(text,"Issue")
+    deps=re.findall(r"(?:#\d+|[A-Z]+-\d+|trello:[^,\s]+|W-\d+)",metadata(text,"Depends on"))
+    files=bullets(section(text,"Files likely affected")); blockers=bullets(section(text,"Blockers"))
+    title=text.splitlines()[0].removeprefix("# Task:").strip() if text else path.stem
+    explicit=metadata(text,"Sprint lane").lower(); lane=explicit if explicit in {"execution","blocked","decision","research","oversized","release","deferred","cancelled"} else "execution"
+    if blockers: lane="blocked"
+    elif not files or len(files)>8: lane="oversized"
+    elif re.search(r"\bresearch\b",title,re.I): lane="research"
+    elif re.search(r"\brelease\b",title,re.I): lane="release"
+    return {"slug":path.stem,"canonical_ref":issue or None,"title":title,"local_state":path.parent.name,"priority":metadata(text,"Priority") or "P2","dependencies":deps,"files":files,"lane":lane,"path":str(path.resolve()),"digest":"sha256:"+hashlib.sha256(text.encode()).hexdigest(),"confidence":"declared"}
+def load_tasks(selection):
+    rd=rig_dir(); roots=[rd/"tasks"/"backlog",rd/"tasks"/"active",rd/"tasks"/"done"]
+    paths=[p for base in roots if base.is_dir() for p in base.glob("*.md") if p.name!="TASK_example.md"]
+    done_refs=set()
+    for p in paths:
+        if p.parent.name=="done":
+            t=p.read_text(); ref=metadata(t,"GitHub issue") or metadata(t,"Issue")
+            if ref: done_refs.add(ref)
+    records=[task_record(p,done_refs) for p in paths if p.parent.name!="done"]
+    if selection and "--all" not in selection:
+        wanted=set(selection); records=[r for r in records if r["slug"] in wanted or r["canonical_ref"] in wanted]
+    selected_refs={r["canonical_ref"] for r in records if r["canonical_ref"]}
+    for record in records:
+        if any(dep not in done_refs and dep not in selected_refs for dep in record["dependencies"]): record["lane"]="blocked"
+    return records,done_refs
+def tracker(path):
+    if not path: return None,["tracker_evidence_unavailable"]
+    try: data=json.loads(pathlib.Path(path).read_text())
+    except (OSError,ValueError): raise ValueError("malformed_tracker_evidence")
+    if data.get("schema")!=EVIDENCE_SCHEMA or data.get("schema_version")!=1 or not isinstance(data.get("items"),list): raise ValueError("unsupported_tracker_evidence")
+    return data,[]
+def audit(selection,evidence_path):
+    tasks,_=load_tasks(selection); evidence,warnings=tracker(evidence_path)
+    local={t["canonical_ref"]:t for t in tasks if t["canonical_ref"]}; tracked={i.get("canonical_ref"):i for i in (evidence or {}).get("items",[]) if i.get("canonical_ref")}
+    parity=[]
+    for ref in sorted(set(local)|set(tracked)):
+        if ref in local and ref in tracked: state="matched" if tracked[ref].get("state") not in ("closed","done") else "state_mismatch"
+        elif ref in local: state="evidence_unavailable" if evidence is None else "local_only"
+        else: state="tracker_only"
+        parity.append({"canonical_ref":ref,"class":state})
+    dup=[]
+    seen={}
+    for t in tasks:
+        key=t["canonical_ref"]
+        if key and key in seen: dup.append({"canonical_ref":key,"tasks":[seen[key],t["slug"]]})
+        elif key: seen[key]=t["slug"]
+    return {"tasks":tasks,"parity":parity,"duplicates":dup,"tracker":{"available":evidence is not None,"digest":digest(evidence) if evidence else None},"source_digest":digest({"tasks":[(t["path"],t["digest"]) for t in tasks],"evidence":evidence})},warnings
+def overlap(a,b):
+    for x in a:
+        for y in b:
+            if any(c in x+y for c in "*?["):
+                if fnmatch.fnmatch(x,y) or fnmatch.fnmatch(y,x) or pathlib.PurePath(x).suffix==pathlib.PurePath(y).suffix: return "glob"
+            if x==y: return "exact_file"
+            if x.rstrip("/")+"/" in y or y.rstrip("/")+"/" in x: return "prefix"
+    return None
+def make_plan(report,session=None):
+    tasks=report["tasks"]; edges=[]; by_ref={t["canonical_ref"]:t for t in tasks if t["canonical_ref"]}
+    for i,a in enumerate(tasks):
+        for b in tasks[i+1:]:
+            kind=overlap(a["files"],b["files"])
+            if kind: edges.append({"from":a["slug"],"to":b["slug"],"type":kind})
+        for dep in a["dependencies"]:
+            if dep in by_ref: edges.append({"from":by_ref[dep]["slug"],"to":a["slug"],"type":"dependency"})
+    executable=[t for t in tasks if t["lane"]=="execution"]
+    parents={t["slug"]:[by_ref[d]["slug"] for d in t["dependencies"] if d in by_ref] for t in executable}
+    def depth(slug,trail=()):
+        if slug in trail: return 10**6
+        return 0 if not parents.get(slug) else 1+max(depth(p,trail+(slug,)) for p in parents[slug])
+    priority={"P0":0,"P1":1,"P2":2,"P3":3}; executable.sort(key=lambda t:(depth(t["slug"]),priority.get(t["priority"],2),t["canonical_ref"] or "",t["slug"]))
+    waves=[]
+    for task in executable:
+        placed=False
+        parent_indexes=[i for i,w in enumerate(waves) if any(parent in w for parent in parents.get(task["slug"],[]))]
+        minimum=max(parent_indexes,default=-1)+1
+        for index,wave in enumerate(waves):
+            if index<minimum: continue
+            if not any(any(e["from"] in (task["slug"],other) and e["to"] in (task["slug"],other) for e in edges) for other in wave): wave.append(task["slug"]); placed=True; break
+        if not placed: waves.append([task["slug"]])
+    lanes={name:[t["slug"] for t in tasks if t["lane"]==name] for name in ("blocked","decision","research","oversized","release","deferred","cancelled")}
+    plan={"waves":waves,"lanes":lanes,"edges":edges,"source_digest":report["source_digest"]}
+    plan["approval_token"]=hashlib.sha256(digest({"plan":plan,"session":session}).encode()).hexdigest()[:20]
+    return plan
+def session_exact():
+    cmd=[str(root()/"bin"/"rig"),"session","current","--json"]
+    try: data=json.loads(subprocess.check_output(cmd,text=True,stderr=subprocess.DEVNULL))
+    except Exception: return None
+    return {"anchor":data.get("anchor"),"revision":data.get("revision"),"root_attribution":True} if data.get("confidence")=="exact" else None
+def sprint_home(sid): return rig_dir()/"memory"/"sprints"/sid
+def write_doc(sid,body,session):
+    home=sprint_home(sid); home.mkdir(parents=True,exist_ok=True); lock=open(home/".lock","a+"); fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
+    revisions=[]
+    for p in home.glob("revision-*.json"):
+        try: revisions.append((int(p.stem.split("-")[1]),json.loads(p.read_text())))
+        except Exception: pass
+    rev=max([n for n,_ in revisions],default=0)+1; previous=max(revisions,default=(0,None))[1]
+    doc={"schema":DOC_SCHEMA,"schema_version":1,"sprint_id":sid,"revision":rev,"created_at":previous.get("created_at") if previous else now(),"updated_at":now(),"project_root":str(root().resolve()),"session":session,"supersedes_revision":rev-1 if previous else None,**body}
+    doc["digest"]=digest(doc); path=home/f"revision-{rev}.json"; fd,tmp=tempfile.mkstemp(prefix=".revision-",dir=str(home))
+    with os.fdopen(fd,"w") as f: json.dump(doc,f,indent=2); f.write("\n"); f.flush(); os.fsync(f.fileno())
+    os.replace(tmp,path); pointer={"schema_version":1,"sprint_id":sid,"revision":rev,"digest":doc["digest"]}
+    fd,tmp=tempfile.mkstemp(prefix=".current-",dir=str(home)); os.write(fd,(json.dumps(pointer)+"\n").encode()); os.fsync(fd); os.close(fd); os.replace(tmp,home/"current.json")
+    return doc
+def read_doc(sid):
+    home=sprint_home(sid)
+    try: pointer=json.loads((home/"current.json").read_text()); doc=json.loads((home/f"revision-{pointer['revision']}.json").read_text())
+    except Exception: raise ValueError("sprint_not_found")
+    if pointer.get("digest")!=doc.get("digest"): raise ValueError("sprint_digest_mismatch")
+    return doc
+def parser():
+    p=argparse.ArgumentParser(add_help=False); p.add_argument("command",choices=("audit","plan","status")); p.add_argument("selection",nargs="*"); p.add_argument("--all",action="store_true"); p.add_argument("--tracker-evidence"); p.add_argument("--audit"); p.add_argument("--sprint"); p.add_argument("--mode",default="audit-only"); p.add_argument("--write",action="store_true"); p.add_argument("--approval-token"); p.add_argument("--refresh",action="store_true"); p.add_argument("--json",action="store_true"); return p
+def main():
+    try: a=parser().parse_args()
+    except SystemExit: emit("unknown",False,code=3,errors=[{"reason":"invalid_input"}])
+    selection=a.selection+(["--all"] if a.all else [])
+    try:
+        if a.command=="audit":
+            report,warnings=audit(selection,a.tracker_evidence)
+            if not a.write: emit("audit",True,report,mode=a.mode,warnings=warnings)
+            session=session_exact(); sid=a.sprint or str(uuid.uuid4())
+            if not session: emit("audit",False,code=3,mode=a.mode,sprint_id=sid,warnings=warnings,errors=[{"reason":"exact_root_session_required"}])
+            doc=write_doc(sid,{"phase":"inspect","status":"proposed","audit":report,"plan":None,"approval":None},session)
+            emit("audit",True,{**report,"document":str(sprint_home(sid)/f"revision-{doc['revision']}.json")},mode=a.mode,sprint_id=sid,document_revision=doc["revision"],document_digest=doc["digest"],session=session,warnings=warnings)
+        if a.command=="plan":
+            if a.audit: report=json.loads(pathlib.Path(a.audit).read_text()).get("result",{})
+            elif a.sprint and not selection: report=read_doc(a.sprint).get("audit",{})
+            else: report,_=audit(selection,a.tracker_evidence)
+            session=session_exact()
+            plan=make_plan(report,session); sid=a.sprint or str(uuid.uuid4())
+            if not a.write: emit("plan",True,{"plan":plan,"write_required":True},mode=a.mode,sprint_id=sid,session=session)
+            if not session: emit("plan",False,code=3,mode=a.mode,sprint_id=sid,errors=[{"reason":"exact_root_session_required"}])
+            if a.approval_token!=plan["approval_token"]: emit("plan",False,{"plan":plan,"no_write":True},code=3,mode=a.mode,sprint_id=sid,session=session,errors=[{"reason":"approval_required"}])
+            doc=write_doc(sid,{"phase":"approve","status":"ready","audit":report,"plan":plan,"approval":{"token_digest":digest(a.approval_token)}},session)
+            emit("plan",True,{"plan":plan,"document":str(sprint_home(sid)/f"revision-{doc['revision']}.json")},mode=a.mode,sprint_id=sid,document_revision=doc["revision"],document_digest=doc["digest"],session=session)
+        doc=read_doc(a.sprint or ""); result={"phase":doc["phase"],"status":doc["status"],"plan":doc.get("plan"),"supersedes_revision":doc.get("supersedes_revision")}
+        if a.refresh:
+            live,_=audit([],a.tracker_evidence); result["drift"]={"detected":live["source_digest"]!=doc.get("audit",{}).get("source_digest"),"live_source_digest":live["source_digest"]}
+        emit("status",True,result,mode="resume",sprint_id=doc["sprint_id"],document_revision=doc["revision"],document_digest=doc["digest"],session=doc.get("session"))
+    except ValueError as exc: emit(a.command,False,code=4 if "schema" in str(exc) else 3,mode=a.mode,sprint_id=a.sprint,errors=[{"reason":str(exc)}])
+    except (OSError,json.JSONDecodeError): emit(a.command,False,code=3,mode=a.mode,sprint_id=a.sprint,errors=[{"reason":"invalid_input"}])
+if __name__=="__main__": main()
