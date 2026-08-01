@@ -87,7 +87,8 @@ PY
   [ "$status" -eq 0 ]
   cache="$(find "$CASE_DIR/.rig/memory/cache/connector-preflight-v1" -name '*.json' -type f | head -1)"
   [ -n "$cache" ]
-  [ "$(stat -f '%Lp' "$cache")" = 600 ]
+  mode="$(stat -f '%Lp' "$cache" 2>/dev/null)" || mode="$(stat -c '%a' "$cache")"
+  [ "$mode" = 600 ]
   jq -e '.result.state=="callable"' "$cache" >/dev/null
 }
 

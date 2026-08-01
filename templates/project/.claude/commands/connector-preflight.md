@@ -1,5 +1,7 @@
 # Command: /connector-preflight
 
+## Run the preflight
+
 Read `.rig/processes/CONNECTOR_PREFLIGHT.md` completely and follow it as the
 canonical contract. This command is a thin session-native collector: obtain the
 requested skill ID, consume the exact #409 root session already established by
