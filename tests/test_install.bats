@@ -323,6 +323,23 @@ is_rig_owned_stub() {
   [ ! -e "$sentinel" ]
 }
 
+@test "repair-stale removes only confirmed-missing manifest entries" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+  jq '.entries[".rig/removed-by-user.md"] = {"sha256":"deadbeef","owner":"user","source":"shared-rig","type":"file","mode":"644","installer_version":"legacy"}' "$metadata" > "$TEMP_DIR/metadata.json"
+  mv "$TEMP_DIR/metadata.json" "$metadata"
+  printf 'deadbeef  .rig/removed-by-user.md\n' >> "$manifest"
+
+  run_installer --repair-stale
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Repaired stale manifest entry: project:.rig/removed-by-user.md"* ]]
+  ! jq -e '.entries[".rig/removed-by-user.md"]' "$metadata" >/dev/null
+  ! grep -q '  .rig/removed-by-user.md$' "$manifest"
+}
+
 @test "upgrade strategy: preserves customized generated Codex artifacts" {
   run_installer --strategy upgrade --project-agent codex
   [ "$status" -eq 0 ]
