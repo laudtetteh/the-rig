@@ -496,6 +496,30 @@ is_rig_owned_stub() {
   [[ "$output" == *".codex/config.toml"* ]]
 }
 
+@test "upgrade strategy: rewrites generated settings paths after project relocation" {
+  run_installer --strategy skip --subagents
+  [ "$status" -eq 0 ]
+
+  local old_project="$TEST_PROJECT"
+  local old_abs; old_abs="$(cd "$old_project" && pwd)"
+  local moved_project="$TEMP_DIR/moved-project"
+  mv "$old_project" "$moved_project"
+  TEST_PROJECT="$moved_project"
+  local new_abs; new_abs="$(cd "$TEST_PROJECT" && pwd)"
+  grep -qF "$old_abs/.claude/hooks/" "$TEST_PROJECT/.claude/settings.json"
+
+  run_installer --strategy upgrade --subagents
+  [ "$status" -eq 0 ]
+  grep -qF "$new_abs/.claude/hooks/" "$TEST_PROJECT/.claude/settings.json"
+  ! grep -qF "$old_abs/.claude/hooks/" "$TEST_PROJECT/.claude/settings.json"
+  [[ "$output" == *"Updated moved-project paths in .claude/settings.json"* ]]
+
+  cp "$TEST_PROJECT/.claude/settings.json" "$TEMP_DIR/settings-after-move.json"
+  run_installer --strategy upgrade --subagents
+  [ "$status" -eq 0 ]
+  cmp -s "$TEMP_DIR/settings-after-move.json" "$TEST_PROJECT/.claude/settings.json"
+}
+
 @test "upgrade strategy: preserves an external .rigpath symlink" {
   local rig_ext="$TEMP_DIR/external-rig"
   run_installer --strategy skip --tracking stealth --rig-dir "$rig_ext"

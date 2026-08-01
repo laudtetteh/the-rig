@@ -546,12 +546,68 @@ read_agent_state() {
 }
 
 write_agent_state() {
-  local state_file="$1" layer="$2" selection="$3" tmp
+  local state_file="$1" layer="$2" selection="$3" project_root="${4:-}" tmp selection_json
   mkdir -p "$(dirname "$state_file")"
   tmp="$(mktemp "${state_file}.tmp.XXXXXX")"
-  printf '{"schema":"https://the-rig.dev/schemas/install-targets/v1","schema_version":1,"layer":"%s","agents":%s,"updated_by":{"installer_version":"%s"}}\n' \
-    "$layer" "$(agent_json "$selection")" "$INSTALLER_VERSION" > "$tmp"
+  selection_json="$(agent_json "$selection")"
+  python3 - "$tmp" "$layer" "$selection_json" "$INSTALLER_VERSION" "$project_root" <<'PYEOF'
+import json, sys
+path, layer, selection, version, project_root = sys.argv[1:]
+data = {
+    "schema": "https://the-rig.dev/schemas/install-targets/v1",
+    "schema_version": 1,
+    "layer": layer,
+    "agents": json.loads(selection),
+    "updated_by": {"installer_version": version},
+}
+if project_root:
+    data["project_root"] = project_root
+with open(path, "w") as f:
+    json.dump(data, f, separators=(",", ":"))
+    f.write("\n")
+PYEOF
   mv "$tmp" "$state_file"
+}
+
+read_project_root() {
+  local state_file="$1"
+  python3 - "$state_file" <<'PYEOF'
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        value = json.load(f).get("project_root", "")
+except (OSError, ValueError, TypeError):
+    value = ""
+print(value if isinstance(value, str) else "")
+PYEOF
+}
+
+rewrite_project_root_references() {
+  local path="$1" old_root="$2" new_root="$3" tmp
+  [[ -f "$path" && -n "$old_root" && "$old_root" != "$new_root" ]] || return 0
+  tmp="$(mktemp "${path}.tmp.XXXXXX")"
+  if ! python3 - "$path" "$tmp" "$old_root" "$new_root" <<'PYEOF'
+import json, sys
+source, destination, old_root, new_root = sys.argv[1:]
+with open(source) as f:
+    data = json.load(f)
+def rewrite(value):
+    if isinstance(value, dict):
+        return {key: rewrite(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [rewrite(item) for item in value]
+    if isinstance(value, str):
+        return value.replace(old_root, new_root)
+    return value
+with open(destination, "w") as f:
+    json.dump(rewrite(data), f, indent=2)
+    f.write("\n")
+PYEOF
+  then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv "$tmp" "$path"
 }
 
 run_capability_smoke() {
@@ -2011,6 +2067,10 @@ if [[ "$DO_PROJECT" == true ]]; then
   if [[ "$COLLISION_STRATEGY" == upgrade && -f "$PROJECT_TARGET_STATE" ]]; then
     _saved_project="$(read_agent_state "$PROJECT_TARGET_STATE")" || _project_state_status=$?
     PREVIOUS_PROJECT_AGENT="${_saved_project:-}"
+    _PREVIOUS_PROJECT_ROOT=""
+    if [[ "${_project_state_status:-0}" -ne 2 && "${_project_state_status:-0}" -ne 3 ]]; then
+      _PREVIOUS_PROJECT_ROOT="$(read_project_root "$PROJECT_TARGET_STATE")"
+    fi
     if [[ "${_project_state_status:-0}" -eq 3 ]]; then
       _PROJECT_STATE_FUTURE=true
       [[ -n "$_FLAG_PROJECT_AGENT" ]] || { error "Future project target metadata requires --project-agent"; exit 2; }
@@ -2315,6 +2375,23 @@ if [[ "$DO_PROJECT" == true ]]; then
 
   # ── SUBSTITUTE PLACEHOLDERS ───────────────────────────────────────────────
   TARGET_ABS="$(cd "$TARGET" && pwd)"
+
+  # A moved project keeps its installed target metadata, but generated
+  # absolute paths in settings still point at the old root. Rewrite the JSON
+  # atomically before the normal placeholder substitution so hooks remain
+  # bound to the current project without touching unrelated files.
+  if [[ "$COLLISION_STRATEGY" == upgrade && -n "${_PREVIOUS_PROJECT_ROOT:-}" &&
+        "$_PREVIOUS_PROJECT_ROOT" != "$TARGET_ABS" ]]; then
+    if upgrade_prepare_mutation "$TARGET" "$TARGET/.claude/settings.json" ".claude/settings.json"; then
+      rewrite_project_root_references "$TARGET/.claude/settings.json" \
+        "$_PREVIOUS_PROJECT_ROOT" "$TARGET_ABS" || {
+        error "Could not update moved-project paths in .claude/settings.json."
+        exit 1
+      }
+      success "Updated moved-project paths in .claude/settings.json"
+      record_upgrade_result migrated ".claude/settings.json"
+    fi
+  fi
 
   TARGET_CLAUDE="$TARGET/CLAUDE.md"
   if [[ -f "$TARGET_CLAUDE" ]] && \
@@ -2627,7 +2704,7 @@ PYEOF
       _project_state_rel=".rig/install-targets.json"
     fi
     if upgrade_prepare_mutation "$_project_state_base" "$PROJECT_TARGET_STATE" "$_project_state_rel"; then
-      write_agent_state "$PROJECT_TARGET_STATE" project "$PROJECT_AGENT"
+      write_agent_state "$PROJECT_TARGET_STATE" project "$PROJECT_AGENT" "$TARGET_ABS"
     fi
   fi
   success "Postflight targets: project=$PROJECT_AGENT; smoke=$_project_smoke"
