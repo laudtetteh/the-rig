@@ -586,6 +586,38 @@ import hashlib, json, os, pathlib, subprocess, sys
 root = pathlib.Path(os.environ["RIG_ROOT"])
 session_dir = pathlib.Path(os.environ["RIG_DIR"]) / "memory" / "sessions"
 args = sys.argv[1:]
+def confined_session_path(value):
+    """Return a canonical session path only when it stays in sessions/."""
+    if not value:
+        return None
+    try:
+        candidate = pathlib.Path(value)
+        if not candidate.is_absolute():
+            candidate = pathlib.Path.cwd() / candidate
+        sessions_root = session_dir.resolve()
+        resolved = candidate.resolve(strict=False)
+        resolved.relative_to(sessions_root)
+        if resolved == sessions_root:
+            return None
+        # Reject symlinks in the file path, including dangling final links.
+        probe = candidate
+        while True:
+            if probe.is_symlink():
+                if probe == candidate:
+                    return None
+                try:
+                    probe.resolve(strict=False).relative_to(sessions_root)
+                    return None
+                except ValueError:
+                    pass
+            if probe.parent == probe:
+                break
+            probe = probe.parent
+        if candidate.exists() and not candidate.is_file():
+            return None
+        return resolved
+    except (OSError, ValueError, RuntimeError):
+        return None
 def option(name):
     try: return args[args.index(name) + 1]
     except (ValueError, IndexError): return ""
@@ -621,14 +653,19 @@ if bool(agent) != bool(native_id) or (agent and agent not in ("claude", "codex")
 records = []
 malformed = False
 unsupported = False
+unsafe_path = False
 for base in (session_dir, session_dir / "done"):
     if base.is_dir():
         for p in base.glob("session-*.json"):
+            if confined_session_path(str(p)) is None:
+                unsafe_path = True
+                continue
             d = load(p)
             if d is None: malformed = True
             elif isinstance(d.get("schema_version"), int) and d["schema_version"] > 1: unsupported = True
             else: records.append((p, d))
 if native_id:
+    if unsafe_path: emit(None, None, "none", "invalid_session_path"); raise SystemExit(4)
     if unsupported: emit(None, None, "none", "unsupported_schema"); raise SystemExit(4)
     if malformed: emit(None, None, "none", "malformed_record"); raise SystemExit(4)
     matches = [(p,d) for p,d in records if d.get("schema_version") == 1 and
@@ -644,9 +681,10 @@ if native_id:
     emit(None, None, "none", "cross_project" if cross else "not_found"); raise SystemExit(3 if cross else 1)
 env_file = os.environ.get("RIG_SESSION_FILE")
 if "RIG_SESSION_FILE" in os.environ:
-    p = pathlib.Path(env_file); d = load(p)
+    p = confined_session_path(env_file)
+    d = load(p) if p else None
     state = d.get("lifecycle", {}).get("state", d.get("status")) if d else None
-    if d and state == "active" and "done" not in p.parts: emit(p, d, "exact", "launcher_file"); raise SystemExit(0)
+    if p and d and state == "active" and "done" not in p.parts: emit(p, d, "exact", "launcher_file"); raise SystemExit(0)
     emit(None, None, "none", "invalid_launcher_file"); raise SystemExit(3)
 files = [(p,d) for p,d in records if "done" not in p.parts and d.get("lifecycle", {}).get("state", d.get("status")) == "active"]
 explicit_anchor = "RIG_SESSION_ANCHOR" in os.environ
@@ -682,6 +720,30 @@ native_title=option("--native-title") or None
 if agent not in ("claude","codex") or not native_id:
     print(json.dumps({"ok":False,"reason":"invalid_input"})); raise SystemExit(3)
 root=pathlib.Path(os.environ["RIG_ROOT"]).resolve(); rig=pathlib.Path(os.environ["RIG_DIR"]); sessions=rig/"memory"/"sessions"; sessions.mkdir(parents=True,exist_ok=True)
+def confined_session_path(value):
+    if not value:
+        return None
+    try:
+        candidate=pathlib.Path(value)
+        if not candidate.is_absolute(): candidate=pathlib.Path.cwd()/candidate
+        sessions_root=sessions.resolve(); resolved=candidate.resolve(strict=False)
+        resolved.relative_to(sessions_root)
+        if resolved == sessions_root: return None
+        probe=candidate
+        while True:
+            if probe.is_symlink():
+                if probe == candidate: return None
+                try:
+                    probe.resolve(strict=False).relative_to(sessions_root)
+                    return None
+                except ValueError:
+                    pass
+            if probe.parent == probe: break
+            probe=probe.parent
+        if candidate.exists() and not candidate.is_file(): return None
+        return resolved
+    except (OSError,ValueError,RuntimeError):
+        return None
 lock=open(sessions/".bind.lock","a+"); fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
 try:
     common=subprocess.check_output(["git","-C",str(root),"rev-parse","--git-common-dir"],text=True,stderr=subprocess.DEVNULL).strip()
@@ -692,23 +754,32 @@ def read(p):
     try:
         d=json.loads(p.read_text()); return d if isinstance(d,dict) else None
     except (OSError,ValueError,TypeError): return None
+hint=os.environ.get("RIG_SESSION_FILE","")
+hint_path=confined_session_path(hint) if hint else None
+if hint and hint_path is None:
+    print(json.dumps({"ok":False,"reason":"invalid_session_path","no_write":True})); raise SystemExit(3)
 records=[]
+unsafe_path=False
 for base in (sessions,sessions/"done"):
     if base.is_dir():
         for p in base.glob("session-*.json"):
+            if confined_session_path(str(p)) is None:
+                unsafe_path=True
+                continue
             d=read(p)
             if d is None:
                 print(json.dumps({"ok":False,"reason":"malformed_record"})); raise SystemExit(4)
             if isinstance(d.get("schema_version"),int) and d["schema_version"]>1:
                 print(json.dumps({"ok":False,"reason":"unsupported_schema"})); raise SystemExit(4)
             records.append((p,d))
+if unsafe_path:
+    print(json.dumps({"ok":False,"reason":"invalid_session_path","no_write":True})); raise SystemExit(4)
 matches=[(p,d) for p,d in records if d.get("schema_version")==1 and d.get("project",{}).get("identity")==project_id and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id]
 if len(matches)>1:
     print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
-hint=os.environ.get("RIG_SESSION_FILE","")
 if matches:
     p,d=matches[0]
-    if hint and pathlib.Path(hint).resolve()!=p.resolve():
+    if hint_path and hint_path!=p.resolve():
         print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
     if "done" in p.parts or d.get("lifecycle",{}).get("state")=="complete":
         print(json.dumps({"ok":False,"reason":"ended_record"})); raise SystemExit(3)
@@ -718,7 +789,8 @@ else:
     cross=[d for _,d in records if d.get("schema_version")==1 and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id]
     if cross:
         print(json.dumps({"ok":False,"reason":"cross_project"})); raise SystemExit(3)
-    p=pathlib.Path(hint) if hint else None; d=read(p) if p else None
+    p=hint_path
+    d=read(p) if p else None
     if d and d.get("schema_version")==1 and d.get("native",{}).get("session_id") not in (None,""):
         print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
     if d and d.get("agent") not in (None,agent):
@@ -891,10 +963,18 @@ try:
     common=subprocess.check_output(["git","-C",str(root),"rev-parse","--git-common-dir"],text=True,stderr=subprocess.DEVNULL).strip(); common=pathlib.Path(common if os.path.isabs(common) else root/common).resolve()
 except (OSError,subprocess.SubprocessError): common=root
 project_id=hashlib.sha256(str(common).encode()).hexdigest(); lock=open(sessions/".bind.lock","a+"); fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
+def safe_record_path(path):
+    try:
+        path.resolve(strict=False).relative_to(sessions.resolve())
+        return path.is_file() and not path.is_symlink()
+    except (OSError,ValueError,RuntimeError):
+        return False
 records=[]
 for base in (sessions,sessions/"done"):
     if not base.is_dir(): continue
     for p in base.glob("session-*.json"):
+        if not safe_record_path(p):
+            emit(False,"invalid_session_path",{"no_write":True},4)
         try: d=json.loads(p.read_text())
         except (OSError,ValueError,TypeError): emit(False,"malformed_record",{"no_write":True},4)
         if isinstance(d.get("schema_version"),int) and d["schema_version"]>1: emit(False,"unsupported_schema",{"no_write":True},4)
@@ -902,6 +982,11 @@ for base in (sessions,sessions/"done"):
 candidates=[(p,d) for p,d in records if d.get("anchor")==anchor]
 if len(candidates)!=1: emit(False,"not_found" if not candidates else "duplicate_anchor",{"no_write":True},1 if not candidates else 2)
 p,d=candidates[0]
+try:
+    candidate=p.resolve(strict=False); candidate.relative_to(sessions.resolve())
+    if p.is_symlink() or not p.is_file(): emit(False,"invalid_session_path",{"no_write":True},3)
+except (OSError,ValueError,RuntimeError):
+    emit(False,"invalid_session_path",{"no_write":True},3)
 if "done" in p.parts or d.get("lifecycle",{}).get("state")=="complete": emit(False,"ended_record",{"no_write":True},3)
 if d.get("project",{}).get("identity") not in (None,project_id): emit(False,"cross_project",{"no_write":True},3)
 bound=d.get("native",{}).get("session_id")
