@@ -15,6 +15,7 @@ Commands:
   rig session doctor        Check session-record integrity and privacy
   rig session repair        Preview or confirm explicit orphan repair
   rig session obligation    Mark or clear an exact session obligation
+  rig sprint                Audit, plan, or inspect a durable sprint
   rig session-name set      Set the current session name atomically
   rig memory validate       Validate Rig memory files
   rig memory repair-markers Reposition unambiguous Rig memory markers
@@ -50,6 +51,7 @@ Content matching is never part of normal resolution.
 EOF
       ;;
     session-name) printf 'Usage: rig session-name set [--tentative|--final] [--complete] [--json] <name>\n';;
+    sprint) printf 'Usage: rig sprint <audit|plan|status> [options] --json\n';;
     memory) printf 'Usage: rig memory <validate|repair-markers> [--json]\n';;
     codex) printf 'Usage: rig codex [-- <codex arguments>]\n';;
     claude) printf 'Usage: rig claude [-- <claude arguments>]\n';;
@@ -965,6 +967,7 @@ main() {
     claude) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help claude; else launch_claude "$@"; fi;;
     codex) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help codex; else launch_codex "$@"; fi;;
     doctor) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help doctor; else doctor "$@"; fi;;
+    sprint) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help sprint; else exec "$(dirname "${BASH_SOURCE[0]}")/rig-sprint" "$@"; fi;;
     session|session-name|memory)
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help "$command"; return; fi
