@@ -55,6 +55,39 @@ json_assert() {
   [ "$status" -eq 0 ]
 }
 
+@test "linked stealth worktree doctor reports and bootstrap repairs without overwriting" {
+  local external="$BATS_TEST_TMPDIR/external-rig"
+  local linked="$BATS_TEST_TMPDIR/linked"
+  mkdir -p "$external/memory"
+  cp "$CASE_DIR/.rig/memory/.rig-manifest" "$external/memory/.rig-manifest"
+  printf '%s\n' "$external" > "$CASE_DIR/.rigpath"
+  printf 'CLAUDE.md\nPROJECT_BRIEF.md\n.claude/\n.rigpath\n.gitleaks.toml\nbin/rig\n' > "$CASE_DIR/.git/info/exclude"
+  printf 'secret config\n' > "$CASE_DIR/.gitleaks.toml"
+  printf 'seed\n' > "$CASE_DIR/README.md"
+  git -C "$CASE_DIR" config user.email test@example.com
+  git -C "$CASE_DIR" config user.name Test
+  git -C "$CASE_DIR" add README.md
+  git -C "$CASE_DIR" commit -qm seed
+  git -C "$CASE_DIR" worktree add -q -b linked-test "$linked"
+
+  run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' doctor --json"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"worktree bootstrap"* ]]
+  printf 'linked customization\nissue-tracking: none\n' > "$linked/CLAUDE.md"
+
+  run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' worktree bootstrap"
+  [ "$status" -eq 0 ]
+  grep -q '^linked customization$' "$linked/CLAUDE.md"
+  [ -f "$linked/.rigpath" ]
+  [ -x "$linked/bin/rig" ]
+  [ -f "$linked/.claude/settings.json" ]
+  [ -f "$linked/.gitleaks.toml" ]
+
+  run bash -c "cd '$linked' && '$linked/bin/rig' doctor --json"
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="worktree_bootstrap"); assert c["ok"] and c["detail"]=="complete"'
+}
+
 @test "Codex skill ambiguity is reported without guessing" {
   mkdir -p "$CASE_DIR/.agents/skills/task" "$CASE_DIR/.agents/skills/unrelated"
   printf '%s\n' '---' > "$CASE_DIR/.agents/skills/task/SKILL.md"
