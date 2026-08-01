@@ -1,8 +1,10 @@
 # Agent install guide
 
+> The Rig installs compatibility layers for both Claude Code and Codex. Paths named `CLAUDE.md` or `.claude` are Claude-native surfaces; Codex receives the corresponding configured/generated adapter.
+
 How to install The Rig non-interactively — exact flag combinations for every scenario.
 
-Use this when a Claude agent is helping a user install or upgrade The Rig.
+Use this when Claude Code or Codex is helping a user install or upgrade The Rig.
 The installer is interactive by default; the flags below bypass all prompts.
 
 ---
@@ -83,7 +85,9 @@ cd ~/tools/the-rig
 $EDITOR ~/.your-ai-contexts/PROFILE.md
 ```
 
-The global layer installs `~/.claude/CLAUDE.md` and `~/.claude/skills/`. It is shared
+The Claude global layer installs `~/.claude/CLAUDE.md` and `~/.claude/skills/`.
+Codex personal skills are generated under `~/.agents/skills/`; selecting both
+agents installs both delivery surfaces while project workflows remain shared
 across all projects on the machine. Run this once per machine, not per project.
 
 ---
@@ -233,7 +237,8 @@ cd ~/tools/the-rig
 
 ## What `/rig-install` does
 
-The `/rig-install` slash command (available when working inside the Rig repo) asks
+The Claude `/rig-install` command (and its generated Codex `$rig-install` skill,
+when available in the selected install) asks
 the user three questions, then emits the exact command for their scenario. It is a
 thin wrapper over this document — run it when you need guided install selection,
 refer here for raw flag reference.

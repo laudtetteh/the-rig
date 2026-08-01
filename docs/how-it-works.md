@@ -1,5 +1,7 @@
 # How The Rig works
 
+> Coexistence: The Rig’s shared `.rig` processes run across Claude Code and Codex. Provider adapters expose the same workflows through Claude commands/hooks and Codex skills/hooks; provider-specific mechanics below are labeled explicitly.
+
 A technical deep-dive into the architecture, components, and session lifecycle.
 
 ---
@@ -70,10 +72,11 @@ Three locations work together. The installer repo produces the other two:
 └──────────────────────────┘
 ```
 
-The global layer is loaded first, automatically, by Claude Code. It provides
-universal context. The project layer is read during orientation and provides
-project-specific context. The installer repo never runs during a session — it
-only runs when you install or upgrade.
+Claude Code loads its global layer natively. Codex consumes generated personal
+skills and supported instruction files. At project scope, both providers share
+the same `.rig/` memory, rules, and processes: `.claude/` is the Claude adapter,
+`.agents/skills/` contains generated Codex skills, and `.codex/` contains the
+Codex hook adapter. The installer repo runs only during install or upgrade.
 
 ---
 
@@ -89,7 +92,7 @@ session-start.sh fires (SessionStart hook)
      │  (before the first user turn — no manual file read required)
      │
      ▼
-Claude Code auto-loads ~/.claude/CLAUDE.md
+Selected provider loads its supported global instructions
      │  Hard rules, working style, memory discipline, personal context
      │
      ▼
@@ -152,7 +155,7 @@ Agent is oriented. Hooks are live. Ready to work.
      │       (lightweight; idempotent — safe to run after every response)
      │
      ▼
-/wrap — run manually before closing Claude Code
+Claude /wrap or Codex $wrap — run manually before closing
      │  Writes .rig/memory/CONTEXT_SNAPSHOT.md (full current state)
      │  Expands PROGRESS.md stubs; trims if > 20 entries
      │  Logs ERRORS.md and RIG_GAPS.md entries
@@ -286,6 +289,10 @@ Step 8: Surface next priority — ask "What's next?"
 ### Claude Code hooks (`.claude/`)
 
 Wired via `.claude/settings.json`. Ten hooks covering the full session lifecycle.
+
+These are intentionally Claude-specific handlers. Codex events are received by
+`.codex/hooks.json` and normalized by `.codex/hooks/rig-adapter.sh` before they
+enter the same canonical contracts.
 
 ```
 Session starts
@@ -455,8 +462,9 @@ the budget in check.
 
 ### What loads at session start (always)
 
-These files are injected by Claude Code unconditionally via `@` import or direct
-load — the agent cannot skip them:
+These files form the required orientation set. Claude loads them through native
+instructions/imports; Codex uses its supported instruction fallback and generated
+skills. Exact delivery differs by provider, but the shared `.rig` contract does not:
 
 | Source | Typical size | Notes |
 |---|---|---|
@@ -467,7 +475,7 @@ load — the agent cannot skip them:
 | `PROJECT_CONVENTIONS.md` | ~1.5 KB initially | Explicitly approved current rules/preferences |
 | `CONTEXT_SNAPSHOT.md` | ~2 KB | Session state — the most important gate |
 
-**Session-start baseline: ~30 KB (~7,000 tokens).** Well within Claude's usable window.
+**Session-start baseline: ~30 KB (~7,000 tokens).** Well within supported agent context windows.
 
 ### What loads on demand (not at startup)
 
@@ -489,12 +497,12 @@ The most important token-management mechanism. When `CONTEXT_SNAPSHOT.md` exists
 and is current, the agent is instructed to stop reading context — it skips PROGRESS.md,
 ERRORS.md, and deeper history entirely. This keeps repeat sessions cheap.
 
-The `/wrap` command writes the snapshot at session end. **Running `/wrap` before
+The Claude `/wrap` command or Codex `$wrap` skill writes the snapshot at session end. **Running the wrap adapter before
 ending a session is the single most effective way to keep future sessions lean.**
 
 ### Trim limits
 
-`PROGRESS.md` and `ERRORS.md` grow over time. The `/wrap` command enforces limits:
+`PROGRESS.md` and `ERRORS.md` grow over time. The wrap workflow enforces limits:
 
 - `PROGRESS.md` → trimmed to 20 entries; older entries moved to `PROGRESS_archive.md`
 - `ERRORS.md` → trimmed to 30 entries; older entries moved to `ERRORS_archive.md`
@@ -513,7 +521,8 @@ The dominant cost is not Rig files — it's **tool call accumulation** mid-sessi
 Every `Read`, `Edit`, `Bash`, and `Grep` result stays in context for the rest of the
 session. A task with 40 tool calls, averaging 1 KB of output each, adds ~40 KB
 (~10,000 tokens) beyond the baseline. This is normal and expected — it is why
-Claude Code auto-compacts around 80–90% of the context window.
+Each provider manages context and compaction differently; Rig checkpoints use
+documented provider lifecycle events and exact session identity.
 
 The Rig's design assumption is that a well-structured session (clear task file, current
 CONTEXT_SNAPSHOT, invoked commands only as needed) will consume the context window in
@@ -523,7 +532,8 @@ proportion to the complexity of the work — not because of Rig overhead.
 
 ## The command set
 
-Twenty slash commands covering the full development lifecycle:
+Canonical workflows are delivered as Claude slash commands and generated Codex
+skills covering the full development lifecycle:
 
 ### Project bootstrap
 | Command | Triggers | Key behaviour |
