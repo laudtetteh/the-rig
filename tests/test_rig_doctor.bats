@@ -30,6 +30,17 @@ json_assert() {
   [[ "$output" == *"Rig doctor: healthy"* ]]
 }
 
+@test "doctor validates connector declarations without claiming session callability" {
+  mkdir -p "$CASE_DIR/.rig/connectors"
+  cp "$BATS_TEST_DIRNAME/../templates/project/.rig/connectors/skill-dependencies.v1.json" "$CASE_DIR/.rig/connectors/skill-dependencies.v1.json"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="connector_declarations"); assert c["ok"] and "session evidence required" in c["detail"]'
+  printf '{bad\n' > "$CASE_DIR/.rig/connectors/skill-dependencies.v1.json"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+}
+
 @test "invalid settings and missing manifest command fail diagnostically" {
   printf '{bad\n' > "$CASE_DIR/.claude/settings.json"
   rm "$CASE_DIR/.claude/commands/ship.md"

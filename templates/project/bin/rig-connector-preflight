@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""Deterministic evaluator for sanitized, session-native connector evidence."""
+import argparse
+import datetime as dt
+import fcntl
+import hashlib
+import json
+import os
+import pathlib
+import stat
+import sys
+import tempfile
+
+RESULT_SCHEMA = "https://the-rig.dev/schemas/connector-preflight-result/v1"
+DECL_SCHEMA = "https://the-rig.dev/schemas/skill-connector-dependencies/v1"
+EVIDENCE_SCHEMA = "https://the-rig.dev/schemas/connector-preflight-evidence/v1"
+ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-._")
+STAGES = ("none", "configured", "authenticated", "schema_visible", "callable")
+STAGE_RANK = {value: index for index, value in enumerate(STAGES)}
+TTL = {"configured": 600, "authenticated": 300, "schema_visible": 120, "callable": 120, "blocked": 30}
+MAX_BYTES = 256 * 1024
+MAX_TOOLS = 512
+MAX_OBSERVATIONS = 128
+
+
+class DataError(Exception):
+    def __init__(self, reason):
+        self.reason = reason
+
+
+def duplicate_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise DataError("evidence_invalid")
+        result[key] = value
+    return result
+
+
+def load_json_bytes(raw, reason):
+    if len(raw) > MAX_BYTES:
+        raise DataError("evidence_too_large" if "evidence" in reason else reason)
+    try:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=duplicate_pairs)
+    except (UnicodeDecodeError, json.JSONDecodeError, DataError):
+        raise DataError(reason)
+    if not isinstance(value, dict):
+        raise DataError(reason)
+    return value
+
+
+def strict_keys(value, allowed, reason):
+    if set(value) - set(allowed):
+        raise DataError(reason)
+
+
+def valid_id(value):
+    return isinstance(value, str) and 0 < len(value) <= 128 and set(value) <= ID_CHARS
+
+
+def digest(value):
+    body = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return "sha256:" + hashlib.sha256(body).hexdigest()
+
+
+def valid_digest(value):
+    return isinstance(value, str) and len(value) == 71 and value.startswith("sha256:") and all(c in "0123456789abcdef" for c in value[7:])
+
+
+def read_regular(path, reason, private=False):
+    try:
+        info = path.lstat()
+    except OSError:
+        raise DataError(reason)
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise DataError(reason)
+    if private and (info.st_mode & 0o077 or info.st_uid != os.getuid()):
+        raise DataError(reason)
+    if info.st_size > MAX_BYTES:
+        raise DataError("evidence_too_large")
+    try:
+        return path.read_bytes()
+    except OSError:
+        raise DataError(reason)
+
+
+def validate_declaration(data):
+    strict_keys(data, ("schema", "schema_version", "skills", "providers", "smoke_checks"), "declaration_invalid")
+    if data.get("schema") != DECL_SCHEMA or data.get("schema_version") != 1:
+        raise DataError("unsupported_schema")
+    if not isinstance(data.get("skills"), list) or not isinstance(data.get("providers"), dict) or not isinstance(data.get("smoke_checks"), dict):
+        raise DataError("declaration_invalid")
+    provider_ids = set()
+    for provider_id, provider in data["providers"].items():
+        if not valid_id(provider_id) or provider_id in provider_ids or not isinstance(provider, dict):
+            raise DataError("declaration_invalid")
+        provider_ids.add(provider_id)
+        strict_keys(provider, ("runtime", "configuration_probes", "authentication", "tools", "smoke_checks"), "declaration_invalid")
+        runtime=provider.get("runtime", []); probes=provider.get("configuration_probes", [])
+        if not isinstance(runtime, list) or not runtime or len(runtime)!=len(set(runtime)) or not set(runtime) <= {"claude", "codex"}:
+            raise DataError("declaration_invalid")
+        if not isinstance(probes,list) or not probes or not all(probe=="public_runtime_registration" for probe in probes) or provider.get("authentication") not in ("runtime", "public_cli", "runtime_or_public_cli", "not_applicable"):
+            raise DataError("declaration_invalid")
+        if not isinstance(provider.get("tools", []), list) or not isinstance(provider.get("smoke_checks", []), list):
+            raise DataError("declaration_invalid")
+        seen_capabilities = set()
+        for tool in provider.get("tools", []):
+            if not isinstance(tool, dict): raise DataError("declaration_invalid")
+            strict_keys(tool, ("capability", "names"), "declaration_invalid")
+            names = tool.get("names")
+            if not valid_id(tool.get("capability")) or tool["capability"] in seen_capabilities or not isinstance(names, list) or not names or not all(valid_id(name) for name in names):
+                raise DataError("declaration_invalid")
+            seen_capabilities.add(tool["capability"])
+        if any(smoke not in data["smoke_checks"] for smoke in provider.get("smoke_checks", [])):
+            raise DataError("declaration_invalid")
+    for smoke_id, smoke in data["smoke_checks"].items():
+        if not valid_id(smoke_id) or not isinstance(smoke, dict): raise DataError("declaration_invalid")
+        strict_keys(smoke, ("safety", "timeout_ms", "max_attempts", "arguments", "success"), "declaration_invalid")
+        if smoke.get("safety") != "read_only_metadata" or smoke.get("arguments") != {} or smoke.get("max_attempts") != 1 or smoke.get("success") != "schema_valid_response" or not isinstance(smoke.get("timeout_ms"), int) or not 1 <= smoke["timeout_ms"] <= 10000:
+            raise DataError("declaration_invalid")
+    seen_skills = set()
+    for skill in data["skills"]:
+        if not isinstance(skill, dict): raise DataError("declaration_invalid")
+        strict_keys(skill, ("id", "requirements"), "declaration_invalid")
+        if not valid_id(skill.get("id")) or skill["id"] in seen_skills or not isinstance(skill.get("requirements"), list):
+            raise DataError("declaration_invalid")
+        seen_skills.add(skill["id"]); seen_requirements = set()
+        for requirement in skill["requirements"]:
+            if not isinstance(requirement, dict): raise DataError("declaration_invalid")
+            strict_keys(requirement, ("id", "required", "selection", "minimum_stage", "providers", "capabilities"), "declaration_invalid")
+            providers = requirement.get("providers"); capabilities = requirement.get("capabilities")
+            if not valid_id(requirement.get("id")) or requirement["id"] in seen_requirements or not isinstance(requirement.get("required"), bool) or requirement.get("selection") not in ("all", "any") or requirement.get("minimum_stage") not in STAGE_RANK or requirement.get("minimum_stage") == "none" or not isinstance(providers, list) or not providers or any(p not in provider_ids for p in providers) or not isinstance(capabilities, list) or not capabilities or not all(valid_id(c) for c in capabilities):
+                raise DataError("declaration_invalid")
+            seen_requirements.add(requirement["id"])
+    return data
+
+
+def validate_evidence(data, declaration, declaration_digest):
+    strict_keys(data, ("schema", "schema_version", "runtime", "session", "collector_agent_kind", "inventory_fingerprint", "tools", "observations", "declaration_digest", "collector_version", "collected_at"), "evidence_invalid")
+    if data.get("schema") != EVIDENCE_SCHEMA or data.get("schema_version") != 1 or data.get("collector_version") != 1:
+        raise DataError("unsupported_schema")
+    if data.get("declaration_digest") != declaration_digest: raise DataError("declaration_mismatch")
+    if data.get("runtime") not in ("claude", "codex") or data.get("collector_agent_kind") != "root": raise DataError("root_attribution_required")
+    session = data.get("session")
+    if not isinstance(session, dict): raise DataError("evidence_invalid")
+    strict_keys(session, ("anchor", "revision", "root_attribution"), "evidence_invalid")
+    if not isinstance(session.get("anchor"), str) or not session["anchor"] or not isinstance(session.get("revision"), int) or session.get("root_attribution") is not True:
+        raise DataError("session_identity_unavailable")
+    if not valid_digest(data.get("inventory_fingerprint")):
+        raise DataError("evidence_invalid")
+    tools, observations = data.get("tools"), data.get("observations")
+    if not isinstance(tools, list) or len(tools) > MAX_TOOLS or not isinstance(observations, list) or len(observations) > MAX_OBSERVATIONS:
+        raise DataError("evidence_invalid")
+    names = set()
+    for tool in tools:
+        if not isinstance(tool, dict): raise DataError("evidence_invalid")
+        strict_keys(tool, ("canonical_name", "schema_hash"), "evidence_invalid")
+        name = tool.get("canonical_name")
+        if not valid_id(name) or name in names or not valid_digest(tool.get("schema_hash")):
+            raise DataError("evidence_invalid")
+        names.add(name)
+    if data["inventory_fingerprint"] != digest(tools): raise DataError("inventory_mismatch")
+    observed_providers=set()
+    for observation in observations:
+        if not isinstance(observation, dict): raise DataError("evidence_invalid")
+        strict_keys(observation, ("provider", "configured", "authentication", "smoke"), "evidence_invalid")
+        if not valid_id(observation.get("provider")) or observation["provider"] in observed_providers or observation.get("configured") not in ("pass", "fail", "unknown") or observation.get("authentication") not in ("pass", "fail", "unknown", "not_applicable"):
+            raise DataError("evidence_invalid")
+        observed_providers.add(observation["provider"])
+        if observation["provider"] not in declaration["providers"]: raise DataError("evidence_invalid")
+        smoke = observation.get("smoke")
+        if smoke is not None:
+            if not isinstance(smoke, dict): raise DataError("evidence_invalid")
+            strict_keys(smoke, ("id", "outcome", "duration_bucket"), "evidence_invalid")
+            if not valid_id(smoke.get("id")) or smoke.get("outcome") not in ("success", "approval_required", "permission_denied", "policy_blocked", "authentication_required", "authentication_failed", "rate_limited", "provider_unavailable", "network_error", "timeout", "malformed_response", "cancelled") or smoke.get("duration_bucket") not in ("lt_1s", "lt_5s", "lt_10s"):
+                raise DataError("evidence_invalid")
+    try:
+        when = dt.datetime.fromisoformat(data["collected_at"].replace("Z", "+00:00"))
+        age = (dt.datetime.now(dt.timezone.utc) - when.astimezone(dt.timezone.utc)).total_seconds()
+    except (KeyError, ValueError, TypeError): raise DataError("evidence_invalid")
+    if age < -60 or age > 600: raise DataError("evidence_stale")
+    return data
+
+
+def current_session(rig_root):
+    import subprocess
+    try:
+        run = subprocess.run([str(rig_root / "bin" / "rig"), "session", "current", "--json"], cwd=rig_root, text=True, capture_output=True, timeout=5)
+        value = json.loads(run.stdout) if run.returncode == 0 else {}
+    except (OSError, ValueError, subprocess.SubprocessError): value = {}
+    if value.get("confidence") != "exact" or not value.get("anchor") or not isinstance(value.get("revision"), int):
+        return None
+    return {"anchor": value["anchor"], "revision": value["revision"], "confidence": "exact"}
+
+
+def provider_result(provider_id, provider, requirement, evidence):
+    observation = next((x for x in evidence["observations"] if x["provider"] == provider_id), None)
+    visible = {x["canonical_name"] for x in evidence["tools"]}
+    stage = "none"; state = "unknown"; reason = "evidence_missing"; blocked_at = None
+    if evidence["runtime"] not in provider.get("runtime",[]):
+        return {"id":provider_id,"confirmed_stage":"none","state":"unknown","reason":"provider_unavailable","blocked_at":None}
+    if observation:
+        if observation["configured"] == "fail": return {"id":provider_id,"confirmed_stage":"none","state":"unconfigured","reason":"not_configured","blocked_at":None}
+        if observation["configured"] == "pass": stage="configured"; state="configured"; reason=None
+        auth = observation["authentication"]
+        if auth == "fail": state="blocked"; reason="authentication_failed"; blocked_at="authenticated"
+        elif auth in ("pass", "not_applicable") and stage == "configured": stage="authenticated"; state="authenticated"; reason=None
+        if stage == "authenticated":
+            capabilities = {item["capability"]: item["names"] for item in provider.get("tools", [])}
+            matches=[]; visibility_reason=None
+            for capability in requirement["capabilities"]:
+                found=[name for name in capabilities.get(capability,[]) if name in visible]
+                if len(found)>1: visibility_reason="ambiguous_tool_match"; break
+                if not found: visibility_reason="schema_not_visible"; break
+                matches.extend(found)
+            if visibility_reason:
+                state="unknown"; reason=visibility_reason
+            elif len(matches)==len(set(matches)) and matches:
+                stage="schema_visible"; state="schema_visible"; reason=None
+        smoke=observation.get("smoke")
+        if smoke and stage == "schema_visible":
+            outcome=smoke["outcome"]
+            if smoke["id"] not in provider.get("smoke_checks",[]): state="unknown"; reason="smoke_unsafe"
+            elif outcome=="success": stage="callable"; state="callable"; reason=None
+            elif outcome in ("approval_required","permission_denied","policy_blocked","authentication_required","authentication_failed","rate_limited","provider_unavailable"):
+                state="blocked"; reason=outcome; blocked_at="callable"
+            else: state="unknown"; reason=outcome
+    return {"id":provider_id,"confirmed_stage":stage,"state":state,"reason":reason,"blocked_at":blocked_at}
+
+
+def evaluate(skill, declaration, evidence):
+    declared = next((item for item in declaration["skills"] if item["id"] == skill), None)
+    if declared is None: raise DataError("declaration_missing")
+    providers=[]; requirements=[]; required_failed=False; optional_failed=False
+    for requirement in declared["requirements"]:
+        rows=[]
+        for provider_id in requirement["providers"]:
+            row=provider_result(provider_id,declaration["providers"][provider_id],requirement,evidence); rows.append(row); providers.append(row)
+        meets=[STAGE_RANK[row["confirmed_stage"]] >= STAGE_RANK[requirement["minimum_stage"]] and row["state"] not in ("blocked","unknown","unconfigured") for row in rows]
+        satisfied=all(meets) if requirement["selection"]=="all" else any(meets)
+        requirements.append({"id":requirement["id"],"required":requirement["required"],"minimum_stage":requirement["minimum_stage"],"satisfied":satisfied,"providers":[r["id"] for r in rows]})
+        if not satisfied and requirement["required"]: required_failed=True
+        if not satisfied and not requirement["required"]: optional_failed=True
+    if required_failed:
+        states={p["state"] for p in providers}; overall="blocked" if "blocked" in states else "unknown"
+    elif optional_failed or any(p["state"] in ("blocked","unknown","unconfigured") for p in providers): overall="degraded"
+    else: overall="callable" if any(p["confirmed_stage"]=="callable" for p in providers) else "schema_visible"
+    return not required_failed,overall,requirements,sorted(providers,key=lambda x:x["id"])
+
+
+def cache_path(rig_dir, key): return rig_dir / "memory" / "cache" / "connector-preflight-v1" / (key + ".json")
+
+
+def cache_read(path):
+    if path.is_symlink(): return None,"invalid"
+    if not path.exists(): return None,"miss"
+    try:
+        info=path.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or info.st_mode&0o077 or info.st_nlink!=1: return None,"invalid"
+        value=json.loads(path.read_text())
+        expiry=dt.datetime.fromisoformat(value["expires_at"].replace("Z","+00:00"))
+        if expiry <= dt.datetime.now(dt.timezone.utc): return None,"expired"
+        return value["result"],"hit"
+    except (OSError,ValueError,KeyError,TypeError): return None,"invalid"
+
+
+def cache_write(path, result, state):
+    ttl=TTL.get(state)
+    if not ttl: return
+    path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+    info=path.parent.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid(): raise DataError("cache_invalid")
+    os.chmod(path.parent,0o700)
+    if path.is_symlink(): raise DataError("cache_invalid")
+    if path.exists():
+        path_info=path.lstat()
+        if not stat.S_ISREG(path_info.st_mode) or path_info.st_uid!=os.getuid() or path_info.st_mode&0o077 or path_info.st_nlink!=1: raise DataError("cache_invalid")
+    lock_path=pathlib.Path(str(path)+".lock")
+    if lock_path.exists():
+        lock_info=lock_path.lstat()
+        if stat.S_ISLNK(lock_info.st_mode) or not stat.S_ISREG(lock_info.st_mode) or lock_info.st_uid!=os.getuid() or lock_info.st_nlink!=1: raise DataError("cache_invalid")
+    lock=open(lock_path,"a+"); os.chmod(lock_path,0o600); fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
+    expiry=dt.datetime.now(dt.timezone.utc)+dt.timedelta(seconds=ttl)
+    fd,tmp=tempfile.mkstemp(prefix=".connector-",dir=path.parent)
+    try:
+        os.fchmod(fd,0o600)
+        with os.fdopen(fd,"w") as out: json.dump({"expires_at":expiry.isoformat(),"result":result},out,separators=(",",":")); out.write("\n"); out.flush(); os.fsync(out.fileno())
+        os.replace(tmp,path)
+    finally:
+        try: os.unlink(tmp)
+        except FileNotFoundError: pass
+
+
+def emit(ok, skill, state="unknown", session=None, requirements=None, providers=None, cache="miss", errors=None, code=0, as_json=True):
+    value={"schema":RESULT_SCHEMA,"schema_version":1,"ok":ok,"command":"connector-preflight","skill":skill,"session":session,"state":state,"requirements":requirements or [],"providers":providers or [],"cache":{"status":cache,"expires_at":None},"warnings":[],"errors":[{"reason":reason} for reason in (errors or [])]}
+    if as_json: print(json.dumps(value,separators=(",",":"),sort_keys=True))
+    else:
+        for row in value["providers"]: print(f"{row['id']}  {row['confirmed_stage']}  {row['state']}  {row.get('reason') or '-'}")
+        print("Connector preflight: "+value["state"])
+    raise SystemExit(code)
+
+
+def main():
+    parser=argparse.ArgumentParser(add_help=False); parser.add_argument("action",nargs="?"); parser.add_argument("--skill"); parser.add_argument("--evidence"); parser.add_argument("--refresh",action="store_true"); parser.add_argument("--json",action="store_true")
+    try: args=parser.parse_args()
+    except SystemExit: emit(False,None,errors=["invalid_input"],code=64)
+    if args.action!="preflight" or not args.skill or not valid_id(args.skill): emit(False,args.skill,errors=["invalid_input"],code=64,as_json=args.json)
+    root=pathlib.Path(__file__).resolve().parent.parent; rig_path=root/".rigpath"
+    if rig_path.exists():
+        configured=pathlib.Path(rig_path.read_text().strip())
+        rig_dir=configured if configured.is_absolute() else root/configured
+    else: rig_dir=root/".rig"
+    declaration_path=pathlib.Path(os.environ.get("_RIG_CONNECTOR_DECLARATION",str(rig_dir/"connectors"/"skill-dependencies.v1.json")))
+    try:
+        declaration=validate_declaration(load_json_bytes(read_regular(declaration_path,"declaration_missing"),"declaration_invalid")); declaration_digest=digest(declaration)
+        if not args.evidence: raise DataError("evidence_missing")
+        raw=sys.stdin.buffer.read(MAX_BYTES+1) if args.evidence=="-" else read_regular(pathlib.Path(args.evidence),"evidence_invalid",private=True)
+        evidence=validate_evidence(load_json_bytes(raw,"evidence_invalid"),declaration,declaration_digest)
+        session=current_session(root)
+        if session is None: raise DataError("session_identity_unavailable")
+        if evidence["session"]["anchor"]!=session["anchor"] or evidence["session"]["revision"]!=session["revision"]: raise DataError("session_mismatch")
+        key=hashlib.sha256(json.dumps([declaration_digest,args.skill,evidence["runtime"],session["anchor"],session["revision"],evidence["inventory_fingerprint"]],separators=(",",":")).encode()).hexdigest()
+        path=cache_path(rig_dir,key); cached,status=(None,"miss") if args.refresh else cache_read(path)
+        if status == "invalid": raise DataError("cache_invalid")
+        if cached is not None: emit(cached["ok"],args.skill,cached["state"],session,cached["requirements"],cached["providers"],status,code=0 if cached["ok"] else 1,as_json=args.json)
+        ok,state,requirements,providers=evaluate(args.skill,declaration,evidence); result={"ok":ok,"state":state,"requirements":requirements,"providers":providers}
+        cache_write(path,result,state); emit(ok,args.skill,state,session,requirements,providers,status,code=0 if ok else 1,as_json=args.json)
+    except DataError as exc:
+        code=69 if exc.reason in ("evidence_missing","session_identity_unavailable","session_mismatch","root_attribution_required") else 65
+        emit(False,args.skill,errors=[exc.reason],code=code,as_json=args.json)
+
+if __name__=="__main__": main()

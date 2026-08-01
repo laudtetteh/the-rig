@@ -9,6 +9,7 @@ Usage: rig <command> [subcommand] [options]
 
 Commands:
   rig doctor                Diagnose a Rig installation
+  rig connector preflight   Check declared connector dependencies
   rig worktree bootstrap    Restore missing stealth artifacts in a linked worktree
   rig session resolve       Resolve the current session identity
   rig session current       Show the exact current session safely
@@ -56,6 +57,7 @@ version() {
 command_help() {
   case "$1" in
     doctor) printf 'Usage: rig doctor [--json]\n';;
+    connector) printf 'Usage: rig connector preflight --skill ID [--evidence FILE|-] [--refresh] [--json]\n';;
     worktree) printf 'Usage: rig worktree bootstrap\n';;
     session) cat <<'EOF'
 Usage: rig session <resolve|current|list|doctor|repair|obligation> [options]
@@ -550,6 +552,23 @@ else:
     reason = "not a GitHub remote" if tracker == "github" else f"not required for {tracker}"
     check("recent_pr_references", True, reason)
 
+# Connector declarations are local configuration only. Doctor validates the
+# public envelope but never promotes them to schema-visible or callable: those
+# stages require sanitized evidence from the exact active agent session.
+connector_declaration = rig / "connectors" / "skill-dependencies.v1.json"
+if connector_declaration.exists():
+    try:
+        connector_data = json.loads(read(connector_declaration))
+        connector_ok = (connector_data.get("schema") == "https://the-rig.dev/schemas/skill-connector-dependencies/v1"
+                        and connector_data.get("schema_version") == 1
+                        and isinstance(connector_data.get("skills"), list)
+                        and isinstance(connector_data.get("providers"), dict)
+                        and isinstance(connector_data.get("smoke_checks"), dict))
+    except (AttributeError, TypeError, ValueError):
+        connector_ok = False
+    check("connector_declarations", connector_ok,
+          "configured; session evidence required for schema visibility and callability" if connector_ok else "invalid declaration")
+
 result = {"ok": all(item["ok"] for item in checks), "command": "doctor", "root": str(root), "rig_dir": str(rig), "checks": checks}
 if "--json" in sys.argv[1:]:
     print(json.dumps(result, separators=(",", ":")))
@@ -1018,6 +1037,7 @@ main() {
     claude) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help claude; else launch_claude "$@"; fi;;
     codex) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help codex; else launch_codex "$@"; fi;;
     doctor) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help doctor; else doctor "$@"; fi;;
+    connector) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help connector; else exec "$(dirname "${BASH_SOURCE[0]}")/rig-connector-preflight" "$@"; fi;;
     worktree) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help worktree; else worktree_bootstrap "$@"; fi;;
     sprint) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help sprint; else exec "$(dirname "${BASH_SOURCE[0]}")/rig-sprint" "$@"; fi;;
     session|session-name|memory)

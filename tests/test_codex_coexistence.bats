@@ -46,6 +46,10 @@ run_install() {
   [ "$actual" -eq "$expected" ]
   [ -f "$TEST_PROJECT/.agents/skills/status/references/command.md" ]
   grep -Fq 'name: status' "$TEST_PROJECT/.agents/skills/status/SKILL.md"
+  [ -f "$TEST_PROJECT/.agents/skills/connector-preflight/references/command.md" ]
+  grep -Fq 'CONNECTOR_PREFLIGHT.md' "$TEST_PROJECT/.agents/skills/connector-preflight/references/command.md"
+  grep -Fq 'exact #409 root session' "$TEST_PROJECT/.agents/skills/connector-preflight/references/command.md"
+  ! grep -Fq 'SQLite' "$TEST_PROJECT/.agents/skills/connector-preflight/references/command.md"
 }
 
 @test "optional command selection is reflected in Codex skills" {
