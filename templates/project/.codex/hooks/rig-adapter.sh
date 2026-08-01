@@ -148,21 +148,25 @@ if [[ "$EVENT" == "PreToolUse" && "$TOOL" == "apply_patch" ]]; then
 fi
 
 HOOK_DIR="$REPO/.claude/hooks"
+notify_event() {
+  [[ -x "$HOME/.claude/bin/rig-notify" ]] || return 0
+  "$HOME/.claude/bin/rig-notify" "$1" >/dev/null 2>&1 || true
+}
 case "$EVENT" in
   PreToolUse)
     [[ "$TOOL" == "apply_patch" ]] && TOOL="Write"
     HOOK="$HOOK_DIR/pre-tool.sh" ;;
-  PermissionRequest) HOOK="$HOOK_DIR/permission-request.sh" ;;
+  PermissionRequest) notify_event permission-request; HOOK="$HOOK_DIR/permission-request.sh" ;;
   PostToolUse) HOOK="$HOOK_DIR/post-tool.sh" ;;
   PreCompact) HOOK="$HOOK_DIR/pre-compact.sh" ;;
   PostCompact) HOOK="$HOOK_DIR/post-compact.sh" ;;
   UserPromptSubmit) HOOK="$HOOK_DIR/prompt-submit.sh" ;;
   SessionStart) HOOK="$HOOK_DIR/session-start.sh" ;;
-  SessionEnd|Stop) HOOK="$HOOK_DIR/stop.sh" ;;
+  SessionEnd|Stop) [[ "$EVENT" == Stop ]] && notify_event stop; HOOK="$HOOK_DIR/stop.sh" ;;
   SubagentStart) HOOK="$HOOK_DIR/subagent-start.sh" ;;
   # The Rig has no canonical Claude SubagentStop hook. Keep this event distinct
   # from root Stop and return valid neutral JSON so the subagent may finish.
-  SubagentStop) printf '{}\n'; exit 0 ;;
+  SubagentStop) notify_event subagent-stop; printf '{}\n'; exit 0 ;;
   *) fail_closed "unsupported Codex hook event: $EVENT" ;;
 esac
 

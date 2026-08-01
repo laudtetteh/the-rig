@@ -2103,6 +2103,29 @@ sys.exit(1)
 
 # ── Global layer upgrade ──────────────────────────────────────────────────────
 
+@test "notifications opt-in installs helper and merges Claude settings" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+  run env HOME="$fake_home" TERM_PROGRAM=iTerm.app TERM=xterm bash "$INSTALLER" \
+    --global-only --global-agent claude --strategy skip --notifications
+  [ "$status" -eq 0 ]
+  [ -x "$fake_home/.claude/bin/rig-notify" ]
+  run jq -e '.preferredNotifChannel == "iterm2" and (.hooks.Notification|length == 1) and (.hooks.Stop|length == 1) and (.hooks.SubagentStop|length == 1) and (.hooks.PermissionRequest|length == 1)' "$fake_home/.claude/settings.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "rig-notify fails open for CI dumb and unknown events" {
+  local helper="$REPO_ROOT/templates/global/bin/rig-notify"
+  run env CI=1 TERM=xterm bash "$helper" stop
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run env -u CI TERM=dumb bash "$helper" permission-request
+  [ "$status" -eq 0 ]
+  run env -u CI TERM=xterm bash "$helper" adversarial-secret
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 _sha256() {
   sha256sum "$1" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$1" | awk '{print $1}'
 }
