@@ -1891,18 +1891,99 @@ _install_protected_path_policy() {
   [ ! -f "$wrap_needed" ]
 }
 
-@test "upgrade: session-end.sh removed from existing installs" {
+@test "upgrade: retires an unchanged manifest-tracked session-end hook" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
   # Simulate an old install that has session-end.sh present
-  touch "$TEST_PROJECT/.claude/hooks/session-end.sh"
+  local legacy="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  printf '# legacy Rig hook\n' > "$legacy"
+  printf '%s  .claude/hooks/session-end.sh\n' "$(_sha256 "$legacy")" \
+    >> "$TEST_PROJECT/.rig/memory/.rig-manifest"
 
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
 
-  # File must be gone after upgrade
-  [ ! -f "$TEST_PROJECT/.claude/hooks/session-end.sh" ]
+  [ ! -e "$legacy" ]
+  [[ "$output" == *"Removed obsolete legacy hook: .claude/hooks/session-end.sh"* ]]
+  [[ "$output" == *"Removed obsolete: 1"* ]]
+  [ "$(find "$TEST_PROJECT/.rig-backup" -name session-end.sh -type f | wc -l | tr -d ' ')" -ge 1 ]
+}
+
+@test "upgrade: preserves a customized session-end hook and reports conflict" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local legacy="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  printf '# legacy Rig hook\n' > "$legacy"
+  printf '%s  .claude/hooks/session-end.sh\n' "$(_sha256 "$legacy")" \
+    >> "$TEST_PROJECT/.rig/memory/.rig-manifest"
+  printf '# user customization\n' >> "$legacy"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ -f "$legacy" ]
+  grep -q '# user customization' "$legacy"
+  [[ "$output" == *"Skipped conflicts: 1"* ]]
+  [[ "$output" == *"Conflicting legacy artifacts requiring explicit repair:"* ]]
+  [[ "$output" == *"RIG_UPGRADE_REVIEW_REQUIRED=1"* ]]
+}
+
+@test "upgrade: preserves a symlinked session-end hook without touching its target" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local legacy="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  local outside="$TEMP_DIR/outside-session-end.sh"
+  printf '# outside sentinel\n' > "$outside"
+  ln -s "$outside" "$legacy"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ -L "$legacy" ]
+  grep -q '# outside sentinel' "$outside"
+  [[ "$output" == *"Skipped conflicts: 1"* ]]
+  [[ "$output" == *"Preserved legacy hook symlink"* ]]
+}
+
+@test "upgrade: preserves a dangling session-end hook" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local legacy="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  ln -s "$TEMP_DIR/missing-session-end.sh" "$legacy"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ -L "$legacy" ]
+  [[ "$output" == *"Skipped conflicts: 1"* ]]
+}
+
+@test "upgrade: preserves an untracked session-end hook" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local legacy="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  printf '# legacy untracked hook\n' > "$legacy"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ -f "$legacy" ]
+  [[ "$output" == *"Skipped conflicts: 1"* ]]
+}
+
+@test "upgrade: preserves a wrong-type session-end path" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local legacy="$TEST_PROJECT/.claude/hooks/session-end.sh"
+  mkdir "$legacy"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ -d "$legacy" ]
+  [[ "$output" == *"Skipped conflicts: 1"* ]]
+  [[ "$output" == *"unsupported file type"* ]]
 }
 
 @test "upgrade: settings.json SessionEnd hook updated from session-end.sh to stop.sh" {

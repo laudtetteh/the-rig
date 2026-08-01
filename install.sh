@@ -565,6 +565,9 @@ UPGRADE_MERGED_COUNT=0
 UPGRADE_SKIPPED_CUSTOMIZED_COUNT=0
 UPGRADE_SKIPPED_UNTRACKED_COUNT=0
 UPGRADE_SKIPPED_CUSTOMIZED_FILES=()
+UPGRADE_SKIPPED_CONFLICT_COUNT=0
+UPGRADE_SKIPPED_CONFLICT_FILES=()
+UPGRADE_REMOVED_COUNT=0
 UPGRADE_STALE_COUNT=0
 UPGRADE_STALE_FILES=()
 
@@ -581,6 +584,11 @@ record_upgrade_result() {
     skipped-untracked)
       UPGRADE_SKIPPED_UNTRACKED_COUNT=$((UPGRADE_SKIPPED_UNTRACKED_COUNT + 1))
       ;;
+    skipped-conflict)
+      UPGRADE_SKIPPED_CONFLICT_COUNT=$((UPGRADE_SKIPPED_CONFLICT_COUNT + 1))
+      UPGRADE_SKIPPED_CONFLICT_FILES[${#UPGRADE_SKIPPED_CONFLICT_FILES[@]}]="$rel"
+      ;;
+    removed) UPGRADE_REMOVED_COUNT=$((UPGRADE_REMOVED_COUNT + 1)) ;;
   esac
 }
 
@@ -1445,6 +1453,56 @@ _copy_global_file_upgrade() {
     "$manifest_file" none true
 }
 
+# Retire the hook merged into stop.sh in v1.21.0 only when the manifest proves
+# that the installed regular file is an unchanged Rig artifact. Untracked,
+# customized, symlinked, dangling, and wrong-type paths are user state until
+# an operator explicitly repairs them. Never remove or follow those paths.
+retire_legacy_session_end() {
+  local rel=".claude/hooks/session-end.sh"
+  local legacy="$TARGET/$rel"
+  local manifest_hash current_hash
+
+  [[ -e "$legacy" || -L "$legacy" ]] || return 0
+
+  if [[ -L "$TARGET/.claude" || -L "$TARGET/.claude/hooks" ]]; then
+    warn "Preserved legacy hook with symlinked parent: $rel"
+    record_upgrade_result skipped-conflict "$rel"
+    return 0
+  fi
+
+  if [[ -L "$legacy" ]]; then
+    warn "Preserved legacy hook symlink: $rel"
+    info "Remove it explicitly after reviewing its target."
+    record_upgrade_result skipped-conflict "$rel"
+    return 0
+  fi
+
+  if [[ ! -f "$legacy" ]]; then
+    warn "Preserved legacy hook with unsupported file type: $rel"
+    info "Repair the path explicitly before retrying the upgrade."
+    record_upgrade_result skipped-conflict "$rel"
+    return 0
+  fi
+
+  manifest_hash="$(read_manifest_hash "$rel" "$MANIFEST_FILE")"
+  current_hash="$(sha256_file "$legacy")"
+  if [[ -z "$manifest_hash" || -z "$current_hash" || "$current_hash" != "$manifest_hash" ]]; then
+    warn "Preserved legacy hook requiring review: $rel"
+    info "The file is customized or has no trusted manifest baseline; no deletion was performed."
+    record_upgrade_result skipped-conflict "$rel"
+    return 0
+  fi
+
+  ensure_upgrade_transaction "$TARGET"
+  backup_file "$legacy" "$TARGET"
+  if ! rm -f "$legacy"; then
+    error "Could not retire legacy hook: $rel"
+    return 1
+  fi
+  success "Removed obsolete legacy hook: $rel"
+  record_upgrade_result removed "$rel"
+}
+
 # ── GLOBAL LAYER ─────────────────────────────────────────────────────────────
 if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   bold "── Global layer ──"
@@ -2058,10 +2116,11 @@ if [[ "$DO_PROJECT" == true ]]; then
   fi
 
   # ── REMOVE SCRIPTS MERGED INTO OTHER HOOKS (upgrade cleanup) ─────────────
-  # session-end.sh was merged into stop.sh in v1.21.0. Remove it from existing
-  # installs so it is no longer invoked (settings.json is updated by the
-  # merge_settings_json step above to point SessionEnd → stop.sh instead).
-  rm -f "$TARGET/.claude/hooks/session-end.sh" 2>/dev/null || true
+  # session-end.sh was merged into stop.sh in v1.21.0. Retire it only when its
+  # manifest proves it is unchanged Rig state; uncertain paths remain intact.
+  if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+    retire_legacy_session_end || exit 1
+  fi
 
   # ── WRITE INSTALLER VERSION INTO .rig/VERSION ─────────────────────────────
   # No static template file — write the running installer's version directly
@@ -2433,7 +2492,9 @@ if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
   bold "── Upgrade summary ──"
   echo "Updated: $UPGRADE_UPDATED_COUNT"
   echo "Merged: $UPGRADE_MERGED_COUNT"
+  echo "Removed obsolete: $UPGRADE_REMOVED_COUNT"
   echo "Skipped customized: $UPGRADE_SKIPPED_CUSTOMIZED_COUNT"
+  echo "Skipped conflicts: $UPGRADE_SKIPPED_CONFLICT_COUNT"
   echo "Skipped untracked user-owned: $UPGRADE_SKIPPED_UNTRACKED_COUNT"
   echo "Stale/missing tracked artifacts: $UPGRADE_STALE_COUNT"
   if [[ "$UPGRADE_STALE_COUNT" -gt 0 ]]; then
@@ -2447,6 +2508,13 @@ if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
     echo "Customized files requiring manual review:"
     for _skipped_file in "${UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]}"; do
       echo "  - $_skipped_file"
+    done
+  fi
+  if [[ "$UPGRADE_SKIPPED_CONFLICT_COUNT" -gt 0 ]]; then
+    UPGRADE_REVIEW_REQUIRED=1
+    echo "Conflicting legacy artifacts requiring explicit repair:"
+    for _conflict_file in "${UPGRADE_SKIPPED_CONFLICT_FILES[@]}"; do
+      echo "  - $_conflict_file"
     done
   fi
   python3 -c 'import json,sys
