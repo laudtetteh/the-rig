@@ -439,6 +439,18 @@ Files in the **Rig-owned** category that you commonly want to customize:
 | `.husky/filter-commit-message-inplace.sh` | Add patterns for other AI tools |
 
 The Upgrade strategy will detect changes to these files and prompt before overwriting.
+
+Upgrade writes are journaled under `.rig-backup/.in-progress/` while they run.
+If the process is interrupted, the next upgrade restores the recorded backups
+before continuing. To perform recovery without applying a new version, run:
+
+```bash
+./install.sh --project-only --target /path/to/project --tracking repo --recover
+```
+
+Recovery records contain operation types and relative paths only; they do not
+contain file contents or command output. A successful upgrade moves the journal
+into its timestamped backup directory for audit and rollback reference.
 Your customizations are safe.
 
 ### Choosing the right intent
