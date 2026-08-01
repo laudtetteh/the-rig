@@ -289,6 +289,22 @@ is_rig_owned_stub() {
   grep -q '  .agents/skills/.*/SKILL.md$' "$manifest"
 }
 
+@test "upgrade strategy: writes versioned artifact metadata beside the legacy manifest" {
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  [ -f "$metadata" ]
+  jq -e '.schema_version == 1 and .entries[".codex/hooks.json"].owner == "rig" and .entries[".codex/hooks.json"].source == "codex-native" and .entries[".codex/hooks.json"].type == "file" and (.entries[".codex/hooks.json"].mode | type == "string")' "$metadata" >/dev/null
+  jq -e '.entries[".claude/hooks/pre-tool.sh"].source == "claude-native" and .entries[".rig/VERSION"].source == "shared-rig" and .entries["CLAUDE.md"].owner == "user"' "$metadata" >/dev/null
+
+  rm "$metadata"
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+  [ -f "$metadata" ]
+  jq -e '.schema_version == 1 and (.entries | length) > 0' "$metadata" >/dev/null
+}
+
 @test "upgrade strategy: preserves customized generated Codex artifacts" {
   run_installer --strategy upgrade --project-agent codex
   [ "$status" -eq 0 ]
