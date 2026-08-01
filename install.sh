@@ -214,6 +214,7 @@ _FLAG_TARGET=""       # set via --target <path>     (skips interactive prompt)
 _FLAG_PROJECT_NAME="" # set via --project-name <n>  (skips interactive prompt)
 _FLAG_BASE_BRANCH=""  # set via --base-branch <n>   (skips interactive prompt)
 _FLAG_TRACKING=""     # set via --tracking <mode>   (skips tracking prompt; orthogonal to --target)
+RECOVER_ONLY=false
 SKIP_GIT_HOOKS=false       # set via --skip-git-hooks    (stealth: skip .git/hooks/ writes)
 INSTALL_FEATURE_DOCS=false # set via --feature-docs      (gates doc-feature/feature-context/etc.)
 INSTALL_SUBAGENTS=false    # set via --subagents          (gates subagent-start.sh + SubagentStart hook)
@@ -234,6 +235,7 @@ for arg in "$@"; do
     --contribute)       INSTALL_CONTRIBUTE=true ;;
     --notifications)    INSTALL_NOTIFICATIONS=true ;;
     --preflight)        PREFLIGHT_ONLY=true ;;
+    --recover)          RECOVER_ONLY=true; _FLAG_STRATEGY="upgrade" ;;
     --json)             JSON_OUTPUT=true ;;
     --global-agent|--project-agent)
       ;;
@@ -260,6 +262,7 @@ for arg in "$@"; do
       echo "  --global-agent <name> Global agent target: claude | codex | both | none"
       echo "  --project-agent <name> Project agent target: claude | codex | both | none"
       echo "  --preflight           Validate targets and prerequisites without writing"
+      echo "  --recover             Restore the last interrupted upgrade transaction"
       echo "  --json                Emit JSON (valid only with --preflight)"
       echo ""
       echo "Non-interactive flags (bypass all prompts — useful for scripting and CI):"
@@ -674,9 +677,70 @@ fi
 # Otherwise backs up to <target>/.rig-backup/<timestamp>/
 BACKUP_DIR=""
 BACKUP_TS="$(date +%Y%m%d_%H%M%S)"
+UPGRADE_JOURNAL=""
+UPGRADE_TRANSACTION_ACTIVE=false
+UPGRADE_TRANSACTION_BASE=""
+
+# Upgrade transactions deliberately contain only operation types and relative
+# paths. They are local recovery metadata, never copied to reports or printed
+# with file contents. A fixed in-progress directory makes an interrupted run
+# discoverable on the next invocation; successful runs are renamed to the
+# timestamped backup directory below.
+journal_append() {
+  local operation="$1" rel="$2" tmp
+  [[ -n "$UPGRADE_JOURNAL" ]] || return 0
+  tmp="$(mktemp "${UPGRADE_JOURNAL}.tmp.XXXXXX")"
+  if [[ -f "$UPGRADE_JOURNAL" ]]; then cat "$UPGRADE_JOURNAL" > "$tmp"; fi
+  printf '%s\t%s\n' "$operation" "$rel" >> "$tmp"
+  mv "$tmp" "$UPGRADE_JOURNAL"
+}
+
+recover_upgrade_transaction() {
+  local base="$1"
+  local transaction="$base/.rig-backup/.in-progress"
+  local journal="$transaction/.journal"
+  [[ -f "$journal" ]] || return 0
+  warn "Interrupted Rig upgrade detected; restoring its last transaction."
+  local operation rel destination backup
+  while IFS=$'\t' read -r operation rel; do
+    [[ -n "$operation" && -n "$rel" ]] || continue
+    destination="$base/$rel"
+    case "$operation" in
+      backup)
+        backup="$transaction/$rel"
+        if [[ -f "$backup" ]]; then
+          mkdir -p "$(dirname "$destination")"
+          cp "$backup" "$destination"
+        fi
+        ;;
+      created)
+        if [[ -f "$destination" || -L "$destination" ]]; then rm -f "$destination"; fi
+        ;;
+    esac
+  done < <(tac "$journal" 2>/dev/null || tail -r "$journal")
+  rm -rf "$transaction"
+  success "Interrupted upgrade restored; rerun Upgrade to converge safely."
+}
 
 init_backup_dir() {
   local base="$1"
+  if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+    if [[ "$UPGRADE_TRANSACTION_ACTIVE" == true && "$UPGRADE_TRANSACTION_BASE" == "$base" ]]; then
+      return
+    fi
+    if [[ "$UPGRADE_TRANSACTION_ACTIVE" == true ]]; then finish_upgrade_transaction; fi
+    BACKUP_DIR="${base}/.rig-backup/.in-progress"
+    if [[ -e "$BACKUP_DIR" ]]; then
+      error "An interrupted upgrade transaction exists at $BACKUP_DIR; recovery is required."
+      exit 1
+    fi
+    mkdir -p "$BACKUP_DIR"
+    UPGRADE_JOURNAL="$BACKUP_DIR/.journal"
+    : > "$UPGRADE_JOURNAL"
+    UPGRADE_TRANSACTION_ACTIVE=true
+    UPGRADE_TRANSACTION_BASE="$base"
+    return
+  fi
   if [[ ( "$RIG_TRACKING" == "stealth" || "$RIG_TRACKING" == "external" ) && -n "$EXTERNAL_RIG_DIR" ]]; then
     BACKUP_DIR="${EXTERNAL_RIG_DIR}/backups/${BACKUP_TS}"
   else
@@ -688,11 +752,37 @@ init_backup_dir() {
 backup_file() {
   local src="$1"
   local base="$2"
-  if [[ -z "$BACKUP_DIR" ]]; then init_backup_dir "$base"; fi
-  local rel="${src#$base/}"
+  if [[ -z "$BACKUP_DIR" || "$UPGRADE_TRANSACTION_BASE" != "$base" ]]; then init_backup_dir "$base"; fi
+  local rel="${src#"$base"/}"
   local dest="${BACKUP_DIR}/${rel}"
   mkdir -p "$(dirname "$dest")"
+  journal_append backup "$rel"
   cp "$src" "$dest"
+}
+
+record_created() {
+  local base="$1" destination="$2"
+  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  journal_append created "${destination#"$base"/}"
+}
+
+ensure_upgrade_transaction() {
+  local base="$1"
+  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  init_backup_dir "$base"
+}
+
+finish_upgrade_transaction() {
+  [[ "$UPGRADE_TRANSACTION_ACTIVE" == true && -n "$BACKUP_DIR" ]] || return 0
+  local final_dir
+  final_dir="$(dirname "$BACKUP_DIR")/${BACKUP_TS}_$$"
+  # A completed transaction remains as a recoverable backup, but no longer
+  # looks interrupted to the next invocation.
+  mv "$BACKUP_DIR" "$final_dir"
+  BACKUP_DIR="$final_dir"
+  UPGRADE_JOURNAL=""
+  UPGRADE_TRANSACTION_ACTIVE=false
+  UPGRADE_TRANSACTION_BASE=""
 }
 
 # ── BREAKING CHANGE CHECK ─────────────────────────────────────────────────────
@@ -857,6 +947,10 @@ copy_file() {
   mkdir -p "$dir"
 
   if [[ ! -e "$dest" && ! -L "$dest" ]]; then
+    if [[ "$COLLISION_STRATEGY" == upgrade && -n "$base" ]]; then
+      ensure_upgrade_transaction "$base"
+      record_created "$base" "$dest"
+    fi
     # No collision — always install
     cp "$src" "$dest"
     success "Created ${dest#${base}/}"
@@ -926,6 +1020,7 @@ copy_file() {
         escaped_target="${abs_target//\//\\/}"
         sed "s/\\[REPO_ROOT\\]/${escaped_target}/g" "$src" > "$tmp_src_subst"
         if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged"; then
+          if [[ "$COLLISION_STRATEGY" == upgrade && -n "$base" ]]; then backup_file "$dest" "$base"; fi
           cp "$tmp_merged" "$dest"
           success "Merged .claude/settings.json"
         else
@@ -1145,6 +1240,8 @@ _copy_global_file_upgrade() {
 
   if [[ ! -e "$dest" && ! -L "$dest" ]]; then
     mkdir -p "$(dirname "$dest")"
+    ensure_upgrade_transaction "$base"
+    record_created "$base" "$dest"
     cp "$src" "$dest"
     success "Created: ${rel}"
     record_upgrade_result updated "$rel"
@@ -1163,6 +1260,11 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   CLAUDE_DIR="$HOME/.claude"
   SKILLS_DIR="$CLAUDE_DIR/skills"
   DEST_CLAUDE="$CLAUDE_DIR/CLAUDE.md"
+
+  if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+    recover_upgrade_transaction "$CLAUDE_DIR"
+    if [[ "$RECOVER_ONLY" == true ]]; then exit 0; fi
+  fi
 
   # Point manifest helpers at the global manifest for this section.
   _SAVED_MANIFEST_FILE="$MANIFEST_FILE"
@@ -1246,6 +1348,8 @@ PYEOF
 
   # Restore manifest pointer
   MANIFEST_FILE="$_SAVED_MANIFEST_FILE"
+
+  finish_upgrade_transaction
 
   echo ""
 fi
@@ -1467,6 +1571,13 @@ if [[ "$DO_PROJECT" == true ]]; then
     MANIFEST_FILE="$TARGET/.rig/memory/.rig-manifest"
   fi
   PROJECT_TARGET_STATE="$(dirname "$(dirname "$MANIFEST_FILE")")/install-targets.json"
+  if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+    recover_upgrade_transaction "$TARGET"
+    if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
+      recover_upgrade_transaction "$EXTERNAL_RIG_DIR"
+    fi
+    if [[ "$RECOVER_ONLY" == true ]]; then exit 0; fi
+  fi
   _PROJECT_STATE_FUTURE=false
   PREVIOUS_PROJECT_AGENT=""
   if [[ "$COLLISION_STRATEGY" == upgrade && -f "$PROJECT_TARGET_STATE" ]]; then
@@ -2028,6 +2139,8 @@ PYEOF
   _project_smoke="$(run_capability_smoke project "$PROJECT_AGENT" "$TARGET")" || { error "Postflight smoke failed: $_project_smoke"; exit 1; }
   [[ "$_PROJECT_STATE_FUTURE" == true ]] || write_agent_state "$PROJECT_TARGET_STATE" project "$PROJECT_AGENT"
   success "Postflight targets: project=$PROJECT_AGENT; smoke=$_project_smoke"
+
+  finish_upgrade_transaction
 
   echo ""
 fi
