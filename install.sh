@@ -195,6 +195,10 @@ report_stale_manifest_entries() {
     [[ -n "$stale_rel" ]] || continue
     stale_count=$((stale_count + 1))
     UPGRADE_STALE_FILES[${#UPGRADE_STALE_FILES[@]}]="$label:$stale_rel"
+    if [[ "$REPAIR_STALE" == true ]]; then
+      repair_stale_manifest_entry "$metadata_file" "${metadata_file%.json}" "$stale_rel"
+      info "Repaired stale manifest entry: $label:$stale_rel"
+    fi
   done < <(python3 - "$metadata_file" "$artifact_root" <<'PYEOF'
 import json, os, sys
 
@@ -215,6 +219,47 @@ PYEOF
     UPGRADE_STALE_COUNT=$((UPGRADE_STALE_COUNT + stale_count))
   fi
   return 0
+}
+
+repair_stale_manifest_entry() {
+  local metadata_file="$1" manifest_file="$2" rel="$3"
+  python3 - "$metadata_file" "$manifest_file" "$rel" <<'PYEOF'
+import json, os, sys, tempfile
+
+metadata_file, manifest_file, rel = sys.argv[1:]
+with open(metadata_file) as fh:
+    data = json.load(fh)
+entries = data.get("entries", {})
+if rel not in entries:
+    raise SystemExit(0)
+del entries[rel]
+directory = os.path.dirname(metadata_file) or "."
+fd, temporary = tempfile.mkstemp(prefix=".rig-manifest.", dir=directory, text=True)
+try:
+    with os.fdopen(fd, "w") as fh:
+        json.dump(data, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    os.replace(temporary, metadata_file)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+if os.path.isfile(manifest_file):
+    with open(manifest_file) as fh:
+        lines = fh.readlines()
+    directory = os.path.dirname(manifest_file) or "."
+    fd, temporary = tempfile.mkstemp(prefix=".rig-manifest.", dir=directory, text=True)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            for line in lines:
+                fields = line.rstrip("\n").split(None, 1)
+                if len(fields) == 2 and fields[1] == rel:
+                    continue
+                fh.write(line)
+        os.replace(temporary, manifest_file)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+PYEOF
 }
 
 read_manifest_hash() {
@@ -321,6 +366,7 @@ _FLAG_BASE_BRANCH=""  # set via --base-branch <n>   (skips interactive prompt)
 _FLAG_TRACKING=""     # set via --tracking <mode>   (skips tracking prompt; orthogonal to --target)
 RECOVER_ONLY=false
 RECOVERY_ONLY_COMPLETE=false
+REPAIR_STALE=false
 SKIP_GIT_HOOKS=false       # set via --skip-git-hooks    (stealth: skip .git/hooks/ writes)
 INSTALL_FEATURE_DOCS=false # set via --feature-docs      (gates doc-feature/feature-context/etc.)
 INSTALL_SUBAGENTS=false    # set via --subagents          (gates subagent-start.sh + SubagentStart hook)
@@ -342,6 +388,7 @@ for arg in "$@"; do
     --notifications)    INSTALL_NOTIFICATIONS=true ;;
     --preflight)        PREFLIGHT_ONLY=true ;;
     --recover)          RECOVER_ONLY=true; _FLAG_STRATEGY="upgrade" ;;
+    --repair-stale)     REPAIR_STALE=true; _FLAG_STRATEGY="upgrade" ;;
     --json)             JSON_OUTPUT=true ;;
     --global-agent|--project-agent)
       ;;
@@ -369,6 +416,7 @@ for arg in "$@"; do
       echo "  --project-agent <name> Project agent target: claude | codex | both | none"
       echo "  --preflight           Validate targets and prerequisites without writing"
       echo "  --recover             Restore the last interrupted upgrade transaction"
+      echo "  --repair-stale        Remove only confirmed-missing manifest entries"
       echo "  --json                Emit JSON (valid only with --preflight)"
       echo ""
       echo "Non-interactive flags (bypass all prompts — useful for scripting and CI):"
