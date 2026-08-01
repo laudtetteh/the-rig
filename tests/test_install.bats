@@ -538,6 +538,56 @@ is_rig_owned_stub() {
   [[ "$output" == *"Preserved conflicting upgrade destination: .rigpath (symlink)"* ]]
 }
 
+matrix_upgrade_case() {
+  local tracking="$1" agent="$2" project rig_dir state_file settings_file
+  project="$TEMP_DIR/matrix-${tracking}-${agent}"
+  mkdir -p "$project"
+  git -C "$project" init -q
+  git -C "$project" config user.email "test@test.com"
+  git -C "$project" config user.name "Test"
+  rig_dir="$TEMP_DIR/rig-${tracking}-${agent}"
+  local args=(--project-only --target "$project" --project-name MatrixProject
+    --strategy upgrade --project-agent "$agent" --tracking "$tracking")
+  if [[ "$tracking" == external || "$tracking" == stealth ]]; then
+    args+=(--rig-dir "$rig_dir")
+  fi
+
+  bash "$INSTALLER" "${args[@]}" >/dev/null 2>&1
+  printf '\n# preserved matrix customization\n' >> "$project/CLAUDE.md"
+  if [[ "$tracking" == external || "$tracking" == stealth ]]; then
+    state_file="$rig_dir/install-targets.json"
+  else
+    state_file="$project/.rig/install-targets.json"
+  fi
+  [ -f "$state_file" ]
+  printf '0.1.0\n' > "$(dirname "$state_file")/VERSION"
+
+  bash "$INSTALLER" "${args[@]}" >/dev/null 2>&1
+  grep -q 'preserved matrix customization' "$project/CLAUDE.md"
+  if [[ "$agent" == claude || "$agent" == both ]]; then
+    settings_file="$project/.claude/settings.json"
+  else
+    settings_file="$project/.codex/hooks.json"
+  fi
+  [ -f "$settings_file" ]
+}
+
+@test "upgrade matrix: repo Claude direct jump preserves customization" {
+  matrix_upgrade_case repo claude
+}
+
+@test "upgrade matrix: local Codex direct jump preserves customization" {
+  matrix_upgrade_case local codex
+}
+
+@test "upgrade matrix: external dual-provider direct jump preserves customization" {
+  matrix_upgrade_case external both
+}
+
+@test "upgrade matrix: stealth dual-provider direct jump preserves customization" {
+  matrix_upgrade_case stealth both
+}
+
 @test "upgrade strategy: preserves a legacy Codex artifact with no manifest entry" {
   run_installer --strategy merge --project-agent codex
   [ "$status" -eq 0 ]
