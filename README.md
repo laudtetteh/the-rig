@@ -65,8 +65,8 @@ The Rig has two layers that load in sequence at every session start:
 | Global identity | `templates/global/CLAUDE.md` | Hard rules, working style, memory discipline, and a `## Personal context` section to fill in once — loads at every session |
 | Skills (5) | `templates/global/skills/` | Reusable prompt scripts for debug, review, refactor, tests, explain |
 | Project brain | `templates/project/CLAUDE.md` | Project-specific identity, stack, conventions, off-limits paths |
-| Processes (6) | `templates/project/.rig/processes/` | Step-by-step workflows: work modes, new-task, ship, debug, post-merge, upgrade |
-| Rules (5) | `templates/project/.rig/rules/` | Coding, git, security, verification, and session-naming contracts |
+| Processes (8) | `templates/project/.rig/processes/` | Step-by-step workflows, including work modes, new-task, ship, debug, post-merge, sprint, connector preflight, and upgrade |
+| Rules (7) | `templates/project/.rig/rules/` | Coding, git, security, verification, session identity, session naming, and protected-path contracts |
 | Memory system | `templates/project/.rig/memory/` | PROGRESS log, ERRORS log, DECISIONS log, CONTEXT_SNAPSHOT (session state), RIG_GAPS (self-improvement feedback) |
 | Task lifecycle | `templates/project/.rig/tasks/` | Structured task files through backlog → active → done |
 | Claude/Codex adapters | `templates/project/.claude/`, `.codex/`, generated `.agents/skills/` | Shared command behavior and protected-path enforcement across both agents |

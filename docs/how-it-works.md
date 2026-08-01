@@ -62,7 +62,7 @@ Three locations work together. The installer repo produces the other two:
 │       personal context,  │  │                    SNAPSHOT        │
 │       skill trigger table│  │  .rig/tasks/     ← backlog/active/│
 │                          │  │                    done            │
-│  ~/.claude/skills/       │  │  .claude/        ← hooks (10) +   │
+│  ~/.claude/skills/       │  │  .claude/        ← hooks +        │
 │    ├─ debug.md           │  │                    commands        │
 │    ├─ code-review.md     │  │  .husky/         ← git hooks      │
 │    ├─ refactor.md        │  │  .github/        ← PR + issue     │
