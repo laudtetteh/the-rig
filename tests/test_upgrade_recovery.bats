@@ -54,3 +54,30 @@ recover() {
   [ ! -e "$TEST_PROJECT/.rig-backup/.in-progress" ]
   [ "$(find "$TEST_PROJECT/.rig-backup" -name .journal -type f | wc -l | tr -d ' ')" -ge 1 ]
 }
+
+@test "recover rejects traversal entries without deleting the transaction" {
+  printf 'outside sentinel\n' > "$TEMP_DIR/outside.txt"
+  mkdir -p "$TEST_PROJECT/.rig-backup/.in-progress"
+  printf 'created\t../outside.txt\n' > "$TEST_PROJECT/.rig-backup/.in-progress/.journal"
+
+  recover
+
+  [ "$status" -ne 0 ]
+  grep -Fxq 'outside sentinel' "$TEMP_DIR/outside.txt"
+  [ -f "$TEST_PROJECT/.rig-backup/.in-progress/.journal" ]
+  [[ "$output" == *"Unsafe path in interrupted upgrade journal"* ]]
+}
+
+@test "recover rejects symlinked journal destinations without external writes" {
+  mkdir -p "$TEMP_DIR/outside-dir"
+  ln -s "$TEMP_DIR/outside-dir" "$TEST_PROJECT/escape"
+  mkdir -p "$TEST_PROJECT/.rig-backup/.in-progress/escape"
+  printf 'created\tescape/created.txt\n' > "$TEST_PROJECT/.rig-backup/.in-progress/.journal"
+
+  recover
+
+  [ "$status" -ne 0 ]
+  [ ! -e "$TEMP_DIR/outside-dir/created.txt" ]
+  [ -f "$TEST_PROJECT/.rig-backup/.in-progress/.journal" ]
+  [[ "$output" == *"Unsafe path in interrupted upgrade journal"* ]]
+}
