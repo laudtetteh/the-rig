@@ -9,6 +9,7 @@ Usage: rig <command> [subcommand] [options]
 
 Commands:
   rig doctor                Diagnose a Rig installation
+  rig worktree bootstrap    Restore missing stealth artifacts in a linked worktree
   rig session resolve       Resolve the current session identity
   rig session current       Show the exact current session safely
   rig session list          List redacted public session summaries
@@ -25,7 +26,20 @@ Commands:
 EOF
 }
 json_requested() { local arg; for arg in "$@"; do [[ "$arg" == --json ]] && return 0; done; return 1; }
-rig_root() { cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd; }
+rig_root() {
+  local script_root cwd_root script_common cwd_common
+  script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+  cwd_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  [[ -n "$cwd_root" ]] && cwd_root="$(cd "$cwd_root" && pwd -P)"
+  if [[ -n "$cwd_root" ]]; then
+    script_common="$(git -C "$script_root" rev-parse --git-common-dir 2>/dev/null || true)"
+    cwd_common="$(git -C "$cwd_root" rev-parse --git-common-dir 2>/dev/null || true)"
+    [[ -n "$script_common" ]] && script_common="$(cd "$script_root" && cd "$script_common" && pwd -P)"
+    [[ -n "$cwd_common" ]] && cwd_common="$(cd "$cwd_root" && cd "$cwd_common" && pwd -P)"
+    [[ -n "$script_common" && "$script_common" == "$cwd_common" ]] && { printf '%s\n' "$cwd_root"; return; }
+  fi
+  printf '%s\n' "$script_root"
+}
 rig_dir() {
   local root path; root="$(rig_root)"
   if [[ -f "$root/.rigpath" ]]; then
@@ -42,6 +56,7 @@ version() {
 command_help() {
   case "$1" in
     doctor) printf 'Usage: rig doctor [--json]\n';;
+    worktree) printf 'Usage: rig worktree bootstrap\n';;
     session) cat <<'EOF'
 Usage: rig session <resolve|current|list|doctor|repair|obligation> [options]
 
@@ -56,6 +71,30 @@ EOF
     codex) printf 'Usage: rig codex [-- <codex arguments>]\n';;
     claude) printf 'Usage: rig claude [-- <claude arguments>]\n';;
   esac
+}
+
+worktree_bootstrap() {
+  [[ "${1:-}" == bootstrap && "$#" -eq 1 ]] || { usage_error "usage: rig worktree bootstrap" "$@"; return; }
+  local root common primary
+  root="$(rig_root)"
+  common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || { echo "Not a Git worktree." >&2; return "$RIG_EXIT_UNAVAILABLE"; }
+  primary="$(dirname "$common")"
+  [[ "$root" != "$primary" && -f "$primary/.rigpath" ]] || { echo "No primary stealth worktree found." >&2; return "$RIG_EXIT_UNAVAILABLE"; }
+  python3 - "$primary" "$root" <<'PY'
+import pathlib, shutil, sys
+source, target = map(pathlib.Path, sys.argv[1:])
+paths = [".rigpath","CLAUDE.md","PROJECT_BRIEF.md",".gitleaks.toml","bin/rig",
+         ".claude",".agents",".codex",".mcp.json",".playwright-mcp",".github",
+         "docs/features/README.md"]
+copied=[]
+for rel in paths:
+    src, dst = source/rel, target/rel
+    if not src.exists() or src.is_symlink() or dst.exists(): continue
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src,dst) if src.is_dir() else shutil.copy2(src,dst)
+    copied.append(rel)
+print("Bootstrapped linked worktree: " + (", ".join(copied) if copied else "already complete"))
+PY
 }
 
 session_obligation() {
@@ -302,7 +341,7 @@ doctor() {
     [[ "$arg" == --json ]] || { usage_error "unknown doctor option: $arg" "$@"; return; }
   done
   RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
-import json, os, pathlib, re, subprocess, sys
+import json, os, pathlib, re, shlex, subprocess, sys
 
 try:
     import tomllib
@@ -328,6 +367,15 @@ def run(command):
     except (OSError, subprocess.SubprocessError) as exc:
         return None
 
+common = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"])
+if common is not None and common.returncode == 0:
+    primary = pathlib.Path(common.stdout.strip()).parent
+    if primary != root and (primary / ".rigpath").exists():
+        required = [".rigpath", "CLAUDE.md", "bin/rig", ".claude"]
+        missing = [p for p in required if not (root / p).exists()]
+        recovery = f"cd {shlex.quote(str(root))} && {shlex.quote(str(primary / 'bin/rig'))} worktree bootstrap"
+        check("worktree_bootstrap", not missing, "complete" if not missing else "missing: " + ", ".join(missing) + "; recover: " + recovery)
+
 # Path resolution must be both usable and recognisably a Rig data directory.
 marker = rig / "memory"
 check("rig_directory", rig.is_dir() and os.access(rig, os.R_OK) and marker.is_dir(),
@@ -344,7 +392,10 @@ else:
 # Stealth exclusions are required only for stealth installs. Future Codex paths
 # become required when the corresponding integration is detectable.
 if rigpath.exists():
-    exclude = read(root / ".git" / "info" / "exclude").splitlines()
+    exclude_path = run(["git", "rev-parse", "--git-path", "info/exclude"])
+    resolved_exclude = pathlib.Path(exclude_path.stdout.strip()) if exclude_path is not None and exclude_path.returncode == 0 else root / ".git" / "info" / "exclude"
+    if not resolved_exclude.is_absolute(): resolved_exclude = root / resolved_exclude
+    exclude = read(resolved_exclude).splitlines()
     entries = {line.strip().rstrip("/") for line in exclude if line.strip() and not line.lstrip().startswith("#")}
     required = ["CLAUDE.md", "PROJECT_BRIEF.md", ".claude", ".rigpath"]
     for candidate in [".agents", ".codex", ".mcp.json", ".playwright-mcp"]:
@@ -967,6 +1018,7 @@ main() {
     claude) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help claude; else launch_claude "$@"; fi;;
     codex) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help codex; else launch_codex "$@"; fi;;
     doctor) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help doctor; else doctor "$@"; fi;;
+    worktree) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help worktree; else worktree_bootstrap "$@"; fi;;
     sprint) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help sprint; else exec "$(dirname "${BASH_SOURCE[0]}")/rig-sprint" "$@"; fi;;
     session|session-name|memory)
       shift
