@@ -43,6 +43,30 @@ write_session() {
   [[ "$output" != *'session-1.json'* ]]
 }
 
+@test "resolver rejects an outside launcher path without reading or writing it" {
+  local outside="$BATS_TEST_TMPDIR/outside-session.json" before after
+  write_session "$outside" outside feat/outside
+  before=$(cksum "$outside")
+  run env RIG_SESSION_FILE="$outside" "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "invalid_launcher_file"'* && "$output" == *'"session_file": null'* ]]
+  after=$(cksum "$outside"); [ "$before" = "$after" ]
+}
+
+@test "resolver rejects traversal and symlink launcher paths" {
+  local outside="$BATS_TEST_TMPDIR/outside-session.json" link="$CASE_DIR/.rig/memory/sessions/session-link.json"
+  write_session "$outside" outside feat/outside
+  ln -s "$outside" "$link"
+  run env RIG_SESSION_FILE="$CASE_DIR/.rig/memory/sessions/../sessions/session-link.json" "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "invalid_launcher_file"'* ]]
+  rm "$link"
+  ln -s "$CASE_DIR/.rig/memory/sessions/missing.json" "$link"
+  run env RIG_SESSION_FILE="$link" "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "invalid_launcher_file"'* ]]
+}
+
 @test "unmatched explicit launcher anchor fails closed" {
   write_session "$CASE_DIR/.rig/memory/sessions/session-1.json" other feat/current
   run env RIG_SESSION_ANCHOR=missing "$CASE_DIR/bin/rig" session resolve --json
@@ -153,6 +177,22 @@ write_session() {
   run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id native-b --source startup
   [ "$status" -eq 3 ]; [[ "$output" == *'"reason": "native_conflict"'* ]]
   after=$(cksum "$file"); [ "$before" = "$after" ]
+}
+
+@test "native binding rejects outside, traversal, and symlink launcher hints" {
+  local outside="$BATS_TEST_TMPDIR/outside-session.json" link="$CASE_DIR/.rig/memory/sessions/session-link.json"
+  write_session "$outside" outside feat/outside
+  run env RIG_SESSION_FILE="$outside" "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id outside-id --source startup
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "invalid_session_path"'* && "$output" == *'"no_write": true'* ]]
+  run env RIG_SESSION_FILE="$CASE_DIR/.rig/memory/sessions/../outside.json" "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id traversal-id --source startup
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "invalid_session_path"'* ]]
+  ln -s "$outside" "$link"
+  run env RIG_SESSION_FILE="$link" "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id symlink-id --source startup
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "invalid_session_path"'* ]]
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -type f -name 'session-*.json' | wc -l | tr -d ' ')" -eq 0 ]
 }
 
 @test "native resolution rejects malformed and future records without writes" {
