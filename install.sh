@@ -223,6 +223,9 @@ PYEOF
 
 repair_stale_manifest_entry() {
   local metadata_file="$1" manifest_file="$2" rel="$3"
+  if ! upgrade_manifest_mutation_allowed "$manifest_file" "$rel"; then
+    return 0
+  fi
   python3 - "$metadata_file" "$manifest_file" "$rel" <<'PYEOF'
 import json, os, sys, tempfile
 
@@ -278,6 +281,9 @@ write_manifest_entry() {
   local manifest_file="${3:-$MANIFEST_FILE}"
   local artifact_path="${4:-}"
   [[ -z "$hash" || -z "$manifest_file" ]] && return
+  if ! upgrade_manifest_mutation_allowed "$manifest_file" "$rel"; then
+    return 0
+  fi
   mkdir -p "$(dirname "$manifest_file")"
   if [[ ! -f "$manifest_file" ]]; then
     {
@@ -656,6 +662,61 @@ upgrade_set_executable_bits() {
   while IFS= read -r -d '' path; do
     chmod +x "$path"
   done < <(find -P "$directory" -maxdepth 1 -type f -name "$pattern" -print0)
+}
+
+# Guard upgrade-only mutations that happen after the manifest-aware copy path.
+# These operations must have the same no-follow semantics as copy_file(): only
+# a missing destination or an existing regular file is writable. A conflict is
+# reported once and preserved for explicit operator repair.
+upgrade_prepare_mutation() {
+  local base="$1" destination="$2" rel="$3" state
+  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  state="$(upgrade_destination_state "$base" "$destination")"
+  case "$state" in
+    missing|regular-file) return 0 ;;
+    *)
+      record_upgrade_destination_conflict "$rel" "$state"
+      return 1
+      ;;
+  esac
+}
+
+upgrade_prepare_directory() {
+  local base="$1" destination="$2" rel="$3" state
+  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  state="$(upgrade_destination_state "$base" "$destination")"
+  case "$state" in
+    missing|directory) return 0 ;;
+    *)
+      record_upgrade_destination_conflict "$rel" "$state"
+      return 1
+      ;;
+  esac
+}
+
+upgrade_manifest_base() {
+  local manifest_file="$1"
+  case "$manifest_file" in
+    "$GLOBAL_MANIFEST_FILE"|"$CODEX_GLOBAL_MANIFEST_FILE") printf '%s\n' "$HOME" ;;
+    *) dirname "$(dirname "$manifest_file")" ;;
+  esac
+}
+
+upgrade_manifest_mutation_allowed() {
+  local manifest_file="$1" rel="$2" base state destination
+  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  base="$(upgrade_manifest_base "$manifest_file")"
+  for destination in "$manifest_file" "${manifest_file}.json"; do
+    state="$(upgrade_destination_state "$base" "$destination")"
+    case "$state" in
+      missing|regular-file) ;;
+      *)
+        record_upgrade_destination_conflict "$rel" "$state"
+        return 1
+        ;;
+    esac
+  done
+  return 0
 }
 
 # ── Portable in-place sed ─────────────────────────────────────────────────────
@@ -1614,17 +1675,26 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   MANIFEST_FILE="$GLOBAL_MANIFEST_FILE"
 
   if has_agent "$GLOBAL_AGENT" claude; then
-  mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR"
+  if upgrade_prepare_directory "$HOME" "$CLAUDE_DIR" ".claude"; then
+    mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR"
+  else
+    info "Preserving conflicting global Claude root: .claude"
+  fi
 
   if [[ "$INSTALL_NOTIFICATIONS" == true ]]; then
-    mkdir -p "$CLAUDE_DIR/bin"
-    cp "$GLOBAL_TEMPLATES/bin/rig-notify" "$CLAUDE_DIR/bin/rig-notify"
-    chmod +x "$CLAUDE_DIR/bin/rig-notify"
-    _notif_channel=terminal_bell
-    [[ -n "${KITTY_WINDOW_ID:-}" ]] && _notif_channel=kitty
-    [[ -n "${GHOSTTY_RESOURCES_DIR:-}" ]] && _notif_channel=ghostty
-    [[ "${TERM_PROGRAM:-}" == iTerm.app ]] && _notif_channel=iterm2
-    python3 - "$CLAUDE_DIR/settings.json" "$_notif_channel" <<'PYEOF'
+    if upgrade_prepare_mutation "$HOME" "$CLAUDE_DIR/bin/rig-notify" ".claude/bin/rig-notify"; then
+      mkdir -p "$CLAUDE_DIR/bin"
+      cp "$GLOBAL_TEMPLATES/bin/rig-notify" "$CLAUDE_DIR/bin/rig-notify"
+      chmod +x "$CLAUDE_DIR/bin/rig-notify"
+    else
+      info "Skipped notification helper due to a conflicting destination."
+    fi
+    if upgrade_prepare_mutation "$HOME" "$CLAUDE_DIR/settings.json" ".claude/settings.json"; then
+      _notif_channel=terminal_bell
+      [[ -n "${KITTY_WINDOW_ID:-}" ]] && _notif_channel=kitty
+      [[ -n "${GHOSTTY_RESOURCES_DIR:-}" ]] && _notif_channel=ghostty
+      [[ "${TERM_PROGRAM:-}" == iTerm.app ]] && _notif_channel=iterm2
+      python3 - "$CLAUDE_DIR/settings.json" "$_notif_channel" <<'PYEOF'
 import json, os, sys, tempfile
 p, channel = sys.argv[1:]
 try:
@@ -1642,7 +1712,10 @@ fd,tmp=tempfile.mkstemp(dir=d); os.close(fd)
 with open(tmp,"w") as f: json.dump(data,f,indent=2); f.write("\n")
 os.replace(tmp,p)
 PYEOF
-    command -v jq >/dev/null 2>&1 && jq -e . "$CLAUDE_DIR/settings.json" >/dev/null || { error "Notification settings validation failed."; exit 1; }
+      command -v jq >/dev/null 2>&1 && jq -e . "$CLAUDE_DIR/settings.json" >/dev/null || { error "Notification settings validation failed."; exit 1; }
+    else
+      info "Skipped notification settings due to a conflicting destination."
+    fi
   fi
 
   # ── CLAUDE.md ──────────────────────────────────────────────────────────────
@@ -1705,7 +1778,10 @@ fi
 
 if [[ "$DO_GLOBAL" == true ]]; then
   _global_smoke="$(run_capability_smoke global "$GLOBAL_AGENT" "$HOME/.claude")" || { error "Postflight smoke failed: $_global_smoke"; exit 1; }
-  [[ "$_GLOBAL_STATE_FUTURE" == true ]] || write_agent_state "$GLOBAL_TARGET_STATE" global "$GLOBAL_AGENT"
+  if [[ "$_GLOBAL_STATE_FUTURE" != true ]] && \
+     upgrade_prepare_mutation "$HOME" "$GLOBAL_TARGET_STATE" ".rig/install-targets.json"; then
+    write_agent_state "$GLOBAL_TARGET_STATE" global "$GLOBAL_AGENT"
+  fi
   success "Postflight targets: global=$GLOBAL_AGENT; smoke=$_global_smoke"
 fi
 if [[ "$COLLISION_STRATEGY" == upgrade && "$DO_GLOBAL" == true ]]; then
@@ -2194,11 +2270,15 @@ if [[ "$DO_PROJECT" == true ]]; then
   # precedence according to Codex's instruction discovery order.
   if has_agent "$PROJECT_AGENT" codex; then
     _CODEX_CONFIG="$TARGET/.codex/config.toml"
-    if ! _codex_merge_result="$(python3 "$SCRIPT_DIR/installer/merge-codex-config.py" "$_CODEX_CONFIG")"; then
-      error "Codex project config was not changed. Fix $_CODEX_CONFIG and retry."
-      exit 1
+    if upgrade_prepare_mutation "$TARGET" "$_CODEX_CONFIG" ".codex/config.toml"; then
+      if ! _codex_merge_result="$(python3 "$SCRIPT_DIR/installer/merge-codex-config.py" "$_CODEX_CONFIG")"; then
+        error "Codex project config was not changed. Fix $_CODEX_CONFIG and retry."
+        exit 1
+      fi
+      success "Codex project instructions: CLAUDE.md fallback ${_codex_merge_result}"
+    else
+      info "Skipped Codex project config due to a conflicting destination."
     fi
-    success "Codex project instructions: CLAUDE.md fallback ${_codex_merge_result}"
   fi
 
   # ── REMOVE SCRIPTS MERGED INTO OTHER HOOKS (upgrade cleanup) ─────────────
@@ -2219,16 +2299,26 @@ if [[ "$DO_PROJECT" == true ]]; then
     _RIG_VER_DEST="$TARGET/.rig/VERSION"
   fi
   if [[ -n "$_RIG_VER_DEST" ]]; then
-    mkdir -p "$(dirname "$_RIG_VER_DEST")" 2>/dev/null || true
-    echo "$INSTALLER_VERSION" > "$_RIG_VER_DEST"
-    write_manifest_entry "$(sha256_file "$_RIG_VER_DEST")" ".rig/VERSION" "$MANIFEST_FILE" "$_RIG_VER_DEST"
+    if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
+      _rig_version_base="$EXTERNAL_RIG_DIR"
+    else
+      _rig_version_base="$TARGET"
+    fi
+    if upgrade_prepare_mutation "$_rig_version_base" "$_RIG_VER_DEST" ".rig/VERSION"; then
+      mkdir -p "$(dirname "$_RIG_VER_DEST")" 2>/dev/null || true
+      echo "$INSTALLER_VERSION" > "$_RIG_VER_DEST"
+      write_manifest_entry "$(sha256_file "$_RIG_VER_DEST")" ".rig/VERSION" "$MANIFEST_FILE" "$_RIG_VER_DEST"
+    else
+      info "Skipped .rig/VERSION due to a conflicting destination."
+    fi
   fi
 
   # ── SUBSTITUTE PLACEHOLDERS ───────────────────────────────────────────────
   TARGET_ABS="$(cd "$TARGET" && pwd)"
 
   TARGET_CLAUDE="$TARGET/CLAUDE.md"
-  if [[ -f "$TARGET_CLAUDE" ]]; then
+  if [[ -f "$TARGET_CLAUDE" ]] && \
+     upgrade_prepare_mutation "$TARGET" "$TARGET_CLAUDE" "CLAUDE.md"; then
     sed_inplace "s/\\[Project Name\\]/${PROJECT_NAME}/g" "$TARGET_CLAUDE"
     success "Substituted [Project Name] in CLAUDE.md"
   fi
@@ -2237,7 +2327,8 @@ if [[ "$DO_PROJECT" == true ]]; then
   # The settings.json template omits SubagentStart by default (it's opt-in).
   # When INSTALL_SUBAGENTS=true (via --subagents or auto-detect), inject the
   # SubagentStart entry with [REPO_ROOT] placeholder; it is substituted below.
-  if [[ "$INSTALL_SUBAGENTS" == true && -f "$TARGET/.claude/settings.json" ]]; then
+  if [[ "$INSTALL_SUBAGENTS" == true && -f "$TARGET/.claude/settings.json" ]] && \
+     upgrade_prepare_mutation "$TARGET" "$TARGET/.claude/settings.json" ".claude/settings.json"; then
     if command -v python3 >/dev/null 2>&1; then
       python3 - "$TARGET/.claude/settings.json" <<'PYEOF' 2>/dev/null || true
 import json, sys
@@ -2259,7 +2350,8 @@ PYEOF
   # Substitute [REPO_ROOT] in settings.json with the absolute project path.
   # This step runs after copy/merge to ensure the final file has the real path.
   TARGET_SETTINGS="$TARGET/.claude/settings.json"
-  if [[ -f "$TARGET_SETTINGS" ]]; then
+  if [[ -f "$TARGET_SETTINGS" ]] && \
+     upgrade_prepare_mutation "$TARGET" "$TARGET_SETTINGS" ".claude/settings.json"; then
     ESCAPED_PATH="${TARGET_ABS//\//\\/}"
     sed_inplace "s/\\[REPO_ROOT\\]/${ESCAPED_PATH}/g" "$TARGET_SETTINGS"
     success "Substituted [REPO_ROOT] in .claude/settings.json → $TARGET_ABS"
@@ -2269,8 +2361,14 @@ PYEOF
   # Covers both inline (.claude/commands/) and external (.rig/processes/) paths.
   _BASE_ESC="${BASE_BRANCH//\//\\/}"
   _subst_base_branch() {
-    local f="$1"
+    local f="$1" base="$TARGET" rel target_rig_dir="${_TARGET_RIG_DIR:-}"
     [[ -f "$f" ]] || return 0
+    rel="${f#"$TARGET"/}"
+    if [[ -n "$target_rig_dir" && "$f" == "$target_rig_dir/"* ]]; then
+      base="$target_rig_dir"
+      rel=".rig/${f#"$target_rig_dir"/}"
+    fi
+    upgrade_prepare_mutation "$base" "$f" "$rel" || return 0
     sed_inplace "s/\\[BASE_BRANCH\\]/${_BASE_ESC}/g" "$f"
   }
   _subst_base_branch "$TARGET/CLAUDE.md"
@@ -2288,8 +2386,12 @@ PYEOF
   # ── EXTERNAL .rig/ — write .rigpath and update git excludes ──────────────
   if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
     # Write the pointer file so hooks can resolve RIG_DIR at runtime
-    echo "$EXTERNAL_RIG_DIR" > "$RIGPATH_FILE"
-    success "Created .rigpath → $EXTERNAL_RIG_DIR"
+    if upgrade_prepare_mutation "$TARGET" "$RIGPATH_FILE" ".rigpath"; then
+      echo "$EXTERNAL_RIG_DIR" > "$RIGPATH_FILE"
+      success "Created .rigpath → $EXTERNAL_RIG_DIR"
+    else
+      info "Skipped .rigpath due to a conflicting destination."
+    fi
 
     # Exclude .rigpath from git tracking (per-clone, not shared via .gitignore)
     GIT_EXCLUDE="$TARGET/.git/info/exclude"
@@ -2306,7 +2408,8 @@ PYEOF
 
     # Update CLAUDE.md @imports to use absolute paths for the external .rig/ dir
     TARGET_CLAUDE="$TARGET/CLAUDE.md"
-    if [[ -f "$TARGET_CLAUDE" ]]; then
+    if [[ -f "$TARGET_CLAUDE" ]] && \
+       upgrade_prepare_mutation "$TARGET" "$TARGET_CLAUDE" "CLAUDE.md"; then
       ESCAPED_EXT="${EXTERNAL_RIG_DIR//\//\\/}"
       sed_inplace "s|@\\.rig/|@${ESCAPED_EXT}/|g" "$TARGET_CLAUDE"
       # Also update the context-loading paths in the prose
@@ -2515,7 +2618,18 @@ PYEOF
 
   # Persist only after the selected layer and its required smoke checks succeed.
   _project_smoke="$(run_capability_smoke project "$PROJECT_AGENT" "$TARGET")" || { error "Postflight smoke failed: $_project_smoke"; exit 1; }
-  [[ "$_PROJECT_STATE_FUTURE" == true ]] || write_agent_state "$PROJECT_TARGET_STATE" project "$PROJECT_AGENT"
+  if [[ "$_PROJECT_STATE_FUTURE" != true ]]; then
+    if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
+      _project_state_base="$EXTERNAL_RIG_DIR"
+      _project_state_rel="install-targets.json"
+    else
+      _project_state_base="$TARGET"
+      _project_state_rel=".rig/install-targets.json"
+    fi
+    if upgrade_prepare_mutation "$_project_state_base" "$PROJECT_TARGET_STATE" "$_project_state_rel"; then
+      write_agent_state "$PROJECT_TARGET_STATE" project "$PROJECT_AGENT"
+    fi
+  fi
   success "Postflight targets: project=$PROJECT_AGENT; smoke=$_project_smoke"
 
   finish_upgrade_transaction
