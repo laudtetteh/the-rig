@@ -305,6 +305,24 @@ is_rig_owned_stub() {
   jq -e '.schema_version == 1 and (.entries | length) > 0' "$metadata" >/dev/null
 }
 
+@test "upgrade strategy: reports missing metadata artifacts without deleting anything" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  local sentinel="$TEST_PROJECT/.rig/legacy-user-file.md"
+  printf 'user data\n' > "$sentinel"
+  jq '.entries[".rig/legacy-user-file.md"] = {"sha256":"deadbeef","owner":"user","source":"shared-rig","type":"file","mode":"644","installer_version":"legacy"}' "$metadata" > "$TEMP_DIR/metadata.json"
+  mv "$TEMP_DIR/metadata.json" "$metadata"
+  rm "$sentinel"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Stale/missing tracked artifacts: 1"* ]]
+  [[ "$output" == *"project:.rig/legacy-user-file.md"* ]]
+  [ ! -e "$sentinel" ]
+}
+
 @test "upgrade strategy: preserves customized generated Codex artifacts" {
   run_installer --strategy upgrade --project-agent codex
   [ "$status" -eq 0 ]
