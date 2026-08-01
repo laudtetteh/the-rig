@@ -81,3 +81,46 @@ recover() {
   [ -f "$TEST_PROJECT/.rig-backup/.in-progress/.journal" ]
   [[ "$output" == *"Unsafe path in interrupted upgrade journal"* ]]
 }
+
+@test "recover processes both global and project layers before exiting" {
+  GLOBAL_HOME="$TEMP_DIR/home"
+  mkdir -p "$GLOBAL_HOME/.claude/.rig-backup/.in-progress"
+  printf 'global original\n' > "$GLOBAL_HOME/.claude/CLAUDE.md"
+  printf 'global original\n' > "$GLOBAL_HOME/.claude/.rig-backup/.in-progress/CLAUDE.md"
+  printf 'backup\tCLAUDE.md\n' > "$GLOBAL_HOME/.claude/.rig-backup/.in-progress/.journal"
+  printf 'global partial\n' > "$GLOBAL_HOME/.claude/CLAUDE.md"
+
+  mkdir -p "$TEST_PROJECT/.rig-backup/.in-progress"
+  printf 'project original\n' > "$TEST_PROJECT/CLAUDE.md"
+  printf 'project original\n' > "$TEST_PROJECT/.rig-backup/.in-progress/CLAUDE.md"
+  printf 'backup\tCLAUDE.md\n' > "$TEST_PROJECT/.rig-backup/.in-progress/.journal"
+  printf 'project partial\n' > "$TEST_PROJECT/CLAUDE.md"
+
+  run env HOME="$GLOBAL_HOME" bash "$INSTALLER" \
+    --target "$TEST_PROJECT" --project-name Test --tracking repo \
+    --global-agent claude --project-agent claude --recover
+
+  [ "$status" -eq 0 ]
+  grep -Fxq 'global original' "$GLOBAL_HOME/.claude/CLAUDE.md"
+  grep -Fxq 'project original' "$TEST_PROJECT/CLAUDE.md"
+  [ ! -e "$GLOBAL_HOME/.claude/.rig-backup/.in-progress" ]
+  [ ! -e "$TEST_PROJECT/.rig-backup/.in-progress" ]
+  [[ "$output" == *"Interrupted upgrade restored"* ]]
+}
+
+@test "recover exits cleanly after a global-only transaction" {
+  GLOBAL_HOME="$TEMP_DIR/home"
+  mkdir -p "$GLOBAL_HOME/.claude/.rig-backup/.in-progress"
+  printf 'global original\n' > "$GLOBAL_HOME/.claude/CLAUDE.md"
+  printf 'global original\n' > "$GLOBAL_HOME/.claude/.rig-backup/.in-progress/CLAUDE.md"
+  printf 'backup\tCLAUDE.md\n' > "$GLOBAL_HOME/.claude/.rig-backup/.in-progress/.journal"
+  printf 'global partial\n' > "$GLOBAL_HOME/.claude/CLAUDE.md"
+
+  run env HOME="$GLOBAL_HOME" bash "$INSTALLER" \
+    --global-only --global-agent claude --recover
+
+  [ "$status" -eq 0 ]
+  grep -Fxq 'global original' "$GLOBAL_HOME/.claude/CLAUDE.md"
+  [ ! -e "$GLOBAL_HOME/.claude/.rig-backup/.in-progress" ]
+  [[ "$output" == *"Recovery complete."* ]]
+}

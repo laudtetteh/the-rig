@@ -215,6 +215,7 @@ _FLAG_PROJECT_NAME="" # set via --project-name <n>  (skips interactive prompt)
 _FLAG_BASE_BRANCH=""  # set via --base-branch <n>   (skips interactive prompt)
 _FLAG_TRACKING=""     # set via --tracking <mode>   (skips tracking prompt; orthogonal to --target)
 RECOVER_ONLY=false
+RECOVERY_ONLY_COMPLETE=false
 SKIP_GIT_HOOKS=false       # set via --skip-git-hooks    (stealth: skip .git/hooks/ writes)
 INSTALL_FEATURE_DOCS=false # set via --feature-docs      (gates doc-feature/feature-context/etc.)
 INSTALL_SUBAGENTS=false    # set via --subagents          (gates subagent-start.sh + SubagentStart hook)
@@ -1300,9 +1301,15 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
 
   if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
     recover_upgrade_transaction "$CLAUDE_DIR"
-    if [[ "$RECOVER_ONLY" == true ]]; then exit 0; fi
+    if [[ "$RECOVER_ONLY" == true ]]; then
+      # Recovery-only must continue into the project layer when both layers
+      # were selected.  A global-only invocation can finish here safely.
+      DO_GLOBAL=false
+      [[ "$DO_PROJECT" == true ]] || RECOVERY_ONLY_COMPLETE=true
+    fi
   fi
 
+  if [[ "$RECOVER_ONLY" != true ]]; then
   # Point manifest helpers at the global manifest for this section.
   _SAVED_MANIFEST_FILE="$MANIFEST_FILE"
   MANIFEST_FILE="$GLOBAL_MANIFEST_FILE"
@@ -1389,6 +1396,12 @@ PYEOF
   finish_upgrade_transaction
 
   echo ""
+  fi
+fi
+
+if [[ "$RECOVERY_ONLY_COMPLETE" == true ]]; then
+  echo "Recovery complete."
+  exit 0
 fi
 
 if [[ "$DO_GLOBAL" == true ]]; then
