@@ -11,6 +11,31 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.23.0] — 2026-08-01
+
+### Added
+- Claude Code and Codex coexistence contracts, provider adapters, generated
+  Codex skills, and native session identity recovery.
+- Connector preflight contracts, hosted security/recovery gates, and release
+  verification guidance.
+
+### Changed
+- Upgrade handling now records artifact ownership and metadata, preserves
+  customizations, reports stale artifacts, supports safe legacy cleanup, and
+  converges moved project roots and provider layouts.
+- Upgrade writes reject symlink, dangling-link, wrong-type, and symlinked
+  parent destinations without following or silently overwriting them.
+
+### Security
+- Session-file mutations, upgrade destinations, recovery journals, manifests,
+  backups, and generated provider surfaces receive explicit path and privacy
+  confinement checks.
+
+### Fixed
+- Installed Claude/Codex artifacts, generated adapters, external `.rig`
+  mirrors, and repeated upgrade paths now have explicit parity and matrix
+  coverage.
+
 ## [1.22.0] — 2026-07-19
 
 ### Fixed
