@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Best-effort, zero-data local notification helper.
+set +e
+case "${1:-}" in notification|stop|subagent-stop|permission-request) event="$1" ;; *) exit 0 ;; esac
+[[ -z "${CI:-}" && "${TERM:-dumb}" != dumb ]] || exit 0
+[[ "$(uname -s 2>/dev/null)" == Darwin ]] || exit 0
+command -v afplay >/dev/null 2>&1 || exit 0
+case "$event" in
+  permission-request) sound=/System/Library/Sounds/Glass.aiff ;;
+  subagent-stop) sound=/System/Library/Sounds/Pop.aiff ;;
+  *) sound=/System/Library/Sounds/Glass.aiff ;;
+esac
+[[ -r "$sound" ]] || exit 0
+afplay "$sound" >/dev/null 2>&1 || true
+exit 0

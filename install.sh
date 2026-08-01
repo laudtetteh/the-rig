@@ -218,6 +218,7 @@ SKIP_GIT_HOOKS=false       # set via --skip-git-hooks    (stealth: skip .git/hoo
 INSTALL_FEATURE_DOCS=false # set via --feature-docs      (gates doc-feature/feature-context/etc.)
 INSTALL_SUBAGENTS=false    # set via --subagents          (gates subagent-start.sh + SubagentStart hook)
 INSTALL_CONTRIBUTE=false   # set via --contribute         (gates rig-gaps.md + rig-propose.md)
+INSTALL_NOTIFICATIONS=false
 _FLAG_GLOBAL_AGENT=""
 _FLAG_PROJECT_AGENT=""
 PREFLIGHT_ONLY=false
@@ -231,6 +232,7 @@ for arg in "$@"; do
     --feature-docs)     INSTALL_FEATURE_DOCS=true ;;
     --subagents)        INSTALL_SUBAGENTS=true ;;
     --contribute)       INSTALL_CONTRIBUTE=true ;;
+    --notifications)    INSTALL_NOTIFICATIONS=true ;;
     --preflight)        PREFLIGHT_ONLY=true ;;
     --json)             JSON_OUTPUT=true ;;
     --global-agent|--project-agent)
@@ -293,6 +295,7 @@ for arg in "$@"; do
       echo "                        event in settings.json. Skipped by default — add for"
       echo "                        projects that use Claude Code multi-agent workflows."
       echo "  --contribute          Install Rig contributor commands (opt-in)."
+      echo "  --notifications       Enable audible/visual agent notifications (opt-in)."
       echo "                        Installs /rig-gaps and /rig-propose. Useful for"
       echo "                        developers who maintain The Rig or a fork."
       echo "  --skip-git-hooks      Stealth mode only: skip writing hooks to .git/hooks/."
@@ -358,6 +361,10 @@ for _agent_value in "${_FLAG_GLOBAL_AGENT:-claude}" "${_FLAG_PROJECT_AGENT:-clau
 done
 GLOBAL_AGENT="${_FLAG_GLOBAL_AGENT:-claude}"
 PROJECT_AGENT="${_FLAG_PROJECT_AGENT:-claude}"
+
+if [[ -t 0 && "$PREFLIGHT_ONLY" != true && "$INSTALL_NOTIFICATIONS" != true ]]; then
+  confirm "Enable audible/visual agent notifications?" "n" && INSTALL_NOTIFICATIONS=true || true
+fi
 
 agent_json() {
   case "$1" in
@@ -1163,6 +1170,35 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
 
   if has_agent "$GLOBAL_AGENT" claude; then
   mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR"
+
+  if [[ "$INSTALL_NOTIFICATIONS" == true ]]; then
+    mkdir -p "$CLAUDE_DIR/bin"
+    cp "$GLOBAL_TEMPLATES/bin/rig-notify" "$CLAUDE_DIR/bin/rig-notify"
+    chmod +x "$CLAUDE_DIR/bin/rig-notify"
+    _notif_channel=terminal_bell
+    [[ -n "${KITTY_WINDOW_ID:-}" ]] && _notif_channel=kitty
+    [[ -n "${GHOSTTY_RESOURCES_DIR:-}" ]] && _notif_channel=ghostty
+    [[ "${TERM_PROGRAM:-}" == iTerm.app ]] && _notif_channel=iterm2
+    python3 - "$CLAUDE_DIR/settings.json" "$_notif_channel" <<'PYEOF'
+import json, os, sys, tempfile
+p, channel = sys.argv[1:]
+try:
+    data = json.load(open(p)) if os.path.exists(p) else {}
+except Exception as e:
+    print(f"Invalid Claude settings JSON: {e}", file=sys.stderr); raise SystemExit(1)
+data["preferredNotifChannel"] = channel
+hooks = data.setdefault("hooks", {})
+cmd = 'bash ~/.claude/bin/rig-notify'
+for event, arg in (("Notification","notification"),("Stop","stop"),("SubagentStop","subagent-stop"),("PermissionRequest","permission-request")):
+    entry={"hooks":[{"type":"command","command":f"{cmd} {arg}"}]}
+    if not any(entry == x for x in hooks.setdefault(event, [])): hooks[event].append(entry)
+d=os.path.dirname(p); os.makedirs(d, exist_ok=True)
+fd,tmp=tempfile.mkstemp(dir=d); os.close(fd)
+with open(tmp,"w") as f: json.dump(data,f,indent=2); f.write("\n")
+os.replace(tmp,p)
+PYEOF
+    command -v jq >/dev/null 2>&1 && jq -e . "$CLAUDE_DIR/settings.json" >/dev/null || { error "Notification settings validation failed."; exit 1; }
+  fi
 
   # ── CLAUDE.md ──────────────────────────────────────────────────────────────
   if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
