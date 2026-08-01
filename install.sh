@@ -99,9 +99,11 @@ is_rig_owned() {
 }
 
 # ── Manifest helpers ──────────────────────────────────────────────────────────
-# The manifest lives at $MANIFEST_FILE and records the SHA256 of each Rig-owned
-# file at the time it was last installed by the installer. Format per line:
+# The manifest lives at $MANIFEST_FILE and records the SHA256 of each installed
+# artifact at the time it was last installed by the installer. Format per line:
 #   sha256hash  relative/path
+# A versioned JSON companion records ownership/source/type/mode metadata while
+# the text format remains readable by older installers.
 #
 # This allows the Upgrade strategy to distinguish:
 #   dest hash == manifest hash  → file unmodified since install → safe to overwrite
@@ -113,6 +115,75 @@ is_rig_owned() {
 MANIFEST_FILE=""        # set during project-layer install (after RIG_DIR is resolved)
 GLOBAL_MANIFEST_FILE="$HOME/.claude/.rig-global-manifest"  # global layer manifest
 CODEX_GLOBAL_MANIFEST_FILE="$HOME/.agents/.rig-global-manifest"
+
+manifest_artifact_source() {
+  case "$1" in
+    .agents/skills/*) echo generated-codex ;;
+    .codex/*) echo codex-native ;;
+    .claude/*) echo claude-native ;;
+    .rig/*) echo shared-rig ;;
+    .husky/*|.gitleaks.toml) echo project-tooling ;;
+    *) echo project-user ;;
+  esac
+}
+
+manifest_artifact_mode() {
+  local path="$1"
+  [[ -e "$path" || -L "$path" ]] || { echo ""; return; }
+  if stat -c '%a' "$path" >/dev/null 2>&1; then
+    stat -c '%a' "$path"
+  else
+    stat -f '%Lp' "$path"
+  fi
+}
+
+write_manifest_metadata() {
+  local hash="$1" rel="$2" manifest_file="$3" artifact_path="${4:-}" metadata_file
+  [[ -z "$hash" || -z "$rel" || -z "$manifest_file" ]] && return
+  metadata_file="${manifest_file}.json"
+  local owner="user" kind="missing" mode=""
+  if is_rig_owned "$rel"; then owner="rig"; fi
+  if [[ -L "$artifact_path" ]]; then kind="symlink"
+  elif [[ -f "$artifact_path" ]]; then kind="file"
+  elif [[ -d "$artifact_path" ]]; then kind="directory"
+  elif [[ -e "$artifact_path" ]]; then kind="other"
+  fi
+  mode="$(manifest_artifact_mode "$artifact_path")"
+  python3 - "$metadata_file" "$rel" "$hash" "$owner" "$(manifest_artifact_source "$rel")" "$kind" "$mode" "$INSTALLER_VERSION" <<'PYEOF'
+import json, os, sys, tempfile
+
+path, rel, digest, owner, source, kind, mode, installer_version = sys.argv[1:]
+try:
+    with open(path) as fh:
+        data = json.load(fh)
+except FileNotFoundError:
+    data = {
+        "schema": "https://the-rig.dev/schemas/manifest/v1",
+        "schema_version": 1,
+        "entries": {},
+    }
+if data.get("schema_version") != 1 or not isinstance(data.get("entries"), dict):
+    raise SystemExit("invalid The Rig manifest metadata")
+data["entries"][rel] = {
+    "sha256": digest,
+    "owner": owner,
+    "source": source,
+    "type": kind,
+    "mode": mode or None,
+    "installer_version": installer_version,
+}
+directory = os.path.dirname(path) or "."
+fd, temporary = tempfile.mkstemp(prefix=".rig-manifest.", dir=directory, text=True)
+try:
+    with os.fdopen(fd, "w") as fh:
+        json.dump(data, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PYEOF
+}
 
 read_manifest_hash() {
   # Returns the recorded hash for a given rel path, or empty string if not found.
@@ -128,6 +199,7 @@ write_manifest_entry() {
   local hash="$1"
   local rel="$2"
   local manifest_file="${3:-$MANIFEST_FILE}"
+  local artifact_path="${4:-}"
   [[ -z "$hash" || -z "$manifest_file" ]] && return
   mkdir -p "$(dirname "$manifest_file")"
   if [[ ! -f "$manifest_file" ]]; then
@@ -142,6 +214,7 @@ write_manifest_entry() {
   grep -v "  ${rel}$" "$manifest_file" > "$tmp" 2>/dev/null || true
   echo "${hash}  ${rel}" >> "$tmp"
   mv "$tmp" "$manifest_file"
+  write_manifest_metadata "$hash" "$rel" "$manifest_file" "$artifact_path"
 }
 
 # ── Locate the script's own directory (works with symlinks) ───────────────────
@@ -997,7 +1070,7 @@ copy_file() {
     # strategy can later detect whether any file has been customized.
     # settings.json is excluded — it's always smart-merged, not hash-tracked.
     if [[ -n "$rel" && "$(basename "$rel")" != "settings.json" ]]; then
-      write_manifest_entry "$(sha256_file "$dest")" "$rel"
+      write_manifest_entry "$(sha256_file "$dest")" "$rel" "$MANIFEST_FILE" "$dest"
     fi
     return
   fi
@@ -1009,7 +1082,7 @@ copy_file() {
         cp "$src" "$dest"
         success "Updated ${dest#${base}/}"
         if [[ -n "$rel" && "$(basename "$rel")" != "settings.json" ]]; then
-          write_manifest_entry "$(sha256_file "$dest")" "$rel"
+          write_manifest_entry "$(sha256_file "$dest")" "$rel" "$MANIFEST_FILE" "$dest"
         fi
       else
         info "Skipped ${dest#${base}/}"
@@ -1042,7 +1115,7 @@ copy_file() {
       cp "$src" "$dest"
       success "Overwrote ${dest#${base}/}"
       if [[ -n "$rel" && "$(basename "$rel")" != "settings.json" ]]; then
-        write_manifest_entry "$(sha256_file "$dest")" "$rel"
+        write_manifest_entry "$(sha256_file "$dest")" "$rel" "$MANIFEST_FILE" "$dest"
       fi
       ;;
     merge)
@@ -1084,13 +1157,13 @@ copy_codex_owned_initial() {
   if [[ -e "$dest" || -L "$dest" ]]; then
     info "Preserved existing: ${dest#${base}/}"
     if [[ -f "$dest" && ! -L "$dest" ]]; then
-      write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file"
+      write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file" "$dest"
     fi
     return
   fi
   cp "$src" "$dest"
   success "Created ${dest#${base}/}"
-  write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file"
+  write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file" "$dest"
 }
 
 # ── UPGRADE STRATEGY HANDLER ──────────────────────────────────────────────────
@@ -1193,18 +1266,18 @@ _copy_upgrade_existing() {
       warn "Preserved untracked Codex artifact: ${rel}"
       info "Recorded its current hash; rerun Upgrade after reviewing it."
       record_upgrade_result skipped-customized "$rel"
-      write_manifest_entry "$dest_hash" "$rel" "$manifest_file"
+      write_manifest_entry "$dest_hash" "$rel" "$manifest_file" "$dest"
     elif [[ "$rig_owned_default" == true ]] || is_rig_owned "$rel"; then
       if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
       cp "$src" "$dest"
       success "Updated: ${rel}"
       record_upgrade_result updated "$rel"
-      write_manifest_entry "$new_hash" "$rel" "$manifest_file"
+      write_manifest_entry "$new_hash" "$rel" "$manifest_file" "$dest"
     else
       info "Skipped (user-owned, no prior manifest entry): ${rel}"
       record_upgrade_result skipped-untracked "$rel"
       # Record the current hash so future upgrades can detect customizations.
-      write_manifest_entry "$dest_hash" "$rel" "$manifest_file"
+      write_manifest_entry "$dest_hash" "$rel" "$manifest_file" "$dest"
     fi
   elif [[ "$dest_hash" == "$manifest_hash" ]]; then
     # Matches manifest → unmodified since install. Safe to overwrite.
@@ -1212,7 +1285,7 @@ _copy_upgrade_existing() {
     cp "$src" "$dest"
     success "Updated: ${rel}"
     record_upgrade_result updated "$rel"
-    write_manifest_entry "$new_hash" "$rel" "$manifest_file"
+    write_manifest_entry "$new_hash" "$rel" "$manifest_file" "$dest"
   else
     # dest_hash differs from manifest_hash — user has customized this file.
     # Show what changed and ask before overwriting.
@@ -1237,7 +1310,7 @@ _copy_upgrade_existing() {
           cp "$src" "$dest"
           success "Updated (overwritten): ${rel}"
           record_upgrade_result updated "$rel"
-          write_manifest_entry "$new_hash" "$rel" "$manifest_file"
+          write_manifest_entry "$new_hash" "$rel" "$manifest_file" "$dest"
           break
           ;;
         s|S)
@@ -1283,7 +1356,7 @@ _copy_global_file_upgrade() {
     cp "$src" "$dest"
     success "Created: ${rel}"
     record_upgrade_result updated "$rel"
-    write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file"
+    write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file" "$dest"
     return
   fi
   _copy_upgrade_existing "$src" "$dest" "$base" "$rel" \
@@ -1918,7 +1991,7 @@ if [[ "$DO_PROJECT" == true ]]; then
   if [[ -n "$_RIG_VER_DEST" ]]; then
     mkdir -p "$(dirname "$_RIG_VER_DEST")" 2>/dev/null || true
     echo "$INSTALLER_VERSION" > "$_RIG_VER_DEST"
-    write_manifest_entry "$(sha256_file "$_RIG_VER_DEST")" ".rig/VERSION"
+    write_manifest_entry "$(sha256_file "$_RIG_VER_DEST")" ".rig/VERSION" "$MANIFEST_FILE" "$_RIG_VER_DEST"
   fi
 
   # ── SUBSTITUTE PLACEHOLDERS ───────────────────────────────────────────────
