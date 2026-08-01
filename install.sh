@@ -695,29 +695,66 @@ journal_append() {
   mv "$tmp" "$UPGRADE_JOURNAL"
 }
 
+upgrade_relpath_safe() {
+  # Journal entries are installer-generated relative paths. Reject anything
+  # that could escape the selected base or cross a symlink during recovery.
+  local base="$1" rel="$2" component path
+  [[ -n "$rel" && "$rel" != /* ]] || return 1
+  case "$rel" in
+    .|..|./*|../*|*/./*|*/../*|*//*|*$'\t'*|*$'\n'*|*$'\r'*) return 1 ;;
+  esac
+  path="$base"
+  while IFS= read -r component; do
+    [[ -n "$component" ]] || return 1
+    path="$path/$component"
+    [[ -L "$path" ]] && return 1
+  done < <(printf '%s\n' "$rel" | tr '/' '\n')
+  return 0
+}
+
 recover_upgrade_transaction() {
   local base="$1"
   local transaction="$base/.rig-backup/.in-progress"
   local journal="$transaction/.journal"
   [[ -f "$journal" ]] || return 0
+  if [[ -L "$transaction" || ! -d "$transaction" ]]; then
+    error "Unsafe interrupted upgrade transaction path: $transaction"
+    return 2
+  fi
   warn "Interrupted Rig upgrade detected; restoring its last transaction."
-  local operation rel destination backup
+  local operation rel destination backup recovery_failed=false
   while IFS=$'\t' read -r operation rel; do
     [[ -n "$operation" && -n "$rel" ]] || continue
+    if ! upgrade_relpath_safe "$base" "$rel" || ! upgrade_relpath_safe "$transaction" "$rel"; then
+      error "Unsafe path in interrupted upgrade journal; recovery stopped: $rel"
+      recovery_failed=true
+      continue
+    fi
     destination="$base/$rel"
     case "$operation" in
       backup)
         backup="$transaction/$rel"
-        if [[ -f "$backup" ]]; then
+        if [[ -f "$backup" && ! -L "$backup" ]]; then
           mkdir -p "$(dirname "$destination")"
           cp "$backup" "$destination"
+        else
+          error "Missing or unsafe backup in interrupted upgrade journal: $rel"
+          recovery_failed=true
         fi
         ;;
       created)
         if [[ -f "$destination" || -L "$destination" ]]; then rm -f "$destination"; fi
         ;;
+      *)
+        error "Unknown operation in interrupted upgrade journal: $operation"
+        recovery_failed=true
+        ;;
     esac
   done < <(tac "$journal" 2>/dev/null || tail -r "$journal")
+  if [[ "$recovery_failed" == true ]]; then
+    error "Interrupted upgrade recovery stopped; review $journal and repair it before retrying."
+    return 2
+  fi
   rm -rf "$transaction"
   success "Interrupted upgrade restored; rerun Upgrade to converge safely."
 }
