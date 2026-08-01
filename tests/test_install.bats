@@ -396,14 +396,70 @@ is_rig_owned_stub() {
   local hook="$TEST_PROJECT/.codex/hooks/rig-adapter.sh"
   local outside="$TEMP_DIR/outside-hook.sh"
   printf '# outside sentinel\n' > "$outside"
+  chmod +x "$outside"
   rm "$hook"
   ln -s "$outside" "$hook"
 
   run_installer --strategy upgrade --project-agent codex
   [ "$status" -eq 0 ]
   [[ "$output" == *"Customized symlink detected: .codex/hooks/rig-adapter.sh"* ]]
+  [[ "$output" == *"Skipped conflicts: 1"* ]]
   [[ -L "$hook" ]]
   grep -q 'outside sentinel' "$outside"
+}
+
+@test "upgrade strategy: preserves a wrong-type destination" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hook="$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  rm "$hook"
+  mkdir "$hook"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ -d "$hook" ]
+  [[ "$output" == *"Preserved conflicting upgrade destination: .claude/hooks/pre-tool.sh (directory)"* ]]
+  [[ "$output" == *"Skipped conflicts:"* ]]
+}
+
+@test "upgrade strategy: preserves a dangling artifact symlink" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local command="$TEST_PROJECT/.claude/commands/status.md"
+  rm "$command"
+  ln -s "$TEMP_DIR/missing-command.md" "$command"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ -L "$command" ]
+  [ ! -e "$command" ]
+  [[ "$output" == *"Customized symlink detected: .claude/commands/status.md"* ]]
+  [[ "$output" == *"Skipped conflicts:"* ]]
+}
+
+@test "upgrade strategy: does not follow a symlinked artifact parent" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local hooks="$TEST_PROJECT/.claude/hooks"
+  local outside_hooks="$TEMP_DIR/outside-hooks"
+  local outside_hook="$outside_hooks/pre-tool.sh"
+  mkdir "$outside_hooks"
+  mv "$hooks"/* "$outside_hooks/"
+  rmdir "$hooks"
+  ln -s "$outside_hooks" "$hooks"
+  chmod 644 "$outside_hook"
+  local before_hash; before_hash="$(_sha256 "$outside_hook")"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ -L "$hooks" ]
+  [ "$(_sha256 "$outside_hook")" = "$before_hash" ]
+  python3 -c "import os, stat; assert stat.S_IMODE(os.stat('$outside_hook').st_mode) == 0o644"
+  [[ "$output" == *"symlinked-parent"* ]]
+  [[ "$output" == *"Skipped conflicts:"* ]]
 }
 
 @test "upgrade strategy: preserves a legacy Codex artifact with no manifest entry" {

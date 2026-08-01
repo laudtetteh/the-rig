@@ -592,6 +592,72 @@ record_upgrade_result() {
   esac
 }
 
+# Classify an upgrade destination without following its leaf or parent
+# symlinks. The result is deliberately a small public vocabulary used by the
+# upgrade summary and tests; no path content is emitted.
+upgrade_destination_state() {
+  python3 - "$1" "$2" <<'PYEOF'
+import os
+import sys
+
+base, destination = (os.path.abspath(value) for value in sys.argv[1:])
+
+try:
+    if os.path.commonpath((base, destination)) != base:
+        print("outside-root")
+        raise SystemExit(0)
+except ValueError:
+    print("outside-root")
+    raise SystemExit(0)
+
+if os.path.islink(base):
+    print("symlinked-root")
+    raise SystemExit(0)
+
+relative = os.path.relpath(destination, base)
+parts = relative.split(os.sep)
+current = base
+for component in parts[:-1]:
+    if component in ("", "."):
+        continue
+    current = os.path.join(current, component)
+    if os.path.islink(current):
+        print("symlinked-parent")
+        raise SystemExit(0)
+    if os.path.lexists(current) and not os.path.isdir(current):
+        print("parent-wrong-type")
+        raise SystemExit(0)
+
+if not os.path.lexists(destination):
+    print("missing")
+elif os.path.islink(destination):
+    print("symlink")
+elif os.path.isfile(destination):
+    print("regular-file")
+elif os.path.isdir(destination):
+    print("directory")
+else:
+    print("wrong-type")
+PYEOF
+}
+
+record_upgrade_destination_conflict() {
+  local rel="$1" state="$2"
+  warn "Preserved conflicting upgrade destination: ${rel:-unknown} (${state})"
+  record_upgrade_result skipped-conflict "$rel"
+}
+
+upgrade_set_executable_bits() {
+  local directory="$1" pattern="$2" rel="$3" path
+  if [[ -L "$directory" ]]; then
+    record_upgrade_destination_conflict "$rel" symlinked-parent
+    return 0
+  fi
+  while IFS= read -r -d '' path; do
+    chmod +x "$path"
+  done < <(find -P "$directory" -maxdepth 1 -type f -name "$pattern" -print0)
+}
+
 # ── Portable in-place sed ─────────────────────────────────────────────────────
 # GNU sed uses -i ""; macOS BSD sed uses -i ''
 sed_inplace() {
@@ -1143,8 +1209,19 @@ copy_file() {
   local dest="$2"
   local base="${3:-}"
   local rel="${4:-}"
-  local dir
+  local dir destination_state
   dir="$(dirname "$dest")"
+
+  if [[ "$COLLISION_STRATEGY" == upgrade && -n "$base" ]]; then
+    destination_state="$(upgrade_destination_state "$base" "$dest")"
+    case "$destination_state" in
+      symlinked-parent|symlinked-root|parent-wrong-type|outside-root|directory|wrong-type)
+        record_upgrade_destination_conflict "$rel" "$destination_state"
+        return 0
+        ;;
+    esac
+  fi
+
   mkdir -p "$dir"
 
   if [[ ! -e "$dest" && ! -L "$dest" ]]; then
@@ -1289,7 +1366,7 @@ _copy_upgrade_existing() {
   if [[ -L "$dest" ]]; then
     warn "Customized symlink detected: ${rel}"
     info "Skipped symlink; remove it explicitly to install the generated file."
-    record_upgrade_result skipped-customized "$rel"
+    record_upgrade_result skipped-conflict "$rel"
     return
   fi
 
@@ -1438,6 +1515,15 @@ _copy_global_file_upgrade() {
   local base="${3:-}"
   local rel="${4:-}"
   local manifest_file="${5:-$GLOBAL_MANIFEST_FILE}"
+  local destination_state
+
+  destination_state="$(upgrade_destination_state "$base" "$dest")"
+  case "$destination_state" in
+    symlinked-parent|symlinked-root|parent-wrong-type|outside-root|directory|wrong-type)
+      record_upgrade_destination_conflict "$rel" "$destination_state"
+      return 0
+      ;;
+  esac
 
   if [[ ! -e "$dest" && ! -L "$dest" ]]; then
     mkdir -p "$(dirname "$dest")"
@@ -2331,24 +2417,49 @@ PYEOF
   CODEX_HOOKS_DIR="$TARGET/.codex/hooks"
   RIG_DISPATCHER="$TARGET/bin/rig"
 
-  if [[ -d "$HUSKY_DIR" ]]; then
-    chmod +x "$HUSKY_DIR/"* 2>/dev/null || true
-    success "Set executable bits on .husky/ hooks"
-  fi
+  if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+    if [[ -d "$HUSKY_DIR" || -L "$HUSKY_DIR" ]]; then
+      upgrade_set_executable_bits "$HUSKY_DIR" '*' '.husky/'
+      success "Set executable bits on .husky/ hooks"
+    fi
 
-  if [[ -d "$CLAUDE_HOOKS_DIR" ]]; then
-    chmod +x "$CLAUDE_HOOKS_DIR/"*.sh 2>/dev/null || true
-    success "Set executable bits on .claude/hooks/ scripts"
-  fi
+    if [[ -d "$CLAUDE_HOOKS_DIR" || -L "$CLAUDE_HOOKS_DIR" ]]; then
+      upgrade_set_executable_bits "$CLAUDE_HOOKS_DIR" '*.sh' '.claude/hooks/'
+      success "Set executable bits on .claude/hooks/ scripts"
+    fi
 
-  if has_agent "$PROJECT_AGENT" codex && [[ -d "$CODEX_HOOKS_DIR" ]]; then
-    chmod +x "$CODEX_HOOKS_DIR/"*.sh 2>/dev/null || true
-    success "Set executable bits on Codex hook adapters"
-  fi
+    if has_agent "$PROJECT_AGENT" codex && \
+       [[ -d "$CODEX_HOOKS_DIR" || -L "$CODEX_HOOKS_DIR" ]]; then
+      upgrade_set_executable_bits "$CODEX_HOOKS_DIR" '*.sh' '.codex/hooks/'
+      success "Set executable bits on Codex hook adapters"
+    fi
 
-  if [[ -f "$RIG_DISPATCHER" ]]; then
-    chmod +x "$RIG_DISPATCHER"
-    success "Set executable bit on bin/rig"
+    if [[ -L "$RIG_DISPATCHER" ]]; then
+      record_upgrade_destination_conflict 'bin/rig' symlink
+    elif [[ -f "$RIG_DISPATCHER" ]]; then
+      chmod +x "$RIG_DISPATCHER"
+      success "Set executable bit on bin/rig"
+    fi
+  else
+    if [[ -d "$HUSKY_DIR" ]]; then
+      chmod +x "$HUSKY_DIR/"* 2>/dev/null || true
+      success "Set executable bits on .husky/ hooks"
+    fi
+
+    if [[ -d "$CLAUDE_HOOKS_DIR" ]]; then
+      chmod +x "$CLAUDE_HOOKS_DIR/"*.sh 2>/dev/null || true
+      success "Set executable bits on .claude/hooks/ scripts"
+    fi
+
+    if has_agent "$PROJECT_AGENT" codex && [[ -d "$CODEX_HOOKS_DIR" ]]; then
+      chmod +x "$CODEX_HOOKS_DIR/"*.sh 2>/dev/null || true
+      success "Set executable bits on Codex hook adapters"
+    fi
+
+    if [[ -f "$RIG_DISPATCHER" ]]; then
+      chmod +x "$RIG_DISPATCHER"
+      success "Set executable bit on bin/rig"
+    fi
   fi
 
   # ── HUSKY INITIALIZATION ──────────────────────────────────────────────────
