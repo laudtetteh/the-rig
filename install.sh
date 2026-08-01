@@ -172,6 +172,7 @@ data["entries"][rel] = {
     "mode": mode or None,
     "installer_version": installer_version,
 }
+
 directory = os.path.dirname(path) or "."
 fd, temporary = tempfile.mkstemp(prefix=".rig-manifest.", dir=directory, text=True)
 try:
@@ -183,6 +184,37 @@ finally:
     if os.path.exists(temporary):
         os.unlink(temporary)
 PYEOF
+}
+
+report_stale_manifest_entries() {
+  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  local metadata_file="$1" artifact_root="$2" label="$3"
+  [[ -f "$metadata_file" ]] || return 0
+  local stale_count=0 stale_rel
+  while IFS= read -r stale_rel; do
+    [[ -n "$stale_rel" ]] || continue
+    stale_count=$((stale_count + 1))
+    UPGRADE_STALE_FILES[${#UPGRADE_STALE_FILES[@]}]="$label:$stale_rel"
+  done < <(python3 - "$metadata_file" "$artifact_root" <<'PYEOF'
+import json, os, sys
+
+metadata, root = sys.argv[1:]
+try:
+    with open(metadata) as fh:
+        data = json.load(fh)
+except (OSError, ValueError):
+    raise SystemExit(0)
+for rel in sorted(data.get("entries", {})):
+    if not isinstance(rel, str) or rel.startswith("/") or ".." in rel.split("/"):
+        continue
+    if not os.path.lexists(os.path.join(root, rel)):
+        print(rel)
+PYEOF
+  )
+  if [[ "$stale_count" -gt 0 ]]; then
+    UPGRADE_STALE_COUNT=$((UPGRADE_STALE_COUNT + stale_count))
+  fi
+  return 0
 }
 
 read_manifest_hash() {
@@ -485,6 +517,8 @@ UPGRADE_MERGED_COUNT=0
 UPGRADE_SKIPPED_CUSTOMIZED_COUNT=0
 UPGRADE_SKIPPED_UNTRACKED_COUNT=0
 UPGRADE_SKIPPED_CUSTOMIZED_FILES=()
+UPGRADE_STALE_COUNT=0
+UPGRADE_STALE_FILES=()
 
 record_upgrade_result() {
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
@@ -1482,6 +1516,9 @@ if [[ "$DO_GLOBAL" == true ]]; then
   [[ "$_GLOBAL_STATE_FUTURE" == true ]] || write_agent_state "$GLOBAL_TARGET_STATE" global "$GLOBAL_AGENT"
   success "Postflight targets: global=$GLOBAL_AGENT; smoke=$_global_smoke"
 fi
+if [[ "$COLLISION_STRATEGY" == upgrade && "$DO_GLOBAL" == true ]]; then
+  report_stale_manifest_entries "${GLOBAL_MANIFEST_FILE}.json" "$HOME" global
+fi
 
 # Reset backup dir between layers so each layer uses its own base path.
 BACKUP_DIR=""
@@ -2265,6 +2302,10 @@ PYEOF
 
   finish_upgrade_transaction
 
+  if [[ "$COLLISION_STRATEGY" == upgrade && ( "$RIG_TRACKING" == repo || "$RIG_TRACKING" == local ) ]]; then
+    report_stale_manifest_entries "${MANIFEST_FILE}.json" "$TARGET" project
+  fi
+
   echo ""
 fi
 
@@ -2346,6 +2387,13 @@ if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
   echo "Merged: $UPGRADE_MERGED_COUNT"
   echo "Skipped customized: $UPGRADE_SKIPPED_CUSTOMIZED_COUNT"
   echo "Skipped untracked user-owned: $UPGRADE_SKIPPED_UNTRACKED_COUNT"
+  echo "Stale/missing tracked artifacts: $UPGRADE_STALE_COUNT"
+  if [[ "$UPGRADE_STALE_COUNT" -gt 0 ]]; then
+    echo "Stale artifacts requiring explicit repair or migration:"
+    for _stale_file in "${UPGRADE_STALE_FILES[@]}"; do
+      echo "  - $_stale_file"
+    done
+  fi
   if [[ "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" -gt 0 ]]; then
     UPGRADE_REVIEW_REQUIRED=1
     echo "Customized files requiring manual review:"
