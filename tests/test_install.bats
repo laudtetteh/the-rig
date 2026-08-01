@@ -462,6 +462,58 @@ is_rig_owned_stub() {
   [[ "$output" == *"Skipped conflicts:"* ]]
 }
 
+@test "upgrade strategy: confines post-copy project mutations" {
+  run_installer --strategy skip --project-agent both --subagents
+  [ "$status" -eq 0 ]
+
+  local version="$TEST_PROJECT/.rig/VERSION"
+  local claude="$TEST_PROJECT/CLAUDE.md"
+  local settings="$TEST_PROJECT/.claude/settings.json"
+  local config="$TEST_PROJECT/.codex/config.toml"
+  local outside_version="$TEMP_DIR/outside-version"
+  local outside_claude="$TEMP_DIR/outside-claude"
+  local outside_settings="$TEMP_DIR/outside-settings.json"
+  local outside_config="$TEMP_DIR/outside-config.toml"
+  printf 'outside-version\n' > "$outside_version"
+  printf 'outside-claude\n' > "$outside_claude"
+  printf '{}\n' > "$outside_settings"
+  printf 'project_doc_fallback_filenames = []\n' > "$outside_config"
+  rm "$version" "$claude" "$settings" "$config"
+  ln -s "$outside_version" "$version"
+  ln -s "$outside_claude" "$claude"
+  ln -s "$outside_settings" "$settings"
+  ln -s "$outside_config" "$config"
+
+  run_installer --strategy upgrade --project-agent both --subagents
+  [ "$status" -eq 0 ]
+  [ -L "$version" ] && [ -L "$claude" ] && [ -L "$settings" ] && [ -L "$config" ]
+  [ "$(cat "$outside_version")" = "outside-version" ]
+  [ "$(cat "$outside_claude")" = "outside-claude" ]
+  [ "$(cat "$outside_settings")" = '{}' ]
+  [ "$(cat "$outside_config")" = 'project_doc_fallback_filenames = []' ]
+  [[ "$output" == *"Skipped conflicts:"* ]]
+  [[ "$output" == *".rig/VERSION"* ]]
+  [[ "$output" == *".codex/config.toml"* ]]
+}
+
+@test "upgrade strategy: preserves an external .rigpath symlink" {
+  local rig_ext="$TEMP_DIR/external-rig"
+  run_installer --strategy skip --tracking stealth --rig-dir "$rig_ext"
+  [ "$status" -eq 0 ]
+
+  local pointer="$TEST_PROJECT/.rigpath"
+  local outside_pointer="$TEMP_DIR/outside-rigpath"
+  printf '%s\n' "$rig_ext" > "$outside_pointer"
+  rm "$pointer"
+  ln -s "$outside_pointer" "$pointer"
+
+  run_installer --strategy upgrade --tracking stealth --rig-dir "$rig_ext"
+  [ "$status" -eq 0 ]
+  [ -L "$pointer" ]
+  [ "$(cat "$outside_pointer")" = "$rig_ext" ]
+  [[ "$output" == *"Preserved conflicting upgrade destination: .rigpath (symlink)"* ]]
+}
+
 @test "upgrade strategy: preserves a legacy Codex artifact with no manifest entry" {
   run_installer --strategy merge --project-agent codex
   [ "$status" -eq 0 ]
@@ -2345,6 +2397,24 @@ _make_failing_sha_tools() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Non-interactive mode — skipping customized file: $skill_rel"* ]]
   grep -q 'personal customization' "$skill"
+}
+
+@test "upgrade strategy: preserves a symlinked global Claude root" {
+  local fake_home="$TEMP_DIR/fake-home"
+  local outside_claude="$TEMP_DIR/outside-claude"
+  mkdir -p "$fake_home"
+
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy skip"
+  [ "$status" -eq 0 ]
+  printf 'outside-global-sentinel\n' > "$fake_home/.claude/sentinel.txt"
+  mv "$fake_home/.claude" "$outside_claude"
+  ln -s "$outside_claude" "$fake_home/.claude"
+
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy upgrade"
+  [ "$status" -eq 0 ]
+  [ -L "$fake_home/.claude" ]
+  [ "$(cat "$outside_claude/sentinel.txt")" = "outside-global-sentinel" ]
+  [[ "$output" == *"Preserved conflicting upgrade destination: .claude (symlink)"* ]]
 }
 
 @test "upgrade strategy: global Rig-owned file updated when hash matches manifest" {
