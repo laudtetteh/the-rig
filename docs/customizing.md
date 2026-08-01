@@ -1,5 +1,7 @@
 # Customizing The Rig
 
+> Coexistence: customize shared `.rig` contracts once, then regenerate provider adapters. Claude command sources and Codex generated skills may use different invocation syntax, but they must preserve the same behavior.
+
 How to adapt The Rig for your stack, team size, and workflow preferences.
 
 ---
@@ -19,7 +21,7 @@ commit-cleanup: yes        # yes | no (strip auto-injected tool footers from com
 rig-gaps-push-target:      # optional: absolute path to RIG_GAPS.md in the local Rig repo
 ```
 
-**`issue-tracking:`** shapes the entire task intake and commit workflow. The ref format enforced in the `commit-msg` hook (`[#N]`, `[TEAM-123]`, `[trello:ID]`, `[W-N]`) and the intake question in `/task` both follow the configured tracker. Set to `none` for personal projects, prototypes, or repos without an issue tracker.
+**`issue-tracking:`** shapes the entire task intake and commit workflow. The ref format enforced in the `commit-msg` hook (`[#N]`, `[TEAM-123]`, `[trello:ID]`, `[W-N]`) and the intake question in Claude `/task` or Codex `$task` both follow the configured tracker. Set to `none` for personal projects, prototypes, or repos without an issue tracker.
 
 **`rig-gaps-push-target:`** enables `/rig-gaps --push` — a same-machine shortcut that appends unsubmitted gap entries directly to The Rig's own `RIG_GAPS.md` without copy-paste. Only useful if you maintain The Rig (or a fork) on this machine. Example:
 
@@ -52,8 +54,8 @@ For deeper customization of individual components, see the sections below.
 | `PROJECT_BRIEF.md` | All of it — fill in your project | — |
 | `.rig/rules/coding-standards.md` | All of it — fill in your stack's conventions | Structure (sections by runtime) |
 | `.rig/rules/security.md` | Project-specific additions section | Non-negotiables (top of file) |
-| `.claude/hooks/pre-tool.sh` | `BLOCKED_PATHS` array | `RIG_PROTECTED` block, tool name casing (`Write`, `Edit`) |
-| `.claude/commands/task.md` | Autonomy/check-in/risk default levels | Wizard structure and operating mode persistence |
+| `.claude/hooks/pre-tool.sh` | `BLOCKED_PATHS` array | Shared enforcement logic and provider payload normalization |
+| `.claude/commands/task.md` | Autonomy/check-in/risk default levels | Canonical workflow structure mirrored into the generated Codex `$task` skill |
 | `.husky/filter-commit-message-inplace.sh` | Add patterns for other AI tools | Existing patterns |
 | `.gitleaks.toml` | Allowlist entries | `useDefault = true` |
 | Processes | Scope and step details | Core sequence and gate logic |
@@ -80,7 +82,9 @@ headings — rename them to your languages and fill in the conventions. The stru
 
 ## Configuring protected paths
 
-Edit `.claude/hooks/pre-tool.sh` and update the `BLOCKED_PATHS` array:
+Edit the canonical `.claude/hooks/pre-tool.sh` handler and update the
+`BLOCKED_PATHS` array. Codex reaches this same enforcement through
+`.codex/hooks/rig-adapter.sh`; do not duplicate policy in that adapter:
 
 ```bash
 BLOCKED_PATHS=(
@@ -171,9 +175,13 @@ add them to both places:
 
 ---
 
-## Adding more slash commands
+## Adding command and skill workflows
 
-Create a new `.md` file in `.claude/commands/`. The filename becomes the command name.
+Create a new `.md` file in `.claude/commands/`. The filename becomes the Claude
+slash-command name. For Codex-enabled installs, the installer generates the
+corresponding `$name` skill under `.agents/skills/name/` from this canonical
+source. Do not hand-edit generated skills; change the command source or a shared
+`.rig/processes/` contract and regenerate through the installer.
 Structure follows the existing commands: what it does, usage, steps, notes.
 
 Example — `/review-pr`:
@@ -286,7 +294,8 @@ entries and `.git/hooks/` scripts are per-clone and must be set up on each machi
 The Rig was designed for solo or small-team use. For larger teams:
 
 **Global layer**: Each engineer installs their own global layer. The personal profile
-is individual — don't share it. The `CLAUDE.md` global template should be the same
+is individual — don't share it. Codex uses its own supported global instruction
+and personal-skill locations; the `CLAUDE.md` global template should be the same
 across the team (standardized hard rules and working style).
 
 **Project layer**: Commit the project layer to the repo. Every team member gets the

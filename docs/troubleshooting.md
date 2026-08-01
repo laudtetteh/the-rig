@@ -1,17 +1,20 @@
 # Troubleshooting
 
+> Coexistence: first identify whether the failing surface is shared, Claude Code-specific, or Codex-specific. Provider hook/configuration diagnostics are not interchangeable; shared `.rig` state remains the common source of truth.
+
 Common problems and how to fix them.
 
 ---
 
-## 0. First: run /rig-status
+## 0. First: run the status adapter
 
-Before digging into a specific problem, run `/rig-status`. It checks all
-hook files, memory files, settings.json wiring, and pending flags in one
+Before digging into a specific problem, run Claude `/rig-status` or Codex
+`$rig-status`. It checks hook files, memory files, provider wiring, and pending flags in one
 pass — and prints a ✓/✗ report with fix hints for anything broken.
 
 ```
-/rig-status
+/rig-status   # Claude Code
+$rig-status   # Codex
 ```
 
 If the output is clean (0 issues), the problem is likely in how the agent
@@ -91,6 +94,31 @@ The sentinel flow is enforced by the Claude Code hook. If you run `git commit`
 directly in a terminal (not through Claude Code), the pre-tool hook doesn't run
 and neither does the sentinel check. This is intentional — the gate is for
 agent-initiated commits only.
+
+### Codex hooks or generated skills are missing
+
+Codex uses `.codex/hooks.json` plus `.codex/hooks/rig-adapter.sh`, and receives
+workflow skills generated under `.agents/skills/`. Check the persisted project
+target and run the provider-neutral doctor before inspecting individual files:
+
+```bash
+bin/rig doctor --json
+cat .rig/install-targets.json 2>/dev/null || true
+test -x .codex/hooks/rig-adapter.sh
+test -d .agents/skills
+```
+
+An installed Codex CLI or a present `.codex/config.toml` proves installation or
+configuration only. It does not prove that a current session can see or call a
+tool. Use the session-native connector preflight when a workflow depends on MCP
+or app tools.
+
+### Claude and Codex behave differently for the same workflow
+
+Treat `.rig/processes/` as canonical. Claude `/name` commands and Codex `$name`
+skills are delivery adapters. Re-run the installer with `--strategy upgrade` to
+regenerate Codex skills from the canonical command sources; do not patch a
+generated `.agents/skills/` file independently.
 
 ---
 

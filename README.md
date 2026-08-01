@@ -1,5 +1,7 @@
 # The Rig
 
+> The Rig supports both Claude Code and Codex. Shared workflows and contracts are provider-neutral; Claude slash commands, Codex skills, and provider hook details are labeled where they differ.
+
 **An opinionated agentic coding system for Claude Code and Codex.**
 
 The Rig wraps Claude Code and Codex with shared structured memory, enforced workflows, automated safety hooks, and commit-history discipline — so AI-assisted development stays consistent across sessions, agents, projects, and months.
@@ -111,8 +113,8 @@ git init
 # Default: stealth mode — all Rig files stored outside the repo (no .rig/ committed)
 # Choose option 1 at the tracking prompt to store .rig/ in the repo instead.
 
-# Then open Claude Code in your project and run /kickoff
-# /kickoff reads PROJECT_BRIEF.md, confirms the project shape,
+# Then open Claude Code and run /kickoff, or open Codex and run $kickoff
+# The kickoff adapter reads PROJECT_BRIEF.md, confirms the project shape,
 # and scaffolds CLAUDE.md + task backlog + GitHub issues in one pass.
 ```
 
@@ -232,19 +234,20 @@ files). The hooks also need their executable bits set. Step 5 restores all of th
 > `docs/customizing.md` → "Keeping .rig/ invisible to teammates" for the full
 > external directory setup.
 
-Run `/rig-status` in Claude Code any time to verify hooks, memory files,
-settings.json wiring, and pending flags in one pass. See
+Run Claude `/rig-status` or Codex `$rig-status` any time to verify hooks, memory
+files, provider wiring, and pending flags in one pass. See
 `docs/troubleshooting.md` for common issues after a re-clone.
 
 ---
 
 ## How it works at session start
 
-When you open Claude Code in a project using The Rig, hooks fire automatically:
+When you open Claude Code or Codex in a project using The Rig, the selected
+provider's hooks establish the same shared lifecycle:
 
 1. **`session-start.sh`** injects `CONTEXT_SNAPSHOT.md`, pending flag warnings, and at most one applicable feature tip as hook context — before the first user turn
-2. The agent reads `~/.claude/CLAUDE.md` — who it is, how to behave, and your personal context
-3. The agent reads `./CLAUDE.md` — what this project is
+2. Claude loads its global `~/.claude/CLAUDE.md`; Codex loads its supported global instructions and generated personal skills
+3. The agent reads `./CLAUDE.md` through Claude's native loading or Codex's configured fallback (unless a native `AGENTS.md` takes precedence)
 4. The agent reads `./.rig/memory/CONTEXT_SNAPSHOT.md` — **if present, this is sufficient; the agent stops here**
 5. `./.rig/memory/PROGRESS.md` — only loaded if snapshot is absent or stale
 6. `./.rig/memory/ERRORS.md` — what to avoid
@@ -260,7 +263,10 @@ are unavailable or already used, and records a one-time sentinel under
 reset one tip, remove its `.rig/memory/tips/.tip-<id>-shown` file; remove the
 `tips/` directory to reset all tips.
 
-**At session end**, `session-end.sh` fires (Claude Code's `SessionEnd` event) and writes `.wrap-needed` + a minimal auto-checkpoint. The `stop.sh` hook fires after every agent turn (the `Stop` event) to keep `CONTEXT_SNAPSHOT.md`'s timestamp current. Run `/wrap` before closing Claude Code for a full snapshot — the hooks are a safety net, not a replacement.
+**At session end**, provider hook adapters bind lifecycle work to the exact native
+session record. `stop.sh` maintains the checkpoint and wrap obligation for the
+exact root session. Run Claude `/wrap` or Codex `$wrap` before closing for a full
+snapshot — hooks are a safety net, not a replacement.
 
 ---
 
@@ -338,8 +344,14 @@ reset one tip, remove its `.rig/memory/tips/.tip-<id>-shown` file; remove the
 | `pre-compact.sh` | `PreCompact` | Writes compact checkpoint + `compactionSummary` before context compaction |
 | `post-compact.sh` | `PostCompact` | Injects checkpoint content as `additionalContext` after compaction |
 | `subagent-start.sh` | `SubagentStart` | Injects project name, branch, active task, and key conventions into spawned subagents |
-| `session-end.sh` | `SessionEnd` | Handles true session termination: writes `.wrap-needed` + minimal auto-checkpoint on logout/clear; clears flag on resume |
 | `stop.sh` | `Stop` (every agent turn) | Updates `Last updated:` in `CONTEXT_SNAPSHOT.md`; appends session-end boundary to `PROGRESS.md` |
+
+### Codex hooks
+
+`.codex/hooks.json` and `.codex/hooks/rig-adapter.sh` translate documented Codex
+events and payload fields into the same canonical hook contracts. Provider-native
+session IDs remain authoritative; Codex does not infer identity from branches,
+titles, transcripts, or singleton state.
 
 ### Git hooks
 
@@ -355,7 +367,7 @@ reset one tip, remove its `.rig/memory/tips/.tip-<id>-shown` file; remove the
 
 | Requirement | Notes |
 |---|---|
-| [Claude Code](https://docs.anthropic.com/claude-code) | The AI coding CLI this system wraps |
+| [Claude Code](https://docs.anthropic.com/claude-code) or [Codex](https://developers.openai.com/codex/) | At least one supported coding-agent CLI; both may be installed |
 | bash 3.2+ | For `install.sh` and hook scripts |
 | git | For hooks and version control |
 | python3 | Required by `pre-tool.sh` for JSON parsing. Standard on macOS 12+ and most Linux distros. |

@@ -1,5 +1,9 @@
 # Key design decisions
 
+## Superseding coexistence decision (2026-08-01)
+
+The Rig is a Claude Code + Codex system. Shared processes, rules, memory, and public contracts are provider-neutral; provider hooks, command/skill syntax, and native lifecycle semantics remain explicitly provider-specific. Canonical Claude command sources may generate Codex adapters, which must preserve behavior without being treated as private provider internals.
+
 Why The Rig is built the way it is. Each entry covers what was decided, what was rejected, and the tradeoff accepted.
 
 ---
@@ -211,3 +215,32 @@ stubs exit 69. With `--json`, scriptable commands emit one JSON object.
 **Tradeoff accepted:** The dispatcher initially contains unavailable stubs.
 Downstream tickets replace their reserved branch instead of introducing a new
 entry point.
+
+---
+
+## 17. Provider-neutral contracts with explicit Claude and Codex adapters
+
+**Decided:** Shared memory, rules, processes, task state, session records, and
+CLI contracts are provider-neutral. Claude Code receives them through native
+`CLAUDE.md`, slash commands, and `.claude` hooks. Codex receives the same intent
+through supported instruction fallback, generated `.agents/skills`, and the
+`.codex` hook adapter. Provider-native session IDs remain authoritative.
+
+**Supersedes:** The product-level assumption in early decisions that The Rig is
+Claude-only or supports one active session per project. Those entries remain as
+historical rationale for the canonical Claude implementation; they are not the
+current compatibility boundary.
+
+**Rejected:** Independently maintained Claude and Codex workflows, renaming
+concrete compatibility files to generic names, and pretending provider event,
+tool, title, transcript, or storage semantics are identical.
+
+**Rationale:** One shared contract prevents behavioral drift, while thin,
+explicit adapters preserve each provider's documented mechanics. Exact native
+identity also permits concurrent sessions and worktrees without branch, PID,
+title, transcript, or singleton inference.
+
+**Consequences:** Product and shared-workflow prose says “Claude Code and Codex”
+on first mention and then “agent” or “provider.” Delivery syntax is shown as
+Claude `/name` and Codex `$name`. Provider-specific files and historical incident
+records remain explicitly labeled rather than mechanically neutralized.

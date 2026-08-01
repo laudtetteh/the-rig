@@ -1,5 +1,7 @@
 # UPGRADE_WORKFLOW.md — Upgrading The Rig
 
+> Upgrade both provider surfaces: Claude-native files under `.claude`/`~/.claude`, Codex configuration/hooks, and generated `.agents/skills`. Shared `.rig` contracts are authoritative; provider-specific files retain their labeled adapter role.
+
 > Use this when upgrading The Rig in this project.
 > Read before running the installer — each failure mode below is real and
 > has been observed in the field.
@@ -8,11 +10,11 @@
 
 ## Overview
 
-The Rig has two upgrade targets on this machine:
+The Rig has three upgrade surfaces on this machine:
 
 1. **`~/tools/the-rig`** — the installer source (shared across all projects)
-2. **Global layer** — `~/.claude/CLAUDE.md` + `~/.claude/skills/`
-3. **Project layer** — `.claude/hooks/`, `.claude/commands/`, `.rig/processes/`, `.husky/`
+2. **Global agent layers** — Claude `~/.claude/` and Codex `~/.agents/skills/`
+3. **Project layer** — shared `.rig/` and `.husky/`, Claude `.claude/`, generated Codex `.agents/skills/`, and Codex `.codex/`
 
 The installer (`install.sh`) handles the project layer automatically via its **Upgrade** strategy.
 The global `CLAUDE.md` requires a manual diff + surgical edit (see below).
@@ -70,6 +72,8 @@ for src in \
   ".claude/commands/task.md" \
   ".claude/commands/post-merge.md" \
   ".claude/commands/session-name.md" \
+  ".codex/hooks.json" \
+  ".codex/hooks/rig-adapter.sh" \
   ".husky/pre-commit" \
   ".husky/post-commit" \
   ".husky/commit-msg" \
@@ -101,7 +105,7 @@ Apply only the changed sections. Preserve:
 - The real `PROFILE_PATH` value (not `[PROFILE_PATH]`)
 - Any personal customizations you've added
 
-For skills (`~/.claude/skills/`), diff each changed one before overwriting:
+For Claude skills (`~/.claude/skills/`), diff each changed one before overwriting:
 
 ```bash
 for f in ~/tools/the-rig/templates/global/skills/*.md; do
@@ -109,6 +113,10 @@ for f in ~/tools/the-rig/templates/global/skills/*.md; do
   diff ~/.claude/skills/"$name" "$f" >/dev/null 2>&1 || echo "CHANGED: $name"
 done
 ```
+
+Codex personal skills live under `~/.agents/skills/` and are generated from the
+canonical global skill sources. Upgrade them through the installer so Claude and
+Codex do not acquire independently maintained workflow text.
 
 ---
 
@@ -122,6 +130,7 @@ The installer will:
 - Auto-update Rig-owned files that haven't been locally modified (manifest hash matches)
 - Prompt on locally modified Rig-owned files (in non-interactive mode, defaults to skip)
 - Smart-merge `.claude/settings.json` without duplicating hooks
+- Regenerate selected Codex skills and update Rig-owned `.codex` hook artifacts
 - Skip user-owned files (CLAUDE.md, rules, memory, tasks, .github)
 
 ---
@@ -153,6 +162,8 @@ cat .claude/settings.json | python3 -c \
    [print(k, len(v), 'entries') for k,v in s.get('hooks',{}).items()]"
                                          # confirm exactly 1 entry per hook event
 ls .claude/commands/                     # confirm all commands present
+test ! -d .agents/skills || find .agents/skills -name SKILL.md | sort
+test ! -d .codex || bin/rig doctor --json # validate selected Codex wiring
 git diff --stat                          # review all changes before committing
 ```
 
@@ -176,7 +187,7 @@ For any upgrade that modifies 4 or more files (hooks, commands, process files, V
 ```bash
 # Replace X.Y.Z with the new version
 git checkout -b chore/rig-upgrade-vX.Y.Z
-git add -f .claude/ .husky/ .rig/processes/ .rig/rules/ .rig/VERSION
+git add -f .claude/ .agents/skills/ .codex/ .husky/ .rig/processes/ .rig/rules/ .rig/VERSION
 git commit -m "chore(rig): upgrade to The Rig vX.Y.Z [#N]"
 gh pr create --title "chore(rig): upgrade to vX.Y.Z" \
   --body "Upgrades The Rig from vOLD to vNEW. See CHANGELOG for details."

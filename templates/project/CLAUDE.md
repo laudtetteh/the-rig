@@ -1,9 +1,14 @@
 # [Project Name] — project brain
 
-> This file is loaded automatically by Claude Code at the start of every session in this repo.
+> This is the Claude-native compatibility source for a project that may run Claude Code and Codex. Shared `.rig` rules apply to either provider; Codex uses its configured context/skill adapter and does not imply Claude-only execution.
+
+> Claude Code loads this file natively. Codex loads it through The Rig's configured
+> project-instruction fallback unless a native `AGENTS.override.md` or `AGENTS.md`
+> takes precedence.
 > Fill in every [PLACEHOLDER]. Delete sections that don't apply.
 > Keep it lean — only things specific to this project belong here.
-> Universal rules (working style, hard rules, git conventions) live in ~/.claude/CLAUDE.md.
+> Claude global rules live in `~/.claude/CLAUDE.md`; Codex uses its supported
+> global instructions and generated personal skills.
 
 ---
 
@@ -31,6 +36,8 @@
 ```
 [project-name]/
 ├── .claude/          # Claude Code config (hooks, commands)
+├── .agents/skills/   # generated Codex skills from canonical commands
+├── .codex/           # Codex config and hook adapter
 ├── .github/          # PR and issue templates
 ├── .husky/           # Git hooks
 ├── [backend/]        # Backend application
@@ -109,7 +116,7 @@ Change this value to match your project's branching convention.
 
 ## Project settings
 
-These fields are read by slash commands and workflow files. Set them once and every
+These fields are read by Claude commands, Codex skills, and shared workflow files. Set them once and every
 future session inherits them — no need to re-state preferences in chat.
 
 ```
@@ -155,8 +162,9 @@ commit-cleanup: yes
 # transcript-retention-days: 14
 ```
 
-Optional. When set to a positive integer, `/wrap` prunes JSONL transcript files in
-`~/.claude/projects/` older than this many days. Prevents `/tmp` or disk from filling up
+Optional. When set to a positive integer, the wrap workflow prunes transcript
+files only from the current provider's documented persistence location (Claude
+projects or Codex sessions) when retention is enabled. Prevents disk from filling up
 after long-running projects. Commented out by default — uncomment and set a value to enable.
 
 ```
@@ -217,7 +225,7 @@ The file is gitignored — opt-in is per-machine, not per-repo.
 ## Off-limits — never touch without explicit instruction
 
 - `.husky/` — git hooks are stable; do not modify
-- `.claude/worktrees/` — Claude Code internal; never edit or write here
+- `.claude/worktrees/` — Claude Code-specific internal path; never edit or write here
 - `.github/` — issue and PR templates are set; do not modify
 - `[any other protected path]` — [reason]
 
