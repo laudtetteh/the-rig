@@ -1,0 +1,212 @@
+#!/usr/bin/env bats
+#
+# tests/test_upgrade_agent_contract.bats — Coverage for the agent-driven
+# upgrade contract added under issue #444 (lane 444-A): --strategy agent-plan
+# and --strategy agent-upgrade.
+#
+# Run with: bats tests/test_upgrade_agent_contract.bats
+#
+# Both strategies reuse the exact same discovery/classification code path as
+# --strategy upgrade (see install.sh's AGENT_DRY_RUN gating). agent-plan must
+# never write to the target; agent-upgrade applies the same safe/convergeable
+# actions as upgrade. Both emit one JSON document on stdout and refuse
+# (status "refused", exit 3) whenever any file needs manual review.
+
+REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
+INSTALLER="$REPO_ROOT/install.sh"
+
+setup() {
+  TEMP_DIR="$(mktemp -d)"
+  TEST_PROJECT="$TEMP_DIR/test-project"
+  mkdir -p "$TEST_PROJECT"
+  git -C "$TEST_PROJECT" init -q
+  git -C "$TEST_PROJECT" config user.email "test@test.com"
+  git -C "$TEST_PROJECT" config user.name "Test"
+}
+
+teardown() {
+  rm -rf "$TEMP_DIR"
+}
+
+run_installer() {
+  # Convenience wrapper mirroring tests/test_install.bats' run_installer:
+  # always project-only, into TEST_PROJECT, with a fixed name and repo
+  # tracking (keeps the fixture fully inside TEMP_DIR).
+  run bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking repo \
+    "$@"
+}
+
+_sha256() {
+  sha256sum "$1" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$1" | awk '{print $1}'
+}
+
+# install.sh has a known, pre-existing, documented ordering issue (see this
+# repo's own CLAUDE.md "Known gotchas": "`main` substitution runs after
+# `write_manifest_entry`"): [BASE_BRANCH]/[Project Name] substitution runs
+# AFTER the manifest hash is recorded for a file, so a handful of template
+# files always show as "customized" after the very first install, even with
+# zero real user edits. That is unrelated to the 444-A agent contract under
+# test here. Stabilize the manifest for those known files to their actual
+# post-substitution content so a test can construct a genuinely-unmodified
+# fixture and isolate what this lane actually changed.
+stabilize_substitution_baseline() {
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+  local rel f
+  for rel in CLAUDE.md .claude/commands/ship.md .claude/commands/post-merge.md \
+             .rig/processes/POST_MERGE_WORKFLOW.md .rig/processes/SHIP_WORKFLOW.md; do
+    f="$TEST_PROJECT/$rel"
+    [[ -f "$f" ]] || continue
+    grep -v "  ${rel}\$" "$manifest" > "$manifest.tmp"
+    printf '%s  %s\n' "$(_sha256 "$f")" "$rel" >> "$manifest.tmp"
+    mv "$manifest.tmp" "$manifest"
+  done
+}
+
+# Content+path snapshot of the whole target tree. Used to prove agent-plan
+# performs zero writes: two snapshots taken before/after a run must be
+# byte-for-byte identical (same files, same content, same names).
+tree_snapshot() {
+  find "$TEST_PROJECT" -type f | sort | xargs cksum
+}
+
+# Extracts the final JSON line from bats' $output (the agent contract always
+# emits exactly one JSON document as the last line of stdout).
+last_json_line() {
+  printf '%s\n' "$output" | tail -1
+}
+
+# json_field <python-expression>  — expression must reference `d`, e.g.
+# "d['status']" or "len(d['artifacts'])". Evaluates against the JSON on the
+# final line of $output.
+json_field() {
+  printf '%s\n' "$output" | tail -1 | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print($1)
+"
+}
+
+@test "agent-plan on a fresh clean upgrade emits a valid success JSON plan with zero writes" {
+  # Establish a real, unmodified install first (so the manifest baseline
+  # matches every installed file exactly — the "fresh/clean" case).
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  local before after
+  before="$(tree_snapshot)"
+
+  run_installer --strategy agent-plan
+  [ "$status" -eq 0 ]
+
+  after="$(tree_snapshot)"
+  [ "$before" = "$after" ]
+
+  [[ "$(last_json_line)" == \{* ]]
+  [ "$(json_field "d['schema_version']")" = "1" ]
+  [ "$(json_field "d['mode']")" = "plan" ]
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "d['conflicts']")" = "[]" ]
+  [ "$(json_field "len(d['artifacts'])")" != "0" ]
+}
+
+@test "agent-plan on a target with a customized file emits refused with populated conflicts and exits 3" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  # Tamper with a Rig-owned file after the manifest baseline was recorded —
+  # its hash now differs from the manifest, making it "customized".
+  echo "# locally customized by the user" >> "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+
+  local before after
+  before="$(tree_snapshot)"
+
+  run_installer --strategy agent-plan
+  [ "$status" -eq 3 ]
+
+  after="$(tree_snapshot)"
+  [ "$before" = "$after" ]
+
+  [ "$(json_field "d['status']")" = "refused" ]
+  [ "$(json_field "len(d['conflicts'])")" != "0" ]
+  [ "$(json_field "'.claude/hooks/pre-tool.sh' in [c['path'] for c in d['conflicts']]")" = "True" ]
+  [ "$(json_field "bool(d['conflicts'][0]['repair_guidance'])")" = "True" ]
+
+  # The customized file itself must be untouched.
+  grep -q "locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+}
+
+@test "agent-upgrade on a clean target applies updates and exits 0" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  # A missing tracked artifact is always safe to (re)create — the simplest
+  # reliable way to force a real "updated" action in agent-upgrade.
+  rm -f "$TEST_PROJECT/.claude/commands/status.md"
+
+  run_installer --strategy agent-upgrade
+  [ "$status" -eq 0 ]
+
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "d['summary']['updated']")" != "0" ]
+  [ -f "$TEST_PROJECT/.claude/commands/status.md" ]
+}
+
+@test "agent-upgrade on a target with a customized file applies safe updates but exits 3 refused and leaves it untouched" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  echo "# locally customized by the user" >> "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  rm -f "$TEST_PROJECT/.claude/commands/status.md"
+
+  run_installer --strategy agent-upgrade
+  [ "$status" -eq 3 ]
+
+  [ "$(json_field "d['status']")" = "refused" ]
+  [ "$(json_field "d['summary']['updated']")" != "0" ]
+  [ "$(json_field "d['summary']['skipped_customized']")" != "0" ]
+
+  # Safe/convergeable action was actually applied...
+  [ -f "$TEST_PROJECT/.claude/commands/status.md" ]
+  # ...but the customized file was never silently overwritten.
+  grep -q "locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+}
+
+@test "existing --strategy upgrade behavior is unchanged by the agent contract" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  echo "# locally customized by the user" >> "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  rm -f "$TEST_PROJECT/.claude/commands/status.md"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  # Plain upgrade still exits 0 even when review is required (only the new
+  # agent-* strategies gained exit code 3) and still prints the legacy
+  # RIG_UPGRADE_REVIEW_REQUIRED marker instead of JSON.
+  [[ "$output" == *"RIG_UPGRADE_REVIEW_REQUIRED=1"* ]]
+  [[ "$output" != *'"schema_version"'* ]]
+  [ -f "$TEST_PROJECT/.claude/commands/status.md" ]
+  grep -q "locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+}
+
+@test "--help documents both new agent strategy values" {
+  run bash "$INSTALLER" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"agent-plan"* ]]
+  [[ "$output" == *"agent-upgrade"* ]]
+}
+
+@test "an unrecognized --strategy value still falls back to interactive, not agent mode" {
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name "TestProject" --tracking repo --strategy bogus-value < /dev/null
+  [[ "$output" != *'"schema_version"'* ]]
+}
