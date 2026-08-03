@@ -24,20 +24,28 @@ BOLD='\033[1m'
 RESET='\033[0m'
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-info()    { echo -e "${BLUE}→${RESET} $*"; }
-success() { echo -e "${GREEN}✓${RESET} $*"; }
-warn()    { echo -e "${YELLOW}!${RESET} $*"; }
+# AGENT_MODE gates human-oriented stdout so agent-plan/agent-upgrade can emit a
+# single machine-readable JSON document. Declared here (before first use) since
+# these wrappers are defined at the very top of the script; the real value is
+# set later during flag parsing. error() always writes to stderr, so it is
+# never gated — fatal diagnostics must remain visible even in agent mode.
+AGENT_MODE="${AGENT_MODE:-}"
+info()    { [[ -n "$AGENT_MODE" ]] && return 0; echo -e "${BLUE}→${RESET} $*"; }
+success() { [[ -n "$AGENT_MODE" ]] && return 0; echo -e "${GREEN}✓${RESET} $*"; }
+warn()    { [[ -n "$AGENT_MODE" ]] && return 0; echo -e "${YELLOW}!${RESET} $*"; }
 error()   { echo -e "${RED}✗${RESET} $*" >&2; }
-bold()    { echo -e "${BOLD}$*${RESET}"; }
-ask()     { echo -e "${BOLD}?${RESET} $*"; }
+bold()    { [[ -n "$AGENT_MODE" ]] && return 0; echo -e "${BOLD}$*${RESET}"; }
+ask()     { [[ -n "$AGENT_MODE" ]] && return 0; echo -e "${BOLD}?${RESET} $*"; }
 
 confirm() {
   local msg="$1"
   local default="${2:-n}"
   local prompt
   if [[ "$default" == "y" ]]; then prompt="[Y/n]"; else prompt="[y/N]"; fi
-  # Non-interactive (CI / piped stdin): accept the default without prompting.
-  if [[ ! -t 0 ]]; then
+  # Non-interactive (CI / piped stdin) or agent mode: accept the default
+  # without prompting. Agent modes must never block on a TTY prompt even if
+  # stdin happens to be a terminal.
+  if [[ ! -t 0 || -n "$AGENT_MODE" ]]; then
     [[ "$default" =~ ^[Yy]$ ]]
     return
   fi
@@ -281,6 +289,8 @@ write_manifest_entry() {
   local manifest_file="${3:-$MANIFEST_FILE}"
   local artifact_path="${4:-}"
   [[ -z "$hash" || -z "$manifest_file" ]] && return
+  # agent-plan: classification only, never write the manifest.
+  [[ "$AGENT_DRY_RUN" == true ]] && return 0
   if ! upgrade_manifest_mutation_allowed "$manifest_file" "$rel"; then
     return 0
   fi
@@ -382,6 +392,15 @@ _FLAG_GLOBAL_AGENT=""
 _FLAG_PROJECT_AGENT=""
 PREFLIGHT_ONLY=false
 JSON_OUTPUT=false
+# AGENT_MODE: "" (default) | "plan" (--strategy agent-plan) | "apply" (--strategy agent-upgrade).
+# AGENT_DRY_RUN: true only for AGENT_MODE=plan. Every mutation primitive in this
+# script (write_manifest_entry, backup_file, ensure_upgrade_transaction,
+# record_created, write_agent_state, rewrite_project_root_references, the
+# copy_file/_copy_upgrade_existing/_copy_global_file_upgrade family, and a
+# handful of directly-guarded cp/mkdir/sed/chmod/rm call sites) checks this
+# flag and no-ops when true, so agent-plan can run the real classification
+# logic used by --strategy upgrade with zero writes to the target.
+AGENT_DRY_RUN=false
 
 for arg in "$@"; do
   case "$arg" in
@@ -427,11 +446,18 @@ for arg in "$@"; do
       echo ""
       echo "Non-interactive flags (bypass all prompts — useful for scripting and CI):"
       echo "  --strategy <name>     Set strategy directly."
-      echo "                        Values: merge | skip | overwrite | upgrade | interactive"
+      echo "                        Values: merge | skip | overwrite | upgrade | interactive |"
+      echo "                                agent-plan | agent-upgrade"
       echo "                        merge    — new/drop-in install (safe default; smart-merges settings.json)"
       echo "                        skip     — only install files that don't exist yet"
       echo "                        upgrade  — auto-update unmodified Rig files; prompt on customized; skip user-owned"
       echo "                        overwrite — replace everything; back up originals"
+      echo "                        agent-plan    — read-only: emit a JSON plan of what upgrade"
+      echo "                                        would do; zero writes; exit 3 if any file"
+      echo "                                        needs manual review (see UPGRADE_WORKFLOW.md)"
+      echo "                        agent-upgrade — apply the same convergence as 'upgrade' and"
+      echo "                                        emit a JSON result; exit 3 if any file was"
+      echo "                                        left for manual review"
       echo "  --target <path>       Set target project directory."
       echo "  --project-name <name> Set project name (used in CLAUDE.md substitution)."
       echo "  --base-branch <name>  Set base branch name (default: main). Substituted into"
@@ -506,6 +532,23 @@ for (( i=0; i<${#args[@]}; i++ )); do
   fi
 done
 
+# Set AGENT_MODE/AGENT_DRY_RUN as soon as --strategy is known (rather than
+# down in the intent-menu bypass block below) so the info/success/warn/bold/
+# ask/confirm wrappers defined at the top of this script — and every banner
+# or prompt printed between here and the intent-menu block — are already
+# gated before anything runs. The intent-menu block below still owns setting
+# COLLISION_STRATEGY itself.
+case "$_FLAG_STRATEGY" in
+  agent-plan)
+    AGENT_MODE="plan"
+    AGENT_DRY_RUN=true
+    ;;
+  agent-upgrade)
+    AGENT_MODE="apply"
+    AGENT_DRY_RUN=false
+    ;;
+esac
+
 # Agent-target contract. Selectors are intentionally separate from layer flags.
 if [[ "$JSON_OUTPUT" == true && "$PREFLIGHT_ONLY" != true ]]; then
   error "--json is valid only with --preflight"
@@ -547,6 +590,8 @@ read_agent_state() {
 
 write_agent_state() {
   local state_file="$1" layer="$2" selection="$3" project_root="${4:-}" tmp selection_json
+  # agent-plan: classification only, never write target-state metadata.
+  [[ "$AGENT_DRY_RUN" == true ]] && return 0
   mkdir -p "$(dirname "$state_file")"
   tmp="$(mktemp "${state_file}.tmp.XXXXXX")"
   selection_json="$(agent_json "$selection")"
@@ -585,6 +630,8 @@ PYEOF
 rewrite_project_root_references() {
   local path="$1" old_root="$2" new_root="$3" tmp
   [[ -f "$path" && -n "$old_root" && "$old_root" != "$new_root" ]] || return 0
+  # agent-plan: classification only, never rewrite moved-project paths.
+  [[ "$AGENT_DRY_RUN" == true ]] && return 0
   tmp="$(mktemp "${path}.tmp.XXXXXX")"
   if ! python3 - "$path" "$tmp" "$old_root" "$new_root" <<'PYEOF'
 import json, sys
@@ -632,10 +679,17 @@ UPGRADE_SKIPPED_CONFLICT_FILES=()
 UPGRADE_REMOVED_COUNT=0
 UPGRADE_STALE_COUNT=0
 UPGRADE_STALE_FILES=()
+# Full per-artifact log, one entry per record_upgrade_result() call, encoded as
+# "<rel>\x1e<result>" (US = 0x1E, never legal in a path). Consumed only by the
+# agent-plan/agent-upgrade JSON emitter at the end of the script to build the
+# "artifacts" array; unrelated to (and additive with) the *_COUNT bookkeeping
+# above, which existing human-oriented output already relies on unchanged.
+UPGRADE_ARTIFACT_RECORDS=()
 
 record_upgrade_result() {
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
   local result="$1" rel="${2:-}"
+  UPGRADE_ARTIFACT_RECORDS[${#UPGRADE_ARTIFACT_RECORDS[@]}]="${rel}"$'\x1e'"${result}"
   case "$result" in
     updated) UPGRADE_UPDATED_COUNT=$((UPGRADE_UPDATED_COUNT + 1)) ;;
     merged) UPGRADE_MERGED_COUNT=$((UPGRADE_MERGED_COUNT + 1)) ;;
@@ -715,6 +769,8 @@ upgrade_set_executable_bits() {
     record_upgrade_destination_conflict "$rel" symlinked-parent
     return 0
   fi
+  # agent-plan: classification only, never change file modes.
+  [[ "$AGENT_DRY_RUN" == true ]] && return 0
   while IFS= read -r -d '' path; do
     chmod +x "$path"
   done < <(find -P "$directory" -maxdepth 1 -type f -name "$pattern" -print0)
@@ -822,6 +878,22 @@ if [[ -n "$_FLAG_STRATEGY" ]]; then
   case "$_FLAG_STRATEGY" in
     interactive|skip|overwrite|merge|upgrade)
       COLLISION_STRATEGY="$_FLAG_STRATEGY"
+      ;;
+    agent-plan|agent-upgrade)
+      # Agent-driven contract (issue #444, lane 444-A). Non-interactive-only —
+      # deliberately absent from the interactive intent menu above so a human
+      # can never land here by accident. Both modes reuse the exact same
+      # discovery/classification code path as --strategy upgrade internally;
+      # agent-plan additionally sets AGENT_DRY_RUN so every mutation primitive
+      # it reaches becomes a no-op and the run is provably read-only.
+      COLLISION_STRATEGY="upgrade"
+      if [[ "$_FLAG_STRATEGY" == agent-plan ]]; then
+        AGENT_MODE="plan"
+        AGENT_DRY_RUN=true
+      else
+        AGENT_MODE="apply"
+        AGENT_DRY_RUN=false
+      fi
       ;;
     *)
       warn "Unknown --strategy value '${_FLAG_STRATEGY}' — defaulting to interactive."
@@ -1136,6 +1208,8 @@ init_backup_dir() {
 backup_file() {
   local src="$1"
   local base="$2"
+  # agent-plan: classification only, never write a backup.
+  [[ "$AGENT_DRY_RUN" == true ]] && return 0
   if [[ -z "$BACKUP_DIR" || "$UPGRADE_TRANSACTION_BASE" != "$base" ]]; then init_backup_dir "$base"; fi
   local rel="${src#"$base"/}"
   local dest="${BACKUP_DIR}/${rel}"
@@ -1147,12 +1221,16 @@ backup_file() {
 record_created() {
   local base="$1" destination="$2"
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  # agent-plan: classification only, never write the transaction journal.
+  [[ "$AGENT_DRY_RUN" == true ]] && return 0
   journal_append created "${destination#"$base"/}"
 }
 
 ensure_upgrade_transaction() {
   local base="$1"
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  # agent-plan: classification only, never open a transaction/backup dir.
+  [[ "$AGENT_DRY_RUN" == true ]] && return 0
   init_backup_dir "$base"
 }
 
@@ -1339,15 +1417,16 @@ copy_file() {
     esac
   fi
 
-  mkdir -p "$dir"
+  # agent-plan: classification only, never create the destination directory.
+  [[ "$AGENT_DRY_RUN" == true ]] || mkdir -p "$dir"
 
   if [[ ! -e "$dest" && ! -L "$dest" ]]; then
     if [[ "$COLLISION_STRATEGY" == upgrade && -n "$base" ]]; then
       ensure_upgrade_transaction "$base"
       record_created "$base" "$dest"
     fi
-    # No collision — always install
-    cp "$src" "$dest"
+    # No collision — always install (agent-plan: classification only, no write)
+    [[ "$AGENT_DRY_RUN" == true ]] || cp "$src" "$dest"
     success "Created ${dest#${base}/}"
     record_upgrade_result updated "${rel:-${dest#${base}/}}"
     # Record ALL files in the manifest (not just Rig-owned) so the Upgrade
@@ -1498,7 +1577,8 @@ _copy_upgrade_existing() {
     escaped_target="${abs_target//\//\\/}"
     sed "s/\\[REPO_ROOT\\]/${escaped_target}/g" "$src" > "$tmp_src_subst"
     if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged"; then
-      cp "$tmp_merged" "$dest"
+      # agent-plan: classification only, never write the merged result.
+      [[ "$AGENT_DRY_RUN" == true ]] || cp "$tmp_merged" "$dest"
       success "Merged .claude/settings.json"
       record_upgrade_result merged "$rel"
     else
@@ -1517,11 +1597,13 @@ _copy_upgrade_existing() {
   if [[ -z "$new_hash" ]]; then
     if cmp -s "$src" "$dest"; then
       info "Up to date: ${rel}"
+      record_upgrade_result up-to-date "$rel"
     else
       warn "sha256 unavailable — cannot detect customizations in: ${rel}"
       if confirm "Overwrite ${rel} with new version?" "y"; then
         if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
-        cp "$src" "$dest"
+        # agent-plan: classification only, never write.
+        [[ "$AGENT_DRY_RUN" == true ]] || cp "$src" "$dest"
         success "Updated: ${rel}"
         record_upgrade_result updated "$rel"
       else
@@ -1535,6 +1617,7 @@ _copy_upgrade_existing() {
   # Already at the new version — nothing to do
   if [[ "$dest_hash" == "$new_hash" ]]; then
     info "Up to date: ${rel}"
+    record_upgrade_result up-to-date "$rel"
     return
   fi
 
@@ -1553,7 +1636,8 @@ _copy_upgrade_existing() {
       write_manifest_entry "$dest_hash" "$rel" "$manifest_file" "$dest"
     elif [[ "$rig_owned_default" == true ]] || is_rig_owned "$rel"; then
       if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
-      cp "$src" "$dest"
+      # agent-plan: classification only, never write.
+      [[ "$AGENT_DRY_RUN" == true ]] || cp "$src" "$dest"
       success "Updated: ${rel}"
       record_upgrade_result updated "$rel"
       write_manifest_entry "$new_hash" "$rel" "$manifest_file" "$dest"
@@ -1566,20 +1650,27 @@ _copy_upgrade_existing() {
   elif [[ "$dest_hash" == "$manifest_hash" ]]; then
     # Matches manifest → unmodified since install. Safe to overwrite.
     if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
-    cp "$src" "$dest"
+    # agent-plan: classification only, never write.
+    [[ "$AGENT_DRY_RUN" == true ]] || cp "$src" "$dest"
     success "Updated: ${rel}"
     record_upgrade_result updated "$rel"
     write_manifest_entry "$new_hash" "$rel" "$manifest_file" "$dest"
   else
     # dest_hash differs from manifest_hash — user has customized this file.
-    # Show what changed and ask before overwriting.
-    echo ""
-    warn "Customized file detected: ${rel}"
-    echo "  Your version differs from what The Rig originally installed."
-    echo "  The new Rig version also modifies this file."
-    echo ""
-    # Non-interactive (CI / piped stdin): skip without prompting.
-    if [[ ! -t 0 ]]; then
+    # Show what changed and ask before overwriting (agent mode: this is
+    # narrative-only chatter ahead of the JSON result, so suppress it).
+    if [[ -z "$AGENT_MODE" ]]; then
+      echo ""
+      warn "Customized file detected: ${rel}"
+      echo "  Your version differs from what The Rig originally installed."
+      echo "  The new Rig version also modifies this file."
+      echo ""
+    fi
+    # Non-interactive (CI / piped stdin) or agent mode: skip without prompting.
+    # Agent modes must never block on a prompt, and must never silently accept
+    # a customized file as converged — it is always reported as needing
+    # manual review (see the refusal semantics in the JSON emitter below).
+    if [[ ! -t 0 || -n "$AGENT_MODE" ]]; then
       info "Non-interactive mode — skipping customized file: ${rel}"
       info "Run the installer interactively to review and update this file."
       record_upgrade_result skipped-customized "$rel"
@@ -1643,10 +1734,13 @@ _copy_global_file_upgrade() {
   esac
 
   if [[ ! -e "$dest" && ! -L "$dest" ]]; then
-    mkdir -p "$(dirname "$dest")"
+    # agent-plan: classification only, never create the directory or write.
+    if [[ "$AGENT_DRY_RUN" != true ]]; then
+      mkdir -p "$(dirname "$dest")"
+    fi
     ensure_upgrade_transaction "$base"
     record_created "$base" "$dest"
-    cp "$src" "$dest"
+    [[ "$AGENT_DRY_RUN" == true ]] || cp "$src" "$dest"
     success "Created: ${rel}"
     record_upgrade_result updated "$rel"
     write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file" "$dest"
@@ -1698,9 +1792,12 @@ retire_legacy_session_end() {
 
   ensure_upgrade_transaction "$TARGET"
   backup_file "$legacy" "$TARGET"
-  if ! rm -f "$legacy"; then
-    error "Could not retire legacy hook: $rel"
-    return 1
+  # agent-plan: classification only, never delete the legacy hook.
+  if [[ "$AGENT_DRY_RUN" != true ]]; then
+    if ! rm -f "$legacy"; then
+      error "Could not retire legacy hook: $rel"
+      return 1
+    fi
   fi
   success "Removed obsolete legacy hook: $rel"
   record_upgrade_result removed "$rel"
@@ -1716,7 +1813,8 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   DEST_CLAUDE="$CLAUDE_DIR/CLAUDE.md"
 
   if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
-    recover_upgrade_transaction "$CLAUDE_DIR"
+    # agent-plan: classification only, never recover an interrupted transaction.
+    [[ "$AGENT_DRY_RUN" == true ]] || recover_upgrade_transaction "$CLAUDE_DIR"
     if [[ "$RECOVER_ONLY" == true ]]; then
       # Recovery-only must continue into the project layer when both layers
       # were selected.  A global-only invocation can finish here safely.
@@ -1732,12 +1830,13 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
 
   if has_agent "$GLOBAL_AGENT" claude; then
   if upgrade_prepare_directory "$HOME" "$CLAUDE_DIR" ".claude"; then
-    mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR"
+    # agent-plan: classification only, never create the global Claude root.
+    [[ "$AGENT_DRY_RUN" == true ]] || mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR"
   else
     info "Preserving conflicting global Claude root: .claude"
   fi
 
-  if [[ "$INSTALL_NOTIFICATIONS" == true ]]; then
+  if [[ "$INSTALL_NOTIFICATIONS" == true && "$AGENT_DRY_RUN" != true ]]; then
     if upgrade_prepare_mutation "$HOME" "$CLAUDE_DIR/bin/rig-notify" ".claude/bin/rig-notify"; then
       mkdir -p "$CLAUDE_DIR/bin"
       cp "$GLOBAL_TEMPLATES/bin/rig-notify" "$CLAUDE_DIR/bin/rig-notify"
@@ -2039,8 +2138,17 @@ if [[ "$DO_PROJECT" == true ]]; then
   if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
     # Expand ~ and resolve to absolute path
     EXTERNAL_RIG_DIR="${EXTERNAL_RIG_DIR/#\~/$HOME}"
-    mkdir -p "$EXTERNAL_RIG_DIR" || { error "Cannot create directory: $EXTERNAL_RIG_DIR"; exit 1; }
-    EXTERNAL_RIG_DIR="$(cd "$EXTERNAL_RIG_DIR" && pwd)"
+    if [[ "$AGENT_DRY_RUN" == true ]]; then
+      # agent-plan: classification only, never create the external .rig/ dir.
+      # An existing install (the realistic agent-plan target) already has this
+      # directory; canonicalize it read-only. A missing directory here means
+      # the install is in an unusual state outside 444-A's scope — leave the
+      # path unresolved rather than mutate the filesystem to find out.
+      [[ -d "$EXTERNAL_RIG_DIR" ]] && EXTERNAL_RIG_DIR="$(cd "$EXTERNAL_RIG_DIR" && pwd)"
+    else
+      mkdir -p "$EXTERNAL_RIG_DIR" || { error "Cannot create directory: $EXTERNAL_RIG_DIR"; exit 1; }
+      EXTERNAL_RIG_DIR="$(cd "$EXTERNAL_RIG_DIR" && pwd)"
+    fi
     RIGPATH_FILE="$TARGET/.rigpath"
     info "External .rig/ location: $EXTERNAL_RIG_DIR"
   fi
@@ -2056,9 +2164,12 @@ if [[ "$DO_PROJECT" == true ]]; then
   fi
   PROJECT_TARGET_STATE="$(dirname "$(dirname "$MANIFEST_FILE")")/install-targets.json"
   if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
-    recover_upgrade_transaction "$TARGET"
-    if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
-      recover_upgrade_transaction "$EXTERNAL_RIG_DIR"
+    # agent-plan: classification only, never recover an interrupted transaction.
+    if [[ "$AGENT_DRY_RUN" != true ]]; then
+      recover_upgrade_transaction "$TARGET"
+      if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
+        recover_upgrade_transaction "$EXTERNAL_RIG_DIR"
+      fi
     fi
     if [[ "$RECOVER_ONLY" == true ]]; then exit 0; fi
   fi
@@ -2365,9 +2476,12 @@ if [[ "$DO_PROJECT" == true ]]; then
       _rig_version_base="$TARGET"
     fi
     if upgrade_prepare_mutation "$_rig_version_base" "$_RIG_VER_DEST" ".rig/VERSION"; then
-      mkdir -p "$(dirname "$_RIG_VER_DEST")" 2>/dev/null || true
-      echo "$INSTALLER_VERSION" > "$_RIG_VER_DEST"
-      write_manifest_entry "$(sha256_file "$_RIG_VER_DEST")" ".rig/VERSION" "$MANIFEST_FILE" "$_RIG_VER_DEST"
+      # agent-plan: classification only, never write .rig/VERSION.
+      if [[ "$AGENT_DRY_RUN" != true ]]; then
+        mkdir -p "$(dirname "$_RIG_VER_DEST")" 2>/dev/null || true
+        echo "$INSTALLER_VERSION" > "$_RIG_VER_DEST"
+        write_manifest_entry "$(sha256_file "$_RIG_VER_DEST")" ".rig/VERSION" "$MANIFEST_FILE" "$_RIG_VER_DEST"
+      fi
     else
       info "Skipped .rig/VERSION due to a conflicting destination."
     fi
@@ -2396,15 +2510,18 @@ if [[ "$DO_PROJECT" == true ]]; then
   TARGET_CLAUDE="$TARGET/CLAUDE.md"
   if [[ -f "$TARGET_CLAUDE" ]] && \
      upgrade_prepare_mutation "$TARGET" "$TARGET_CLAUDE" "CLAUDE.md"; then
-    sed_inplace "s/\\[Project Name\\]/${PROJECT_NAME}/g" "$TARGET_CLAUDE"
-    success "Substituted [Project Name] in CLAUDE.md"
+    # agent-plan: classification only, never substitute placeholders.
+    if [[ "$AGENT_DRY_RUN" != true ]]; then
+      sed_inplace "s/\\[Project Name\\]/${PROJECT_NAME}/g" "$TARGET_CLAUDE"
+      success "Substituted [Project Name] in CLAUDE.md"
+    fi
   fi
 
   # ── INJECT SubagentStart hook when --subagents is active ─────────────────
   # The settings.json template omits SubagentStart by default (it's opt-in).
   # When INSTALL_SUBAGENTS=true (via --subagents or auto-detect), inject the
   # SubagentStart entry with [REPO_ROOT] placeholder; it is substituted below.
-  if [[ "$INSTALL_SUBAGENTS" == true && -f "$TARGET/.claude/settings.json" ]] && \
+  if [[ "$INSTALL_SUBAGENTS" == true && "$AGENT_DRY_RUN" != true && -f "$TARGET/.claude/settings.json" ]] && \
      upgrade_prepare_mutation "$TARGET" "$TARGET/.claude/settings.json" ".claude/settings.json"; then
     if command -v python3 >/dev/null 2>&1; then
       python3 - "$TARGET/.claude/settings.json" <<'PYEOF' 2>/dev/null || true
@@ -2429,9 +2546,12 @@ PYEOF
   TARGET_SETTINGS="$TARGET/.claude/settings.json"
   if [[ -f "$TARGET_SETTINGS" ]] && \
      upgrade_prepare_mutation "$TARGET" "$TARGET_SETTINGS" ".claude/settings.json"; then
-    ESCAPED_PATH="${TARGET_ABS//\//\\/}"
-    sed_inplace "s/\\[REPO_ROOT\\]/${ESCAPED_PATH}/g" "$TARGET_SETTINGS"
-    success "Substituted [REPO_ROOT] in .claude/settings.json → $TARGET_ABS"
+    # agent-plan: classification only, never substitute placeholders.
+    if [[ "$AGENT_DRY_RUN" != true ]]; then
+      ESCAPED_PATH="${TARGET_ABS//\//\\/}"
+      sed_inplace "s/\\[REPO_ROOT\\]/${ESCAPED_PATH}/g" "$TARGET_SETTINGS"
+      success "Substituted [REPO_ROOT] in .claude/settings.json → $TARGET_ABS"
+    fi
   fi
 
   # Substitute [BASE_BRANCH] in CLAUDE.md, commands, and process files.
@@ -2446,6 +2566,8 @@ PYEOF
       rel=".rig/${f#"$target_rig_dir"/}"
     fi
     upgrade_prepare_mutation "$base" "$f" "$rel" || return 0
+    # agent-plan: classification only, never substitute placeholders.
+    [[ "$AGENT_DRY_RUN" == true ]] && return 0
     sed_inplace "s/\\[BASE_BRANCH\\]/${_BASE_ESC}/g" "$f"
   }
   _subst_base_branch "$TARGET/CLAUDE.md"
@@ -2459,6 +2581,15 @@ PYEOF
   _subst_base_branch "$_TARGET_RIG_DIR/processes/POST_MERGE_WORKFLOW.md"
   _subst_base_branch "$_TARGET_RIG_DIR/processes/SHIP_WORKFLOW.md"
   success "Substituted [BASE_BRANCH] → $BASE_BRANCH in workflow files"
+
+  # agent-plan: none of the tracking-mode bookkeeping below (.rigpath, git
+  # excludes, stale in-repo .rig/ cleanup, stealth .git/hooks/ install) feeds
+  # the artifact classification/JSON contract — it never calls
+  # record_upgrade_result and isn't part of the UPGRADE_*_COUNT bookkeeping
+  # the schema mirrors. Skip it outright under AGENT_DRY_RUN rather than
+  # guarding each of its ~15 individual writes, since it produces nothing
+  # agent-plan needs to report and must not run in a read-only preflight.
+  if [[ "$AGENT_DRY_RUN" != true ]]; then
 
   # ── EXTERNAL .rig/ — write .rigpath and update git excludes ──────────────
   if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
@@ -2591,6 +2722,8 @@ PYEOF
     fi
   fi
 
+  fi # AGENT_DRY_RUN tracking-mode bookkeeping guard
+
   # ── EXECUTABLE BITS ───────────────────────────────────────────────────────
   HUSKY_DIR="$TARGET/.husky"
   CLAUDE_HOOKS_DIR="$TARGET/.claude/hooks"
@@ -2617,7 +2750,8 @@ PYEOF
     if [[ -L "$RIG_DISPATCHER" ]]; then
       record_upgrade_destination_conflict 'bin/rig' symlink
     elif [[ -f "$RIG_DISPATCHER" ]]; then
-      chmod +x "$RIG_DISPATCHER"
+      # agent-plan: classification only, never change file modes.
+      [[ "$AGENT_DRY_RUN" == true ]] || chmod +x "$RIG_DISPATCHER"
       success "Set executable bit on bin/rig"
     fi
   else
@@ -2644,7 +2778,11 @@ PYEOF
 
   # ── HUSKY INITIALIZATION ──────────────────────────────────────────────────
   # Skipped in stealth mode — hooks are already wired to .git/hooks/ above.
-  if [[ "$INSTALL_GIT_HOOKS" == true && "$RIG_TRACKING" != "stealth" ]]; then
+  # Also skipped entirely in agent mode: confirm() already defaults to "no"
+  # non-interactively, but Husky init is an external side effect (npm/npx)
+  # outside the file-convergence contract this lane implements — never run it
+  # from agent-plan or agent-upgrade regardless of default behavior.
+  if [[ "$INSTALL_GIT_HOOKS" == true && "$RIG_TRACKING" != "stealth" && -z "$AGENT_MODE" ]]; then
     if [[ -f "$TARGET/package.json" ]]; then
       echo ""
       info "package.json detected."
@@ -2747,8 +2885,10 @@ fi
 # Files removed are Rig-specific repo files only. Scaffolded project files
 # (CLAUDE.md, memory/, processes/, rules/, tasks/, .claude/, .husky/, etc.)
 # are never touched.
-
-if [[ "$DO_PROJECT" == true && -n "${TARGET_ABS:-}" ]]; then
+#
+# Never run in agent mode: this is a destructive rm -rf outside the
+# file-convergence contract, and agent-plan must be provably read-only.
+if [[ "$DO_PROJECT" == true && -n "${TARGET_ABS:-}" && -z "$AGENT_MODE" ]]; then
   SCRIPT_ABS="$(cd "$SCRIPT_DIR" && pwd)"
   if [[ "$SCRIPT_ABS" == "$TARGET_ABS" ]]; then
     # Guard: if install.sh is committed in this repo, we're inside The Rig's own
@@ -2788,8 +2928,143 @@ if [[ "$DO_PROJECT" == true && -n "${TARGET_ABS:-}" ]]; then
 fi
 
 # ── DONE ──────────────────────────────────────────────────────────────────────
-echo ""
 UPGRADE_REVIEW_REQUIRED=0
+if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+  [[ "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" -gt 0 ]] && UPGRADE_REVIEW_REQUIRED=1
+  [[ "$UPGRADE_SKIPPED_CONFLICT_COUNT" -gt 0 ]] && UPGRADE_REVIEW_REQUIRED=1
+fi
+
+if [[ -n "$AGENT_MODE" ]]; then
+  # ── Agent-driven contract result (issue #444, lane 444-A) ──────────────────
+  # agent-plan/agent-upgrade emit exactly one JSON document on stdout instead
+  # of the human-oriented summary below (info/success/warn/bold/ask are
+  # no-ops in AGENT_MODE; this is the only stdout content they produce).
+  #
+  # Exit code 3 is new and dedicated to this contract. It is deliberately
+  # distinct from the two exit codes already in use elsewhere in this script:
+  # 1 is the general fatal-error code, and 2 is reserved for malformed or
+  # missing project/global target metadata (see the --strategy/--global-agent/
+  # --project-agent parsing earlier in this file). Neither of those means
+  # "the run completed but left something for a human to review" — reusing
+  # either would make that state indistinguishable from a crash or a bad
+  # flag. status="refused" + exit 3 together mean: nothing was silently
+  # overwritten or silently accepted as converged; a customized or
+  # conflicting file needs manual review before this project is fully
+  # upgraded. A run with zero customized/conflicting files exits 0 with
+  # status="success", whether or not anything was actually updated.
+  _agent_status="success"
+  [[ "$UPGRADE_REVIEW_REQUIRED" -eq 1 ]] && _agent_status="refused"
+  # The artifact log is passed via a temp file, not a pipe: python3 - <<'PYEOF'
+  # already claims stdin to read its own script source, so piping data into
+  # the same stdin would silently discard it (the heredoc redirect wins over
+  # the pipe for that fd). A file argv sidesteps the conflict entirely.
+  _agent_records_file="$(mktemp)"
+  printf '%s\n' "${UPGRADE_ARTIFACT_RECORDS[@]:-}" > "$_agent_records_file"
+  _agent_json="$(python3 - \
+    "$AGENT_MODE" "$_agent_status" "$_agent_records_file" \
+    "$UPGRADE_UPDATED_COUNT" "$UPGRADE_MERGED_COUNT" "$UPGRADE_REMOVED_COUNT" \
+    "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" "$UPGRADE_SKIPPED_CONFLICT_COUNT" \
+    "$UPGRADE_SKIPPED_UNTRACKED_COUNT" "$UPGRADE_STALE_COUNT" <<'PYEOF'
+import json, sys
+
+mode, status, records_path = sys.argv[1], sys.argv[2], sys.argv[3]
+(updated, merged, removed, skipped_customized, skipped_conflict,
+ skipped_untracked, stale) = (int(x) for x in sys.argv[4:11])
+
+# result-code (as passed to record_upgrade_result in install.sh) -> fields.
+CLASSIFICATION = {
+    "updated": "unmodified-since-install",
+    "merged": "settings-mergeable",
+    "removed": "obsolete",
+    "migrated": "moved-project-reference",
+    "up-to-date": "up-to-date",
+    "skipped-untracked": "user-owned-untracked",
+    "skipped-customized": "customized",
+    "skipped-conflict": "conflict",
+}
+ACTION = {
+    "updated": "update",
+    "merged": "merge",
+    "removed": "remove",
+    "migrated": "rewrite",
+    "up-to-date": "none",
+    "skipped-untracked": "skip",
+    "skipped-customized": "skip",
+    "skipped-conflict": "skip",
+}
+REASON = {
+    "updated": "template file updated to the incoming Rig version",
+    "merged": "settings.json merged (smart-merge) with the incoming Rig version",
+    "removed": "obsolete Rig-owned artifact retired",
+    "migrated": "path references rewritten for a moved project root",
+    "up-to-date": "already matches the incoming Rig version; no action needed",
+    "skipped-untracked": "user-owned file with no prior manifest baseline; preserved untouched",
+    "skipped-customized": "local content differs from the recorded Rig baseline (customized)",
+    "skipped-conflict": "destination path has an unsupported type/symlink/location conflict",
+}
+REPAIR_GUIDANCE = {
+    "skipped-customized": (
+        "Resolve manually and re-run, or restore the file from .rig-backup/ "
+        "and accept the incoming template on the next upgrade."
+    ),
+    "skipped-conflict": (
+        "Remove or repair the conflicting path explicitly (wrong type, "
+        "symlink, or out-of-root location), then re-run the upgrade."
+    ),
+}
+
+artifacts = []
+conflicts = []
+with open(records_path) as fh:
+    records_text = fh.read()
+for line in records_text.split("\n"):
+    if not line:
+        continue
+    path, sep, result = line.partition("\x1e")
+    if not sep:
+        continue
+    entry = {
+        "path": path,
+        "classification": CLASSIFICATION.get(result, result),
+        "action": ACTION.get(result, "unknown"),
+        "reason": REASON.get(result, result),
+    }
+    artifacts.append(entry)
+    if result in REPAIR_GUIDANCE:
+        conflicts.append({
+            "path": path,
+            "reason": entry["reason"],
+            "repair_guidance": REPAIR_GUIDANCE[result],
+        })
+
+doc = {
+    "schema_version": 1,
+    "mode": mode,
+    "status": status,
+    "summary": {
+        "updated": updated,
+        "merged": merged,
+        "removed_obsolete": removed,
+        "skipped_customized": skipped_customized,
+        "skipped_conflict": skipped_conflict,
+        "skipped_untracked": skipped_untracked,
+        "stale": stale,
+    },
+    "artifacts": artifacts,
+    "conflicts": conflicts,
+}
+print(json.dumps(doc, separators=(",", ":")))
+PYEOF
+)"
+  rm -f "$_agent_records_file"
+  printf '%s\n' "$_agent_json"
+  if [[ "$_agent_status" == "refused" ]]; then
+    exit 3
+  fi
+  exit 0
+fi
+
+echo ""
 if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
   bold "── Upgrade summary ──"
   echo "Updated: $UPGRADE_UPDATED_COUNT"

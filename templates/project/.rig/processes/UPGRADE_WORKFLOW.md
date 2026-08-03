@@ -234,3 +234,160 @@ acquiring the index lock and works correctly inside hooks on all Git versions.
 - **`~/tools/the-rig`** — stable installer source. Always on `main`. Never develop here.
 - **`~/code/the-rig`** — active dev repo for The Rig itself. Can be on any branch.
   Do NOT use this as an installer source for production projects.
+
+---
+
+## Agent-driven upgrade contract (`--strategy agent-plan` / `--strategy agent-upgrade`)
+
+> Added under issue #444, lane 444-A. These two `--strategy` values are
+> non-interactive-only: they are accepted by `install.sh --strategy <value>`
+> but never offered as a numbered choice in the interactive "What are you
+> doing?" menu, so an interactive human user can never land in agent mode by
+> accident.
+
+### When to use these instead of `--strategy upgrade`
+
+Use `--strategy agent-plan` when a calling agent or script needs a
+machine-readable, read-only preview of what an upgrade would do before
+deciding whether to run it — for example inside `/rig-upgrade`'s survey phase
+(see `templates/project/.claude/commands/rig-upgrade.md`, section 1c-bis).
+
+Use `--strategy agent-upgrade` when a calling agent or script wants to apply
+the same safe/convergeable actions `--strategy upgrade` already applies (file
+creation, unmodified-file updates, `settings.json` smart-merge, obsolete-hook
+retirement), but needs a single JSON result document instead of parsing
+human-oriented stdout text, and needs a reliable, distinct exit code that
+means "something needs a human" rather than "crashed" or "bad flag."
+
+Both modes run the exact same artifact discovery/classification as
+`--strategy upgrade` — there is one classification code path in `install.sh`,
+shared by all three strategies. Neither mode performs real three-way merging
+of customized files; that is out of scope for lane 444-A and is tracked as a
+follow-up (lane 444-C) under #444. A customized or conflicting file is always
+left exactly as `--strategy upgrade` would leave it today: untouched, and
+reported for manual review.
+
+### `agent-plan` — read-only preflight
+
+```bash
+install.sh --project-only --target "$(pwd)" --tracking repo --strategy agent-plan
+```
+
+- Performs **zero writes** to the target (or the global layer, if the global
+  layer is also selected). No file is created, modified, deleted, backed up,
+  or has its mode changed. No manifest entry, transaction journal, or
+  target-state file is written.
+- Prints exactly one JSON document on stdout (see schema below) and exits.
+- Exit code `0` when `status` is `"success"`. Exit code `3` when `status` is
+  `"refused"` (see below). A different exit code means a genuine fatal error
+  unrelated to conflicts (for example, the target directory does not exist) —
+  the same class of error that would make plain `--strategy upgrade` exit `1`
+  today.
+
+### `agent-upgrade` — apply the same convergence as `upgrade`
+
+```bash
+install.sh --project-only --target "$(pwd)" --tracking repo --strategy agent-upgrade
+```
+
+- Applies the same file operations `--strategy upgrade` already applies
+  non-interactively: creates missing tracked files, updates files whose
+  installed hash still matches the manifest baseline, smart-merges
+  `.claude/settings.json`, and retires obsolete Rig-owned artifacts (for
+  example the legacy `session-end.sh` hook merged into `stop.sh`).
+- Never prompts, even if stdin happens to be a TTY.
+- Never silently overwrites a customized file and never silently accepts a
+  stale customized file as converged — a customized or conflicting file is
+  always left untouched and reported, exactly like a non-interactive
+  `--strategy upgrade` run leaves it today.
+- Prints the same JSON schema as `agent-plan` (with `"mode":"apply"`) and
+  uses the same exit codes (`0` success, `3` refused).
+
+### Refusal semantics and exit code 3
+
+If classification would place **any** file in the customized-skip or
+conflict-skip bucket — anything the current interactive `--strategy upgrade`
+would leave for manual review — both `agent-plan` and `agent-upgrade` set
+`status` to `"refused"` in the JSON output and exit with code `3`. This is
+intentional: The Rig's policy is to never silently accept a stale customized
+artifact as converged. A run with zero customized or conflicting files exits
+`0` with `status: "success"`, whether or not anything was actually updated.
+
+Exit code `3` is dedicated to this contract and does not collide with the two
+exit codes `install.sh` already uses elsewhere:
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Success (interactive/non-interactive strategies), or agent mode with `status: "success"` |
+| `1` | General fatal error (used throughout `install.sh`) |
+| `2` | Malformed or missing project/global target metadata (`--strategy`/`--global-agent`/`--project-agent` parsing) |
+| `3` | Agent mode only: `status: "refused"` — at least one artifact needs manual review |
+
+### JSON schema
+
+```json
+{
+  "schema_version": 1,
+  "mode": "plan | apply",
+  "status": "success | refused | error",
+  "summary": {
+    "updated": 0,
+    "merged": 0,
+    "removed_obsolete": 0,
+    "skipped_customized": 0,
+    "skipped_conflict": 0,
+    "skipped_untracked": 0,
+    "stale": 0
+  },
+  "artifacts": [
+    {
+      "path": "relative/path/from/target/root",
+      "classification": "up-to-date | unmodified-since-install | settings-mergeable | obsolete | moved-project-reference | user-owned-untracked | customized | conflict",
+      "action": "none | update | merge | remove | rewrite | skip",
+      "reason": "human-readable explanation of the classification"
+    }
+  ],
+  "conflicts": [
+    {
+      "path": "relative/path/from/target/root",
+      "reason": "human-readable explanation",
+      "repair_guidance": "concrete next step for a human or a follow-up agent run"
+    }
+  ]
+}
+```
+
+- `summary` mirrors the same `UPGRADE_*_COUNT` bookkeeping the human-oriented
+  `--strategy upgrade` summary already prints (`Updated:`, `Merged:`,
+  `Removed obsolete:`, `Skipped customized:`, `Skipped conflicts:`,
+  `Skipped untracked user-owned:`, `Stale/missing tracked artifacts:`).
+- `artifacts` contains one entry per file the classification logic actually
+  evaluated (every file that contributes to `summary`, plus files found to
+  already be up to date). It does not enumerate files outside that
+  classification path (for example stealth git-hook installation or Husky
+  initialization) — those are not part of the `UPGRADE_*_COUNT` contract
+  today and are out of scope for lane 444-A.
+- `conflicts` is non-empty only when `status` is `"refused"`, and contains
+  exactly the artifacts whose `classification` is `"customized"` or
+  `"conflict"`.
+- `status: "error"` is reserved for a future lane; a genuine fatal error in
+  the current implementation exits before any JSON is printed, the same way
+  a fatal error in plain `--strategy upgrade` does today.
+
+### Example: a clean plan (`status: "success"`)
+
+```json
+{"schema_version":1,"mode":"plan","status":"success","summary":{"updated":0,"merged":1,"removed_obsolete":0,"skipped_customized":0,"skipped_conflict":0,"skipped_untracked":0,"stale":0},"artifacts":[{"path":".claude/hooks/pre-tool.sh","classification":"up-to-date","action":"none","reason":"already matches the incoming Rig version; no action needed"},{"path":".claude/settings.json","classification":"settings-mergeable","action":"merge","reason":"settings.json merged (smart-merge) with the incoming Rig version"}],"conflicts":[]}
+```
+
+### Example: a refused result (`status: "refused"`, exit 3)
+
+```json
+{"schema_version":1,"mode":"apply","status":"refused","summary":{"updated":1,"merged":1,"removed_obsolete":0,"skipped_customized":1,"skipped_conflict":0,"skipped_untracked":0,"stale":0},"artifacts":[{"path":".claude/commands/status.md","classification":"unmodified-since-install","action":"update","reason":"template file updated to the incoming Rig version"},{"path":".claude/settings.json","classification":"settings-mergeable","action":"merge","reason":"settings.json merged (smart-merge) with the incoming Rig version"},{"path":"CLAUDE.md","classification":"customized","action":"skip","reason":"local content differs from the recorded Rig baseline (customized)"}],"conflicts":[{"path":"CLAUDE.md","reason":"local content differs from the recorded Rig baseline (customized)","repair_guidance":"Resolve manually and re-run, or restore the file from .rig-backup/ and accept the incoming template on the next upgrade."}]}
+```
+
+In this example, `agent-upgrade` still updated `.claude/commands/status.md`
+and merged `.claude/settings.json` — the safe/convergeable actions — while
+leaving `CLAUDE.md` completely untouched and reporting it in `conflicts`
+with concrete repair guidance. The overall run still exits `3` because at
+least one file was left for manual review.

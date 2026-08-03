@@ -298,6 +298,40 @@ BASE_BRANCH=$(grep "^base-branch:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $
 BASE_BRANCH="${BASE_BRANCH:-main}"
 ```
 
+### 1c-bis — Structured plan via `install.sh --strategy agent-plan`
+
+As of #444 lane 444-A, `install.sh` accepts `--strategy agent-plan`: a
+read-only, non-interactive invocation that runs the exact same artifact
+discovery/classification as `--strategy upgrade`, performs zero writes to the
+target, and emits one JSON document on stdout describing every discovered
+artifact and its classification/action/reason. This is available as a
+structured, machine-readable alternative (or supplement) to the manual
+per-file `_diff_tpl` survey in 1d/1e below — it can shortcut or cross-check
+that survey for the file families install.sh itself tracks (everything
+counted in the installer's `UPGRADE_*_COUNT` bookkeeping).
+
+```bash
+AGENT_PLAN_JSON=$(bash "$INSTALLER_SRC/install.sh" --project-only \
+  --target "$REPO" --tracking "$TRACKING" --strategy agent-plan)
+AGENT_PLAN_STATUS=$?
+```
+
+`$AGENT_PLAN_STATUS` is `0` when `status` is `"success"` (no file needs manual
+review) and `3` when `status` is `"refused"` (at least one customized or
+conflicting file needs manual review — see the `conflicts` array in the JSON
+for `path`/`reason`/`repair_guidance` per file). A dedicated exit code other
+than `0`/`3` means a genuine fatal error unrelated to conflicts (e.g. a
+missing target). Full schema and example documents are in
+`$RIG_DIR/processes/UPGRADE_WORKFLOW.md`.
+
+**Scope note:** this lane wires `agent-plan` into the survey step only.
+Phase 2 below still delegates to `install.sh --strategy upgrade` for the
+actual interactive/noninteractive run, and Phase 2b still offers manual
+accept/keep decisions rather than guarded convergence — wiring the full
+orchestrator (Phases 2–5) to the agent-driven contract, including
+`--strategy agent-upgrade` and true three-way convergence, is tracked as a
+follow-up under #444 (lanes 444-B onward), not implemented here.
+
 ### 1d — Survey changed files
 
 For each key Rig-owned file, compare the installed version to the template.
