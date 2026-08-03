@@ -83,6 +83,69 @@ write_session() {
   [[ "$output" == *'"reason": "anchor"'* ]]
 }
 
+write_native_session() {
+  # Writes a v1-schema record, matching the exact shape session_bind produces,
+  # so it is eligible for native-id matching (unlike write_session's legacy
+  # shape, which has no schema_version/native/project fields at all).
+  local path="$1" anchor="$2" native_id="$3" state="${4:-active}" project_identity
+  project_identity=$(git -C "$CASE_DIR" rev-parse --git-common-dir 2>/dev/null)
+  project_identity=$(SHA_INPUT="$(cd "$CASE_DIR" && cd "$project_identity" && pwd -P)" python3 -c 'import hashlib,os; print(hashlib.sha256(os.environ["SHA_INPUT"].encode()).hexdigest())')
+  PATH_F="$path" ANCHOR="$anchor" NATIVE="$native_id" STATE="$state" PROJECT_ID="$project_identity" python3 -c '
+import json, os
+json.dump({
+    "schema_version": 1, "anchor": os.environ["ANCHOR"], "agent": "claude",
+    "native": {"session_id": os.environ["NATIVE"]},
+    "project": {"identity": os.environ["PROJECT_ID"]},
+    "lifecycle": {"state": os.environ["STATE"]}, "revision": 1
+}, open(os.environ["PATH_F"], "w"))'
+}
+
+@test "resolver binds an ambient Claude host session id with no launcher file or PID sentinel" {
+  write_native_session "$CASE_DIR/.rig/memory/sessions/session-native.json" native-anchor ambient-native-id
+  run env CLAUDE_CODE_SESSION_ID=ambient-native-id RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"anchor": "native-anchor"'* && "$output" == *'"confidence": "exact"'* && "$output" == *'"reason": "native_id"'* ]]
+}
+
+@test "ambient native session id fails closed on a duplicate binding instead of guessing" {
+  write_native_session "$CASE_DIR/.rig/memory/sessions/session-native-a.json" anchor-a dup-native-id
+  write_native_session "$CASE_DIR/.rig/memory/sessions/session-native-b.json" anchor-b dup-native-id
+  run env CLAUDE_CODE_SESSION_ID=dup-native-id "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'"reason": "duplicate_native_id"'* ]]
+}
+
+@test "ambient native session id bound to another project fails closed instead of falling back" {
+  write_native_session "$CASE_DIR/.rig/memory/sessions/session-foreign.json" foreign-anchor foreign-native-id
+  PATH_F="$CASE_DIR/.rig/memory/sessions/session-foreign.json" python3 -c 'import json,os; p=os.environ["PATH_F"]; d=json.load(open(p)); d["project"]["identity"]="a-different-project"; json.dump(d,open(p,"w"))'
+  run env CLAUDE_CODE_SESSION_ID=foreign-native-id "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "cross_project"'* ]]
+}
+
+@test "ambient native session id with no matching record falls through to legacy anchor fallback unchanged" {
+  write_session "$CASE_DIR/.rig/memory/sessions/session-7.json" legacy feat/other
+  printf legacy > /tmp/.rig-session-778899.uuid
+  run env CLAUDE_CODE_SESSION_ID=unrelated-id RIG_SESSION_PID=778899 "$CASE_DIR/bin/rig" session resolve --json
+  rm -f /tmp/.rig-session-778899.uuid
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"reason": "anchor"'* && "$output" == *'"anchor": "legacy"'* ]]
+}
+
+@test "ambient native session id that matches nothing at all still fails closed with not_found" {
+  write_session "$CASE_DIR/.rig/memory/sessions/session-1.json" one feat/current
+  run env CLAUDE_CODE_SESSION_ID=nothing-matches-this RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"reason": "not_found"'* ]]
+}
+
+@test "ambient native session id does not resolve a completed session" {
+  write_native_session "$CASE_DIR/.rig/memory/sessions/done/session-ended.json" ended-anchor ended-native-id complete
+  run env CLAUDE_CODE_SESSION_ID=ended-native-id "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "ended_record"'* ]]
+}
+
 @test "atomic writer preserves shell metacharacters and newlines literally" {
   local file="$CASE_DIR/.rig/memory/sessions/session-1.json" name
   write_session "$file" safe feat/current
