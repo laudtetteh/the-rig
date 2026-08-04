@@ -514,9 +514,16 @@ artifact.
 
 > Implemented under issue #444 lane 444-H (merged). These gates run inside
 > the installed project's own `bin/rig doctor` — a separate command from
-> `install.sh` itself — and are not currently invoked automatically by
-> `install.sh`, `agent-upgrade`, or `/rig-upgrade`. Run `bin/rig doctor` (or
-> `bin/rig doctor --json`) yourself after an upgrade to check them.
+> `install.sh` itself. `install.sh` and `agent-upgrade` never invoke it
+> themselves (a bare `install.sh --strategy agent-upgrade` run is still just
+> the file-convergence engine, with no doctor call at all). As of issue #456,
+> `/rig-upgrade` Phase 3d does invoke `bin/rig doctor --json` automatically
+> after every project-layer upgrade (both `agent` and `classic` mode — see
+> `templates/project/.claude/commands/rig-upgrade.md`, section 3d) and
+> surfaces any gate failure before declaring the command complete. Running
+> `install.sh` or `agent-upgrade` directly, outside of `/rig-upgrade`, still
+> requires a manual `bin/rig doctor` (or `bin/rig doctor --json`) call
+> afterward to check these gates.
 
 | Gate | Verifies | Reports "skipped" (not "failed") when |
 |---|---|---|
@@ -553,12 +560,15 @@ and either restore the expected type or correct the manifest entry before
 re-running the upgrade.
 
 **`agent-plan`/`agent-upgrade` exits `3` with `status: "refused"`:** every
-safe/convergeable action was already applied (and, once lane 444-C's
-convergence engine is in effect, every conflict-free structure-aware merge
-too) — only the files listed in `conflicts[]` are still untouched. For each
-one, either resolve it manually (reconcile the customization with the
-incoming change, or restore from `.rig-backup/` and re-run to accept the
-incoming template) or re-run with a strategy that explicitly accepts the
-incoming version for that file (interactive `--strategy upgrade` will prompt
-per file). Re-running `agent-upgrade` unchanged against the same unresolved
-conflict refuses again by design — that is not a bug to retry around.
+safe/convergeable action was already applied, including every conflict-free
+structure-aware merge lane 444-C's convergence engine could apply — only the
+files listed in `conflicts[]` are still untouched. For each one, either
+resolve it manually (reconcile the customization with the incoming change,
+or restore from `.rig-backup/` and re-run to accept the incoming template)
+or re-run with a strategy that explicitly accepts the incoming version for
+that file (interactive `--strategy upgrade` will prompt per file). Re-running
+`agent-upgrade` unchanged against the same unresolved conflict refuses again
+by design — that is not a bug to retry around. `/rig-upgrade` Phase 2b-agent
+presents each `conflicts[]` entry (`path`/`reason`/`repair_guidance`)
+automatically when running in `agent` mode — see
+`templates/project/.claude/commands/rig-upgrade.md`, section 2b-agent.
