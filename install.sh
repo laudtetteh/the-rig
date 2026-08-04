@@ -2124,7 +2124,14 @@ if [[ "$DO_GLOBAL" == true ]]; then
   success "Postflight targets: global=$GLOBAL_AGENT; smoke=$_global_smoke"
 fi
 if [[ "$COLLISION_STRATEGY" == upgrade && "$DO_GLOBAL" == true ]]; then
-  report_stale_manifest_entries "${GLOBAL_MANIFEST_FILE}.json" "$HOME" global
+  # Global manifest entries are recorded relative to $CLAUDE_DIR ($HOME/.claude
+  # — see the copy_file call installing CLAUDE.md with base="$CLAUDE_DIR",
+  # rel="CLAUDE.md"), not $HOME directly. Passing $HOME here resolved every
+  # entry one directory too shallow, so every global artifact was reported as
+  # a false-positive "missing" stale entry. This went unnoticed before lane
+  # 444-E started counting unrepaired stale entries toward
+  # UPGRADE_REVIEW_REQUIRED; now it must resolve correctly.
+  report_stale_manifest_entries "${GLOBAL_MANIFEST_FILE}.json" "$CLAUDE_DIR" global
 fi
 
 # Reset backup dir between layers so each layer uses its own base path.
