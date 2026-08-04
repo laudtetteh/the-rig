@@ -305,6 +305,98 @@ is_rig_owned_stub() {
   jq -e '.schema_version == 1 and (.entries | length) > 0' "$metadata" >/dev/null
 }
 
+@test "upgrade strategy: manifest entries record base_revision, generator, and provider" {
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  [ -f "$metadata" ]
+
+  # generated-codex artifact: mirrored by installer/generate-codex-skills.py.
+  jq -e '.entries[".agents/skills/debug/SKILL.md"].generator == "codex-mirror"
+    and .entries[".agents/skills/debug/SKILL.md"].provider == "codex"
+    and (.entries[".agents/skills/debug/SKILL.md"].base_revision | type == "string")' "$metadata" >/dev/null
+
+  # hand-authored template, Claude-specific: unambiguous provider regardless
+  # of the project agent selection that drove this run.
+  jq -e '.entries[".claude/hooks/pre-tool.sh"].generator == "install.sh"
+    and .entries[".claude/hooks/pre-tool.sh"].provider == "claude"' "$metadata" >/dev/null
+
+  # hand-authored template, Codex-specific.
+  jq -e '.entries[".codex/hooks.json"].generator == "install.sh"
+    and .entries[".codex/hooks.json"].provider == "codex"' "$metadata" >/dev/null
+
+  # shared/project-user artifact: takes on this run's active project agent
+  # selection since the file itself is not provider-specific.
+  jq -e '.entries["CLAUDE.md"].generator == "install.sh"
+    and .entries["CLAUDE.md"].provider == "codex"' "$metadata" >/dev/null
+
+  # base_revision mirrors installer_version (the only trustworthy per-file
+  # revision signal available today).
+  jq -e '.entries["CLAUDE.md"].base_revision == .entries["CLAUDE.md"].installer_version' "$metadata" >/dev/null
+}
+
+@test "manifest provenance validator: accepts a legacy manifest lacking provenance fields" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  jq 'del(.entries["CLAUDE.md"].base_revision, .entries["CLAUDE.md"].generator, .entries["CLAUDE.md"].provider)' \
+    "$metadata" > "$TEMP_DIR/legacy-metadata.json"
+  mv "$TEMP_DIR/legacy-metadata.json" "$metadata"
+
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"legacy_provenance":["CLAUDE.md"]'* ]]
+}
+
+@test "manifest provenance validator: reports a deliberately malformed provenance entry" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  jq '.entries["CLAUDE.md"].generator = "not-a-real-generator"' "$metadata" > "$TEMP_DIR/malformed-metadata.json"
+  mv "$TEMP_DIR/malformed-metadata.json" "$metadata"
+
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"ok":false'* ]]
+  [[ "$output" == *'"path":"CLAUDE.md"'* ]]
+  [[ "$output" == *"not-a-real-generator"* ]]
+}
+
+@test "upgrade strategy: a pre-provenance manifest entry survives a real upgrade run" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  # Simulate a manifest written before 444-B: strip the new fields from an
+  # unmodified Rig-owned file's entry, same as an old installer would have
+  # left it.
+  jq 'del(.entries[".claude/hooks/pre-tool.sh"].base_revision,
+          .entries[".claude/hooks/pre-tool.sh"].generator,
+          .entries[".claude/hooks/pre-tool.sh"].provider)' \
+    "$metadata" > "$TEMP_DIR/legacy-metadata.json"
+  mv "$TEMP_DIR/legacy-metadata.json" "$metadata"
+
+  # Reading it back must not crash the validator...
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
+  [ "$status" -eq 0 ]
+
+  # ...nor a real upgrade run against the now-legacy entry. The file is
+  # unmodified, so this hits the same-hash fast path that does not rewrite
+  # the manifest entry — the point of this test is that this is safe, not
+  # that it forces a migration.
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_PROJECT/.claude/hooks/pre-tool.sh" ]
+
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]]
+}
+
 @test "upgrade strategy: reports missing metadata artifacts without deleting anything" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
