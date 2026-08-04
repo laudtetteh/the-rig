@@ -43,8 +43,13 @@ run_installer() {
 # installer_version/timestamps are allowed to be rewritten identically on
 # each run) and .git internals (irrelevant to installed-artifact state).
 snapshot_tree() {
+  # .rig-backup can be created at more than one base within a single run
+  # (e.g. $TEST_PROJECT/.rig-backup for project-root mutations,
+  # $TEST_PROJECT/.rig/.rig-backup for direct-writer mutations scoped under
+  # .rig/ — see 444-F's upgrade_prepare_mutation()), so prune by directory
+  # name at any depth rather than matching two fixed paths.
   find "$TEST_PROJECT" \
-    \( -path "$TEST_PROJECT/.git" -o -path "$TEST_PROJECT/.rig-backup" \) -prune -o \
+    \( -path "$TEST_PROJECT/.git" -o -name ".rig-backup" \) -prune -o \
     -type f -print \
     | sort \
     | while IFS= read -r file; do

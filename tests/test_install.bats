@@ -455,7 +455,7 @@ is_rig_owned_stub() {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
   [[ "$output" == *"Stale/missing tracked artifacts: 1"* ]]
-  [[ "$output" == *"project:.rig/legacy-user-file.md"* ]]
+  [[ "$output" == *"project:missing:.rig/legacy-user-file.md"* ]]
   [ ! -e "$sentinel" ]
 }
 

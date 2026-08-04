@@ -82,7 +82,8 @@ sha256_file() {
 #
 # Rig-owned:   bin/rig, .claude/hooks/, .claude/commands/, .agents/skills/,
 #              .codex/hooks.json, .codex/hooks/, .rig/processes/,
-#              .rig/rules/protected-paths.txt, .husky/, .gitleaks.toml
+#              .rig/rules/protected-paths.txt, .husky/, .gitleaks.toml,
+#              .git/hooks/ (stealth-mode installed hook scripts only)
 # User-owned:  CLAUDE.md, PROJECT_BRIEF.md, other .rig/rules/, .rig/memory/*.md,
 #              .rig/tasks/, .github/
 # Special:     .claude/settings.json (always smart-merged, not manifest-tracked)
@@ -99,6 +100,7 @@ is_rig_owned() {
     .rig/processes/*|\
     .rig/rules/protected-paths.txt|\
     .husky/*|\
+    .git/hooks/*|\
     .gitleaks.toml)
       return 0 ;;
     *)
@@ -130,7 +132,7 @@ manifest_artifact_source() {
     .codex/*) echo codex-native ;;
     .claude/*) echo claude-native ;;
     .rig/*) echo shared-rig ;;
-    .husky/*|.gitleaks.toml) echo project-tooling ;;
+    .husky/*|.git/hooks/*|.gitleaks.toml) echo project-tooling ;;
     *) echo project-user ;;
   esac
 }
@@ -250,23 +252,74 @@ validate_manifest_provenance() {
   python3 "$SCRIPT_DIR/installer/validate-manifest-provenance.py" "$metadata_file"
 }
 
+# Audit a manifest's tracked entries against what's actually on disk.
+#
+#   metadata_file  the *.json metadata companion to a .rig-manifest file
+#   artifact_root  root that non-".rig/*" tracked paths resolve against
+#   label          "global" | "project" — only used to prefix report lines
+#   rig_root       optional; when set (external/stealth layouts), any tracked
+#                  rel beginning with ".rig/" resolves against this root
+#                  instead, with the ".rig/" prefix stripped first. This is
+#                  required because external/stealth manifests mix two
+#                  families of rel paths in the same file: ordinary
+#                  project-rooted paths (.claude/, CLAUDE.md, .git/hooks/…)
+#                  that live under $TARGET, and ".rig/…" paths whose actual
+#                  files were relocated to $EXTERNAL_RIG_DIR without the
+#                  ".rig/" prefix. Resolving every entry against a single
+#                  root previously made every ".rig/*" entry look either
+#                  falsely stale (root=$TARGET) or made every non-".rig/*"
+#                  entry unreachable (root=$EXTERNAL_RIG_DIR) — so this
+#                  audit was skipped entirely for external/stealth (issue
+#                  #444, lane 444-E). Repo/local layouts never pass rig_root
+#                  and behave exactly as before.
+#
+# Reports (never silently fixes) four disjoint categories:
+#   missing            tracked path no longer exists — the only category
+#                      --repair-stale is permitted to remove from the
+#                      manifest; removing the entry does not touch the
+#                      filesystem, there is nothing there to touch.
+#   wrong-type         tracked path exists but its type (file/directory)
+#                      no longer matches what the manifest recorded.
+#   dangling-symlink   tracked path is a symlink whose target does not exist.
+#   unexpected-symlink tracked path is now a symlink where the manifest did
+#                      not record one.
+# The last three are never auto-repaired, even with --repair-stale — the
+# manifest metadata for those paths is left untouched pending explicit
+# operator review, per the "never silently overwrite or silently fix" policy
+# in TASK_444.
 report_stale_manifest_entries() {
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
-  local metadata_file="$1" artifact_root="$2" label="$3"
+  local metadata_file="$1" artifact_root="$2" label="$3" rig_root="${4:-}"
   [[ -f "$metadata_file" ]] || return 0
-  local stale_count=0 stale_rel
-  while IFS= read -r stale_rel; do
+  local stale_count=0 category stale_rel
+  while IFS=$'\t' read -r category stale_rel; do
     [[ -n "$stale_rel" ]] || continue
     stale_count=$((stale_count + 1))
-    UPGRADE_STALE_FILES[${#UPGRADE_STALE_FILES[@]}]="$label:$stale_rel"
-    if [[ "$REPAIR_STALE" == true ]]; then
-      repair_stale_manifest_entry "$metadata_file" "${metadata_file%.json}" "$stale_rel"
-      info "Repaired stale manifest entry: $label:$stale_rel"
+    UPGRADE_STALE_FILES[${#UPGRADE_STALE_FILES[@]}]="$label:$category:$stale_rel"
+    if [[ "$category" == missing ]]; then
+      if [[ "$REPAIR_STALE" == true ]]; then
+        repair_stale_manifest_entry "$metadata_file" "${metadata_file%.json}" "$stale_rel"
+        info "Repaired stale manifest entry: $label:$stale_rel"
+      else
+        UPGRADE_STALE_UNREPAIRED_COUNT=$((UPGRADE_STALE_UNREPAIRED_COUNT + 1))
+      fi
+    else
+      # wrong-type / dangling-symlink / unexpected-symlink are never
+      # auto-repaired, even with --repair-stale — always requires review.
+      warn "Stale manifest entry requires manual repair ($category): $label:$stale_rel"
+      UPGRADE_STALE_UNREPAIRED_COUNT=$((UPGRADE_STALE_UNREPAIRED_COUNT + 1))
     fi
-  done < <(python3 - "$metadata_file" "$artifact_root" <<'PYEOF'
+  done < <(python3 - "$metadata_file" "$artifact_root" "$rig_root" <<'PYEOF'
 import json, os, sys
 
-metadata, root = sys.argv[1:]
+metadata, root, rig_root = sys.argv[1:]
+
+def resolve(rel):
+    if rig_root and (rel == ".rig" or rel.startswith(".rig/")):
+        stripped = rel[len(".rig/"):] if rel.startswith(".rig/") else ""
+        return os.path.join(rig_root, stripped) if stripped else rig_root
+    return os.path.join(root, rel)
+
 try:
     with open(metadata) as fh:
         data = json.load(fh)
@@ -275,8 +328,27 @@ except (OSError, ValueError):
 for rel in sorted(data.get("entries", {})):
     if not isinstance(rel, str) or rel.startswith("/") or ".." in rel.split("/"):
         continue
-    if not os.path.lexists(os.path.join(root, rel)):
-        print(rel)
+    entry = data["entries"].get(rel)
+    recorded_type = entry.get("type") if isinstance(entry, dict) else None
+    path = resolve(rel)
+
+    if not os.path.lexists(path):
+        print(f"missing\t{rel}")
+        continue
+
+    is_symlink = os.path.islink(path)
+    if is_symlink:
+        if not os.path.exists(path):  # follows the link — False means dangling
+            print(f"dangling-symlink\t{rel}")
+        elif recorded_type not in (None, "symlink"):
+            print(f"unexpected-symlink\t{rel}")
+        continue
+
+    if recorded_type in (None, "missing"):
+        continue
+    actual_type = "directory" if os.path.isdir(path) else ("file" if os.path.isfile(path) else "other")
+    if recorded_type != actual_type:
+        print(f"wrong-type\t{rel}")
 PYEOF
   )
   if [[ "$stale_count" -gt 0 ]]; then
@@ -739,6 +811,11 @@ UPGRADE_SKIPPED_CONFLICT_COUNT=0
 UPGRADE_SKIPPED_CONFLICT_FILES=()
 UPGRADE_REMOVED_COUNT=0
 UPGRADE_STALE_COUNT=0
+# Subset of UPGRADE_STALE_COUNT that --repair-stale did not (and, for
+# wrong-type/symlink categories, never will) resolve automatically. Drives
+# UPGRADE_REVIEW_REQUIRED below without penalizing a run that just repaired
+# every missing-entry finding it could.
+UPGRADE_STALE_UNREPAIRED_COUNT=0
 UPGRADE_STALE_FILES=()
 # Full per-artifact log, one entry per record_upgrade_result() call, encoded as
 # "<rel>\x1e<result>\x1e<detail>" (US = 0x1E, never legal in a path or in the
@@ -846,12 +923,28 @@ upgrade_set_executable_bits() {
 # These operations must have the same no-follow semantics as copy_file(): only
 # a missing destination or an existing regular file is writable. A conflict is
 # reported once and preserved for explicit operator repair.
+#
+# Covers the "direct writer" mutation family (settings merges, .rigpath,
+# .rig/VERSION, target-state metadata, .codex/config.toml, and placeholder
+# substitutions) that mutate a destination in place rather than copying a
+# template file into it via copy_file(). Unlike copy_file()'s own upgrade
+# path, these callers never called backup_file() themselves, so an
+# interrupted run between two of these direct writes previously had nothing
+# to roll back to (issue #444, lane 444-F). An existing regular-file
+# destination is now journaled and backed up here, once, before the caller
+# is allowed to mutate it — same transaction/journal machinery copy_file()
+# already uses, so recover_upgrade_transaction() restores it identically.
 upgrade_prepare_mutation() {
   local base="$1" destination="$2" rel="$3" state
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
   state="$(upgrade_destination_state "$base" "$destination")"
   case "$state" in
-    missing|regular-file) return 0 ;;
+    missing) return 0 ;;
+    regular-file)
+      ensure_upgrade_transaction "$base"
+      backup_file "$destination" "$base"
+      return 0
+      ;;
     *)
       record_upgrade_destination_conflict "$rel" "$state"
       return 1
@@ -1302,8 +1395,25 @@ ensure_upgrade_transaction() {
 
 finish_upgrade_transaction() {
   [[ "$UPGRADE_TRANSACTION_ACTIVE" == true && -n "$BACKUP_DIR" ]] || return 0
-  local final_dir
-  final_dir="$(dirname "$BACKUP_DIR")/${BACKUP_TS}_$$"
+  local final_dir final_parent suffix=0
+  final_parent="$(dirname "$BACKUP_DIR")"
+  final_dir="${final_parent}/${BACKUP_TS}_$$"
+  # A single run can open and finalize more than one transaction against the
+  # same base — init_backup_dir() above auto-finalizes and reopens whenever
+  # ensure_upgrade_transaction()/backup_file() is called with a different
+  # base than the currently active one (direct-writer mutations at several
+  # points in the project layer legitimately alternate between $TARGET and
+  # an external .rig/ root). BACKUP_TS and $$ are fixed for the whole run,
+  # so a base revisited later would otherwise compute the exact same
+  # final_dir as an earlier, already-finalized transaction; `mv` onto an
+  # existing directory nests the new transaction's contents one level deep
+  # (final_dir/.in-progress/…) instead of merging them at the top level,
+  # silently scrambling the backup layout. Disambiguate with a counter
+  # suffix so every finalized transaction directory is unique.
+  while [[ -e "$final_dir" ]]; do
+    suffix=$((suffix + 1))
+    final_dir="${final_parent}/${BACKUP_TS}_${$}_${suffix}"
+  done
   # A completed transaction remains as a recoverable backup, but no longer
   # looks interrupted to the next invocation.
   mv "$BACKUP_DIR" "$final_dir"
@@ -1711,7 +1821,10 @@ _copy_upgrade_existing() {
     sed "s/\\[REPO_ROOT\\]/${escaped_target}/g" "$src" > "$tmp_src_subst"
     if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged"; then
       # agent-plan: classification only, never write the merged result.
-      [[ "$AGENT_DRY_RUN" == true ]] || cp "$tmp_merged" "$dest"
+      if [[ "$AGENT_DRY_RUN" != true ]]; then
+        if [[ -n "$base" ]]; then ensure_upgrade_transaction "$base"; backup_file "$dest" "$base"; fi
+        cp "$tmp_merged" "$dest"
+      fi
       success "Merged .claude/settings.json"
       record_upgrade_result merged "$rel"
     else
@@ -1961,6 +2074,77 @@ retire_legacy_session_end() {
   record_upgrade_result removed "$rel"
 }
 
+# Install a single Rig-owned hook script into .git/hooks/ during a stealth
+# install/upgrade (issue #444, lane 444-G). .git/hooks/ sits outside git
+# tracking and outside the manifest's normal template-copy path, so a plain
+# `cp` here could silently destroy a hand-written or third-party hook with
+# no manifest record and no backup. This routes the write through the same
+# manifest + backup/journal machinery every other Rig-owned artifact uses:
+#
+#   - Destination missing              → first install, no backup needed.
+#   - Destination is a symlink         → never followed/inspected; treated
+#                                         as customized (same no-follow rule
+#                                         copy_file() uses for other assets).
+#   - No manifest entry for this hook  → never verified as Rig-installed;
+#                                         treated as customized/foreign.
+#   - Manifest entry, hash matches     → unmodified Rig-installed hook.
+#   - Manifest entry, hash differs     → user has customized this hook.
+#
+# Interactive/noninteractive (non-agent) runs keep the existing overwrite
+# behavior unchanged — the hook is always installed — but a customized hook
+# is now backed up first via backup_file(), and every write updates the
+# manifest so future runs can detect drift. Agent-upgrade mode
+# (AGENT_MODE=apply) never overwrites a customized hook: it refuses and
+# reports the path in conflicts[] via the existing skipped-customized
+# classification, matching the refusal contract used elsewhere in #444.
+_stealth_install_git_hook() {
+  local hook_src="$1" hook_dest="$2" hook_name="$3"
+  local rel=".git/hooks/${hook_name}"
+  local customized=false
+
+  if [[ -L "$hook_dest" ]]; then
+    customized=true
+  elif [[ -f "$hook_dest" ]]; then
+    local dest_hash manifest_hash
+    dest_hash="$(sha256_file "$hook_dest")"
+    manifest_hash="$(read_manifest_hash "$rel" "$MANIFEST_FILE")"
+    if [[ -z "$manifest_hash" || "$dest_hash" != "$manifest_hash" ]]; then
+      customized=true
+    fi
+  elif [[ -e "$hook_dest" ]]; then
+    # Exists but is neither a regular file nor a symlink (e.g. a directory) —
+    # treat as customized/unsafe rather than guessing.
+    customized=true
+  fi
+
+  if [[ "$customized" == true ]]; then
+    if [[ "$AGENT_MODE" == "apply" ]]; then
+      warn "Stealth: customized git hook preserved (agent-upgrade refuses to overwrite): $rel"
+      record_upgrade_result skipped-customized "$rel"
+      return 0
+    fi
+    warn "Stealth: customized or unrecognized git hook detected: $rel"
+    echo "  A backup will be saved to .rig-backup/ (or the external backups/ dir) before installing the Rig hook."
+  fi
+
+  if [[ -f "$hook_dest" && ! -L "$hook_dest" ]]; then
+    ensure_upgrade_transaction "$TARGET"
+    backup_file "$hook_dest" "$TARGET"
+  elif [[ ! -e "$hook_dest" && ! -L "$hook_dest" ]]; then
+    # First install of this hook: nothing to back up, but still journal it as
+    # "created" (matching copy_file()'s own new-file path) so an interrupted
+    # run rolls back to "hook absent" rather than leaving a half-installed
+    # file with no journal record of how it got there.
+    ensure_upgrade_transaction "$TARGET"
+    record_created "$TARGET" "$hook_dest"
+  fi
+  cp "$hook_src" "$hook_dest"
+  chmod +x "$hook_dest"
+  write_manifest_entry "$(sha256_file "$hook_dest")" "$rel" "$MANIFEST_FILE" "$hook_dest"
+  success "Stealth: installed $hook_name → .git/hooks/"
+  record_upgrade_result updated "$rel"
+}
+
 # ── GLOBAL LAYER ─────────────────────────────────────────────────────────────
 if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   bold "── Global layer ──"
@@ -2098,7 +2282,14 @@ if [[ "$DO_GLOBAL" == true ]]; then
   success "Postflight targets: global=$GLOBAL_AGENT; smoke=$_global_smoke"
 fi
 if [[ "$COLLISION_STRATEGY" == upgrade && "$DO_GLOBAL" == true ]]; then
-  report_stale_manifest_entries "${GLOBAL_MANIFEST_FILE}.json" "$HOME" global
+  # Global manifest entries are recorded relative to $CLAUDE_DIR ($HOME/.claude
+  # — see the copy_file call installing CLAUDE.md with base="$CLAUDE_DIR",
+  # rel="CLAUDE.md"), not $HOME directly. Passing $HOME here resolved every
+  # entry one directory too shallow, so every global artifact was reported as
+  # a false-positive "missing" stale entry. This went unnoticed before lane
+  # 444-E started counting unrepaired stale entries toward
+  # UPGRADE_REVIEW_REQUIRED; now it must resolve correctly.
+  report_stale_manifest_entries "${GLOBAL_MANIFEST_FILE}.json" "$CLAUDE_DIR" global
 fi
 
 # Reset backup dir between layers so each layer uses its own base path.
@@ -2740,13 +2931,18 @@ PYEOF
   _subst_base_branch "$_TARGET_RIG_DIR/processes/SHIP_WORKFLOW.md"
   success "Substituted [BASE_BRANCH] → $BASE_BRANCH in workflow files"
 
-  # agent-plan: none of the tracking-mode bookkeeping below (.rigpath, git
-  # excludes, stale in-repo .rig/ cleanup, stealth .git/hooks/ install) feeds
-  # the artifact classification/JSON contract — it never calls
-  # record_upgrade_result and isn't part of the UPGRADE_*_COUNT bookkeeping
-  # the schema mirrors. Skip it outright under AGENT_DRY_RUN rather than
-  # guarding each of its ~15 individual writes, since it produces nothing
-  # agent-plan needs to report and must not run in a read-only preflight.
+  # agent-plan: most of the tracking-mode bookkeeping below (.rigpath, git
+  # excludes, stale in-repo .rig/ cleanup) never calls record_upgrade_result
+  # and isn't part of the UPGRADE_*_COUNT bookkeeping the schema mirrors.
+  # Skip it outright under AGENT_DRY_RUN rather than guarding each of its
+  # ~15 individual writes, since it produces nothing agent-plan needs to
+  # report and must not run in a read-only preflight. Stealth .git/hooks/
+  # install (lane 444-G) is the one exception: it does call
+  # record_upgrade_result (updated/skipped-customized) so agent-upgrade can
+  # refuse a customized hook via conflicts[] — that still only happens under
+  # AGENT_MODE=apply, which never sets AGENT_DRY_RUN, so the guard below is
+  # still correct: this whole block is skipped only for the read-only
+  # agent-plan path.
   if [[ "$AGENT_DRY_RUN" != true ]]; then
 
   # ── EXTERNAL .rig/ — write .rigpath and update git excludes ──────────────
@@ -2895,9 +3091,7 @@ PYEOF
           hook_name="$(basename "$hook_src")"
           hook_dest="$GIT_HOOKS_DIR/$hook_name"
           if [[ -f "$hook_src" ]]; then
-            cp "$hook_src" "$hook_dest"
-            chmod +x "$hook_dest"
-            success "Stealth: installed $hook_name → .git/hooks/"
+            _stealth_install_git_hook "$hook_src" "$hook_dest" "$hook_name"
           fi
         done
       else
@@ -3033,8 +3227,17 @@ PYEOF
 
   finish_upgrade_transaction
 
-  if [[ "$COLLISION_STRATEGY" == upgrade && ( "$RIG_TRACKING" == repo || "$RIG_TRACKING" == local ) ]]; then
-    report_stale_manifest_entries "${MANIFEST_FILE}.json" "$TARGET" project
+  if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+    if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
+      # See report_stale_manifest_entries()'s rig_root doc comment: external/
+      # stealth manifests mix $TARGET-rooted and $EXTERNAL_RIG_DIR-rooted
+      # rels in one file, so both roots must be passed (issue #444, lane
+      # 444-E — this audit was previously skipped outright for these two
+      # layouts).
+      report_stale_manifest_entries "${MANIFEST_FILE}.json" "$TARGET" project "$EXTERNAL_RIG_DIR"
+    else
+      report_stale_manifest_entries "${MANIFEST_FILE}.json" "$TARGET" project
+    fi
   fi
 
   echo ""
@@ -3116,6 +3319,7 @@ UPGRADE_REVIEW_REQUIRED=0
 if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
   [[ "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" -gt 0 ]] && UPGRADE_REVIEW_REQUIRED=1
   [[ "$UPGRADE_SKIPPED_CONFLICT_COUNT" -gt 0 ]] && UPGRADE_REVIEW_REQUIRED=1
+  [[ "$UPGRADE_STALE_UNREPAIRED_COUNT" -gt 0 ]] && UPGRADE_REVIEW_REQUIRED=1
 fi
 
 if [[ -n "$AGENT_MODE" ]]; then
