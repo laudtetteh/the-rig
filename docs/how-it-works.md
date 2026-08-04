@@ -42,6 +42,9 @@ Three locations work together. The installer repo produces the other two:
 │    --target <path>             project directory to install to  │
 │    --tracking repo|local|external|stealth  tracking mode        │
 │    --strategy merge|upgrade|overwrite|skip  file handling       │
+│      also: agent-plan (read-only JSON plan, zero writes)        │
+│            agent-upgrade (applies + JSON result; exit 3 if      │
+│            anything needs manual review — see UPGRADE_WORKFLOW) │
 │                                                                 │
 │  To upgrade: cd ~/tools/the-rig && git pull                     │
 │  Then re-run install.sh with --strategy upgrade                 │
@@ -226,7 +229,16 @@ Seven files, seven purposes:
 - Used by the **Upgrade** strategy to detect user customizations:
   - Hash unchanged since install → safe to auto-update
   - Hash changed → you've customized it → diff shown before overwrite
-- See `docs/customizing.md` for the full Upgrade strategy workflow
+- A JSON companion, `.rig-manifest.json`, carries richer per-artifact
+  provenance for every tracked path (not just Rig-owned ones): `owner`,
+  `source`, `type`, `mode`, `installer_version`, and (since issue #444 lane
+  444-B) `base_revision`/`generator`/`provider` — the trusted-base and
+  producing-tool metadata a future three-way merge or `bin/rig doctor` gate
+  verifies against. An entry written before lane 444-B simply lacks these
+  three fields (legacy/unknown provenance, not an error).
+- See `docs/customizing.md` for the full Upgrade strategy workflow, the
+  manifest metadata field reference, and the agent-driven `agent-plan`/
+  `agent-upgrade` contract
 
 ---
 
@@ -581,7 +593,7 @@ skills covering the full development lifecycle:
 | `/session-name` | Session naming | Derives a name from current conversation/session evidence only; unrelated snapshots, markers, session records, and project history are rejected |
 | `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, captures in-flight task state, updates PROGRESS, trims PROGRESS/ERRORS, suggests session name, surfaces next priority. Concurrent session guard prevents race conditions on PROGRESS.md. |
 | `/rig-gaps` | Self-improvement | _(Rig contributors)_ Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats report for review and optional submission. `--push` appends directly to the local Rig repo (requires `rig-gaps-push-target:` in `CLAUDE.md`); `--submit` creates public GitHub issues in `laudtetteh/the-rig` (opt-in; requires `.rig-contribute-enabled` sentinel + `gh` auth) |
-| `/rig-upgrade` | Upgrade workflow | Pulls latest Rig source and re-runs `install.sh` with `--strategy upgrade`. `--version` prints the project version, global installer version, and the latest tagged release from GitHub (via `gh`), warning if any are out of sync. `--scope=project\|global\|both` limits which layers are upgraded. |
+| `/rig-upgrade` | Upgrade workflow | Pulls latest Rig source and re-runs `install.sh` with `--strategy upgrade` — the same conservative, choice-driven path as running the installer directly. Its survey phase runs `--strategy agent-plan` as a read-only JSON preview, but the command does not yet apply `--strategy agent-upgrade`'s convergence merge or run `bin/rig doctor` as a post-upgrade check (tracked as a follow-up under issue #444). `--version` prints the project version, global installer version, and the latest tagged release from GitHub (via `gh`), warning if any are out of sync. `--scope=project\|global\|both` limits which layers are upgraded. |
 
 ---
 

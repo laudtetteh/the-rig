@@ -270,9 +270,22 @@ What stealth mode does in a single pass:
 1. Installs `.rig/` to an external path (default: `~/.rig/projects/<project-name>/`)
 2. Writes `.rigpath` and adds it to `.git/info/exclude`
 3. Adds all other Rig artifacts to `.git/info/exclude`:
-   `CLAUDE.md`, `PROJECT_BRIEF.md`, `.claude/`, `.github/`, `.gitleaks.toml`, `docs/features/README.md`
+   `CLAUDE.md`, `PROJECT_BRIEF.md`, `.claude/`, `.agents/`, `.codex/`, `.mcp.json`,
+   `.playwright-mcp/`, `.github/`, `.gitleaks.toml`, `docs/features/README.md`,
+   `.rig-backup/`, `.rig/`, and every generated launcher under `bin/` (not just
+   `bin/rig` — `bin/rig-connector-preflight`, `bin/rig-sprint`, and any future
+   launcher `install.sh` ships are enumerated from its own `templates/project/bin/`
+   source, so this list can never drift the way it did before issue #444 lane 444-D)
 4. Copies git hooks directly to `.git/hooks/` (no Husky required — `.git/hooks/`
-   is never committed and invisible to teammates)
+   is never committed and invisible to teammates). Each installed hook is now
+   manifest-tracked and backed up before an ordinary-mode overwrite (issue #444
+   lane 444-G) — see "Verifying an upgrade" below for what happens when
+   `agent-upgrade` finds a customized hook here instead.
+
+> **Auditing an existing stealth install:** `bin/rig doctor` (see "Verifying an
+> upgrade" below) runs a read-only stealth audit and reports any tracked or
+> visible-unignored Rig artifact it finds — useful for confirming an older
+> install (from before lane 444-D) doesn't have a leftover launcher leak.
 
 Claude Code still reads `.claude/settings.json` from disk at session start — it
 just isn't tracked by git.
@@ -427,6 +440,57 @@ overwrite. In stealth or external tracking mode, backups go to
 `$EXTERNAL_RIG_DIR/backups/<timestamp>/` instead — so they never surface in the
 project's git status. Nothing is ever lost.
 
+### Manifest metadata and provenance fields
+
+Alongside the plain-text `.rig/memory/.rig-manifest` (hash + path, one line per
+file), the installer also writes a JSON companion at
+`.rig/memory/.rig-manifest.json`. If you open it directly, each entry looks
+like this:
+
+```json
+".claude/hooks/pre-tool.sh": {
+  "sha256": "…",
+  "owner": "rig",
+  "source": "claude-native",
+  "type": "file",
+  "mode": "755",
+  "installer_version": "1.24.0",
+  "base_revision": "1.24.0",
+  "generator": "install.sh",
+  "provider": "claude"
+}
+```
+
+What each field means:
+
+- **`owner`** — `"rig"` (a Rig-owned infrastructure file — see `is_rig_owned()`
+  in `install.sh`) or `"user"` (a file you're expected to edit).
+- **`source`** — where the artifact family comes from:
+  `generated-codex` (mirrored into `.agents/skills/`), `codex-native`
+  (`.codex/*`), `claude-native` (`.claude/*`), `shared-rig` (`.rig/*`),
+  `project-tooling` (`.husky/*`, `.gitleaks.toml`, stealth `.git/hooks/*`), or
+  `project-user` (everything else).
+- **`generator`** — the tool that actually produced the artifact's content:
+  `install.sh` for a hand-authored template copied verbatim, or
+  `codex-mirror` for a file `installer/generate-codex-skills.py` derived from
+  a canonical Claude command.
+- **`provider`** — which agent context the artifact belongs to: `claude`,
+  `codex`, `both`, or `none`, using the install-target vocabulary described
+  above.
+- **`base_revision`** — the trusted upstream template revision a future
+  three-way merge should diff against. There is no separate per-file template
+  version yet, so this is set to the installer's own `VERSION` at write time
+  (the same value as `installer_version`) — the two fields are kept distinct
+  because they answer different questions (which installer executable wrote
+  this vs. what revision to merge against), even though they share a value
+  today.
+
+An entry written before this metadata existed (pre-issue-#444) simply omits
+these fields, or carries explicit `null` — that is normal "legacy/unknown
+provenance," not an error. A value present but outside its known vocabulary
+(for example an unrecognized `owner`) is what the `manifest_provenance` doctor
+gate below actually flags.
+
 ### Manifest-aware customization
 
 Files in the **Rig-owned** category that you commonly want to customize:
@@ -473,3 +537,94 @@ menu entirely.
 After upgrading, review the CHANGELOG for any manual steps — some releases may add
 new fields to `.rig/rules/` files or project `CLAUDE.md` that the Upgrade intent
 skips (since those are user-owned).
+
+### Agent-driven upgrade mode (`agent-plan` / `agent-upgrade`)
+
+Everything above describes the **ordinary** Upgrade intent — interactive by
+default, and choice-driven in non-interactive/CI use (a customized file is
+always skipped and reported, never silently changed). That behavior has not
+changed.
+
+Separately, `install.sh` also accepts two more `--strategy` values that exist
+specifically for a calling agent or script: `agent-plan` (read-only — emits a
+JSON plan of what an upgrade would do, zero writes) and `agent-upgrade`
+(applies the same convergeable actions non-interactive `upgrade` already
+applies, plus a structure-aware/three-way merge step for customized files with
+known formats — JSON, TOML, frontmatter Markdown — where the incoming and
+local changes don't conflict). Both print one machine-readable JSON document
+and exit `3` (`status: "refused"`) rather than `0` if anything still needs a
+human — see `.rig/processes/UPGRADE_WORKFLOW.md` → "Agent-driven upgrade
+contract" for the full schema, exit codes, and worked examples.
+
+**This is a separate, guarded capability, not what `/rig-upgrade` runs by
+default today.** `/rig-upgrade`'s Phase 2 currently delegates to plain
+`install.sh --strategy upgrade` — the same conservative, choice-driven path
+described above. Its survey phase (1c-bis) uses `agent-plan` as a read-only
+preview, but the command does not yet call `agent-upgrade` to apply a
+convergence merge, present its JSON result/conflicts to you, or run `bin/rig
+doctor` as a post-upgrade check. Wiring that end-to-end orchestration is
+tracked as a follow-up under issue #444, not implemented yet. If you want the
+convergence behavior today, invoke `install.sh --strategy agent-upgrade`
+directly rather than assuming `/rig-upgrade` provides it.
+
+### Verifying an upgrade: `bin/rig doctor` gates
+
+After any upgrade, `bin/rig doctor` (or `bin/rig doctor --json` for scripting)
+runs a set of postflight checks, including five added under issue #444 lane
+444-H:
+
+| Gate | What it verifies | Degrades to "skipped" (not "failed") when |
+|---|---|---|
+| `manifest_provenance` | Every `.rig-manifest.json` entry's `owner`/`source`/`generator`/`provider`/`type` value is within its known vocabulary | No manifest metadata file exists, or `installer/validate-manifest-provenance.py` isn't colocated (only true for a Rig-dogfooding checkout, not an ordinary downstream install) |
+| `stealth_status` | No Rig-generated artifact is tracked by git or visible-and-unignored in a stealth/external install | The project isn't a stealth/external install, or `installer/audit-stealth.py` isn't colocated |
+| `manifest_mode_hash` | Every Rig-owned artifact's file mode and content hash still match what the manifest recorded (catches hand-edits outside the installer) | No manifest metadata file exists |
+| `stale_manifest_entries` | No manifest entry points at a path that no longer exists on disk | No manifest metadata file exists |
+| `idempotence` | Not verified live by `doctor` itself (a read-only command has no safe way to mutate and roll back a real project tree) — always reports the documented procedure: run `bats tests/test_install_idempotence.bats` | Never fails on its own; it's a pointer to the real check, not a live result |
+
+`installer/validate-manifest-provenance.py` and `installer/audit-stealth.py`
+are release-engineering tools that live in The Rig's own source repo — they
+are never installed into a downstream target project. In an ordinary
+downstream install, `manifest_provenance` and `stealth_status` will therefore
+permanently report "skipped" with an explanatory detail string; that is
+expected steady state, not a gap you need to fix.
+
+### Repairing common post-upgrade findings
+
+**`rig doctor` reports a stealth `tracked_leak` or `untracked_leak`.**
+Run `python3 installer/audit-stealth.py <target>` for the read-only
+classification, then `python3 installer/repair-stealth.py <target>` to append
+any missing pattern to `.git/info/exclude` for artifacts it classified as a
+leak. `repair-stealth.py` is **additive only**: it never rewrites or removes
+an existing exclude line, never touches the git index, and never untracks a
+file. A `tracked_leak` — a Rig-generated file that was actually `git add`-ed
+and committed — is reported by the repair tool's `still_tracked` list but is
+**not** fixed automatically; adding an exclude pattern has no effect on a
+path git already tracks. Untrack it explicitly and deliberately
+(`git rm --cached <path>`, review the diff, then commit) rather than expecting
+any Rig tooling to do that for you.
+
+**`rig doctor` reports a stale manifest entry as `wrong-type`,
+`dangling-symlink`, or `unexpected-symlink`.** These three categories are
+never auto-repaired, including by `--repair-stale` — only a genuinely
+`missing` entry (the tracked path no longer exists at all) is safe to drop
+from the manifest automatically, because removing that entry doesn't touch
+the filesystem. The other three mean something unexpected is sitting at a
+path the manifest expected to be a plain file or directory — for example a
+tracked path that became a symlink, or a symlink whose target vanished.
+Inspect the path by hand, decide whether it's a real customization or
+accidental drift, and either restore the expected artifact type or update the
+manifest entry to match reality before re-running the upgrade.
+
+**`agent-upgrade` (or `agent-plan`) exits `3` with `status: "refused"`.**
+This means the run applied every safe/convergeable action it could (file
+creation, unmodified-file updates, `settings.json` smart-merge, and any
+conflict-free structure-aware merge) but left at least one artifact
+untouched — check the `conflicts[]` array in the JSON output for the exact
+`path`, `reason`, and `repair_guidance` per file. You have two ways forward:
+resolve the conflict manually (edit the file to reconcile your customization
+with the incoming change, or restore it from `.rig-backup/` and re-run to
+accept the incoming template), or explicitly re-run with a strategy that
+accepts the incoming version for that file (interactive `--strategy upgrade`,
+which will prompt you per file). Never treat a `refused` result as a
+transient failure to retry unchanged — re-running `agent-upgrade` against the
+same unresolved conflict will refuse again, by design.
