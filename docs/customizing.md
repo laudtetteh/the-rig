@@ -556,16 +556,17 @@ and exit `3` (`status: "refused"`) rather than `0` if anything still needs a
 human — see `.rig/processes/UPGRADE_WORKFLOW.md` → "Agent-driven upgrade
 contract" for the full schema, exit codes, and worked examples.
 
-**This is a separate, guarded capability, not what `/rig-upgrade` runs by
-default today.** `/rig-upgrade`'s Phase 2 currently delegates to plain
-`install.sh --strategy upgrade` — the same conservative, choice-driven path
-described above. Its survey phase (1c-bis) uses `agent-plan` as a read-only
-preview, but the command does not yet call `agent-upgrade` to apply a
-convergence merge, present its JSON result/conflicts to you, or run `bin/rig
-doctor` as a post-upgrade check. Wiring that end-to-end orchestration is
-tracked as a follow-up under issue #444, not implemented yet. If you want the
-convergence behavior today, invoke `install.sh --strategy agent-upgrade`
-directly rather than assuming `/rig-upgrade` provides it.
+**`/rig-upgrade` now wires both modes explicitly.** Its survey phase (1c-bis)
+always uses `agent-plan` as a read-only preview. Phase 2 (2-mode) then chooses
+between them: `--mode=agent` (also the non-interactive default, since guarded
+convergence never silently overwrites a customization) runs `install.sh
+--strategy agent-upgrade`, presents each `conflicts[]` entry with its repair
+guidance verbatim, and — once the upgrade succeeds — Phase 3d runs `bin/rig
+doctor --json` and surfaces any failing gate before the command finishes.
+`--mode=classic` runs plain `install.sh --strategy upgrade`, the original
+per-file interactive review flow, unchanged from before agent-driven
+convergence existed. See `templates/project/.claude/commands/rig-upgrade.md`
+for the full Phase 2/2a-agent/2b-agent/3d flow.
 
 ### Verifying an upgrade: `bin/rig doctor` gates
 
