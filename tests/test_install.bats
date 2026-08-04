@@ -167,7 +167,7 @@ is_rig_owned_stub() {
   [[ "$output" == '{"ok":true,"command":"memory validate"'* ]]
 }
 
-@test "dispatcher: stealth install excludes only bin/rig and reads external version" {
+@test "dispatcher: stealth install excludes bin/rig and reads external version" {
   local rig_ext="$TEMP_DIR/external-rig"
   run_installer --strategy skip --tracking stealth --rig-dir "$rig_ext"
   [ "$status" -eq 0 ]
@@ -177,6 +177,50 @@ is_rig_owned_stub() {
   run "$TEST_PROJECT/bin/rig" version --json
   [ "$status" -eq 0 ]
   [ "$output" = "{\"version\":\"$(cat "$REPO_ROOT/VERSION")\"}" ]
+}
+
+@test "stealth install excludes every generated bin/rig* launcher, not just bin/rig" {
+  local rig_ext="$TEMP_DIR/external-rig"
+  run_installer --strategy skip --tracking stealth --rig-dir "$rig_ext"
+  [ "$status" -eq 0 ]
+
+  # Every file actually shipped under templates/project/bin/ must have its
+  # own exact-line entry in .git/info/exclude — not merely a substring hit
+  # against another entry (bin/rig is itself a substring of the other
+  # three launcher names, so an exact-line check matters here).
+  local launcher
+  for launcher in "$REPO_ROOT/templates/project/bin/"*; do
+    grep -qx "bin/$(basename "$launcher")" "$TEST_PROJECT/.git/info/exclude"
+  done
+
+  # git status must show zero untracked bin/ artifacts — this is the
+  # actual zero-trace guarantee, not just presence of exclude lines.
+  run git -C "$TEST_PROJECT" status --porcelain --untracked-files=all
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"bin/rig"* ]]
+}
+
+@test "non-stealth install: bin/rig* launchers are untouched by stealth exclusion logic" {
+  # Regression check: repo tracking (the default here) must never write a
+  # stealth block into .git/info/exclude, and every launcher must remain
+  # a plain, visible, untracked file the user is expected to git-add
+  # themselves — exactly the pre-existing non-stealth behaviour.
+  run_installer --strategy skip --tracking repo
+  [ "$status" -eq 0 ]
+
+  local launcher
+  for launcher in "$REPO_ROOT/templates/project/bin/"*; do
+    [ -f "$TEST_PROJECT/bin/$(basename "$launcher")" ]
+  done
+
+  if [ -f "$TEST_PROJECT/.git/info/exclude" ]; then
+    run grep -c "The Rig — stealth mode" "$TEST_PROJECT/.git/info/exclude"
+    [ "$status" -ne 0 ]
+  fi
+
+  run git -C "$TEST_PROJECT" status --porcelain --untracked-files=all
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"?? bin/rig"* ]]
 }
 
 @test "skip strategy: does not overwrite existing files" {
