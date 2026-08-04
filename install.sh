@@ -149,18 +149,55 @@ write_manifest_metadata() {
   local hash="$1" rel="$2" manifest_file="$3" artifact_path="${4:-}" metadata_file
   [[ -z "$hash" || -z "$rel" || -z "$manifest_file" ]] && return
   metadata_file="${manifest_file}.json"
-  local owner="user" kind="missing" mode=""
+  local owner="user" kind="missing" mode="" source generator provider layer_agent
   if is_rig_owned "$rel"; then owner="rig"; fi
+  source="$(manifest_artifact_source "$rel")"
   if [[ -L "$artifact_path" ]]; then kind="symlink"
   elif [[ -f "$artifact_path" ]]; then kind="file"
   elif [[ -d "$artifact_path" ]]; then kind="directory"
   elif [[ -e "$artifact_path" ]]; then kind="other"
   fi
   mode="$(manifest_artifact_mode "$artifact_path")"
-  python3 - "$metadata_file" "$rel" "$hash" "$owner" "$(manifest_artifact_source "$rel")" "$kind" "$mode" "$INSTALLER_VERSION" <<'PYEOF'
+
+  # generator: the tool that actually produced this artifact's content.
+  # generated-codex artifacts are mirrored from the canonical Claude command
+  # body by installer/generate-codex-skills.py; everything else is a
+  # hand-authored template copied verbatim by install.sh itself. Keep this
+  # mapping in sync with installer/validate-manifest-provenance.py.
+  case "$source" in
+    generated-codex) generator="codex-mirror" ;;
+    *) generator="install.sh" ;;
+  esac
+
+  # provider: which agent context this artifact belongs to, using the same
+  # claude/codex/both/none vocabulary as GLOBAL_AGENT/PROJECT_AGENT/has_agent().
+  # Provider-specific paths are unambiguous from their source classification;
+  # shared paths (.rig/*, project tooling, plain user files) take on the
+  # active agent selection for whichever layer this manifest belongs to.
+  case "$manifest_file" in
+    "$GLOBAL_MANIFEST_FILE"|"$CODEX_GLOBAL_MANIFEST_FILE") layer_agent="${GLOBAL_AGENT:-}" ;;
+    *) layer_agent="${PROJECT_AGENT:-}" ;;
+  esac
+  case "$source" in
+    generated-codex|codex-native) provider="codex" ;;
+    claude-native) provider="claude" ;;
+    *) provider="$layer_agent" ;;
+  esac
+
+  # base_revision: the trusted upstream template revision this artifact was
+  # generated/copied from. There is no per-file template versioning today, so
+  # the most trustworthy real signal available is the installer's own VERSION
+  # at write time (the same value already recorded as installer_version).
+  # The two fields are kept distinct on purpose: installer_version answers
+  # "which installer executable performed this write" (housekeeping), while
+  # base_revision answers "what upstream revision should a future three-way
+  # merge diff against" (444-C provenance contract). They share a source
+  # today only because no finer-grained per-template revision exists yet —
+  # do not invent one.
+  python3 - "$metadata_file" "$rel" "$hash" "$owner" "$source" "$kind" "$mode" "$INSTALLER_VERSION" "$generator" "$provider" <<'PYEOF'
 import json, os, sys, tempfile
 
-path, rel, digest, owner, source, kind, mode, installer_version = sys.argv[1:]
+path, rel, digest, owner, source, kind, mode, installer_version, generator, provider = sys.argv[1:]
 try:
     with open(path) as fh:
         data = json.load(fh)
@@ -179,6 +216,9 @@ data["entries"][rel] = {
     "type": kind,
     "mode": mode or None,
     "installer_version": installer_version,
+    "base_revision": installer_version or None,
+    "generator": generator or None,
+    "provider": provider or None,
 }
 
 directory = os.path.dirname(path) or "."
@@ -192,6 +232,22 @@ finally:
     if os.path.exists(temporary):
         os.unlink(temporary)
 PYEOF
+}
+
+# ── Manifest provenance validation ────────────────────────────────────────────
+# Thin wrapper around installer/validate-manifest-provenance.py. Reports (does
+# not silently ignore) malformed provenance fields in a manifest metadata
+# file, and separately reports entries that simply predate this metadata
+# (legacy/unknown provenance — not an error). Not wired into any upgrade
+# decision or doctor/postflight gate in this lane; callable/testable in
+# isolation for 444-H to consume later.
+validate_manifest_provenance() {
+  local metadata_file="$1"
+  if [[ ! -f "$metadata_file" ]]; then
+    printf '%s\n' '{"ok":true,"checked":0,"malformed":[],"legacy_provenance":[]}'
+    return 0
+  fi
+  python3 "$SCRIPT_DIR/installer/validate-manifest-provenance.py" "$metadata_file"
 }
 
 report_stale_manifest_entries() {
