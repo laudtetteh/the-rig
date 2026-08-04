@@ -2118,7 +2118,13 @@ _stealth_install_git_hook() {
   fi
 
   if [[ "$customized" == true ]]; then
-    if [[ "$AGENT_MODE" == "apply" ]]; then
+    # agent-plan (AGENT_MODE=plan) must detect and report this conflict via
+    # the same skipped-customized classification agent-upgrade (AGENT_MODE=
+    # apply) refuses on — otherwise agent-plan could report status:"success"
+    # right before agent-upgrade refuses on the identical project (issue
+    # #458). Detection above always runs; only the actual overwrite below is
+    # gated on AGENT_DRY_RUN, so plan mode reports without ever writing.
+    if [[ "$AGENT_MODE" == "apply" || "$AGENT_MODE" == "plan" ]]; then
       warn "Stealth: customized git hook preserved (agent-upgrade refuses to overwrite): $rel"
       record_upgrade_result skipped-customized "$rel"
       return 0
@@ -2138,8 +2144,9 @@ _stealth_install_git_hook() {
     ensure_upgrade_transaction "$TARGET"
     record_created "$TARGET" "$hook_dest"
   fi
-  cp "$hook_src" "$hook_dest"
-  chmod +x "$hook_dest"
+  # agent-plan: classification only, never write the hook file.
+  [[ "$AGENT_DRY_RUN" == true ]] || cp "$hook_src" "$hook_dest"
+  [[ "$AGENT_DRY_RUN" == true ]] || chmod +x "$hook_dest"
   write_manifest_entry "$(sha256_file "$hook_dest")" "$rel" "$MANIFEST_FILE" "$hook_dest"
   success "Stealth: installed $hook_name → .git/hooks/"
   record_upgrade_result updated "$rel"
@@ -2936,13 +2943,18 @@ PYEOF
   # and isn't part of the UPGRADE_*_COUNT bookkeeping the schema mirrors.
   # Skip it outright under AGENT_DRY_RUN rather than guarding each of its
   # ~15 individual writes, since it produces nothing agent-plan needs to
-  # report and must not run in a read-only preflight. Stealth .git/hooks/
-  # install (lane 444-G) is the one exception: it does call
-  # record_upgrade_result (updated/skipped-customized) so agent-upgrade can
-  # refuse a customized hook via conflicts[] — that still only happens under
-  # AGENT_MODE=apply, which never sets AGENT_DRY_RUN, so the guard below is
-  # still correct: this whole block is skipped only for the read-only
-  # agent-plan path.
+  # report and must not run in a read-only preflight.
+  #
+  # Stealth .git/hooks/ install (lane 444-G) is the one exception, and it is
+  # deliberately NOT nested inside this guard (see the standalone stealth
+  # hook-install block right after this block closes, issue #458). It DOES
+  # call record_upgrade_result (updated/skipped-customized), so agent-plan
+  # needs it to run its customization detection even under AGENT_DRY_RUN —
+  # otherwise agent-plan could report status:"success" right before
+  # agent-upgrade refuses (exit 3) on the exact same customized hook.
+  # _stealth_install_git_hook() itself gates every actual filesystem mutation
+  # behind AGENT_DRY_RUN, so running it here under agent-plan still writes
+  # nothing; it only classifies and records.
   if [[ "$AGENT_DRY_RUN" != true ]]; then
 
   # ── EXTERNAL .rig/ — write .rigpath and update git excludes ──────────────
@@ -3070,7 +3082,19 @@ PYEOF
       warn ".git/info/exclude not found — stealth exclusions could not be applied."
       warn "Add manually: CLAUDE.md, PROJECT_BRIEF.md, .claude/, .agents/, .codex/, .mcp.json, .playwright-mcp/, .github/, .gitleaks.toml, docs/features/README.md, bin/rig*, .rigpath"
     fi
+  fi
 
+  fi # AGENT_DRY_RUN tracking-mode bookkeeping guard
+
+  # ── STEALTH MODE: wire hooks to .git/hooks/ (issue #458) ─────────────────
+  # Deliberately outside the AGENT_DRY_RUN guard above: agent-plan needs
+  # _stealth_install_git_hook()'s customization detection and
+  # record_upgrade_result calls to run so a customized hook is reported via
+  # conflicts[] during a read-only plan, not only during agent-upgrade.
+  # _stealth_install_git_hook() itself gates every actual write (backup,
+  # cp, chmod, manifest entry) behind AGENT_DRY_RUN, so this still performs
+  # zero filesystem mutations under agent-plan — only classification.
+  if [[ "$RIG_TRACKING" == "stealth" ]]; then
     # Copy .husky/ hook scripts directly to .git/hooks/ (Husky-free, per-clone)
     GIT_HOOKS_DIR="$TARGET/.git/hooks"
     HUSKY_SRC="$PROJECT_TEMPLATES/.husky"
@@ -3099,8 +3123,6 @@ PYEOF
       fi
     fi
   fi
-
-  fi # AGENT_DRY_RUN tracking-mode bookkeeping guard
 
   # ── EXECUTABLE BITS ───────────────────────────────────────────────────────
   HUSKY_DIR="$TARGET/.husky"

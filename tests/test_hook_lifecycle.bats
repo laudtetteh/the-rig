@@ -38,6 +38,18 @@ install_stealth() {
     --strategy upgrade
 }
 
+_sha256() {
+  sha256sum "$1" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$1" | awk '{print $1}'
+}
+
+# Content+path snapshot of the target tree AND the external stealth .rig/
+# dir (manifest lives there, not under TEST_PROJECT, in stealth mode). Used
+# to prove agent-plan performs zero writes anywhere: two snapshots taken
+# before/after a run must be byte-for-byte identical.
+tree_snapshot() {
+  find "$TEST_PROJECT" "$RIG_EXT" -type f 2>/dev/null | sort | xargs cksum 2>/dev/null
+}
+
 @test "stealth install tracks installed git hooks in the manifest" {
   install_stealth
   [ "$status" -eq 0 ]
@@ -119,5 +131,115 @@ doc = json.loads(lines[-1])
 entries = {a['path']: a for a in doc['artifacts']}
 assert '.git/hooks/pre-commit' in entries, entries.keys()
 assert entries['.git/hooks/pre-commit']['action'] != 'skip', entries['.git/hooks/pre-commit']
+"
+}
+
+# issue #458: agent-plan (AGENT_DRY_RUN=true) never called
+# _stealth_install_git_hook() at all — the whole stealth hook-install loop
+# lived inside the blanket "if AGENT_DRY_RUN != true" tracking-mode
+# bookkeeping guard. So a customized hook that agent-upgrade correctly
+# refuses on was invisible to agent-plan, which could report status:
+# "success" right before agent-upgrade refused (exit 3) on the identical
+# project. This test proves agent-plan now detects and reports the same
+# conflict, with zero writes anywhere in the target tree.
+@test "agent-plan detects a customized git hook and reports it in conflicts[] with zero writes (issue #458)" {
+  install_stealth
+  [ "$status" -eq 0 ]
+
+  printf '#!/bin/sh\necho hand-written-hook-marker\n' > "$TEST_PROJECT/.git/hooks/pre-commit"
+  chmod +x "$TEST_PROJECT/.git/hooks/pre-commit"
+
+  local before after
+  before="$(tree_snapshot)"
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$RIG_EXT" \
+    --strategy agent-plan
+  [ "$status" -eq 3 ]
+
+  after="$(tree_snapshot)"
+  [ "$before" = "$after" ]
+
+  printf '%s\n' "$output" > "$TEMP_DIR/agent-plan-result.json"
+  python3 -c "
+import json
+lines = [l for l in open('$TEMP_DIR/agent-plan-result.json') if l.strip()]
+doc = json.loads(lines[-1])
+assert doc['mode'] == 'plan', doc['mode']
+assert doc['status'] == 'refused', doc['status']
+paths = [c['path'] for c in doc['conflicts']]
+assert '.git/hooks/pre-commit' in paths, paths
+"
+
+  # The hand-written hook must survive byte-identical — agent-plan never writes.
+  grep -q 'hand-written-hook-marker' "$TEST_PROJECT/.git/hooks/pre-commit"
+}
+
+# Regression check: the agent-plan fix above must not change agent-upgrade's
+# own (pre-existing, already-tested) refusal behavior on the same fixture.
+@test "agent-upgrade on a customized git hook is unchanged: still refuses and preserves the hook byte-identical (issue #458 regression check)" {
+  install_stealth
+  [ "$status" -eq 0 ]
+
+  printf '#!/bin/sh\necho hand-written-hook-marker\n' > "$TEST_PROJECT/.git/hooks/pre-commit"
+  chmod +x "$TEST_PROJECT/.git/hooks/pre-commit"
+  local before_hash
+  before_hash="$(_sha256 "$TEST_PROJECT/.git/hooks/pre-commit")"
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$RIG_EXT" \
+    --strategy agent-upgrade
+  [ "$status" -eq 3 ]
+
+  printf '%s\n' "$output" > "$TEMP_DIR/agent-upgrade-result.json"
+  python3 -c "
+import json
+lines = [l for l in open('$TEMP_DIR/agent-upgrade-result.json') if l.strip()]
+doc = json.loads(lines[-1])
+assert doc['mode'] == 'apply', doc['mode']
+assert doc['status'] == 'refused', doc['status']
+paths = [c['path'] for c in doc['conflicts']]
+assert '.git/hooks/pre-commit' in paths, paths
+"
+
+  local after_hash
+  after_hash="$(_sha256 "$TEST_PROJECT/.git/hooks/pre-commit")"
+  [ "$before_hash" = "$after_hash" ]
+}
+
+# Confirms the fix does not over-report: an unmodified, freshly-installed
+# hook must classify as installed/convergeable, never appear in conflicts[].
+@test "agent-plan on an unmodified git hook classifies it as installed, not a conflict, with zero writes" {
+  install_stealth
+  [ "$status" -eq 0 ]
+
+  local before after
+  before="$(tree_snapshot)"
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$RIG_EXT" \
+    --strategy agent-plan
+
+  after="$(tree_snapshot)"
+  [ "$before" = "$after" ]
+
+  # Exit code deliberately not asserted: [BASE_BRANCH]/[Project Name]
+  # substitution running after write_manifest_entry() records the
+  # pre-substitution hash is a documented, pre-existing false-positive
+  # "customized" for unrelated process files (see this repo's CLAUDE.md
+  # "Known gotchas"), which can push the overall run to refused/exit 3 for
+  # reasons unrelated to hook handling. What matters here is narrower: the
+  # untouched pre-commit hook specifically must not be reported as a
+  # conflict.
+  printf '%s\n' "$output" > "$TEMP_DIR/agent-plan-clean-result.json"
+  python3 -c "
+import json
+lines = [l for l in open('$TEMP_DIR/agent-plan-clean-result.json') if l.strip()]
+doc = json.loads(lines[-1])
+entries = {a['path']: a for a in doc['artifacts']}
+assert '.git/hooks/pre-commit' in entries, entries.keys()
+assert entries['.git/hooks/pre-commit']['action'] != 'skip', entries['.git/hooks/pre-commit']
+conflict_paths = [c['path'] for c in doc['conflicts']]
+assert '.git/hooks/pre-commit' not in conflict_paths, conflict_paths
 "
 }
