@@ -671,6 +671,11 @@ run_capability_smoke() {
 # automated caller can determine whether a successful run still needs review.
 UPGRADE_UPDATED_COUNT=0
 UPGRADE_MERGED_COUNT=0
+# Distinct from UPGRADE_MERGED_COUNT (settings.json's existing additive-dedup
+# smart-merge). This counts files resolved by the general-purpose
+# structure-aware/three-way convergence engine added in issue #444 lane
+# 444-C -- see attempt_convergence_merge() below.
+UPGRADE_CONVERGED_COUNT=0
 UPGRADE_SKIPPED_CUSTOMIZED_COUNT=0
 UPGRADE_SKIPPED_UNTRACKED_COUNT=0
 UPGRADE_SKIPPED_CUSTOMIZED_FILES=()
@@ -680,19 +685,24 @@ UPGRADE_REMOVED_COUNT=0
 UPGRADE_STALE_COUNT=0
 UPGRADE_STALE_FILES=()
 # Full per-artifact log, one entry per record_upgrade_result() call, encoded as
-# "<rel>\x1e<result>" (US = 0x1E, never legal in a path). Consumed only by the
-# agent-plan/agent-upgrade JSON emitter at the end of the script to build the
-# "artifacts" array; unrelated to (and additive with) the *_COUNT bookkeeping
-# above, which existing human-oriented output already relies on unchanged.
+# "<rel>\x1e<result>\x1e<detail>" (US = 0x1E, never legal in a path or in the
+# JSON-encoded detail payload). Consumed only by the agent-plan/agent-upgrade
+# JSON emitter at the end of the script to build the "artifacts"/"conflicts"
+# arrays; unrelated to (and additive with) the *_COUNT bookkeeping above,
+# which existing human-oriented output already relies on unchanged. `detail`
+# is an optional JSON-encoded array of specific conflicting keys/lines (see
+# attempt_convergence_merge()); empty for every result code that predates
+# issue #444 lane 444-C.
 UPGRADE_ARTIFACT_RECORDS=()
 
 record_upgrade_result() {
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
-  local result="$1" rel="${2:-}"
-  UPGRADE_ARTIFACT_RECORDS[${#UPGRADE_ARTIFACT_RECORDS[@]}]="${rel}"$'\x1e'"${result}"
+  local result="$1" rel="${2:-}" detail="${3:-}"
+  UPGRADE_ARTIFACT_RECORDS[${#UPGRADE_ARTIFACT_RECORDS[@]}]="${rel}"$'\x1e'"${result}"$'\x1e'"${detail}"
   case "$result" in
     updated) UPGRADE_UPDATED_COUNT=$((UPGRADE_UPDATED_COUNT + 1)) ;;
     merged) UPGRADE_MERGED_COUNT=$((UPGRADE_MERGED_COUNT + 1)) ;;
+    converged) UPGRADE_CONVERGED_COUNT=$((UPGRADE_CONVERGED_COUNT + 1)) ;;
     skipped-customized)
       UPGRADE_SKIPPED_CUSTOMIZED_COUNT=$((UPGRADE_SKIPPED_CUSTOMIZED_COUNT + 1))
       UPGRADE_SKIPPED_CUSTOMIZED_FILES[${#UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]}]="$rel"
@@ -1529,6 +1539,73 @@ copy_codex_owned_initial() {
   write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file" "$dest"
 }
 
+# ── STRUCTURE-AWARE / THREE-WAY CONVERGENCE ENGINE (issue #444, lane 444-C) ──
+# Only reachable from _copy_upgrade_existing()'s "customized" branch below,
+# and only when AGENT_MODE is set (--strategy agent-plan/agent-upgrade).
+# Interactive, skip, overwrite, merge, and plain --strategy upgrade never
+# call this — their o/s/d prompt and non-interactive skip-with-review
+# behavior are unchanged byte-for-byte.
+#
+# No trusted base/provenance is available yet: issue #444 lane 444-B (which
+# adds base_revision/generator/provider manifest fields for exactly this
+# purpose) had not merged as of this lane. Every merge helper below is
+# called with only --current/--incoming and degrades to a conservative
+# 2-way rule in that mode: a key/section/line that differs between the
+# current (customized) file and the incoming template is always reported as
+# a conflict rather than guessed — see installer/_convergence_common.py.
+# Wiring a real --base once 444-B lands is a thin adapter at the call site
+# below, not a redesign of the helpers themselves.
+agent_convergence_merge_tool() {
+  local rel="$1"
+  case "$rel" in
+    */settings.json|settings.json) echo "" ;;  # already smart-merged elsewhere, never here
+    *.json) echo "merge-json.py" ;;
+    *.toml) echo "merge-toml.py" ;;
+    .claude/commands/*.md|.claude/agents/*.md|.rig/processes/*.md) echo "merge-frontmatter-markdown.py" ;;
+    *) echo "merge-text3way.py" ;;
+  esac
+}
+
+# Attempt a convergence merge for one customized file. The caller invokes
+# this via command substitution ($(...)), which runs it in a subshell -- so,
+# unlike most helpers in this script, it cannot hand data back through a
+# global variable (any assignment would be lost when the subshell exits).
+# Everything it returns must go through stdout instead:
+#   exit 0 -> stdout is the path of a temp file holding the merged content;
+#             the caller is responsible for applying and removing it.
+#   exit 1 -> stdout is a JSON-encoded array of the specific conflicting
+#             keys/lines (compact, single-line -- safe to capture as one
+#             command-substitution value even though individual conflict
+#             snippets may contain escaped newlines).
+# Never writes to $dest itself.
+attempt_convergence_merge() {
+  local src="$1" dest="$2" rel="$3" tool out report status
+  command -v python3 >/dev/null 2>&1 || { echo "[]"; return 1; }
+  tool="$(agent_convergence_merge_tool "$rel")"
+  [[ -n "$tool" ]] || { echo "[]"; return 1; }
+  out="$(mktemp)"
+  set +e
+  report="$(python3 "$SCRIPT_DIR/installer/$tool" --current "$dest" --incoming "$src" --output "$out" 2>/dev/null)"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  rm -f "$out"
+  python3 -c '
+import json, sys
+try:
+    doc = json.loads(sys.argv[1])
+    conflicts = doc.get("conflicts", [])
+    assert isinstance(conflicts, list)
+except Exception:
+    conflicts = []
+print(json.dumps(conflicts, separators=(",", ":")))
+' "$report" 2>/dev/null || echo "[]"
+  return 1
+}
+
 # ── UPGRADE STRATEGY HANDLER ──────────────────────────────────────────────────
 # Separated for readability. Called by copy_file() when COLLISION_STRATEGY=upgrade.
 #
@@ -1666,11 +1743,36 @@ _copy_upgrade_existing() {
       echo "  The new Rig version also modifies this file."
       echo ""
     fi
-    # Non-interactive (CI / piped stdin) or agent mode: skip without prompting.
-    # Agent modes must never block on a prompt, and must never silently accept
-    # a customized file as converged — it is always reported as needing
-    # manual review (see the refusal semantics in the JSON emitter below).
-    if [[ ! -t 0 || -n "$AGENT_MODE" ]]; then
+    # Agent mode (issue #444 lane 444-C): before falling back to the
+    # non-interactive skip below, try the structure-aware/three-way
+    # convergence engine. A clean merge is applied (or, in agent-plan's
+    # AGENT_DRY_RUN, classified only) and the run is NOT refused for this
+    # file. A merge conflict still falls through to the same
+    # skipped-customized refusal as before, just with specific
+    # keys/lines attached instead of a generic reason.
+    if [[ -n "$AGENT_MODE" ]]; then
+      # attempt_convergence_merge()'s stdout is a temp file path on success
+      # (exit 0) or a JSON conflicts array on failure (exit 1) — see its own
+      # comment for why it can't hand this back via a global variable.
+      local _converged_output
+      if _converged_output="$(attempt_convergence_merge "$src" "$dest" "$rel")"; then
+        if [[ "$AGENT_DRY_RUN" != true ]]; then
+          [[ -n "$base" ]] && backup_file "$dest" "$base"
+          cp "$_converged_output" "$dest"
+          write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file" "$dest"
+        fi
+        rm -f "$_converged_output"
+        success "Converged: ${rel}"
+        record_upgrade_result converged "$rel"
+        return
+      fi
+      info "Non-interactive mode — merge conflict, skipping: ${rel}"
+      info "Run the installer interactively to review and update this file."
+      record_upgrade_result skipped-customized "$rel" "$_converged_output"
+      return
+    fi
+    # Non-interactive (CI / piped stdin): skip without prompting.
+    if [[ ! -t 0 ]]; then
       info "Non-interactive mode — skipping customized file: ${rel}"
       info "Run the installer interactively to review and update this file."
       record_upgrade_result skipped-customized "$rel"
@@ -2964,17 +3066,24 @@ if [[ -n "$AGENT_MODE" ]]; then
     "$AGENT_MODE" "$_agent_status" "$_agent_records_file" \
     "$UPGRADE_UPDATED_COUNT" "$UPGRADE_MERGED_COUNT" "$UPGRADE_REMOVED_COUNT" \
     "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" "$UPGRADE_SKIPPED_CONFLICT_COUNT" \
-    "$UPGRADE_SKIPPED_UNTRACKED_COUNT" "$UPGRADE_STALE_COUNT" <<'PYEOF'
+    "$UPGRADE_SKIPPED_UNTRACKED_COUNT" "$UPGRADE_STALE_COUNT" "$UPGRADE_CONVERGED_COUNT" <<'PYEOF'
 import json, sys
 
 mode, status, records_path = sys.argv[1], sys.argv[2], sys.argv[3]
 (updated, merged, removed, skipped_customized, skipped_conflict,
- skipped_untracked, stale) = (int(x) for x in sys.argv[4:11])
+ skipped_untracked, stale, converged) = (int(x) for x in sys.argv[4:12])
 
 # result-code (as passed to record_upgrade_result in install.sh) -> fields.
 CLASSIFICATION = {
     "updated": "unmodified-since-install",
     "merged": "settings-mergeable",
+    # issue #444 lane 444-C: resolved by the structure-aware/three-way
+    # convergence engine (installer/merge-*.py), not the existing
+    # additive-dedup smart-merge for settings.json (that is "merged" above).
+    # NOTE: this heredoc is nested inside a $(...) command substitution --
+    # bash 3.2 (macOS default) mis-tracks quote balance if a heredoc body
+    # here contains a literal apostrophe, so avoid them in this block.
+    "converged": "converged",
     "removed": "obsolete",
     "migrated": "moved-project-reference",
     "up-to-date": "up-to-date",
@@ -2985,6 +3094,7 @@ CLASSIFICATION = {
 ACTION = {
     "updated": "update",
     "merged": "merge",
+    "converged": "merge",
     "removed": "remove",
     "migrated": "rewrite",
     "up-to-date": "none",
@@ -2995,6 +3105,10 @@ ACTION = {
 REASON = {
     "updated": "template file updated to the incoming Rig version",
     "merged": "settings.json merged (smart-merge) with the incoming Rig version",
+    "converged": (
+        "local customization preserved while incorporating conflict-free "
+        "incoming Rig changes via structure-aware or three-way merge"
+    ),
     "removed": "obsolete Rig-owned artifact retired",
     "migrated": "path references rewritten for a moved project root",
     "up-to-date": "already matches the incoming Rig version; no action needed",
@@ -3020,9 +3134,10 @@ with open(records_path) as fh:
 for line in records_text.split("\n"):
     if not line:
         continue
-    path, sep, result = line.partition("\x1e")
+    path, sep, rest = line.partition("\x1e")
     if not sep:
         continue
+    result, _, detail_raw = rest.partition("\x1e")
     entry = {
         "path": path,
         "classification": CLASSIFICATION.get(result, result),
@@ -3031,10 +3146,23 @@ for line in records_text.split("\n"):
     }
     artifacts.append(entry)
     if result in REPAIR_GUIDANCE:
+        # issue #444 lane 444-C: when the convergence engine attempted a
+        # merge and hit a real conflict, detail_raw is a JSON-encoded array
+        # of the specific keys/lines that conflicted (see
+        # attempt_convergence_merge() in install.sh and installer/merge-*.py).
+        # Empty for every path that never reached the convergence engine
+        # (e.g. no python3, unsupported destination conflict).
+        try:
+            details = json.loads(detail_raw) if detail_raw else []
+            if not isinstance(details, list):
+                details = []
+        except ValueError:
+            details = []
         conflicts.append({
             "path": path,
             "reason": entry["reason"],
             "repair_guidance": REPAIR_GUIDANCE[result],
+            "details": details,
         })
 
 doc = {
@@ -3044,6 +3172,7 @@ doc = {
     "summary": {
         "updated": updated,
         "merged": merged,
+        "converged": converged,
         "removed_obsolete": removed,
         "skipped_customized": skipped_customized,
         "skipped_conflict": skipped_conflict,
