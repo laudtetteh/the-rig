@@ -27,6 +27,8 @@ gated — survey before touching anything, confirm before committing.
 /rig-upgrade --scope=project  # upgrade project layer only (skip Phase 4 global)
 /rig-upgrade --scope=global   # upgrade global layer only (skip Phases 1–3 project)
 /rig-upgrade --scope=both     # upgrade both layers without prompting (same as default but explicit)
+/rig-upgrade --mode=agent     # skip the Phase 2 mode prompt: force guarded convergence (install.sh --strategy agent-upgrade)
+/rig-upgrade --mode=classic   # skip the Phase 2 mode prompt: force the conservative installer (install.sh --strategy upgrade)
 ```
 
 Before invoking the installer, resolve and confirm agent targets independently
@@ -105,6 +107,22 @@ Read the scope flag before Phase 0. Default is `both` (current behavior).
 - `--scope=both`: normal flow (no skip).
 
 These flags do not suppress the Phase 0 session state check — always run 0a first.
+
+### `--mode` flag
+
+Read the mode flag before Phase 0. It selects how Phase 2 (2-mode below) applies
+the project-layer upgrade, and short-circuits the interactive mode prompt in
+2-mode when present.
+
+- `--mode=agent`: set `UPGRADE_MODE=agent` — Phase 2 runs `install.sh --strategy
+  agent-upgrade` (guarded convergence).
+- `--mode=classic`: set `UPGRADE_MODE=classic` — Phase 2 runs `install.sh
+  --strategy upgrade` (the original per-file interactive review flow), unchanged
+  from before agent-driven convergence existed.
+- Neither flag passed: `UPGRADE_MODE` is unset here; 2-mode asks the user (or
+  applies the non-interactive default) once Phase 2 is reached.
+
+`--mode` has no effect when `--scope=global` skips Phase 2 entirely.
 
 ---
 
@@ -324,37 +342,31 @@ than `0`/`3` means a genuine fatal error unrelated to conflicts (e.g. a
 missing target). Full schema and example documents are in
 `$RIG_DIR/processes/UPGRADE_WORKFLOW.md`.
 
-**Scope note — read before assuming this command is the convergence
-engine.** This lane wires `agent-plan` into the survey step only (1c-bis
-above). Everything downstream of that survey is unchanged and still
-conservative:
+**Scope note — what this command actually wires today.** This survey step
+(1c-bis) always runs `agent-plan` as a read-only preview, regardless of which
+mode Phase 2 ends up using. What Phase 2 does with that preview depends on
+`UPGRADE_MODE` (see 2-mode below):
 
-- Phase 2 (`2a` below) still invokes `install.sh --strategy upgrade`, not
-  `--strategy agent-upgrade` — the same conservative, choice-driven
-  installer run you'd get running `install.sh` directly.
-- Phase 2b still offers a manual `[a]ccept template` / `[k]eep yours` /
-  `[s]how full file` decision per customized file, not a structure-aware or
-  three-way merge. Even once issue #444 lane 444-C's convergence engine
-  lands (tracked separately, not implemented by this command), this phase
-  would need to be rewired to call `agent-upgrade` and surface its
-  `converged`/`conflicts[]` JSON output to reach that behavior.
-- This command never invokes `bin/rig doctor` as a post-upgrade check.
-  Phase 3 here is a narrower, hand-rolled set of checks (VERSION,
-  `settings.json` deduplication, commands inventory) that predates and does
-  not overlap with the `manifest_provenance`/`stealth_status`/
-  `manifest_mode_hash`/`stale_manifest_entries`/`idempotence` gates
-  `bin/rig doctor` runs (see `UPGRADE_WORKFLOW.md` → "Post-upgrade
-  verification"). Run `bin/rig doctor` yourself after this command finishes
-  if you want those gates checked.
+- `UPGRADE_MODE=agent` (the recommended, and non-interactive default, mode):
+  Phase 2 invokes `install.sh --strategy agent-upgrade` — the real guarded
+  convergence engine, including issue #444 lane 444-C's structure-aware/
+  three-way merge for customized files with a known format. Phase 2b presents
+  the JSON `status`/`conflicts[]` result directly; it does not re-ask the
+  user to decide anything the engine already resolved. Phase 3 invokes
+  `bin/rig doctor --json` and surfaces any gate failure before the command
+  declares completion.
+- `UPGRADE_MODE=classic`: Phase 2 invokes `install.sh --strategy upgrade` —
+  the original conservative, choice-driven installer run, with the original
+  manual `[a]ccept template` / `[k]eep yours` / `[s]how full file` decision
+  per customized file in Phase 2b. This path is unchanged from before agent
+  mode existed and remains available on request.
 
-Wiring the full orchestrator — Phase 2 calling `agent-upgrade` instead of
-plain `upgrade`, presenting its JSON `status`/`conflicts[]` result to you
-instead of the current line-parsed summary, and invoking `bin/rig doctor`'s
-gates as an explicit post-upgrade verification step — is tracked as a
-follow-up under issue #444, not implemented in this lane. Do not describe
-`/rig-upgrade` as already providing intelligent convergence; today it is
-orchestration around the same conservative installer strategy you could run
-directly.
+Both modes still route through the exact same artifact discovery/
+classification code path in `install.sh` — `agent-upgrade` differs from
+`upgrade` only in how it reports and gates on the result (single JSON
+document, dedicated exit code `3` for "needs manual review"), not in what it
+is willing to touch automatically. See `UPGRADE_WORKFLOW.md` → "Agent-driven
+upgrade contract" for the full JSON schema and exit-code table.
 
 ### 1d — Survey changed files
 
@@ -478,20 +490,141 @@ Declare these arrays before Phase 2 begins. Every sub-phase appends to them;
 Phase 5 reads them to produce an accurate summary.
 
 ```bash
-UPGRADED=()             # files the installer auto-updated
-CUSTOMIZED_ACCEPTED=()  # user-modified files where user chose [a]ccept
-CUSTOMIZED_KEPT=()      # user-modified files where user chose [k]eep
-SKIPPED_BASE_BRANCH=()  # files skipped due to [BASE_BRANCH] false-positive
-FIXED=()                # manual corrections (VERSION, settings.json, commands)
-GLOBAL_UPDATED=()       # global layer sections/skills updated
-GLOBAL_SKIPPED=()       # global layer sections/skills kept by user
+UPGRADE_MODE=""          # "agent" or "classic" — set in Phase 2, 2-mode
+UPGRADED=()              # files applied: classic mode's auto-updates, or agent
+                         # mode's update/merge/remove actions
+CONVERGED=()             # agent mode only: customized files merged via
+                         # structure-aware/three-way convergence (issue #444 lane 444-C)
+AGENT_CONFLICTS=()       # agent mode only: paths still needing manual review
+                         # (classification "customized" or "conflict")
+CUSTOMIZED_ACCEPTED=()   # classic mode only: user-modified files where user chose [a]ccept
+CUSTOMIZED_KEPT=()       # classic mode only: user-modified files where user chose [k]eep
+SKIPPED_BASE_BRANCH=()   # classic mode only: files skipped due to [BASE_BRANCH] false-positive
+FIXED=()                 # manual corrections (VERSION, settings.json, commands)
+DOCTOR_FAILURES=()       # bin/rig doctor gate names that failed post-upgrade
+GLOBAL_UPDATED=()        # global layer sections/skills updated
+GLOBAL_SKIPPED=()        # global layer sections/skills kept by user
 ```
 
 ---
 
 ## Phase 2 — Project layer upgrade
 
-### 2a — Run the installer
+### 2-mode — Choose the upgrade mode
+
+If `--mode=agent` or `--mode=classic` was passed (see Flags → `--mode`), set
+`UPGRADE_MODE` to that value directly and skip the prompt below.
+
+Otherwise, in an interactive session, ask the user:
+
+> "Two ways to apply this upgrade:
+> - **[g] Guarded convergence (recommended)** — runs `install.sh --strategy
+>   agent-upgrade`. Applies every safe/convergeable change automatically —
+>   including conflict-free structure-aware merges of customized files — never
+>   prompts per file, and reports any file that still needs manual review with
+>   concrete repair guidance instead of asking you to decide file-by-file.
+> - **[c] Classic upgrade** — runs `install.sh --strategy upgrade`, the
+>   original interactive `[a]ccept template` / `[k]eep yours` / `[s]how full
+>   file` flow for every customized file.
+>
+> Which do you want? [g/c]"
+
+Wait for the response. Map `g` / `guarded` / `agent` → `UPGRADE_MODE=agent`;
+`c` / `classic` → `UPGRADE_MODE=classic`. On any other input, re-ask once;
+if still unclear, default to `agent`.
+
+For an agent-driven/noninteractive execution context with no `--mode` flag and
+no user available to prompt, default to `UPGRADE_MODE=agent` directly without
+asking — guarded convergence never silently overwrites a customized file (a
+customized or conflicting file is always left untouched and reported in
+`conflicts[]`, per "Refusal semantics and exit code 3" in
+`UPGRADE_WORKFLOW.md`), and it produces the structured JSON result Phase 3's
+`bin/rig doctor` check expects to reason about.
+
+Then continue to **2a-agent** if `UPGRADE_MODE=agent`, or **2a-classic** if
+`UPGRADE_MODE=classic`. Both paths converge again at **2c**.
+
+---
+
+### 2a-agent — Run the guarded convergence engine
+
+```bash
+AGENT_UPGRADE_JSON=$(bash "$INSTALLER_SRC/install.sh" --project-only \
+  --target "$REPO" --tracking "$TRACKING" --strategy agent-upgrade)
+AGENT_UPGRADE_STATUS=$?
+echo "$AGENT_UPGRADE_JSON" | python3 -m json.tool  # pretty-print for the user
+```
+
+Interpret `$AGENT_UPGRADE_STATUS`:
+
+- **`0`** — `status` is `"success"`. Every discovered artifact converged; no
+  file needs manual review. Continue to 2b-agent (it reports nothing to
+  review and moves straight on).
+- **`3`** — `status` is `"refused"`. Every safe/convergeable action was still
+  applied (see `summary.updated`, `summary.merged`, and `summary.converged`
+  in the JSON) — this is not a failed run. At least one artifact is left
+  untouched and listed in `conflicts[]`. Continue to 2b-agent to present it.
+- **Any other exit code** — a genuine fatal error unrelated to conflicts (for
+  example a missing target directory). Show `$AGENT_UPGRADE_JSON` verbatim
+  (or, if it is empty, say the command produced no output), stop, and do not
+  proceed to 2c or Phase 3.
+
+Parse the JSON to populate the result accumulators:
+
+```bash
+echo "$AGENT_UPGRADE_JSON" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+for a in d['artifacts']:
+    if a['classification'] == 'converged':
+        print('CONVERGED\t' + a['path'])
+    elif a['action'] in ('update', 'merge', 'remove'):
+        print('UPGRADED\t' + a['path'] + ' (' + a['action'] + ')')
+for c in d['conflicts']:
+    print('CONFLICT\t' + c['path'])
+"
+```
+
+Read each tab-separated output line and append to the matching accumulator:
+lines starting `CONVERGED` → `CONVERGED+=("$path")`; lines starting `UPGRADED`
+→ `UPGRADED+=("$path")`; lines starting `CONFLICT` → `AGENT_CONFLICTS+=("$path")`.
+
+### 2b-agent — Present unresolved conflicts
+
+If `AGENT_CONFLICTS` is empty (i.e. `$AGENT_UPGRADE_STATUS` was `0`): say
+"No files need manual review — every artifact converged automatically." and
+continue to 2c.
+
+Otherwise, for each entry in `$AGENT_UPGRADE_JSON`'s `conflicts[]` array,
+present it exactly as the engine reported it — read `path`, `reason`, and
+`repair_guidance` straight from the JSON. Do not invent guidance text and do
+not offer an `[a]ccept`/`[k]eep` choice here: the engine already applied every
+action it was willing to take automatically, so what remains is genuinely
+unresolved and requires the manual step named in `repair_guidance`.
+
+```
+⚠️ N file(s) need manual review (guarded convergence left these untouched):
+
+  path:            <conflicts[i].path>
+  reason:          <conflicts[i].reason>
+  repair guidance: <conflicts[i].repair_guidance>
+
+  [... one block per conflicts[] entry ...]
+```
+
+Then say:
+> "These files were left exactly as they were — nothing above was silently
+> overwritten or silently accepted. Resolve them using the repair guidance
+> above on your own schedule, then re-run `/rig-upgrade` to re-check. The
+> rest of this upgrade already applied; continuing to verification."
+
+Continue to 2c regardless of whether conflicts were found — a refused result
+still applied every safe action, so post-upgrade verification is still
+meaningful.
+
+---
+
+### 2a-classic — Run the installer
 
 ```bash
 installer_output=$("$INSTALLER_SRC/install.sh" \
@@ -518,11 +651,11 @@ Watch for:
 - `"Updated: ..."` — file was auto-updated ✓ → added to `UPGRADED[]`
 - `"Up to date: ..."` — file already current ✓
 - `"Merged .claude/settings.json"` — settings merged ✓
-- `"Customized file detected: ..."` — user-modified file was skipped; handle in 2b
+- `"Customized file detected: ..."` — user-modified file was skipped; handle in 2b-classic
 - `"Skipped (user-owned...): ..."` — expected; ignore
 - Any `ERROR` or non-zero exit — stop and report
 
-### 2b — Handle skipped "Customized" files
+### 2b-classic — Handle skipped "Customized" files
 
 For each file the installer reported as `"Customized file detected:"`:
 
@@ -642,6 +775,59 @@ and offer to install them. For each one installed:
 FIXED+=("commands: installed $name")
 ```
 
+### 3d — `bin/rig doctor` postflight gates
+
+Run the installed project's own `bin/rig doctor` to verify the five gates it
+checks (`manifest_provenance`, `stealth_status`, `manifest_mode_hash`,
+`stale_manifest_entries`, `idempotence` — see `UPGRADE_WORKFLOW.md` →
+"Post-upgrade verification: `bin/rig doctor` gates" for what each one
+verifies) actually pass on the state the upgrade just produced:
+
+```bash
+if [[ -x "$REPO/bin/rig" ]]; then
+  DOCTOR_JSON=$("$REPO/bin/rig" doctor --json)
+  DOCTOR_STATUS=$?
+else
+  DOCTOR_JSON=""
+  DOCTOR_STATUS=127
+fi
+```
+
+If `$REPO/bin/rig` does not exist or is not executable (a project upgrading
+from a version older than issue #444 lane 444-H, before this command shipped):
+say "bin/rig doctor is not available in this project yet (pre-444-H install) —
+skipping postflight gates." and continue to Phase 4. Do not treat this as a
+failure.
+
+Otherwise, parse `$DOCTOR_JSON`:
+
+```bash
+echo "$DOCTOR_JSON" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+for c in d['checks']:
+    if not c['ok']:
+        print('FAIL\t' + c['name'] + '\t' + c['detail'])
+print('OVERALL\t' + str(d['ok']))
+"
+```
+
+Append the gate name from each `FAIL` line to `DOCTOR_FAILURES`.
+
+- If the parsed `OVERALL` value is `True` (equivalently, `$DOCTOR_STATUS` was
+  `0`): say "bin/rig doctor: all gates passed." and continue to Phase 4.
+- If `False` (`$DOCTOR_STATUS` was `1`): present each failing gate's name and
+  `detail` string exactly as `bin/rig doctor --json` reported it, then say:
+  > "⚠️ bin/rig doctor found `${#DOCTOR_FAILURES[@]}` gate failure(s) after
+  > this upgrade (listed above). These are separate from the "skipped" gates
+  > that are expected steady state on an ordinary install (see
+  > `UPGRADE_WORKFLOW.md`) — a failure here means a check actually ran and
+  > found a real mismatch. Review each one before treating the upgrade as
+  > complete; this does not block continuing to Phase 4/5, but it must appear
+  > in the Phase 5 summary."
+  Continue to Phase 4 — do not stop the command, but carry `DOCTOR_FAILURES`
+  into the Phase 5 summary so it is never silently dropped.
+
 ---
 
 ## Phase 4 — Global layer upgrade (optional)
@@ -714,7 +900,7 @@ GLOBAL_SKIPPED+=("skill: $name")
 Print a summary using the result accumulators populated in Phases 2–4:
 
 ```bash
-echo "=== Upgrade complete: $CURRENT_VERSION → $EXPECTED_VERSION ==="
+echo "=== Upgrade complete: $CURRENT_VERSION → $EXPECTED_VERSION (mode: $UPGRADE_MODE) ==="
 echo ""
 
 if [[ ${#UPGRADED[@]} -gt 0 ]]; then
@@ -725,19 +911,43 @@ else
 fi
 echo ""
 
-if [[ ${#CUSTOMIZED_ACCEPTED[@]} -gt 0 || ${#CUSTOMIZED_KEPT[@]} -gt 0 || ${#SKIPPED_BASE_BRANCH[@]} -gt 0 ]]; then
-  echo "Reviewed (customized files):"
-  for f in "${CUSTOMIZED_ACCEPTED[@]}"; do printf '  accepted: %s\n' "$f"; done
-  for f in "${CUSTOMIZED_KEPT[@]}";    do printf '  kept:     %s\n' "$f"; done
-  for f in "${SKIPPED_BASE_BRANCH[@]}"; do printf '  skipped (BASE_BRANCH only): %s\n' "$f"; done
+if [[ "$UPGRADE_MODE" == "agent" ]]; then
+  if [[ ${#CONVERGED[@]} -gt 0 ]]; then
+    echo "Converged (structure-aware/three-way merge, customization preserved):"
+    printf '  %s\n' "${CONVERGED[@]}"
+  else
+    echo "Converged: (none)"
+  fi
+  echo ""
+  if [[ ${#AGENT_CONFLICTS[@]} -gt 0 ]]; then
+    echo "Needs manual review (${#AGENT_CONFLICTS[@]} — see repair guidance presented in 2b-agent):"
+    printf '  %s\n' "${AGENT_CONFLICTS[@]}"
+  else
+    echo "Needs manual review: (none — status was success)"
+  fi
 else
-  echo "Reviewed: (no customized files)"
+  if [[ ${#CUSTOMIZED_ACCEPTED[@]} -gt 0 || ${#CUSTOMIZED_KEPT[@]} -gt 0 || ${#SKIPPED_BASE_BRANCH[@]} -gt 0 ]]; then
+    echo "Reviewed (customized files):"
+    for f in "${CUSTOMIZED_ACCEPTED[@]}"; do printf '  accepted: %s\n' "$f"; done
+    for f in "${CUSTOMIZED_KEPT[@]}";    do printf '  kept:     %s\n' "$f"; done
+    for f in "${SKIPPED_BASE_BRANCH[@]}"; do printf '  skipped (BASE_BRANCH only): %s\n' "$f"; done
+  else
+    echo "Reviewed: (no customized files)"
+  fi
 fi
 echo ""
 
 if [[ ${#FIXED[@]} -gt 0 ]]; then
   echo "Fixed (${#FIXED[@]}):"
   printf '  %s\n' "${FIXED[@]}"
+fi
+echo ""
+
+if [[ ${#DOCTOR_FAILURES[@]} -gt 0 ]]; then
+  echo "bin/rig doctor: ${#DOCTOR_FAILURES[@]} gate failure(s):"
+  printf '  %s\n' "${DOCTOR_FAILURES[@]}"
+else
+  echo "bin/rig doctor: all gates passed (or unavailable — see Phase 3d)"
 fi
 echo ""
 
@@ -753,12 +963,16 @@ fi
 If this project has a bats test suite (`tests/*.bats`), remind the user:
 > "Run `bats tests/` to verify the installer is still working correctly."
 
+If `DOCTOR_FAILURES` is non-empty, repeat the warning before moving on:
+> "⚠️ `bin/rig doctor` reported gate failures above — resolve them before
+> considering this upgrade fully verified."
+
 ### 5a — Commit strategy recommendation
 
 Count the total modified files:
 
 ```bash
-TOTAL_CHANGED=$((${#UPGRADED[@]} + ${#CUSTOMIZED_ACCEPTED[@]} + ${#FIXED[@]}))
+TOTAL_CHANGED=$((${#UPGRADED[@]} + ${#CONVERGED[@]} + ${#CUSTOMIZED_ACCEPTED[@]} + ${#FIXED[@]}))
 ```
 
 If `$TOTAL_CHANGED` > 3:
@@ -798,5 +1012,8 @@ Then say:
 | A Rig-owned file wasn't updated (no prompt either) | Copy from template manually: `cp $TEMPLATES/$rel $REPO/$rel` |
 | Global CLAUDE.md was overwritten with placeholders | Restore from `.rig-backup/` + re-apply surgical edits |
 | `git add` in hook fails with `index.lock` | Use `git update-index --add <file>` inside hooks instead of `git add` |
+| `agent-upgrade` exits `3` (`status: "refused"`) | Not a failure — every safe action was still applied. Resolve each `conflicts[]` entry using its own `repair_guidance`, then re-run `/rig-upgrade` |
+| `bin/rig doctor` reports a gate failure after upgrade | Review the failing gate's `detail` string (Phase 3d); it names the exact mismatch (e.g. hash drift, stale manifest entry) |
+| `bin/rig doctor` not found | The project was installed before issue #444 lane 444-H shipped `bin/rig` — Phase 3d skips cleanly; re-run `/rig-upgrade` after this upgrade completes to pick it up |
 
 Full upgrade docs: `$RIG_DIR/processes/UPGRADE_WORKFLOW.md`
