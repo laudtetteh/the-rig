@@ -167,6 +167,185 @@ SH
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); assert not next(x for x in d["checks"] if x["name"]=="recent_commit_references")["ok"]'
 }
 
+write_fixture_provenance_validator() {
+  # Minimal stand-in for the real installer/validate-manifest-provenance.py
+  # (444-B / #448): same CLI contract (positional metadata path arg), same
+  # JSON shape and exit codes (0 ok, 1 malformed found, 2 unreadable/bad
+  # schema). Doctor only depends on that contract, not the real script's
+  # internals, so this fixture lets 444-H's gate be tested independently of
+  # #448 landing.
+  mkdir -p "$1"
+  cat > "$1/validate-manifest-provenance.py" <<'PYEOF'
+#!/usr/bin/env python3
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        data = json.load(fh)
+except (OSError, ValueError) as exc:
+    print(json.dumps({"ok": False, "error": {"code": "manifest-unreadable", "message": str(exc)}}))
+    sys.exit(2)
+entries = data.get("entries", {})
+malformed, legacy = [], []
+known_providers = {"claude", "codex", "both", "none"}
+for rel, entry in sorted(entries.items()):
+    provider = entry.get("provider")
+    if provider is not None and provider not in known_providers:
+        malformed.append({"path": rel, "problems": [{"field": "provider", "reason": f"unrecognized value: {provider!r}"}]})
+    elif all(entry.get(f) is None for f in ("base_revision", "generator", "provider")):
+        legacy.append(rel)
+ok = not malformed
+print(json.dumps({"ok": ok, "checked": len(entries), "malformed": malformed, "legacy_provenance": legacy}))
+sys.exit(0 if ok else 1)
+PYEOF
+}
+
+write_fixture_stealth_auditor() {
+  # Minimal stand-in for the real installer/audit-stealth.py (444-D / #449):
+  # same CLI contract (positional target path arg), same JSON shape and exit
+  # codes (0 ok/no-leak, 1 leak found, 2 not-a-git-repo). Doctor only depends
+  # on that contract.
+  mkdir -p "$1"
+  cat > "$1/audit-stealth.py" <<'PYEOF'
+#!/usr/bin/env python3
+import json, os, sys
+target = os.path.abspath(sys.argv[1])
+if not os.path.isdir(os.path.join(target, ".git")):
+    print(json.dumps({"ok": False, "error": {"code": "not-a-git-repo", "message": "not a git repo"}}))
+    sys.exit(2)
+if not os.path.exists(os.path.join(target, ".rigpath")):
+    print(json.dumps({"ok": True, "target": target, "stealth": False, "message": "not a stealth install", "artifacts": []}))
+    sys.exit(0)
+leak_path = os.path.join(target, "bin", "rig-sprint")
+leaks = []
+if os.path.exists(leak_path):
+    leaks.append({"path": "bin/rig-sprint", "status": "untracked_leak"})
+print(json.dumps({"ok": not leaks, "target": target, "stealth": True, "artifacts": leaks, "leak_count": len(leaks)}))
+sys.exit(0 if not leaks else 1)
+PYEOF
+}
+
+@test "manifest provenance and stealth-status gates skip gracefully when tools are absent" {
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}
+assert c["manifest_provenance"]["ok"] and "not present" in c["manifest_provenance"]["detail"]
+assert c["stealth_status"]["ok"] and "not present" in c["stealth_status"]["detail"]
+assert c["manifest_mode_hash"]["ok"] and "no manifest metadata file" in c["manifest_mode_hash"]["detail"]
+assert c["stale_manifest_entries"]["ok"] and "no manifest metadata file" in c["stale_manifest_entries"]["detail"]
+assert c["idempotence"]["ok"] and "test_install_idempotence.bats" in c["idempotence"]["detail"]'
+}
+
+@test "manifest provenance gate reports a malformed entry once the validator is present" {
+  write_fixture_provenance_validator "$BATS_TEST_TMPDIR/installer-fixture"
+  cat > "$CASE_DIR/.rig/memory/.rig-manifest.json" <<'EOF'
+{
+  "schema_version": 1,
+  "entries": {
+    "CLAUDE.md": {"sha256": "x", "owner": "user", "provider": "not-a-real-provider"},
+    ".claude/commands/task.md": {"sha256": "x", "owner": "rig", "base_revision": "1.0.0", "generator": "install.sh", "provider": "claude"}
+  }
+}
+EOF
+  run env _RIG_INSTALLER_DIR="$BATS_TEST_TMPDIR/installer-fixture" "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="manifest_provenance"); assert not c["ok"] and "CLAUDE.md" in c["detail"] and "provider" in c["detail"]'
+}
+
+@test "manifest provenance gate accepts legacy entries without failing" {
+  write_fixture_provenance_validator "$BATS_TEST_TMPDIR/installer-fixture"
+  cat > "$CASE_DIR/.rig/memory/.rig-manifest.json" <<'EOF'
+{
+  "schema_version": 1,
+  "entries": {
+    "CLAUDE.md": {"sha256": "x", "owner": "user"}
+  }
+}
+EOF
+  run env _RIG_INSTALLER_DIR="$BATS_TEST_TMPDIR/installer-fixture" "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="manifest_provenance"); assert c["ok"] and "legacy" in c["detail"]'
+}
+
+@test "stealth-status gate reports an untracked launcher leak once the auditor is present" {
+  write_fixture_stealth_auditor "$BATS_TEST_TMPDIR/installer-fixture"
+  local external="$BATS_TEST_TMPDIR/external-rig"
+  mkdir -p "$external/memory"
+  cp "$CASE_DIR/.rig/memory/.rig-manifest" "$external/memory/.rig-manifest"
+  printf '%s\n' "$external" > "$CASE_DIR/.rigpath"
+  printf 'CLAUDE.md\nPROJECT_BRIEF.md\n.claude/\n.rigpath\nbin/rig\n' > "$CASE_DIR/.git/info/exclude"
+  printf '#!/usr/bin/env bash\n' > "$CASE_DIR/bin/rig-sprint"
+  run env _RIG_INSTALLER_DIR="$BATS_TEST_TMPDIR/installer-fixture" "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="stealth_status"); assert not c["ok"] and "bin/rig-sprint" in c["detail"]'
+}
+
+@test "stealth-status gate passes clean when the auditor is present and finds no leaks" {
+  write_fixture_stealth_auditor "$BATS_TEST_TMPDIR/installer-fixture"
+  run env _RIG_INSTALLER_DIR="$BATS_TEST_TMPDIR/installer-fixture" "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="stealth_status"); assert c["ok"] and "not a stealth install" in c["detail"]'
+}
+
+@test "manifest mode/hash drift is detected for rig-owned entries only" {
+  printf 'edited\n' > "$CASE_DIR/.claude/commands/ship.md"
+  local good_hash; good_hash="$(python3 -c "import hashlib; print(hashlib.sha256(open('$CASE_DIR/.claude/commands/task.md','rb').read()).hexdigest())")"
+  cat > "$CASE_DIR/.rig/memory/.rig-manifest.json" <<EOF
+{
+  "schema_version": 1,
+  "entries": {
+    ".claude/commands/task.md": {"sha256": "$good_hash", "owner": "rig", "mode": "644"},
+    ".claude/commands/ship.md": {"sha256": "0000000000000000000000000000000000000000000000000000000000000000", "owner": "rig", "mode": "644"},
+    "CLAUDE.md": {"sha256": "irrelevant-because-user-owned", "owner": "user", "mode": "644"}
+  }
+}
+EOF
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="manifest_mode_hash"); assert not c["ok"] and "ship.md" in c["detail"] and "hash mismatch" in c["detail"] and "CLAUDE.md" not in c["detail"]'
+}
+
+@test "stale manifest entries are reported for artifacts missing from disk" {
+  cat > "$CASE_DIR/.rig/memory/.rig-manifest.json" <<'EOF'
+{
+  "schema_version": 1,
+  "entries": {
+    "bin/rig-vanished": {"sha256": "x", "owner": "rig", "mode": "755"}
+  }
+}
+EOF
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="stale_manifest_entries"); assert not c["ok"] and "bin/rig-vanished" in c["detail"]'
+}
+
+@test "postflight gate JSON output stays schema-consistent across pass and fail states" {
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"])
+names = {"manifest_provenance","stealth_status","manifest_mode_hash","stale_manifest_entries","idempotence"}
+present = {c["name"] for c in d["checks"]}
+assert names <= present
+for c in d["checks"]:
+    assert set(c) == {"name","ok","detail"}
+    assert isinstance(c["ok"], bool) and isinstance(c["detail"], str)'
+
+  cat > "$CASE_DIR/.rig/memory/.rig-manifest.json" <<'EOF'
+{
+  "schema_version": 1,
+  "entries": {
+    "bin/rig-vanished": {"sha256": "x", "owner": "rig", "mode": "755"}
+  }
+}
+EOF
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"])
+for c in d["checks"]:
+    assert set(c) == {"name","ok","detail"}
+    assert isinstance(c["ok"], bool) and isinstance(c["detail"], str)
+assert d["ok"] is False'
+}
+
 @test "adversarial rigpath and unknown option fail closed without execution" {
   printf '%s\n' '$(touch /tmp/rig-doctor-injected)' > "$CASE_DIR/.rigpath"
   run "$CASE_DIR/bin/rig" doctor --json
