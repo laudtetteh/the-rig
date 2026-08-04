@@ -391,3 +391,174 @@ and merged `.claude/settings.json` — the safe/convergeable actions — while
 leaving `CLAUDE.md` completely untouched and reporting it in `conflicts`
 with concrete repair guidance. The overall run still exits `3` because at
 least one file was left for manual review.
+
+### Structure-aware/three-way convergence (`converged` classification)
+
+> Implemented under issue #444 lane 444-C, in PR #452. As of this writing
+> that PR is open with CI pending and has not merged to `main` — the
+> behavior below reflects the PR's diff, read directly rather than assumed.
+> Re-verify this section once #452 actually merges, in case anything shifted
+> during review.
+
+Lane 444-C adds a real merge step for customized files with a known,
+structured format, reachable only from `agent-plan`/`agent-upgrade` (every
+interactive, skip, overwrite, merge, and plain non-interactive `--strategy
+upgrade` run is byte-for-byte unaffected). When a customized file would
+otherwise fall into the `skipped-customized` bucket, the file's extension and
+path first route it to one of four narrowly-scoped merge helpers under
+`installer/`:
+
+| File pattern | Helper |
+|---|---|
+| `*.json` (except `settings.json`, which is always smart-merged elsewhere and never reaches this path) | `merge-json.py` — key-level three-way merge |
+| `*.toml` | `merge-toml.py` — section/key-aware merge |
+| `.claude/commands/*.md`, `.claude/agents/*.md`, `.rig/processes/*.md` | `merge-frontmatter-markdown.py` — structural frontmatter merge; whole-side-wins body when only one side changed, explicit conflict when both changed |
+| everything else | `merge-text3way.py` — plain-text fallback; resolves only unambiguous whole-file cases, otherwise reports a specific line-range conflict, never a guessed splice |
+
+No trusted `base_revision` exists to diff against until lane 444-B's
+provenance fields are actually consumed here (444-B itself has merged as of
+this writing, but 444-C's merge call sites still invoke the helpers with only
+`--current`/`--incoming`, no `--base` — wiring a real base is a thin adapter
+at the call site, not a redesign, per the PR description). Without a base,
+the merge algorithm degrades to a conservative rule: a key or line that
+differs between the customized file and the incoming template is always
+reported as a conflict, never guessed.
+
+A successful merge is recorded as a new `converged` classification instead of
+forcing a refusal:
+
+```json
+{"path":"relative/path","classification":"converged","action":"merge","reason":"local customization preserved while incorporating conflict-free incoming Rig changes via structure-aware or three-way merge"}
+```
+
+An unresolved merge conflict still produces the existing `skipped-customized`
+classification and `status: "refused"`/exit `3` behavior described above, but
+each `conflicts[]` entry gains a `details` array naming the exact keys or
+line ranges that conflicted (compact JSON, one entry per conflicting
+key/line), instead of only a generic path-level reason:
+
+```json
+{"path":"relative/path","reason":"local content differs from the recorded Rig baseline (customized)","repair_guidance":"Resolve manually and re-run, or restore the file from .rig-backup/ and accept the incoming template on the next upgrade.","details":["settings.timeout","hooks.pre-commit"]}
+```
+
+The `summary` object gains a matching `converged` count alongside the fields
+already documented above.
+
+### Stale-manifest categories for every tracking layout
+
+> Implemented under issue #444 lanes 444-E/444-F/444-G, consolidated in PR
+> #451. As of this writing that PR is open with CI pending and has not
+> merged to `main` — the behavior below reflects the PR's diff, read directly
+> rather than assumed. Re-verify this section once #451 actually merges.
+
+Before this lane, external and stealth manifests (which mix ordinary
+project-rooted paths with `.rig/…` paths that were relocated to the external
+Rig directory) resolved every tracked entry against a single root, which made
+stale-manifest auditing either falsely flag every `.rig/…` entry or make
+every other entry unreachable — so the audit was skipped entirely for those
+two layouts. It now resolves each entry against the correct root (project
+root for ordinary paths, the external Rig directory for `.rig/…` paths) and
+reports four disjoint categories instead of a single flat "missing" list:
+
+| Category | Meaning | Auto-repaired by `--repair-stale`? |
+|---|---|---|
+| `missing` | The tracked path no longer exists at all | Yes — the only category this is ever true for, because removing the manifest entry doesn't touch a filesystem path that isn't there |
+| `wrong-type` | The path exists, but its type (file vs. directory) no longer matches what the manifest recorded | No — always requires manual review |
+| `dangling-symlink` | The path is a symlink whose target no longer exists | No — always requires manual review |
+| `unexpected-symlink` | The path is now a symlink where the manifest recorded a non-symlink type | No — always requires manual review |
+
+The three non-`missing` categories are never auto-repaired, on purpose:
+silently rewriting the manifest for a path whose real-world state doesn't
+match what was recorded would be exactly the kind of silent
+accept-as-converged behavior issue #444's locked policy forbids. In agent
+mode, any unrepaired stale entry (not just `wrong-type`/symlink findings —
+a `missing` entry left unrepaired because `--repair-stale` wasn't passed
+counts too) now also drives `status: "refused"`/exit `3`, the same as a
+customized or conflicting file.
+
+### Complete transaction/backup coverage for direct-writer mutations
+
+> Implemented under issue #444 lane 444-F, in the same PR #451 referenced
+> above (open, CI pending as of this writing).
+
+Several install/upgrade code paths mutate a destination file in place rather
+than copying a template through `copy_file()` — settings-merge writes,
+`.rigpath`, `.rig/VERSION`, install-target state metadata, `.codex/config.toml`,
+and `[PLACEHOLDER]` substitutions. Before this lane, none of those call sites
+invoked `backup_file()` themselves, so a run interrupted between two of them
+had nothing recorded to roll back to. They now route through
+`upgrade_prepare_mutation()`, which journals and backs up an existing
+regular-file destination before the caller is allowed to mutate it — the
+same transaction machinery `copy_file()`'s own upgrade path already used, so
+`--recover` restores these mutations identically to any other tracked write.
+
+### Safe `.git/hooks/` lifecycle in stealth mode
+
+> Also implemented under issue #444 lane 444-G, in PR #451 (open, CI pending
+> as of this writing).
+
+Stealth-mode `.git/hooks/` writes previously bypassed the manifest and
+backup system entirely (a plain `cp` over whatever was already there). They
+are now manifest-tracked and customization-aware, using the same
+missing/unmodified/customized states as every other Rig-owned artifact: a
+hook with no manifest entry, a hash mismatch against its manifest entry, or a
+symlink destination is treated as customized or foreign, never silently
+overwritten. In ordinary interactive/non-interactive (non-agent) runs the
+hook is still always installed, but a customized one is backed up first. In
+`agent-upgrade` mode (`AGENT_MODE=apply`), a customized hook is never
+overwritten — it is refused and reported in `conflicts[]` via the existing
+`skipped-customized` classification, exactly like any other customized
+artifact.
+
+### Post-upgrade verification: `bin/rig doctor` gates
+
+> Implemented under issue #444 lane 444-H (merged). These gates run inside
+> the installed project's own `bin/rig doctor` — a separate command from
+> `install.sh` itself — and are not currently invoked automatically by
+> `install.sh`, `agent-upgrade`, or `/rig-upgrade`. Run `bin/rig doctor` (or
+> `bin/rig doctor --json`) yourself after an upgrade to check them.
+
+| Gate | Verifies | Reports "skipped" (not "failed") when |
+|---|---|---|
+| `manifest_provenance` | Every `.rig-manifest.json` entry's `owner`/`source`/`generator`/`provider`/`type` is within its known vocabulary (delegates to `installer/validate-manifest-provenance.py`) | No manifest metadata file exists, or the validator script isn't colocated with this checkout (true for every ordinary downstream install — that script never ships into a target project) |
+| `stealth_status` | No Rig-generated artifact is tracked by git or visible-and-unignored in a stealth/external install (delegates to `installer/audit-stealth.py`) | The project isn't a stealth/external install, the audit script isn't colocated, or the git directory can't be classified (e.g. a linked worktree) |
+| `manifest_mode_hash` | Every Rig-owned artifact's file mode and content hash still match the manifest (catches hand-edits made outside the installer) | No manifest metadata file exists |
+| `stale_manifest_entries` | No manifest entry points at a path that no longer exists on disk at all | No manifest metadata file exists |
+| `idempotence` | Not verified live — `doctor` is read-only and has no safe way to mutate/roll back a real project tree from inside itself. Always reports the documented procedure instead of fabricating a live result | Never "fails" on its own; always points to `bats tests/test_install_idempotence.bats` |
+
+`installer/validate-manifest-provenance.py` and `installer/audit-stealth.py`
+are release-engineering tools that live only in The Rig's own source repo.
+Neither ships into a downstream target project, so `manifest_provenance` and
+`stealth_status` permanently report "skipped" with an explanatory detail
+string on an ordinary install — that is expected steady state, not a defect.
+
+### Repair guidance by finding
+
+**Stealth `tracked_leak` / `untracked_leak` (from `stealth_status` or a
+direct `installer/audit-stealth.py` run):** run
+`python3 installer/repair-stealth.py <target>`. It appends any missing
+pattern to `.git/info/exclude` for artifacts classified as a leak — additive
+only, never rewrites or removes an existing exclude line, never touches the
+git index. A `tracked_leak` (a Rig-generated file that was actually
+committed) is reported in the tool's `still_tracked` list but is **not**
+fixed automatically, because an exclude pattern has no effect on a path git
+already tracks — untrack it explicitly with `git rm --cached <path>`, review
+the resulting diff, then commit.
+
+**Stale manifest entry reported as `wrong-type`, `dangling-symlink`, or
+`unexpected-symlink`:** manual review required, always — see "Stale-manifest
+categories" above for why these three are never auto-repaired. Inspect the
+path, determine whether it's a deliberate local change or accidental drift,
+and either restore the expected type or correct the manifest entry before
+re-running the upgrade.
+
+**`agent-plan`/`agent-upgrade` exits `3` with `status: "refused"`:** every
+safe/convergeable action was already applied (and, once lane 444-C's
+convergence engine is in effect, every conflict-free structure-aware merge
+too) — only the files listed in `conflicts[]` are still untouched. For each
+one, either resolve it manually (reconcile the customization with the
+incoming change, or restore from `.rig-backup/` and re-run to accept the
+incoming template) or re-run with a strategy that explicitly accepts the
+incoming version for that file (interactive `--strategy upgrade` will prompt
+per file). Re-running `agent-upgrade` unchanged against the same unresolved
+conflict refuses again by design — that is not a bug to retry around.

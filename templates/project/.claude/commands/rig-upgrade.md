@@ -324,13 +324,37 @@ than `0`/`3` means a genuine fatal error unrelated to conflicts (e.g. a
 missing target). Full schema and example documents are in
 `$RIG_DIR/processes/UPGRADE_WORKFLOW.md`.
 
-**Scope note:** this lane wires `agent-plan` into the survey step only.
-Phase 2 below still delegates to `install.sh --strategy upgrade` for the
-actual interactive/noninteractive run, and Phase 2b still offers manual
-accept/keep decisions rather than guarded convergence — wiring the full
-orchestrator (Phases 2–5) to the agent-driven contract, including
-`--strategy agent-upgrade` and true three-way convergence, is tracked as a
-follow-up under #444 (lanes 444-B onward), not implemented here.
+**Scope note — read before assuming this command is the convergence
+engine.** This lane wires `agent-plan` into the survey step only (1c-bis
+above). Everything downstream of that survey is unchanged and still
+conservative:
+
+- Phase 2 (`2a` below) still invokes `install.sh --strategy upgrade`, not
+  `--strategy agent-upgrade` — the same conservative, choice-driven
+  installer run you'd get running `install.sh` directly.
+- Phase 2b still offers a manual `[a]ccept template` / `[k]eep yours` /
+  `[s]how full file` decision per customized file, not a structure-aware or
+  three-way merge. Even once issue #444 lane 444-C's convergence engine
+  lands (tracked separately, not implemented by this command), this phase
+  would need to be rewired to call `agent-upgrade` and surface its
+  `converged`/`conflicts[]` JSON output to reach that behavior.
+- This command never invokes `bin/rig doctor` as a post-upgrade check.
+  Phase 3 here is a narrower, hand-rolled set of checks (VERSION,
+  `settings.json` deduplication, commands inventory) that predates and does
+  not overlap with the `manifest_provenance`/`stealth_status`/
+  `manifest_mode_hash`/`stale_manifest_entries`/`idempotence` gates
+  `bin/rig doctor` runs (see `UPGRADE_WORKFLOW.md` → "Post-upgrade
+  verification"). Run `bin/rig doctor` yourself after this command finishes
+  if you want those gates checked.
+
+Wiring the full orchestrator — Phase 2 calling `agent-upgrade` instead of
+plain `upgrade`, presenting its JSON `status`/`conflicts[]` result to you
+instead of the current line-parsed summary, and invoking `bin/rig doctor`'s
+gates as an explicit post-upgrade verification step — is tracked as a
+follow-up under issue #444, not implemented in this lane. Do not describe
+`/rig-upgrade` as already providing intelligent convergence; today it is
+orchestration around the same conservative installer strategy you could run
+directly.
 
 ### 1d — Survey changed files
 
