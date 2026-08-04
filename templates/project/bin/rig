@@ -343,7 +343,7 @@ doctor() {
     [[ "$arg" == --json ]] || { usage_error "unknown doctor option: $arg" "$@"; return; }
   done
   RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
-import json, os, pathlib, re, shlex, subprocess, sys
+import hashlib, json, os, pathlib, re, shlex, stat, subprocess, sys
 
 try:
     import tomllib
@@ -568,6 +568,212 @@ if connector_declaration.exists():
         connector_ok = False
     check("connector_declarations", connector_ok,
           "configured; session evidence required for schema visibility and callability" if connector_ok else "invalid declaration")
+
+# ── Postflight/release gates (#444 lane 444-H) ─────────────────────────────────
+# These gates make "the upgrade succeeded" a verifiable claim: manifest
+# provenance, stealth-status, mode/hash drift, and stale-state detection.
+#
+# installer/validate-manifest-provenance.py (444-B / #448) and
+# installer/audit-stealth.py (444-D / #449) are release-engineering tools that
+# live in The Rig's own source repo, not artifacts shipped into downstream
+# target projects (nothing under templates/ copies an installer/ directory
+# into an installed project). They can only be found here when this doctor
+# run is itself operating inside a colocated checkout of the source repo
+# (The Rig dogfooding itself) or when _RIG_INSTALLER_DIR names their
+# directory explicitly (used by tests and any future explicit wiring). In an
+# ordinary downstream install neither script will ever be found, and both
+# gates below correctly and permanently report "skipped" rather than
+# "failed" — that is expected steady state, not a gap.
+def find_installer_script(name):
+    candidates = []
+    override = os.environ.get("_RIG_INSTALLER_DIR")
+    if override:
+        candidates.append(pathlib.Path(override) / name)
+    candidates.append(root / "installer" / name)
+    candidates.append(rig / "installer" / name)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+manifest_metadata = rig / "memory" / ".rig-manifest.json"
+
+# Manifest provenance gate: delegates to validate-manifest-provenance.py when
+# present. Malformed base_revision/generator/provider values are reported as
+# failures; entries that simply predate provenance tracking (legacy/unknown)
+# are surfaced in the detail text but do not fail the check on their own.
+provenance_script = find_installer_script("validate-manifest-provenance.py")
+if provenance_script is None:
+    check("manifest_provenance", True,
+          "skipped: installer/validate-manifest-provenance.py not present (activates once #448 merges/is colocated)")
+elif not manifest_metadata.is_file():
+    check("manifest_provenance", True, "skipped: no manifest metadata file present")
+else:
+    provenance_run = run(["python3", str(provenance_script), str(manifest_metadata)])
+    if provenance_run is None:
+        check("manifest_provenance", False, "validator failed to execute")
+    else:
+        try:
+            provenance_payload = json.loads(provenance_run.stdout)
+        except ValueError:
+            provenance_payload = None
+        if provenance_payload is None:
+            check("manifest_provenance", False,
+                  f"validator produced invalid output (exit {provenance_run.returncode}): {provenance_run.stderr.strip()}")
+        elif provenance_run.returncode == 2:
+            check("manifest_provenance", False,
+                  "manifest metadata invalid: " + provenance_payload.get("error", {}).get("message", "unknown"))
+        else:
+            malformed = provenance_payload.get("malformed", [])
+            legacy = provenance_payload.get("legacy_provenance", [])
+            detail = f"{provenance_payload.get('checked', 0)} entries checked"
+            if malformed:
+                first = malformed[0]
+                fields = ", ".join(p.get("field", "") for p in first.get("problems", []))
+                detail += f"; malformed: {first.get('path')} ({fields})"
+                if len(malformed) > 1:
+                    detail += f" and {len(malformed) - 1} more"
+            elif legacy:
+                detail += f"; {len(legacy)} legacy/unknown-provenance entr{'y' if len(legacy) == 1 else 'ies'} (not an error)"
+            check("manifest_provenance", provenance_payload.get("ok", False), detail)
+
+# Stealth-status gate: delegates to audit-stealth.py when present. Reports
+# tracked_leak/untracked_leak findings as failures; a non-stealth project (no
+# .rigpath) or an unreadable non-primary git dir (e.g. a linked worktree,
+# which audit-stealth.py cannot classify) is reported as skipped, not failed.
+stealth_script = find_installer_script("audit-stealth.py")
+if stealth_script is None:
+    check("stealth_status", True,
+          "skipped: installer/audit-stealth.py not present (activates once #449 merges/is colocated)")
+else:
+    stealth_run = run(["python3", str(stealth_script), str(root)])
+    if stealth_run is None:
+        check("stealth_status", False, "audit failed to execute")
+    else:
+        try:
+            stealth_payload = json.loads(stealth_run.stdout)
+        except ValueError:
+            stealth_payload = None
+        if stealth_payload is None:
+            check("stealth_status", False,
+                  f"audit produced invalid output (exit {stealth_run.returncode}): {stealth_run.stderr.strip()}")
+        elif stealth_run.returncode == 2:
+            err = stealth_payload.get("error", {})
+            if err.get("code") == "not-a-git-repo":
+                check("stealth_status", True, "skipped: not a primary git repository")
+            else:
+                check("stealth_status", False, "audit error: " + err.get("message", "unknown"))
+        elif not stealth_payload.get("stealth", False):
+            check("stealth_status", True, stealth_payload.get("message", "not a stealth/external install"))
+        else:
+            leaks = [a for a in stealth_payload.get("artifacts", [])
+                     if a.get("status") in ("tracked_leak", "untracked_leak")]
+            if leaks:
+                detail = f"{stealth_payload.get('leak_count', len(leaks))} leak(s): " + \
+                    ", ".join(f"{a['path']} ({a['status']})" for a in leaks[:5])
+                if len(leaks) > 5:
+                    detail += f" and {len(leaks) - 5} more"
+            else:
+                detail = "no leaks detected"
+            check("stealth_status", stealth_payload.get("ok", False), detail)
+
+# Manifest mode/hash drift + stale-state gates share one parse of the
+# manifest metadata JSON (schema_version 1, entries: relpath -> {sha256,
+# owner, source, type, mode, ...}). check-capabilities.py only runs
+# capability-manifest smoke checks (exists/executable/json-key/command
+# against installer/capabilities.v1.json) — it has no notion of the
+# per-artifact install manifest, so this is new logic, not a duplicate.
+if manifest_metadata.is_file():
+    try:
+        manifest_json = json.loads(read(manifest_metadata))
+        manifest_entries = manifest_json.get("entries")
+        if not isinstance(manifest_entries, dict):
+            raise ValueError("entries is not an object")
+    except (ValueError, AttributeError):
+        manifest_entries = None
+
+    if manifest_entries is None:
+        check("manifest_mode_hash", False, "manifest metadata file is not valid JSON")
+        check("stale_manifest_entries", False, "manifest metadata file is not valid JSON")
+    else:
+        def path_is_safe(rel):
+            return isinstance(rel, str) and rel and not rel.startswith("/") and ".." not in rel.split("/")
+
+        # Mode/hash drift: only Rig-owned entries are meaningful here. A
+        # hash/mode mismatch on a user-owned (customized) file is expected
+        # behaviour, not drift, and upgrade already has its own customization
+        # workflow for those — this gate exists to catch Rig-owned files that
+        # were hand-edited outside the installer.
+        drift = []
+        drift_checked = 0
+        for rel in sorted(manifest_entries):
+            entry = manifest_entries[rel]
+            if not path_is_safe(rel) or not isinstance(entry, dict) or entry.get("owner") != "rig":
+                continue
+            drift_checked += 1
+            artifact = root / rel
+            if not artifact.exists() and not artifact.is_symlink():
+                drift.append(f"{rel}: missing")
+                continue
+            expected_hash = entry.get("sha256")
+            if expected_hash and artifact.is_file() and not artifact.is_symlink():
+                try:
+                    actual_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+                except OSError:
+                    actual_hash = None
+                if actual_hash is not None and actual_hash != expected_hash:
+                    drift.append(f"{rel}: hash mismatch")
+                    continue
+            expected_mode = entry.get("mode")
+            if expected_mode:
+                try:
+                    actual_mode = format(stat.S_IMODE(artifact.lstat().st_mode), "o")
+                except OSError:
+                    actual_mode = None
+                if actual_mode is not None and str(actual_mode) != str(expected_mode):
+                    drift.append(f"{rel}: mode {actual_mode} != {expected_mode}")
+        if drift_checked:
+            mode_hash_detail = f"{drift_checked - len(drift)}/{drift_checked} rig-owned artifacts match manifest"
+        else:
+            mode_hash_detail = "no rig-owned manifest entries to check"
+        if drift:
+            mode_hash_detail += "; drift: " + ", ".join(drift[:5])
+            if len(drift) > 5:
+                mode_hash_detail += f" and {len(drift) - 5} more"
+        check("manifest_mode_hash", not drift, mode_hash_detail)
+
+        # Stale-state: any manifest entry (any owner) whose artifact no longer
+        # exists on disk at all. This mirrors report_stale_manifest_entries()'s
+        # own existence-check logic in install.sh (same path-safety filter,
+        # same os.path.lexists semantics), reimplemented directly here rather
+        # than shelling out to install.sh: that function is gated on
+        # in-progress upgrade state ($COLLISION_STRATEGY, $REPAIR_STALE, a
+        # live $TARGET) that doctor does not have and should not fabricate.
+        stale = [rel for rel in sorted(manifest_entries)
+                 if path_is_safe(rel) and not (root / rel).exists() and not (root / rel).is_symlink()]
+        if stale:
+            stale_detail = f"{len(stale)} stale entr{'y' if len(stale) == 1 else 'ies'}: " + ", ".join(stale[:5])
+            if len(stale) > 5:
+                stale_detail += f" and {len(stale) - 5} more"
+        else:
+            stale_detail = "no stale entries"
+        check("stale_manifest_entries", not stale, stale_detail)
+else:
+    check("manifest_mode_hash", True, "skipped: no manifest metadata file present")
+    check("stale_manifest_entries", True, "skipped: no manifest metadata file present")
+
+# Idempotence gate: doctor is a read-only diagnostic and deliberately never
+# re-invokes the installer against a live project tree (there is no safe way
+# to snapshot/roll back a real target from inside a read-only command, and
+# bin/rig has no recorded path back to the install.sh that produced it once
+# installed). Idempotence is instead proven by a dedicated test that runs
+# install.sh twice against a disposable fixture and asserts the second run
+# changes nothing: tests/test_install_idempotence.bats. This check always
+# reports the documented procedure rather than silently claiming a live
+# verification that did not happen.
+check("idempotence", True,
+      "not verified live (would require mutating the live project tree from a read-only command); "
+      "run: bats tests/test_install_idempotence.bats")
 
 result = {"ok": all(item["ok"] for item in checks), "command": "doctor", "root": str(root), "rig_dir": str(rig), "checks": checks}
 if "--json" in sys.argv[1:]:

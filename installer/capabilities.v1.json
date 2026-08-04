@@ -18,7 +18,12 @@
       "layer": "project",
       "always": true,
       "agents": ["claude", "codex"],
-      "artifacts": [{"path": "bin/rig", "type": "file", "required": true}],
+      "artifacts": [
+        {"path": "bin/rig", "type": "file", "required": true},
+        {"path": "bin/rig-connector-preflight", "type": "file", "required": true},
+        {"path": "bin/rig-sprint", "type": "file", "required": true},
+        {"path": "bin/rig-tab-title-watch", "type": "file", "required": true}
+      ],
       "dependencies": ["git"],
       "smoke": [{"id": "rig-dispatcher", "type": "executable", "target": "bin/rig", "required": true}]
     },

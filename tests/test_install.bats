@@ -167,7 +167,7 @@ is_rig_owned_stub() {
   [[ "$output" == '{"ok":true,"command":"memory validate"'* ]]
 }
 
-@test "dispatcher: stealth install excludes only bin/rig and reads external version" {
+@test "dispatcher: stealth install excludes bin/rig and reads external version" {
   local rig_ext="$TEMP_DIR/external-rig"
   run_installer --strategy skip --tracking stealth --rig-dir "$rig_ext"
   [ "$status" -eq 0 ]
@@ -177,6 +177,50 @@ is_rig_owned_stub() {
   run "$TEST_PROJECT/bin/rig" version --json
   [ "$status" -eq 0 ]
   [ "$output" = "{\"version\":\"$(cat "$REPO_ROOT/VERSION")\"}" ]
+}
+
+@test "stealth install excludes every generated bin/rig* launcher, not just bin/rig" {
+  local rig_ext="$TEMP_DIR/external-rig"
+  run_installer --strategy skip --tracking stealth --rig-dir "$rig_ext"
+  [ "$status" -eq 0 ]
+
+  # Every file actually shipped under templates/project/bin/ must have its
+  # own exact-line entry in .git/info/exclude — not merely a substring hit
+  # against another entry (bin/rig is itself a substring of the other
+  # three launcher names, so an exact-line check matters here).
+  local launcher
+  for launcher in "$REPO_ROOT/templates/project/bin/"*; do
+    grep -qx "bin/$(basename "$launcher")" "$TEST_PROJECT/.git/info/exclude"
+  done
+
+  # git status must show zero untracked bin/ artifacts — this is the
+  # actual zero-trace guarantee, not just presence of exclude lines.
+  run git -C "$TEST_PROJECT" status --porcelain --untracked-files=all
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"bin/rig"* ]]
+}
+
+@test "non-stealth install: bin/rig* launchers are untouched by stealth exclusion logic" {
+  # Regression check: repo tracking (the default here) must never write a
+  # stealth block into .git/info/exclude, and every launcher must remain
+  # a plain, visible, untracked file the user is expected to git-add
+  # themselves — exactly the pre-existing non-stealth behaviour.
+  run_installer --strategy skip --tracking repo
+  [ "$status" -eq 0 ]
+
+  local launcher
+  for launcher in "$REPO_ROOT/templates/project/bin/"*; do
+    [ -f "$TEST_PROJECT/bin/$(basename "$launcher")" ]
+  done
+
+  if [ -f "$TEST_PROJECT/.git/info/exclude" ]; then
+    run grep -c "The Rig — stealth mode" "$TEST_PROJECT/.git/info/exclude"
+    [ "$status" -ne 0 ]
+  fi
+
+  run git -C "$TEST_PROJECT" status --porcelain --untracked-files=all
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"?? bin/rig"* ]]
 }
 
 @test "skip strategy: does not overwrite existing files" {
@@ -303,6 +347,98 @@ is_rig_owned_stub() {
   [ "$status" -eq 0 ]
   [ -f "$metadata" ]
   jq -e '.schema_version == 1 and (.entries | length) > 0' "$metadata" >/dev/null
+}
+
+@test "upgrade strategy: manifest entries record base_revision, generator, and provider" {
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  [ -f "$metadata" ]
+
+  # generated-codex artifact: mirrored by installer/generate-codex-skills.py.
+  jq -e '.entries[".agents/skills/debug/SKILL.md"].generator == "codex-mirror"
+    and .entries[".agents/skills/debug/SKILL.md"].provider == "codex"
+    and (.entries[".agents/skills/debug/SKILL.md"].base_revision | type == "string")' "$metadata" >/dev/null
+
+  # hand-authored template, Claude-specific: unambiguous provider regardless
+  # of the project agent selection that drove this run.
+  jq -e '.entries[".claude/hooks/pre-tool.sh"].generator == "install.sh"
+    and .entries[".claude/hooks/pre-tool.sh"].provider == "claude"' "$metadata" >/dev/null
+
+  # hand-authored template, Codex-specific.
+  jq -e '.entries[".codex/hooks.json"].generator == "install.sh"
+    and .entries[".codex/hooks.json"].provider == "codex"' "$metadata" >/dev/null
+
+  # shared/project-user artifact: takes on this run's active project agent
+  # selection since the file itself is not provider-specific.
+  jq -e '.entries["CLAUDE.md"].generator == "install.sh"
+    and .entries["CLAUDE.md"].provider == "codex"' "$metadata" >/dev/null
+
+  # base_revision mirrors installer_version (the only trustworthy per-file
+  # revision signal available today).
+  jq -e '.entries["CLAUDE.md"].base_revision == .entries["CLAUDE.md"].installer_version' "$metadata" >/dev/null
+}
+
+@test "manifest provenance validator: accepts a legacy manifest lacking provenance fields" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  jq 'del(.entries["CLAUDE.md"].base_revision, .entries["CLAUDE.md"].generator, .entries["CLAUDE.md"].provider)' \
+    "$metadata" > "$TEMP_DIR/legacy-metadata.json"
+  mv "$TEMP_DIR/legacy-metadata.json" "$metadata"
+
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"legacy_provenance":["CLAUDE.md"]'* ]]
+}
+
+@test "manifest provenance validator: reports a deliberately malformed provenance entry" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  jq '.entries["CLAUDE.md"].generator = "not-a-real-generator"' "$metadata" > "$TEMP_DIR/malformed-metadata.json"
+  mv "$TEMP_DIR/malformed-metadata.json" "$metadata"
+
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"ok":false'* ]]
+  [[ "$output" == *'"path":"CLAUDE.md"'* ]]
+  [[ "$output" == *"not-a-real-generator"* ]]
+}
+
+@test "upgrade strategy: a pre-provenance manifest entry survives a real upgrade run" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  # Simulate a manifest written before 444-B: strip the new fields from an
+  # unmodified Rig-owned file's entry, same as an old installer would have
+  # left it.
+  jq 'del(.entries[".claude/hooks/pre-tool.sh"].base_revision,
+          .entries[".claude/hooks/pre-tool.sh"].generator,
+          .entries[".claude/hooks/pre-tool.sh"].provider)' \
+    "$metadata" > "$TEMP_DIR/legacy-metadata.json"
+  mv "$TEMP_DIR/legacy-metadata.json" "$metadata"
+
+  # Reading it back must not crash the validator...
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
+  [ "$status" -eq 0 ]
+
+  # ...nor a real upgrade run against the now-legacy entry. The file is
+  # unmodified, so this hits the same-hash fast path that does not rewrite
+  # the manifest entry — the point of this test is that this is safe, not
+  # that it forces a migration.
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_PROJECT/.claude/hooks/pre-tool.sh" ]
+
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]]
 }
 
 @test "upgrade strategy: reports missing metadata artifacts without deleting anything" {

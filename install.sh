@@ -151,18 +151,55 @@ write_manifest_metadata() {
   local hash="$1" rel="$2" manifest_file="$3" artifact_path="${4:-}" metadata_file
   [[ -z "$hash" || -z "$rel" || -z "$manifest_file" ]] && return
   metadata_file="${manifest_file}.json"
-  local owner="user" kind="missing" mode=""
+  local owner="user" kind="missing" mode="" source generator provider layer_agent
   if is_rig_owned "$rel"; then owner="rig"; fi
+  source="$(manifest_artifact_source "$rel")"
   if [[ -L "$artifact_path" ]]; then kind="symlink"
   elif [[ -f "$artifact_path" ]]; then kind="file"
   elif [[ -d "$artifact_path" ]]; then kind="directory"
   elif [[ -e "$artifact_path" ]]; then kind="other"
   fi
   mode="$(manifest_artifact_mode "$artifact_path")"
-  python3 - "$metadata_file" "$rel" "$hash" "$owner" "$(manifest_artifact_source "$rel")" "$kind" "$mode" "$INSTALLER_VERSION" <<'PYEOF'
+
+  # generator: the tool that actually produced this artifact's content.
+  # generated-codex artifacts are mirrored from the canonical Claude command
+  # body by installer/generate-codex-skills.py; everything else is a
+  # hand-authored template copied verbatim by install.sh itself. Keep this
+  # mapping in sync with installer/validate-manifest-provenance.py.
+  case "$source" in
+    generated-codex) generator="codex-mirror" ;;
+    *) generator="install.sh" ;;
+  esac
+
+  # provider: which agent context this artifact belongs to, using the same
+  # claude/codex/both/none vocabulary as GLOBAL_AGENT/PROJECT_AGENT/has_agent().
+  # Provider-specific paths are unambiguous from their source classification;
+  # shared paths (.rig/*, project tooling, plain user files) take on the
+  # active agent selection for whichever layer this manifest belongs to.
+  case "$manifest_file" in
+    "$GLOBAL_MANIFEST_FILE"|"$CODEX_GLOBAL_MANIFEST_FILE") layer_agent="${GLOBAL_AGENT:-}" ;;
+    *) layer_agent="${PROJECT_AGENT:-}" ;;
+  esac
+  case "$source" in
+    generated-codex|codex-native) provider="codex" ;;
+    claude-native) provider="claude" ;;
+    *) provider="$layer_agent" ;;
+  esac
+
+  # base_revision: the trusted upstream template revision this artifact was
+  # generated/copied from. There is no per-file template versioning today, so
+  # the most trustworthy real signal available is the installer's own VERSION
+  # at write time (the same value already recorded as installer_version).
+  # The two fields are kept distinct on purpose: installer_version answers
+  # "which installer executable performed this write" (housekeeping), while
+  # base_revision answers "what upstream revision should a future three-way
+  # merge diff against" (444-C provenance contract). They share a source
+  # today only because no finer-grained per-template revision exists yet —
+  # do not invent one.
+  python3 - "$metadata_file" "$rel" "$hash" "$owner" "$source" "$kind" "$mode" "$INSTALLER_VERSION" "$generator" "$provider" <<'PYEOF'
 import json, os, sys, tempfile
 
-path, rel, digest, owner, source, kind, mode, installer_version = sys.argv[1:]
+path, rel, digest, owner, source, kind, mode, installer_version, generator, provider = sys.argv[1:]
 try:
     with open(path) as fh:
         data = json.load(fh)
@@ -181,6 +218,9 @@ data["entries"][rel] = {
     "type": kind,
     "mode": mode or None,
     "installer_version": installer_version,
+    "base_revision": installer_version or None,
+    "generator": generator or None,
+    "provider": provider or None,
 }
 
 directory = os.path.dirname(path) or "."
@@ -194,6 +234,22 @@ finally:
     if os.path.exists(temporary):
         os.unlink(temporary)
 PYEOF
+}
+
+# ── Manifest provenance validation ────────────────────────────────────────────
+# Thin wrapper around installer/validate-manifest-provenance.py. Reports (does
+# not silently ignore) malformed provenance fields in a manifest metadata
+# file, and separately reports entries that simply predate this metadata
+# (legacy/unknown provenance — not an error). Not wired into any upgrade
+# decision or doctor/postflight gate in this lane; callable/testable in
+# isolation for 444-H to consume later.
+validate_manifest_provenance() {
+  local metadata_file="$1"
+  if [[ ! -f "$metadata_file" ]]; then
+    printf '%s\n' '{"ok":true,"checked":0,"malformed":[],"legacy_provenance":[]}'
+    return 0
+  fi
+  python3 "$SCRIPT_DIR/installer/validate-manifest-provenance.py" "$metadata_file"
 }
 
 # Audit a manifest's tracked entries against what's actually on disk.
@@ -743,6 +799,11 @@ run_capability_smoke() {
 # automated caller can determine whether a successful run still needs review.
 UPGRADE_UPDATED_COUNT=0
 UPGRADE_MERGED_COUNT=0
+# Distinct from UPGRADE_MERGED_COUNT (settings.json's existing additive-dedup
+# smart-merge). This counts files resolved by the general-purpose
+# structure-aware/three-way convergence engine added in issue #444 lane
+# 444-C -- see attempt_convergence_merge() below.
+UPGRADE_CONVERGED_COUNT=0
 UPGRADE_SKIPPED_CUSTOMIZED_COUNT=0
 UPGRADE_SKIPPED_UNTRACKED_COUNT=0
 UPGRADE_SKIPPED_CUSTOMIZED_FILES=()
@@ -757,19 +818,24 @@ UPGRADE_STALE_COUNT=0
 UPGRADE_STALE_UNREPAIRED_COUNT=0
 UPGRADE_STALE_FILES=()
 # Full per-artifact log, one entry per record_upgrade_result() call, encoded as
-# "<rel>\x1e<result>" (US = 0x1E, never legal in a path). Consumed only by the
-# agent-plan/agent-upgrade JSON emitter at the end of the script to build the
-# "artifacts" array; unrelated to (and additive with) the *_COUNT bookkeeping
-# above, which existing human-oriented output already relies on unchanged.
+# "<rel>\x1e<result>\x1e<detail>" (US = 0x1E, never legal in a path or in the
+# JSON-encoded detail payload). Consumed only by the agent-plan/agent-upgrade
+# JSON emitter at the end of the script to build the "artifacts"/"conflicts"
+# arrays; unrelated to (and additive with) the *_COUNT bookkeeping above,
+# which existing human-oriented output already relies on unchanged. `detail`
+# is an optional JSON-encoded array of specific conflicting keys/lines (see
+# attempt_convergence_merge()); empty for every result code that predates
+# issue #444 lane 444-C.
 UPGRADE_ARTIFACT_RECORDS=()
 
 record_upgrade_result() {
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
-  local result="$1" rel="${2:-}"
-  UPGRADE_ARTIFACT_RECORDS[${#UPGRADE_ARTIFACT_RECORDS[@]}]="${rel}"$'\x1e'"${result}"
+  local result="$1" rel="${2:-}" detail="${3:-}"
+  UPGRADE_ARTIFACT_RECORDS[${#UPGRADE_ARTIFACT_RECORDS[@]}]="${rel}"$'\x1e'"${result}"$'\x1e'"${detail}"
   case "$result" in
     updated) UPGRADE_UPDATED_COUNT=$((UPGRADE_UPDATED_COUNT + 1)) ;;
     merged) UPGRADE_MERGED_COUNT=$((UPGRADE_MERGED_COUNT + 1)) ;;
+    converged) UPGRADE_CONVERGED_COUNT=$((UPGRADE_CONVERGED_COUNT + 1)) ;;
     skipped-customized)
       UPGRADE_SKIPPED_CUSTOMIZED_COUNT=$((UPGRADE_SKIPPED_CUSTOMIZED_COUNT + 1))
       UPGRADE_SKIPPED_CUSTOMIZED_FILES[${#UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]}]="$rel"
@@ -1639,6 +1705,73 @@ copy_codex_owned_initial() {
   write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file" "$dest"
 }
 
+# ── STRUCTURE-AWARE / THREE-WAY CONVERGENCE ENGINE (issue #444, lane 444-C) ──
+# Only reachable from _copy_upgrade_existing()'s "customized" branch below,
+# and only when AGENT_MODE is set (--strategy agent-plan/agent-upgrade).
+# Interactive, skip, overwrite, merge, and plain --strategy upgrade never
+# call this — their o/s/d prompt and non-interactive skip-with-review
+# behavior are unchanged byte-for-byte.
+#
+# No trusted base/provenance is available yet: issue #444 lane 444-B (which
+# adds base_revision/generator/provider manifest fields for exactly this
+# purpose) had not merged as of this lane. Every merge helper below is
+# called with only --current/--incoming and degrades to a conservative
+# 2-way rule in that mode: a key/section/line that differs between the
+# current (customized) file and the incoming template is always reported as
+# a conflict rather than guessed — see installer/_convergence_common.py.
+# Wiring a real --base once 444-B lands is a thin adapter at the call site
+# below, not a redesign of the helpers themselves.
+agent_convergence_merge_tool() {
+  local rel="$1"
+  case "$rel" in
+    */settings.json|settings.json) echo "" ;;  # already smart-merged elsewhere, never here
+    *.json) echo "merge-json.py" ;;
+    *.toml) echo "merge-toml.py" ;;
+    .claude/commands/*.md|.claude/agents/*.md|.rig/processes/*.md) echo "merge-frontmatter-markdown.py" ;;
+    *) echo "merge-text3way.py" ;;
+  esac
+}
+
+# Attempt a convergence merge for one customized file. The caller invokes
+# this via command substitution ($(...)), which runs it in a subshell -- so,
+# unlike most helpers in this script, it cannot hand data back through a
+# global variable (any assignment would be lost when the subshell exits).
+# Everything it returns must go through stdout instead:
+#   exit 0 -> stdout is the path of a temp file holding the merged content;
+#             the caller is responsible for applying and removing it.
+#   exit 1 -> stdout is a JSON-encoded array of the specific conflicting
+#             keys/lines (compact, single-line -- safe to capture as one
+#             command-substitution value even though individual conflict
+#             snippets may contain escaped newlines).
+# Never writes to $dest itself.
+attempt_convergence_merge() {
+  local src="$1" dest="$2" rel="$3" tool out report status
+  command -v python3 >/dev/null 2>&1 || { echo "[]"; return 1; }
+  tool="$(agent_convergence_merge_tool "$rel")"
+  [[ -n "$tool" ]] || { echo "[]"; return 1; }
+  out="$(mktemp)"
+  set +e
+  report="$(python3 "$SCRIPT_DIR/installer/$tool" --current "$dest" --incoming "$src" --output "$out" 2>/dev/null)"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  rm -f "$out"
+  python3 -c '
+import json, sys
+try:
+    doc = json.loads(sys.argv[1])
+    conflicts = doc.get("conflicts", [])
+    assert isinstance(conflicts, list)
+except Exception:
+    conflicts = []
+print(json.dumps(conflicts, separators=(",", ":")))
+' "$report" 2>/dev/null || echo "[]"
+  return 1
+}
+
 # ── UPGRADE STRATEGY HANDLER ──────────────────────────────────────────────────
 # Separated for readability. Called by copy_file() when COLLISION_STRATEGY=upgrade.
 #
@@ -1779,11 +1912,36 @@ _copy_upgrade_existing() {
       echo "  The new Rig version also modifies this file."
       echo ""
     fi
-    # Non-interactive (CI / piped stdin) or agent mode: skip without prompting.
-    # Agent modes must never block on a prompt, and must never silently accept
-    # a customized file as converged — it is always reported as needing
-    # manual review (see the refusal semantics in the JSON emitter below).
-    if [[ ! -t 0 || -n "$AGENT_MODE" ]]; then
+    # Agent mode (issue #444 lane 444-C): before falling back to the
+    # non-interactive skip below, try the structure-aware/three-way
+    # convergence engine. A clean merge is applied (or, in agent-plan's
+    # AGENT_DRY_RUN, classified only) and the run is NOT refused for this
+    # file. A merge conflict still falls through to the same
+    # skipped-customized refusal as before, just with specific
+    # keys/lines attached instead of a generic reason.
+    if [[ -n "$AGENT_MODE" ]]; then
+      # attempt_convergence_merge()'s stdout is a temp file path on success
+      # (exit 0) or a JSON conflicts array on failure (exit 1) — see its own
+      # comment for why it can't hand this back via a global variable.
+      local _converged_output
+      if _converged_output="$(attempt_convergence_merge "$src" "$dest" "$rel")"; then
+        if [[ "$AGENT_DRY_RUN" != true ]]; then
+          [[ -n "$base" ]] && backup_file "$dest" "$base"
+          cp "$_converged_output" "$dest"
+          write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file" "$dest"
+        fi
+        rm -f "$_converged_output"
+        success "Converged: ${rel}"
+        record_upgrade_result converged "$rel"
+        return
+      fi
+      info "Non-interactive mode — merge conflict, skipping: ${rel}"
+      info "Run the installer interactively to review and update this file."
+      record_upgrade_result skipped-customized "$rel" "$_converged_output"
+      return
+    fi
+    # Non-interactive (CI / piped stdin): skip without prompting.
+    if [[ ! -t 0 ]]; then
       info "Non-interactive mode — skipping customized file: ${rel}"
       info "Run the installer interactively to review and update this file."
       record_upgrade_result skipped-customized "$rel"
@@ -2856,10 +3014,15 @@ PYEOF
   if [[ "$RIG_TRACKING" == "stealth" ]]; then
     GIT_EXCLUDE="$TARGET/.git/info/exclude"
     if [[ -f "$GIT_EXCLUDE" ]]; then
-      # Helper: append entry only if not already present
+      # Helper: append entry only if not already present.
+      # -x (whole-line) matters here: without it, a substring match on
+      # "bin/rig" is satisfied by an already-written "bin/rig-sprint" line,
+      # silently skipping the real "bin/rig" entry depending on find(1)'s
+      # enumeration order. Exact-line matching removes that ordering hazard
+      # for every entry, not just the bin/rig* ones.
       _stealth_exclude() {
         local entry="$1"
-        if ! grep -qF "$entry" "$GIT_EXCLUDE"; then
+        if ! grep -qxF "$entry" "$GIT_EXCLUDE"; then
           echo "$entry" >> "$GIT_EXCLUDE"
           success "Stealth: excluded $entry from git"
         else
@@ -2880,11 +3043,32 @@ PYEOF
       _stealth_exclude "docs/features/README.md"
       _stealth_exclude ".rig-backup/"
       _stealth_exclude ".rig/"
-      _stealth_exclude "bin/rig"
+      # Exclude every generated launcher under bin/ — not just bin/rig.
+      # Enumerated from the installer's own templates/project/bin/ source
+      # rather than a hardcoded per-name list or a "bin/rig*" glob:
+      #   - a hardcoded list drifts the moment a new launcher ships (this is
+      #     exactly how bin/rig-connector-preflight, bin/rig-sprint, and
+      #     bin/rig-tab-title-watch went unexcluded — they were added to
+      #     templates/project/bin/ without a matching entry here);
+      #   - a "bin/rig*" glob in .git/info/exclude is future-proof but would
+      #     also silently swallow an unrelated file a project author later
+      #     adds at bin/rig-<anything>, hiding it from git without their
+      #     knowledge — not a call this installer should make on a user's
+      #     behalf without asking.
+      # Enumerating our own template source excludes exactly (and only)
+      # what we install, with zero drift on future launcher additions and
+      # zero risk of over-excluding a file we did not generate.
+      if [[ -d "$PROJECT_TEMPLATES/bin" ]]; then
+        while IFS= read -r -d '' _launcher_src; do
+          _stealth_exclude "bin/$(basename "$_launcher_src")"
+        done < <(find "$PROJECT_TEMPLATES/bin" -type f -print0)
+      else
+        _stealth_exclude "bin/rig"
+      fi
       # .rigpath is already excluded by the external-mode block above
     else
       warn ".git/info/exclude not found — stealth exclusions could not be applied."
-      warn "Add manually: CLAUDE.md, PROJECT_BRIEF.md, .claude/, .agents/, .codex/, .mcp.json, .playwright-mcp/, .github/, .gitleaks.toml, docs/features/README.md, .rigpath"
+      warn "Add manually: CLAUDE.md, PROJECT_BRIEF.md, .claude/, .agents/, .codex/, .mcp.json, .playwright-mcp/, .github/, .gitleaks.toml, docs/features/README.md, bin/rig*, .rigpath"
     fi
 
     # Copy .husky/ hook scripts directly to .git/hooks/ (Husky-free, per-clone)
@@ -3168,17 +3352,24 @@ if [[ -n "$AGENT_MODE" ]]; then
     "$AGENT_MODE" "$_agent_status" "$_agent_records_file" \
     "$UPGRADE_UPDATED_COUNT" "$UPGRADE_MERGED_COUNT" "$UPGRADE_REMOVED_COUNT" \
     "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" "$UPGRADE_SKIPPED_CONFLICT_COUNT" \
-    "$UPGRADE_SKIPPED_UNTRACKED_COUNT" "$UPGRADE_STALE_COUNT" <<'PYEOF'
+    "$UPGRADE_SKIPPED_UNTRACKED_COUNT" "$UPGRADE_STALE_COUNT" "$UPGRADE_CONVERGED_COUNT" <<'PYEOF'
 import json, sys
 
 mode, status, records_path = sys.argv[1], sys.argv[2], sys.argv[3]
 (updated, merged, removed, skipped_customized, skipped_conflict,
- skipped_untracked, stale) = (int(x) for x in sys.argv[4:11])
+ skipped_untracked, stale, converged) = (int(x) for x in sys.argv[4:12])
 
 # result-code (as passed to record_upgrade_result in install.sh) -> fields.
 CLASSIFICATION = {
     "updated": "unmodified-since-install",
     "merged": "settings-mergeable",
+    # issue #444 lane 444-C: resolved by the structure-aware/three-way
+    # convergence engine (installer/merge-*.py), not the existing
+    # additive-dedup smart-merge for settings.json (that is "merged" above).
+    # NOTE: this heredoc is nested inside a $(...) command substitution --
+    # bash 3.2 (macOS default) mis-tracks quote balance if a heredoc body
+    # here contains a literal apostrophe, so avoid them in this block.
+    "converged": "converged",
     "removed": "obsolete",
     "migrated": "moved-project-reference",
     "up-to-date": "up-to-date",
@@ -3189,6 +3380,7 @@ CLASSIFICATION = {
 ACTION = {
     "updated": "update",
     "merged": "merge",
+    "converged": "merge",
     "removed": "remove",
     "migrated": "rewrite",
     "up-to-date": "none",
@@ -3199,6 +3391,10 @@ ACTION = {
 REASON = {
     "updated": "template file updated to the incoming Rig version",
     "merged": "settings.json merged (smart-merge) with the incoming Rig version",
+    "converged": (
+        "local customization preserved while incorporating conflict-free "
+        "incoming Rig changes via structure-aware or three-way merge"
+    ),
     "removed": "obsolete Rig-owned artifact retired",
     "migrated": "path references rewritten for a moved project root",
     "up-to-date": "already matches the incoming Rig version; no action needed",
@@ -3224,9 +3420,10 @@ with open(records_path) as fh:
 for line in records_text.split("\n"):
     if not line:
         continue
-    path, sep, result = line.partition("\x1e")
+    path, sep, rest = line.partition("\x1e")
     if not sep:
         continue
+    result, _, detail_raw = rest.partition("\x1e")
     entry = {
         "path": path,
         "classification": CLASSIFICATION.get(result, result),
@@ -3235,10 +3432,23 @@ for line in records_text.split("\n"):
     }
     artifacts.append(entry)
     if result in REPAIR_GUIDANCE:
+        # issue #444 lane 444-C: when the convergence engine attempted a
+        # merge and hit a real conflict, detail_raw is a JSON-encoded array
+        # of the specific keys/lines that conflicted (see
+        # attempt_convergence_merge() in install.sh and installer/merge-*.py).
+        # Empty for every path that never reached the convergence engine
+        # (e.g. no python3, unsupported destination conflict).
+        try:
+            details = json.loads(detail_raw) if detail_raw else []
+            if not isinstance(details, list):
+                details = []
+        except ValueError:
+            details = []
         conflicts.append({
             "path": path,
             "reason": entry["reason"],
             "repair_guidance": REPAIR_GUIDANCE[result],
+            "details": details,
         })
 
 doc = {
@@ -3248,6 +3458,7 @@ doc = {
     "summary": {
         "updated": updated,
         "merged": merged,
+        "converged": converged,
         "removed_obsolete": removed,
         "skipped_customized": skipped_customized,
         "skipped_conflict": skipped_conflict,
