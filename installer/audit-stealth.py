@@ -138,7 +138,16 @@ def collect_expected_paths(target, rig_dir):
     # stealth/external mode and never land in the target repo at all — they
     # are not part of the target's git-exclude surface and would always
     # misreport as "missing".
-    return {p for p in expected if not p.startswith(".rig/")}
+    #
+    # .git/hooks/* entries (manifest-tracked since 444-G's safe stealth hook
+    # lifecycle) are structurally outside the git working tree: .git/ itself
+    # is never tracked, never shown by `git status`, and `git check-ignore`
+    # does not apply gitignore semantics to paths inside it. Running them
+    # through the tracked/ignored pipeline this tool uses for real working-
+    # tree paths always misreports them as untracked_leak, even on a fresh,
+    # correctly stealth-installed project. They are safe by construction and
+    # excluded from the expected-artifact set here, the same way .rig/* is.
+    return {p for p in expected if not p.startswith(".rig/") and not p.startswith(".git/")}
 
 
 def main():
