@@ -2902,6 +2902,23 @@ _make_failing_sha_tools() {
   grep -q '# user customization' "$fake_home/.claude/CLAUDE.md"
 }
 
+@test "upgrade strategy: global CLAUDE.md never overwritten with no manifest entry (issue #470/#471 review)" {
+  # The actual #140 precondition, at the global layer: a real, hand-written
+  # ~/.claude/CLAUDE.md and zero manifest of any kind — no prior installer
+  # run at all. _copy_global_file_upgrade() previously hardcoded
+  # rig_owned_default=true for every file it handled (CLAUDE.md included),
+  # so a missing manifest entry took the unconditional-overwrite branch
+  # regardless of is_rig_owned("CLAUDE.md") already correctly saying
+  # user-owned. Found during independent review of PR #471, before merge.
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home/.claude"
+  printf 'MY REAL HAND-WRITTEN GLOBAL CLAUDE.MD CONTENT\n' > "$fake_home/.claude/CLAUDE.md"
+
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy upgrade"
+  [ "$status" -eq 0 ]
+  grep -q 'MY REAL HAND-WRITTEN GLOBAL CLAUDE.MD CONTENT' "$fake_home/.claude/CLAUDE.md"
+}
+
 @test "upgrade strategy: global file prompts and updates when SHA256 tools fail" {
   local fake_home="$TEMP_DIR/fake-home"
   mkdir -p "$fake_home"

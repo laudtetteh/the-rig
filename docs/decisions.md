@@ -329,3 +329,25 @@ overwrite." `init_backup_dir()` already branches correctly per
 plain timestamped dir for every other strategy), so none of this required
 changes to the backup storage model itself — only to how consistently both
 the backup call and the user-owned-file protection are invoked.
+
+**Addendum (same PR, found by independent review before merge):** the initial
+version of this hardening pass scoped its audit to the project-layer
+collision strategies (`copy_file()`/`_copy_upgrade_existing()`) and missed
+the global layer's parallel handler, `_copy_global_file_upgrade()` (used for
+`~/.claude/CLAUDE.md` and global skills). That function hardcoded
+`rig_owned_default=true` for every file it processes — correct for the
+global skills files (whose `rel` paths like `skills/$name` don't match
+`is_rig_owned()`'s patterns, so they need the forced default to stay
+auto-updatable), but wrong for the global `CLAUDE.md`, which is the *same*
+user-owned file class the `#14`/`#140` bug was originally about. A missing
+global manifest entry took the unconditional-overwrite branch regardless of
+`is_rig_owned("CLAUDE.md")` already correctly saying user-owned — reproduced
+live before the fix (a hand-written global `CLAUDE.md` with no manifest was
+silently replaced by the stock template on `--strategy upgrade`). Fixed by
+adding an explicit `rig_owned_default` parameter to
+`_copy_global_file_upgrade()` (default `true`, preserving the skills
+behavior) and passing `false` from the `CLAUDE.md` call site specifically.
+This is exactly the kind of gap "add tests, don't just trust the diff"
+review is supposed to catch — worth remembering as the standing reason PR
+review can't be skipped even when the diff already includes new tests for
+the scope it claims to cover.

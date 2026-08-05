@@ -2068,14 +2068,23 @@ _copy_file_upgrade() {
 
 # ── GLOBAL UPGRADE HANDLER ───────────────────────────────────────────────────
 # Thin global-layer wrapper around the shared existing-file upgrade handler.
-# All files passed here are treated as Rig-owned — the caller never passes
-# PROFILE.md (personal data that must never be auto-overwritten).
+# Files passed here default to Rig-owned (global skills/hooks paths like
+# "skills/$name" don't match is_rig_owned()'s patterns, so they need this
+# forced default to stay auto-updatable) — the caller never passes PROFILE.md
+# (personal data that must never be auto-overwritten). CLAUDE.md is the same
+# class of exception: it's explicitly user-owned (is_rig_owned() already
+# knows this), so its caller passes rig_owned_default=false explicitly rather
+# than relying on this function's true-by-default (issue #470/#471 review —
+# the global CLAUDE.md previously took the unconditional-overwrite branch on
+# a missing manifest entry regardless of is_rig_owned(), the exact bug class
+# this hardening pass exists to eliminate, just at the global layer).
 _copy_global_file_upgrade() {
   local src="$1"
   local dest="$2"
   local base="${3:-}"
   local rel="${4:-}"
   local manifest_file="${5:-$GLOBAL_MANIFEST_FILE}"
+  local rig_owned_default="${6:-true}"
   local destination_state
 
   destination_state="$(upgrade_destination_state "$base" "$dest")"
@@ -2100,7 +2109,7 @@ _copy_global_file_upgrade() {
     return
   fi
   _copy_upgrade_existing "$src" "$dest" "$base" "$rel" \
-    "$manifest_file" none true
+    "$manifest_file" none "$rig_owned_default"
 }
 
 # Retire the hook merged into stop.sh in v1.21.0 only when the manifest proves
@@ -2315,7 +2324,10 @@ PYEOF
 
   # ── CLAUDE.md ──────────────────────────────────────────────────────────────
   if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
-    _copy_global_file_upgrade "$GLOBAL_TEMPLATES/CLAUDE.md" "$DEST_CLAUDE" "$CLAUDE_DIR" "CLAUDE.md"
+    # rig_owned_default=false: CLAUDE.md is user-owned (see is_rig_owned()'s
+    # own classification comment), unlike the skills files below — a missing
+    # manifest entry must default to skip-and-warn, not silent overwrite.
+    _copy_global_file_upgrade "$GLOBAL_TEMPLATES/CLAUDE.md" "$DEST_CLAUDE" "$CLAUDE_DIR" "CLAUDE.md" "$GLOBAL_MANIFEST_FILE" false
   else
     copy_file "$GLOBAL_TEMPLATES/CLAUDE.md" "$DEST_CLAUDE" "$CLAUDE_DIR" "CLAUDE.md"
   fi
