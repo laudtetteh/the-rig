@@ -21,7 +21,7 @@ The installer is interactive by default; the flags below bypass all prompts.
 | `--json` | — | With `--preflight`, emit schema-versioned JSON only |
 | `--target <path>` | absolute path | Project directory to install into |
 | `--tracking` | `repo` \| `local` \| `external` \| `stealth` | How `.rig/` is tracked in git |
-| `--strategy` | `merge` \| `upgrade` \| `overwrite` \| `skip` | How to handle existing files |
+| `--strategy` | `merge` \| `upgrade` \| `overwrite` \| `skip` \| `interactive` \| `agent-plan` \| `agent-upgrade` | How to handle existing files |
 | `--rig-dir <path>` | absolute path | Where to put `.rig/` when using external or stealth tracking |
 | `--project-name <name>` | string | Project name substituted into templates |
 | `--skip-git-hooks` | — | Skip writing to `.git/hooks/` (stealth + existing Husky setup) |
@@ -43,6 +43,13 @@ The installer is interactive by default; the flags below bypass all prompts.
 | `upgrade` | Updates Rig-owned files if unchanged; detects customizations | Upgrading an existing install |
 | `overwrite` | Replaces all Rig-owned files unconditionally | Repair/reset |
 | `skip` | Never overwrites anything | Safe read-only test |
+| `interactive` | Asks per file (Custom path only) | Human-supervised, file-by-file review |
+| `agent-plan` | Zero writes; emits a JSON preview of what `upgrade` would do; exits `3` if any file needs manual review | Agent/script preflight before applying an upgrade |
+| `agent-upgrade` | Applies the same safe convergence as `upgrade`; emits a JSON result; exits `3` if any file was left for manual review | Agent/script-driven guarded upgrade with a machine-readable result |
+
+`agent-plan` and `agent-upgrade` are non-interactive-only: they are accepted by
+`--strategy` but never offered in the interactive "What are you doing?" menu, so
+a human user can never land in agent mode by accident.
 
 If agent selectors are omitted, fresh installs retain the historical Claude-only
 default. Upgrades reuse the last successful selection from
@@ -232,6 +239,40 @@ cd ~/tools/the-rig
   --project-name "MyProject"
 # (omitting --global-only and --project-only runs both layers)
 ```
+
+---
+
+### 9 — Agent-driven guarded upgrade
+
+For a calling agent or script that needs a machine-readable preview before
+applying an upgrade, run `agent-plan` first, inspect the JSON, then run
+`agent-upgrade`:
+
+```bash
+cd ~/tools/the-rig
+git pull
+
+# 1. Read-only preview — zero writes, prints one JSON document, exits 3 if
+#    anything would need manual review.
+./install.sh --project-only --target /path/to/project --strategy agent-plan
+
+# 2. If the plan's "status" is "success", apply the same convergence and get
+#    a JSON result back.
+./install.sh --project-only --target /path/to/project --strategy agent-upgrade
+```
+
+Both commands exit `0` with `"status": "success"` when nothing needs manual
+review, and exit `3` with `"status": "refused"` when at least one artifact is
+customized or conflicting. On exit `3`, read the JSON's `conflicts[]` array —
+each entry has `path`, `reason`, and `repair_guidance` — and present those
+fields verbatim to the user rather than inventing guidance text. Full JSON
+schema, exit-code table, and classification semantics:
+`.rig/processes/UPGRADE_WORKFLOW.md`'s "Agent-driven upgrade contract" section.
+
+A manifest entry whose `base_revision` claims an installer version newer
+than the one currently running is treated the same way as any other
+unresolved finding: both commands refuse (exit `3`) with repair guidance,
+rather than silently trusting a future or bogus revision claim.
 
 ---
 

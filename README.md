@@ -186,10 +186,10 @@ mode on its own — provide `--strategy` and `--tracking` to skip all prompts.
 > **Agent-driven mode.** `install.sh` also accepts `--strategy agent-plan`
 > (read-only JSON preview) and `--strategy agent-upgrade` (applies, then emits
 > a JSON result and exits `3` if anything needs manual review) for scripted or
-> agent-driven callers. This is a separate, more guarded capability from the
-> `--strategy upgrade` shown above — see `docs/customizing.md` and
-> `.rig/processes/UPGRADE_WORKFLOW.md` for the full contract and how it
-> differs from what `/rig-upgrade` runs by default today.
+> agent-driven callers. `/rig-upgrade --mode=agent` (the default) calls this
+> same `agent-upgrade` strategy internally — only `/rig-upgrade --mode=classic`
+> still uses plain `--strategy upgrade` shown above. See `docs/customizing.md`
+> and `.rig/processes/UPGRADE_WORKFLOW.md` for the full contract.
 
 **After the installer runs:** check how many files changed before committing.
 

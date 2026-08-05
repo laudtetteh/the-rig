@@ -63,7 +63,7 @@ No arguments. Output the table below directly — do not read individual command
 
 | Command | What it does | Key flags |
 |---|---|---|
-| `/rig-upgrade` | Upgrade The Rig to the latest version. | `--version` (print versions only, no upgrade), `--scope=project\|global\|both` |
+| `/rig-upgrade` | Upgrade The Rig to the latest version. | `--version` (print versions only, no upgrade), `--scope=project\|global\|both`, `--mode=agent\|classic` (skip the mode prompt) |
 | `/rig-propose` | _(opt-in: `--contribute`)_ Propose a change to Rig governance files (hooks, processes, rules, CLAUDE.md). Writes a diff for human review — never applies it directly. | — |
 | `/rig-gaps` | _(opt-in: `--contribute`)_ Log and submit workflow friction observed during a task. | `--push` (append to local Rig repo), `--submit` (create GitHub issue) |
 | `/rig-help` | This command. | — |

@@ -16,7 +16,13 @@ upgrades and interrupted operations:
   rollback or repair instructions rather than silently continuing;
 - logs, manifests, backups, and reports redact secrets and private provider
   state;
-- shell syntax and ShellCheck checks pass before a release candidate is cut.
+- shell syntax and ShellCheck checks pass before a release candidate is cut;
+- manifest provenance and stealth-status are verified via `bin/rig doctor`'s 5
+  postflight gates (`manifest_provenance`, `stealth_status`,
+  `manifest_mode_hash`, `stale_manifest_entries`, `idempotence`);
+- agent-driven callers (`agent-plan`/`agent-upgrade`) get a JSON result with
+  exit code 3 on any unresolved conflict, including a future/bogus manifest
+  `base_revision`.
 
 ## Required hosted checks
 

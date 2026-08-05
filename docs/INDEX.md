@@ -11,3 +11,4 @@ One-liner per file. Keep this current when a doc is added, removed, or substanti
 | [`troubleshooting.md`](troubleshooting.md) | Symptoms, causes, and fixes for common issues |
 | [`agent-install.md`](agent-install.md) | Non-interactive and scripted installation patterns |
 | [`features/README.md`](features/README.md) | Index of feature documentation (per-feature end-to-end traces) |
+| [`release-verification.md`](release-verification.md) | Hosted CI gates required before tagging a release |

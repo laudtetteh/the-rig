@@ -235,7 +235,11 @@ Seven files, seven purposes:
   444-B) `base_revision`/`generator`/`provider` — the trusted-base and
   producing-tool metadata a future three-way merge or `bin/rig doctor` gate
   verifies against. An entry written before lane 444-B simply lacks these
-  three fields (legacy/unknown provenance, not an error).
+  three fields (legacy/unknown provenance, not an error). A `base_revision`
+  claiming an installer version newer than the one currently running (issue
+  #463) is reported as its own `future_revision` finding, distinct from
+  `malformed`, and causes the same refuse-with-guidance behavior (exit `3` in
+  agent mode) as any other unresolved finding.
 - See `docs/customizing.md` for the full Upgrade strategy workflow, the
   manifest metadata field reference, and the agent-driven `agent-plan`/
   `agent-upgrade` contract

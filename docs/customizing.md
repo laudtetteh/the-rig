@@ -491,6 +491,15 @@ provenance," not an error. A value present but outside its known vocabulary
 (for example an unrecognized `owner`) is what the `manifest_provenance` doctor
 gate below actually flags.
 
+A `base_revision` that is a parseable version strictly newer than the
+installer version currently running (issue #463) is a separate case: it is
+reported as its own `future_revision` finding, distinct from `malformed`.
+`agent-plan`/`agent-upgrade` refuse (exit `3`, `status: "refused"`) with
+repair guidance; plain `--strategy upgrade` still completes (exit `0`) but
+prints the finding and sets `RIG_UPGRADE_REVIEW_REQUIRED=1` for manual
+review, exactly as it already does for a customized or
+conflicting file.
+
 ### Manifest-aware customization
 
 Files in the **Rig-owned** category that you commonly want to customize:
