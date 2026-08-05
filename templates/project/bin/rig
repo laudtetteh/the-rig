@@ -569,6 +569,31 @@ if connector_declaration.exists():
     check("connector_declarations", connector_ok,
           "configured; session evidence required for schema visibility and callability" if connector_ok else "invalid declaration")
 
+# CLAUDE.md/PROJECT_BRIEF.md placeholder gate: a historical installer bug
+# (v1.10.0, fixed v1.10.1 / commit 28b8756, issue #140) could silently reset
+# these user-owned files to the raw template when no manifest entry existed
+# yet. A git-tracked project shows this in `git status`; a stealth/external
+# install (CLAUDE.md/PROJECT_BRIEF.md are git-excluded there) has no such
+# signal at all. This gate can't tell "never filled in" from "reset by that
+# bug" — both look identical on disk — so it reports as a soft, advisory
+# finding rather than claiming certainty. See docs/lessons-learned.md #14.
+_placeholder_markers = {
+    "CLAUDE.md": "[One paragraph: what it does, who it's for, and why it exists.]",
+    "PROJECT_BRIEF.md": '[What does this product do? Complete this sentence: "A tool that helps [who] [do what]."]',
+}
+_placeholder_hits = []
+for _fname, _marker in _placeholder_markers.items():
+    _fpath = root / _fname
+    if _fpath.is_file() and _marker in read(_fpath):
+        _placeholder_hits.append(_fname)
+if _placeholder_hits:
+    check("template_placeholder_content", False,
+          f"still shows the raw template placeholder: {', '.join(_placeholder_hits)} — "
+          "either never filled in, or possibly reset by a historical upgrade bug "
+          "(docs/lessons-learned.md #14); worth a manual check, especially for stealth installs where git can't show a diff")
+else:
+    check("template_placeholder_content", True, "no unfilled core-content placeholders detected")
+
 # ── Postflight/release gates (#444 lane 444-H) ─────────────────────────────────
 # These gates make "the upgrade succeeded" a verifiable claim: manifest
 # provenance, stealth-status, mode/hash drift, and stale-state detection.
@@ -716,6 +741,16 @@ if manifest_metadata.is_file():
         def path_is_safe(rel):
             return isinstance(rel, str) and rel and not rel.startswith("/") and ".." not in rel.split("/")
 
+        # Manifest relpaths are recorded relative to the logical .rig/ root,
+        # not the project root. In stealth/external mode .rig/ is physically
+        # rig_dir() (RIG_DIR, resolved via .rigpath), not root/.rig — mirrors
+        # install.sh's report_stale_manifest_entries() resolve() helper.
+        def resolve_artifact(rel):
+            if rel == ".rig" or rel.startswith(".rig/"):
+                stripped = rel[len(".rig/"):] if rel.startswith(".rig/") else ""
+                return (rig / stripped) if stripped else rig
+            return root / rel
+
         # Mode/hash drift: only Rig-owned entries are meaningful here. A
         # hash/mode mismatch on a user-owned (customized) file is expected
         # behaviour, not drift, and upgrade already has its own customization
@@ -728,7 +763,7 @@ if manifest_metadata.is_file():
             if not path_is_safe(rel) or not isinstance(entry, dict) or entry.get("owner") != "rig":
                 continue
             drift_checked += 1
-            artifact = root / rel
+            artifact = resolve_artifact(rel)
             if not artifact.exists() and not artifact.is_symlink():
                 drift.append(f"{rel}: missing")
                 continue
@@ -767,7 +802,7 @@ if manifest_metadata.is_file():
         # in-progress upgrade state ($COLLISION_STRATEGY, $REPAIR_STALE, a
         # live $TARGET) that doctor does not have and should not fabricate.
         stale = [rel for rel in sorted(manifest_entries)
-                 if path_is_safe(rel) and not (root / rel).exists() and not (root / rel).is_symlink()]
+                 if path_is_safe(rel) and not resolve_artifact(rel).exists() and not resolve_artifact(rel).is_symlink()]
         if stale:
             stale_detail = f"{len(stale)} stale entr{'y' if len(stale) == 1 else 'ies'}: " + ", ".join(stale[:5])
             if len(stale) > 5:
