@@ -716,6 +716,16 @@ if manifest_metadata.is_file():
         def path_is_safe(rel):
             return isinstance(rel, str) and rel and not rel.startswith("/") and ".." not in rel.split("/")
 
+        # Manifest relpaths are recorded relative to the logical .rig/ root,
+        # not the project root. In stealth/external mode .rig/ is physically
+        # rig_dir() (RIG_DIR, resolved via .rigpath), not root/.rig — mirrors
+        # install.sh's report_stale_manifest_entries() resolve() helper.
+        def resolve_artifact(rel):
+            if rel == ".rig" or rel.startswith(".rig/"):
+                stripped = rel[len(".rig/"):] if rel.startswith(".rig/") else ""
+                return (rig / stripped) if stripped else rig
+            return root / rel
+
         # Mode/hash drift: only Rig-owned entries are meaningful here. A
         # hash/mode mismatch on a user-owned (customized) file is expected
         # behaviour, not drift, and upgrade already has its own customization
@@ -728,7 +738,7 @@ if manifest_metadata.is_file():
             if not path_is_safe(rel) or not isinstance(entry, dict) or entry.get("owner") != "rig":
                 continue
             drift_checked += 1
-            artifact = root / rel
+            artifact = resolve_artifact(rel)
             if not artifact.exists() and not artifact.is_symlink():
                 drift.append(f"{rel}: missing")
                 continue
@@ -767,7 +777,7 @@ if manifest_metadata.is_file():
         # in-progress upgrade state ($COLLISION_STRATEGY, $REPAIR_STALE, a
         # live $TARGET) that doctor does not have and should not fabricate.
         stale = [rel for rel in sorted(manifest_entries)
-                 if path_is_safe(rel) and not (root / rel).exists() and not (root / rel).is_symlink()]
+                 if path_is_safe(rel) and not resolve_artifact(rel).exists() and not resolve_artifact(rel).is_symlink()]
         if stale:
             stale_detail = f"{len(stale)} stale entr{'y' if len(stale) == 1 else 'ies'}: " + ", ".join(stale[:5])
             if len(stale) > 5:

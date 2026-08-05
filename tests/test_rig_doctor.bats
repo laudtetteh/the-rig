@@ -353,6 +353,32 @@ EOF
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="stale_manifest_entries"); assert not c["ok"] and "bin/rig-vanished" in c["detail"]'
 }
 
+@test "manifest mode/hash and stale-entry gates resolve .rig/-prefixed entries against the external stealth dir, not project root" {
+  local external="$BATS_TEST_TMPDIR/external-rig-manifest"
+  mkdir -p "$external/memory" "$external/processes"
+  cp "$CASE_DIR/.rig/memory/.rig-manifest" "$external/memory/.rig-manifest"
+  printf '%s\n' "$external" > "$CASE_DIR/.rigpath"
+  printf 'CLAUDE.md\nPROJECT_BRIEF.md\n.claude/\n.rigpath\n' > "$CASE_DIR/.git/info/exclude"
+  printf 'workflow body\n' > "$external/processes/UPGRADE_WORKFLOW.md"
+  local good_hash; good_hash="$(python3 -c "import hashlib; print(hashlib.sha256(open('$external/processes/UPGRADE_WORKFLOW.md','rb').read()).hexdigest())")"
+  cat > "$external/memory/.rig-manifest.json" <<EOF
+{
+  "schema_version": 1,
+  "entries": {
+    ".rig/processes/UPGRADE_WORKFLOW.md": {"sha256": "$good_hash", "owner": "rig", "mode": "644"}
+  }
+}
+EOF
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["manifest_mode_hash"]["ok"] and "UPGRADE_WORKFLOW" not in c["manifest_mode_hash"]["detail"]; assert c["stale_manifest_entries"]["ok"] and "no stale entries" in c["stale_manifest_entries"]["detail"]'
+
+  rm "$external/processes/UPGRADE_WORKFLOW.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert not c["manifest_mode_hash"]["ok"] and ".rig/processes/UPGRADE_WORKFLOW.md: missing" in c["manifest_mode_hash"]["detail"]; assert not c["stale_manifest_entries"]["ok"] and ".rig/processes/UPGRADE_WORKFLOW.md" in c["stale_manifest_entries"]["detail"]'
+}
+
 @test "postflight gate JSON output stays schema-consistent across pass and fail states" {
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
