@@ -410,6 +410,66 @@ is_rig_owned_stub() {
   [[ "$output" == *"not-a-real-generator"* ]]
 }
 
+@test "manifest provenance validator: base_revision older than the running installer is unaffected" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  jq '.entries["CLAUDE.md"].base_revision = "0.0.1"' "$metadata" > "$TEMP_DIR/older-metadata.json"
+  mv "$TEMP_DIR/older-metadata.json" "$metadata"
+
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata" --running-version "$(cat "$REPO_ROOT/VERSION")"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"future_revision":[]'* ]]
+}
+
+@test "manifest provenance validator: base_revision equal to the running installer is unaffected" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  local running_version; running_version="$(cat "$REPO_ROOT/VERSION")"
+  jq --arg v "$running_version" '.entries["CLAUDE.md"].base_revision = $v' "$metadata" > "$TEMP_DIR/equal-metadata.json"
+  mv "$TEMP_DIR/equal-metadata.json" "$metadata"
+
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata" --running-version "$running_version"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"future_revision":[]'* ]]
+}
+
+@test "manifest provenance validator: reports a base_revision newer than the running installer as future_revision" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  jq '.entries["CLAUDE.md"].base_revision = "99.0.0"' "$metadata" > "$TEMP_DIR/future-metadata.json"
+  mv "$TEMP_DIR/future-metadata.json" "$metadata"
+
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata" --running-version "$(cat "$REPO_ROOT/VERSION")"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"ok":false'* ]]
+  [[ "$output" == *'"path":"CLAUDE.md"'* ]]
+  [[ "$output" == *'"base_revision":"99.0.0"'* ]]
+  # malformed/legacy stay empty — future_revision is its own distinct category.
+  [[ "$output" == *'"malformed":[]'* ]]
+}
+
+@test "manifest provenance validator: omitting --running-version disables the future_revision check" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  jq '.entries["CLAUDE.md"].base_revision = "99.0.0"' "$metadata" > "$TEMP_DIR/future-metadata.json"
+  mv "$TEMP_DIR/future-metadata.json" "$metadata"
+
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"future_revision":[]'* ]]
+}
+
 @test "upgrade strategy: a pre-provenance manifest entry survives a real upgrade run" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]

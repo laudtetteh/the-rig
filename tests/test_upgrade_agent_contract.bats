@@ -178,6 +178,66 @@ print($1)
   grep -q "locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
 }
 
+@test "agent-plan on a target with a future manifest base_revision emits refused, reports zero writes, and exits 3" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  # Simulate a bogus/corrupted or future-installer-written manifest entry:
+  # a base_revision newer than the installer currently running (issue #463).
+  # Deliberately NOT CLAUDE.md/ship.md/post-merge.md/SHIP_WORKFLOW.md/
+  # POST_MERGE_WORKFLOW.md — those 5 are the known "main substitution runs
+  # after write_manifest_entry" files (see this repo's own CLAUDE.md "Known
+  # gotchas"); agent-upgrade legitimately re-writes them even after
+  # stabilize_substitution_baseline, which would reset our tampered
+  # base_revision back to a real value before this test could observe it.
+  # .claude/hooks/pre-tool.sh is a plain, stable Rig-owned file with no such
+  # quirk, so it stays untouched by agent-upgrade unless genuinely flagged.
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  jq '.entries[".claude/hooks/pre-tool.sh"].base_revision = "99.0.0"' "$metadata" > "$TEMP_DIR/future-metadata.json"
+  mv "$TEMP_DIR/future-metadata.json" "$metadata"
+
+  local before after
+  before="$(tree_snapshot)"
+
+  run_installer --strategy agent-plan
+  [ "$status" -eq 3 ]
+
+  after="$(tree_snapshot)"
+  [ "$before" = "$after" ]
+
+  [ "$(json_field "d['status']")" = "refused" ]
+}
+
+@test "agent-upgrade on a target with a future manifest base_revision refuses and exits 3, matching the fail-closed precedent" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  # See the agent-plan test above for why .claude/hooks/pre-tool.sh (not
+  # CLAUDE.md) is used: it is not one of the 5 files affected by the
+  # documented substitution-ordering quirk, so agent-upgrade's real write
+  # path leaves its manifest entry (including our tampered base_revision)
+  # untouched — this test needs the entry to survive an actual apply run.
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  jq '.entries[".claude/hooks/pre-tool.sh"].base_revision = "99.0.0"' "$metadata" > "$TEMP_DIR/future-metadata.json"
+  mv "$TEMP_DIR/future-metadata.json" "$metadata"
+
+  run_installer --strategy agent-upgrade
+  [ "$status" -eq 3 ]
+  [ "$(json_field "d['status']")" = "refused" ]
+}
+
+@test "agent-plan on an ordinary manifest (base_revision <= running installer) is unaffected by the future_revision check" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  run_installer --strategy agent-plan
+  [ "$status" -eq 0 ]
+  [ "$(json_field "d['status']")" = "success" ]
+}
+
 @test "existing --strategy upgrade behavior is unchanged by the agent contract" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]

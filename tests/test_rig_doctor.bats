@@ -266,6 +266,41 @@ EOF
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="manifest_provenance"); assert c["ok"] and "legacy" in c["detail"]'
 }
 
+@test "manifest provenance gate detects a future base_revision using the real validator (issue #463)" {
+  # Exercises the actual installer/validate-manifest-provenance.py (not the
+  # fixture stand-in above) wired through doctor's --running-version arg, so
+  # this covers a real consuming path end to end, not the validator alone.
+  printf '1.0.0\n' > "$CASE_DIR/.rig/VERSION"
+  cat > "$CASE_DIR/.rig/memory/.rig-manifest.json" <<'EOF'
+{
+  "schema_version": 1,
+  "entries": {
+    "CLAUDE.md": {"sha256": "x", "owner": "user", "base_revision": "99.0.0", "generator": "install.sh", "provider": "claude"},
+    ".claude/commands/task.md": {"sha256": "x", "owner": "user", "base_revision": "1.0.0", "generator": "install.sh", "provider": "claude"}
+  }
+}
+EOF
+  run env _RIG_INSTALLER_DIR="$BATS_TEST_DIRNAME/../installer" "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="manifest_provenance"); assert not c["ok"] and "future base_revision" in c["detail"] and "CLAUDE.md" in c["detail"] and "99.0.0" in c["detail"]'
+}
+
+@test "manifest provenance gate is unaffected by base_revision equal to or older than the installed VERSION (issue #463)" {
+  printf '1.0.0\n' > "$CASE_DIR/.rig/VERSION"
+  cat > "$CASE_DIR/.rig/memory/.rig-manifest.json" <<'EOF'
+{
+  "schema_version": 1,
+  "entries": {
+    "CLAUDE.md": {"sha256": "x", "owner": "user", "base_revision": "1.0.0", "generator": "install.sh", "provider": "claude"},
+    ".claude/commands/task.md": {"sha256": "x", "owner": "user", "base_revision": "0.9.0", "generator": "install.sh", "provider": "claude"}
+  }
+}
+EOF
+  run env _RIG_INSTALLER_DIR="$BATS_TEST_DIRNAME/../installer" "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="manifest_provenance"); assert c["ok"]'
+}
+
 @test "stealth-status gate reports an untracked launcher leak once the auditor is present" {
   write_fixture_stealth_auditor "$BATS_TEST_TMPDIR/installer-fixture"
   local external="$BATS_TEST_TMPDIR/external-rig"

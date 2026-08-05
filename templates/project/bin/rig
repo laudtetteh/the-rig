@@ -602,6 +602,11 @@ manifest_metadata = rig / "memory" / ".rig-manifest.json"
 # present. Malformed base_revision/generator/provider values are reported as
 # failures; entries that simply predate provenance tracking (legacy/unknown)
 # are surfaced in the detail text but do not fail the check on their own.
+# Since issue #463, the installed project's own .rig/VERSION is passed as
+# --running-version so the validator can additionally flag an entry whose
+# base_revision claims an installer VERSION newer than what is actually
+# installed here — an impossible/bogus state, reported as a distinct
+# future_revision finding and treated as a failure, same as malformed.
 provenance_script = find_installer_script("validate-manifest-provenance.py")
 if provenance_script is None:
     check("manifest_provenance", True,
@@ -609,7 +614,12 @@ if provenance_script is None:
 elif not manifest_metadata.is_file():
     check("manifest_provenance", True, "skipped: no manifest metadata file present")
 else:
-    provenance_run = run(["python3", str(provenance_script), str(manifest_metadata)])
+    provenance_command = ["python3", str(provenance_script), str(manifest_metadata)]
+    installed_version_file = rig / "VERSION"
+    installed_version = read(installed_version_file).strip() if installed_version_file.is_file() else ""
+    if installed_version:
+        provenance_command += ["--running-version", installed_version]
+    provenance_run = run(provenance_command)
     if provenance_run is None:
         check("manifest_provenance", False, "validator failed to execute")
     else:
@@ -626,6 +636,7 @@ else:
         else:
             malformed = provenance_payload.get("malformed", [])
             legacy = provenance_payload.get("legacy_provenance", [])
+            future = provenance_payload.get("future_revision", [])
             detail = f"{provenance_payload.get('checked', 0)} entries checked"
             if malformed:
                 first = malformed[0]
@@ -633,6 +644,12 @@ else:
                 detail += f"; malformed: {first.get('path')} ({fields})"
                 if len(malformed) > 1:
                     detail += f" and {len(malformed) - 1} more"
+            elif future:
+                first = future[0]
+                detail += (f"; future base_revision: {first.get('path')} "
+                           f"({first.get('base_revision')} > {first.get('running_version')})")
+                if len(future) > 1:
+                    detail += f" and {len(future) - 1} more"
             elif legacy:
                 detail += f"; {len(legacy)} legacy/unknown-provenance entr{'y' if len(legacy) == 1 else 'ies'} (not an error)"
             check("manifest_provenance", provenance_payload.get("ok", False), detail)
