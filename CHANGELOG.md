@@ -11,6 +11,61 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.24.0] — 2026-08-05
+
+### Added
+- Agent-driven upgrade contract: `install.sh --strategy agent-plan`
+  (read-only JSON preview, zero writes) and `--strategy agent-upgrade`
+  (applies safe convergence, emits a JSON result, exits `3` on any
+  unresolved conflict).
+- Three-way and structure-aware convergence engine for customized JSON,
+  TOML, and frontmatter-Markdown files under `agent-upgrade`.
+- Manifest provenance metadata (`base_revision`/`generator`/`provider`
+  fields) with a standalone validator, including a future/bogus
+  `base_revision` gate — an entry claiming a revision newer than the
+  running installer is refused, never silently trusted.
+- `bin/rig doctor` gained five postflight gates: `manifest_provenance`,
+  `stealth_status`, `manifest_mode_hash`, `stale_manifest_entries`,
+  `idempotence`.
+- `/rig-upgrade` now wires its Phase 2 to the agent-driven orchestrator via
+  a new `--mode=agent` (default) / `--mode=classic` flag, with a Phase 3d
+  `bin/rig doctor` postflight check.
+- Stealth artifact audit/repair tooling (`installer/audit-stealth.py`,
+  `installer/repair-stealth.py`) for classifying and safely repairing
+  leaked Rig artifacts in stealth-tracked projects.
+
+### Changed
+- Stealth-mode git exclusion now covers every generated launcher sibling
+  under `bin/`, not just `bin/rig`.
+- Direct-writer mutations (`.rigpath`, `.rig/VERSION`, target-state
+  metadata, `.codex/config.toml`, `.claude/settings.json` merges) are now
+  journaled and recoverable through an interrupted upgrade.
+- Stale-manifest detection now covers all four tracking layouts
+  (repo/local/external/stealth) and reports missing/wrong-type/
+  dangling-symlink/unexpected-symlink as four disjoint categories — only
+  missing entries are ever auto-repaired.
+- Stealth `.git/hooks/` writes are now manifest-tracked and backed up
+  before an ordinary-mode overwrite, and refused (not silently
+  overwritten) under `agent-upgrade` when customized.
+
+### Fixed
+- Three bugs that affected *ordinary* (non-agent) upgrade behavior, found
+  and fixed during this release's own review process: the global-layer
+  stale-manifest check resolved paths against the wrong root and produced
+  false-positive missing reports; `.claude/settings.json` merges had no
+  backup/transaction coverage; the stealth-exclude dedup check used a
+  substring match that could silently drop `bin/rig` from the exclude list
+  once a sibling launcher was written first.
+- `bin/rig session resolve` restored: the native-identity resolver's
+  ambient fallback now checks the host-injected `CLAUDE_CODE_SESSION_ID`
+  before falling back to a PID-sentinel scheme that only worked one
+  process hop from the session-start hook.
+- `agent-plan` now detects stealth `.git/hooks/` customization conflicts —
+  it previously skipped that entire detection path under dry-run, so a
+  clean plan could be followed by an unpredicted `agent-upgrade` refusal.
+
+---
+
 ## [1.23.0] — 2026-08-01
 
 ### Added
