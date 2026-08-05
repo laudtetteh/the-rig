@@ -239,6 +239,8 @@ Do not list the issues again — the user has already read them in context.
 ## Notes
 
 - `/rig-status` is read-only. It never modifies any file.
-- For deeper diagnostics (hook execution tracing, manifest inspection), use `/debug`.
+- For manifest/stealth diagnostics (provenance, mode/hash drift, stale entries), run
+  `bin/rig doctor` (or `bin/rig doctor --json`). Reserve `/debug` for genuine
+  hypothesis-driven bug investigation, not manifest inspection.
 - If the report shows hooks as present but they still aren't firing, the likely cause
   is that `settings.json` does not register them — check Section 5 output.

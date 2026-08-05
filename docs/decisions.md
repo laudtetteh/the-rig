@@ -244,3 +244,29 @@ title, transcript, or singleton inference.
 on first mention and then “agent” or “provider.” Delivery syntax is shown as
 Claude `/name` and Codex `$name`. Provider-specific files and historical incident
 records remain explicitly labeled rather than mechanically neutralized.
+
+---
+
+## 18. Every GitHub issue gets a local task card, including fast-turnover follow-ups
+
+**Decided:** Every GitHub issue gets a local task card in `tasks/backlog/`
+(this project's external Rig state, not this git repo), moved to `tasks/done/`
+on completion — including fast-turnover single-PR follow-ups discovered
+mid-sprint, not just planned epics.
+
+**Rejected:** Only give epics/planned multi-lane work a task card; let GitHub
+issues alone track fast reactive fixes.
+
+**Rationale:** During the 1.24.0 sprint, three follow-up issues found by a
+pre-release review (#458, #462, #463) were fixed and merged within the same
+session without ever getting a local task card — they were tracked live via
+the GitHub issue and the coordinator's `ACTIVE_BATCH.md` instead, which
+worked in the moment but left the task-card system as an incomplete record
+after the fact. Letting GitHub-issue-only tracking apply to "fast" fixes
+produces exactly this inconsistency — some issues have a full paper trail,
+others don't, with no principled reason for the difference from a later
+reader's perspective.
+
+**Tradeoff accepted:** Slightly more overhead per reactive fix (one card to
+create), in exchange for a consistent, complete local record that doesn't
+depend on GitHub being the source of truth.
