@@ -569,6 +569,31 @@ if connector_declaration.exists():
     check("connector_declarations", connector_ok,
           "configured; session evidence required for schema visibility and callability" if connector_ok else "invalid declaration")
 
+# CLAUDE.md/PROJECT_BRIEF.md placeholder gate: a historical installer bug
+# (v1.10.0, fixed v1.10.1 / commit 28b8756, issue #140) could silently reset
+# these user-owned files to the raw template when no manifest entry existed
+# yet. A git-tracked project shows this in `git status`; a stealth/external
+# install (CLAUDE.md/PROJECT_BRIEF.md are git-excluded there) has no such
+# signal at all. This gate can't tell "never filled in" from "reset by that
+# bug" — both look identical on disk — so it reports as a soft, advisory
+# finding rather than claiming certainty. See docs/lessons-learned.md #14.
+_placeholder_markers = {
+    "CLAUDE.md": "[One paragraph: what it does, who it's for, and why it exists.]",
+    "PROJECT_BRIEF.md": '[What does this product do? Complete this sentence: "A tool that helps [who] [do what]."]',
+}
+_placeholder_hits = []
+for _fname, _marker in _placeholder_markers.items():
+    _fpath = root / _fname
+    if _fpath.is_file() and _marker in read(_fpath):
+        _placeholder_hits.append(_fname)
+if _placeholder_hits:
+    check("template_placeholder_content", False,
+          f"still shows the raw template placeholder: {', '.join(_placeholder_hits)} — "
+          "either never filled in, or possibly reset by a historical upgrade bug "
+          "(docs/lessons-learned.md #14); worth a manual check, especially for stealth installs where git can't show a diff")
+else:
+    check("template_placeholder_content", True, "no unfilled core-content placeholders detected")
+
 # ── Postflight/release gates (#444 lane 444-H) ─────────────────────────────────
 # These gates make "the upgrade succeeded" a verifiable claim: manifest
 # provenance, stealth-status, mode/hash drift, and stale-state detection.

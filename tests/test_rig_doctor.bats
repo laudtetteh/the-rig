@@ -379,6 +379,17 @@ EOF
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert not c["manifest_mode_hash"]["ok"] and ".rig/processes/UPGRADE_WORKFLOW.md: missing" in c["manifest_mode_hash"]["detail"]; assert not c["stale_manifest_entries"]["ok"] and ".rig/processes/UPGRADE_WORKFLOW.md" in c["stale_manifest_entries"]["detail"]'
 }
 
+@test "template_placeholder_content gate flags an unfilled CLAUDE.md/PROJECT_BRIEF.md core section" {
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="template_placeholder_content"); assert c["ok"] and "no unfilled" in c["detail"]'
+
+  printf '# proj\n\n## What this project is\n\n[One paragraph: what it does, who it'"'"'s for, and why it exists.]\n' > "$CASE_DIR/CLAUDE.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="template_placeholder_content"); assert not c["ok"] and "CLAUDE.md" in c["detail"] and "lessons-learned" in c["detail"]'
+}
+
 @test "postflight gate JSON output stays schema-consistent across pass and fail states" {
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
