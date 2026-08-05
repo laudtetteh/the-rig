@@ -441,6 +441,112 @@ is_rig_owned_stub() {
   [[ "$output" == *'"ok":true'* ]]
 }
 
+@test "manifest provenance: real writer and real validator agree end-to-end (project layer)" {
+  # Fresh install with a Codex project agent so the codex-mirror generator
+  # path (installer/generate-codex-skills.py) is exercised for real, not
+  # just the hand-authored install.sh copy path.
+  run_installer --strategy skip --project-agent codex
+  [ "$status" -eq 0 ]
+
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+  local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  [ -f "$metadata" ]
+
+  # Force a genuine upgrade-time rewrite of a Rig-owned file rather than
+  # relying on the initial-install write alone: simulate a previously
+  # installed older revision whose recorded manifest hash agrees with the
+  # (stale) on-disk content but disagrees with the current template. This
+  # is the real "hash matches manifest -> safe to overwrite" path, so
+  # write_manifest_metadata() runs a second time, for real, mid-upgrade.
+  printf '# simulated older revision\n' > "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  local old_hash
+  old_hash=$(_sha256 "$TEST_PROJECT/.claude/hooks/pre-tool.sh")
+  grep -v '  \.claude/hooks/pre-tool\.sh$' "$manifest" > "$TEMP_DIR/manifest-stripped"
+  printf '%s  .claude/hooks/pre-tool.sh\n' "$old_hash" >> "$TEMP_DIR/manifest-stripped"
+  mv "$TEMP_DIR/manifest-stripped" "$manifest"
+  jq 'del(.entries[".claude/hooks/pre-tool.sh"])' "$metadata" > "$TEMP_DIR/metadata-stripped.json"
+  mv "$TEMP_DIR/metadata-stripped.json" "$metadata"
+
+  run_installer --strategy upgrade --project-agent codex
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Updated: .claude/hooks/pre-tool.sh"* ]]
+
+  # The real writer must have re-recorded this entry with fresh, correct
+  # provenance as part of that real upgrade-time rewrite.
+  jq -e '.entries[".claude/hooks/pre-tool.sh"].generator == "install.sh"
+    and .entries[".claude/hooks/pre-tool.sh"].provider == "claude"
+    and .entries[".claude/hooks/pre-tool.sh"].base_revision == .entries[".claude/hooks/pre-tool.sh"].installer_version' "$metadata" >/dev/null
+
+  # Run the REAL validator against the REAL manifest this run produced —
+  # not a hand-built fixture standing in for it.
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"malformed":[]'* ]]
+
+  # Spot-check the generated Codex artifact path agrees with the
+  # validator's vocabulary too.
+  jq -e '.entries[".agents/skills/debug/SKILL.md"].generator == "codex-mirror"
+    and .entries[".agents/skills/debug/SKILL.md"].provider == "codex"' "$metadata" >/dev/null
+
+  # And a shared/project-user artifact, which takes on the active project
+  # agent selection rather than an unambiguous provider-specific one.
+  jq -e '.entries["CLAUDE.md"].generator == "install.sh"
+    and .entries["CLAUDE.md"].provider == "codex"' "$metadata" >/dev/null
+}
+
+@test "manifest provenance: real writer and real validator agree end-to-end (global layer)" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+
+  # Fresh global install with both agents so the global Codex-mirror
+  # manifest (a separate file from the Claude global manifest) is
+  # exercised for real too.
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --global-agent both --strategy skip"
+  [ "$status" -eq 0 ]
+
+  local claude_manifest="$fake_home/.claude/.rig-global-manifest"
+  local claude_metadata="$claude_manifest.json"
+  local codex_metadata="$fake_home/.agents/.rig-global-manifest.json"
+  [ -f "$claude_metadata" ]
+  [ -f "$codex_metadata" ]
+
+  # Force a genuine upgrade-time rewrite of the global CLAUDE.md, same
+  # technique as the project-layer test above: an on-disk/manifest hash
+  # match that disagrees with the current template.
+  printf '# simulated older revision\n' > "$fake_home/.claude/CLAUDE.md"
+  local old_hash
+  old_hash=$(_sha256 "$fake_home/.claude/CLAUDE.md")
+  grep -v '  CLAUDE\.md$' "$claude_manifest" > "$TEMP_DIR/claude-manifest-stripped"
+  printf '%s  CLAUDE.md\n' "$old_hash" >> "$TEMP_DIR/claude-manifest-stripped"
+  mv "$TEMP_DIR/claude-manifest-stripped" "$claude_manifest"
+  jq 'del(.entries["CLAUDE.md"])' "$claude_metadata" > "$TEMP_DIR/claude-metadata-stripped.json"
+  mv "$TEMP_DIR/claude-metadata-stripped.json" "$claude_metadata"
+
+  run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --global-agent both --strategy upgrade"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Updated: CLAUDE.md"* ]]
+
+  # Real writer, real rewrite: fresh provenance recorded for real, mid-upgrade.
+  jq -e '.entries["CLAUDE.md"].generator == "install.sh"
+    and .entries["CLAUDE.md"].provider == "both"
+    and .entries["CLAUDE.md"].base_revision == .entries["CLAUDE.md"].installer_version' "$claude_metadata" >/dev/null
+
+  # Real validator against the real global Claude-layer manifest.
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$claude_metadata"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"malformed":[]'* ]]
+
+  # Real validator against the real global Codex-mirror manifest — a
+  # separate manifest file from the Claude one, produced by the same run.
+  jq -e '[.entries[] | select(.generator == "codex-mirror" and .provider == "codex")] | length > 0' "$codex_metadata" >/dev/null
+  run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$codex_metadata"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"malformed":[]'* ]]
+}
+
 @test "upgrade strategy: reports missing metadata artifacts without deleting anything" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
