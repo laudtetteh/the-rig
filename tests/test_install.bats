@@ -1022,6 +1022,45 @@ matrix_upgrade_case() {
   grep -q "MY CUSTOM OVERWRITE CONTENT" "$TEST_PROJECT/CLAUDE.md"
 }
 
+# ── the actual #140/#470 precondition: no manifest entry at all ──────────────
+# Every existing "never overwrites user-owned files" test above first runs an
+# install/upgrade that WRITES a manifest entry for CLAUDE.md, then tests the
+# "customized, differs from that recorded baseline" scenario. None of them
+# reproduce the actual precondition that caused real, undetected data loss on
+# real projects (docs/lessons-learned.md #14): a user-owned file with a real,
+# pre-existing value and *zero* manifest entry at all — e.g. a project that
+# predates manifest tracking for this file, or an old install never
+# re-upgraded since. This precondition went completely untested from the
+# original #140 fix (May 2026) until this test was added — the fix commit
+# itself added no test (`git show 28b8756 -- tests/` is empty).
+_seed_untracked_user_owned_file() {
+  # A fresh project with real, hand-written CLAUDE.md content and no .rig/
+  # manifest of any kind — reproduces "no manifest entry" without depending
+  # on any prior installer run.
+  printf 'MY REAL PROJECT-SPECIFIC CONTENT, WRITTEN BY HAND\n' > "$TEST_PROJECT/CLAUDE.md"
+}
+
+@test "merge strategy: never overwrites a user-owned file with no manifest entry" {
+  _seed_untracked_user_owned_file
+  run_installer --strategy merge
+  [ "$status" -eq 0 ]
+  grep -q "MY REAL PROJECT-SPECIFIC CONTENT" "$TEST_PROJECT/CLAUDE.md"
+}
+
+@test "overwrite strategy: never silently overwrites a user-owned file with no manifest entry (issue #470)" {
+  _seed_untracked_user_owned_file
+  run_installer --strategy overwrite
+  [ "$status" -eq 0 ]
+  grep -q "MY REAL PROJECT-SPECIFIC CONTENT" "$TEST_PROJECT/CLAUDE.md"
+}
+
+@test "upgrade strategy: never overwrites a user-owned file with no manifest entry (issue #140 precondition)" {
+  _seed_untracked_user_owned_file
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  grep -q "MY REAL PROJECT-SPECIFIC CONTENT" "$TEST_PROJECT/CLAUDE.md"
+}
+
 # ── settings.json merge ───────────────────────────────────────────────────────
 
 @test "merge strategy: creates settings.json when absent" {
@@ -1075,6 +1114,29 @@ print(sum(len(v) for v in s.get('hooks', {}).values()))
 ")
   # Count must not grow — no duplicates added
   [ "$count_after_second" -eq "$count_after_first" ]
+}
+
+@test "merge strategy: backs up settings.json before merging into an existing one (issue #470)" {
+  # First install populates settings.json.
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  local before_hash
+  before_hash="$(sha256sum "$TEST_PROJECT/.claude/settings.json" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$TEST_PROJECT/.claude/settings.json" | awk '{print $1}')"
+
+  # Second install via merge hits the merge branch against an existing
+  # settings.json. Before issue #470's fix, this specific branch's backup
+  # call was gated on `$COLLISION_STRATEGY == upgrade`, which is never true
+  # inside the `merge)` case — so no backup was ever taken here, regardless
+  # of how the merge itself turned out.
+  run_installer --strategy merge
+  [ "$status" -eq 0 ]
+
+  run find "$TEST_PROJECT/.rig-backup" -name settings.json
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  local backup_hash
+  backup_hash="$(sha256sum "$output" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$output" | awk '{print $1}')"
+  [ "$backup_hash" = "$before_hash" ]
 }
 
 @test "upgrade strategy: does not duplicate hooks when settings.json already has Rig hooks" {

@@ -270,3 +270,62 @@ reader's perspective.
 **Tradeoff accepted:** Slightly more overhead per reactive fix (one card to
 create), in exchange for a consistent, complete local record that doesn't
 depend on GitHub being the source of truth.
+
+---
+
+## 19. Backup-before-write is a structural invariant, and the "no manifest entry" precondition gets its own direct test
+
+**Decided:** Two related hardenings, both prompted by the same investigation:
+
+1. Every collision-path write in `install.sh`/`bin/rig` that could overwrite
+   an existing file goes through a single choke-point function
+   (`_upgrade_write`) that unconditionally backs up the destination first if
+   it exists. No classification branch calls `cp` directly onto a possibly-
+   existing destination anymore.
+2. The `overwrite` strategy's user-owned-file protection — previously only
+   triggered when a manifest entry existed and showed customization — now
+   also treats a *missing* manifest entry as "cannot prove this is safe to
+   replace," warning and defaulting to skip, exactly matching issue #140's
+   original fix for the `upgrade` strategy.
+3. Added the direct regression test that should have existed since #140: a
+   user-owned file with real content and **zero** manifest entry, run
+   through `merge`/`overwrite`/`upgrade` in turn, asserting it survives.
+   Verified this test actually catches the bug by running it against the
+   pre-fix `overwrite` branch first (failed), then the fix (passed).
+
+**Rejected:** Leaving backup-before-overwrite as something each classification
+branch decides for itself (the prior design — `if [[ -n "$base" ]]; then
+backup_file ...; fi` repeated independently at ~10 call sites); leaving the
+`overwrite` strategy's silent-replace-on-no-manifest-entry behavior in place
+on the reasoning that "overwrite means overwrite" (rejected because the
+strategy's own documented contract says "replace all **Rig-owned** files,"
+never promising to blindly replace user-owned ones).
+
+**Rationale:** A months-old, already-fixed installer bug (v1.10.0 → v1.10.1,
+see `docs/lessons-learned.md` #14) destroyed real user content specifically
+because one classification branch wrongly concluded "safe to overwrite, no
+backup needed." Auditing every call site for the 1.25.0 hardening pass found
+three more, currently-live instances of the same underlying class: the
+`interactive` strategy's overwrite confirmation never called `backup_file` at
+all; the `merge` strategy's settings.json path gated its backup call on
+`$COLLISION_STRATEGY == upgrade`, a condition that can never be true inside
+the `merge)` case, so it silently never fired; and the `overwrite` strategy
+silently replaced a user-owned file whenever no manifest entry existed at
+all — not merely missing a backup, but missing the entire warn/skip
+protection. Separately, and more importantly: `git show 28b8756 -- tests/`
+(the original #140 fix commit) is empty — that fix was never locked in by a
+test, which is exactly why its damage went undetected on real projects for
+months, and why the same bug class kept reappearing in new call sites
+undetected by a 260+-test suite. Per-branch discipline for backup calls, and
+relying on "tests still pass" instead of a test proving the specific
+invariant, both kept reintroducing this same class of bug.
+
+**Consequences:** Any new collision-handling branch added in the future must
+route its write through `_upgrade_write` rather than calling `cp` directly,
+and must treat a missing manifest entry on a user-owned file as unprovable-
+safe, never as "no baseline recorded, so nothing to compare against, so
+overwrite." `init_backup_dir()` already branches correctly per
+`$COLLISION_STRATEGY` (transactional `.in-progress` dir for `upgrade`, a
+plain timestamped dir for every other strategy), so none of this required
+changes to the backup storage model itself — only to how consistently both
+the backup call and the user-owned-file protection are invoked.
