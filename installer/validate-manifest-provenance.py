@@ -8,13 +8,35 @@ nulls); that is a normal "legacy/unknown provenance" state, not an error.
 A field that IS present but holds a value outside its known vocabulary is
 malformed and must be reported, never silently ignored.
 
-This script is a standalone, isolated building block for a future
-doctor/postflight gate (444-H). It is not wired into `rig doctor` or any
-upgrade decision path in this lane.
+When --running-version is supplied, entries are additionally checked for
+version continuity (issue #463): a base_revision that is a parseable
+X[.Y[.Z...]] version strictly newer than --running-version describes an
+impossible/bogus state (a manifest claiming to be from an installer
+release that, relative to what is actually running, does not exist yet —
+either hand-corruption or a manifest written by some future installer).
+That is reported as a distinct "future_revision" finding, separate from
+"malformed" (an ordinary malformed field is a wrong-shaped value; a future
+revision is a well-formed value describing an impossible state) and from
+"legacy_provenance" (predates provenance tracking entirely). A
+base_revision that is missing, null, equal to, older than, or not a clean
+dotted-numeric string is never reported here — this check is intentionally
+narrow and makes no attempt at real semantic version-compatibility
+gating between releases. Omitting --running-version disables this check
+entirely (future_revision is always an empty list), preserving the exact
+prior behavior for any caller that does not pass it.
+
+This script was originally a standalone, isolated building block for a
+future doctor/postflight gate (444-H); it is now wired into `rig doctor`'s
+manifest_provenance gate (see templates/project/bin/rig) and into
+install.sh's validate_manifest_provenance() wrapper, which the
+agent-plan/agent-upgrade upgrade flow consults to refuse on a future
+base_revision (issue #463).
 
 Exit codes:
-  0  all entries are either well-formed or legacy/unknown provenance
-  1  one or more entries have malformed provenance fields
+  0  all entries are either well-formed (and not future-revision) or
+     legacy/unknown provenance
+  1  one or more entries have malformed provenance fields and/or a
+     future_revision finding
   2  the manifest metadata file itself is unreadable or has an
      unrecognized schema
 """
@@ -86,9 +108,53 @@ def is_legacy(entry):
     return all(entry.get(field) is None for field in PROVENANCE_FIELDS)
 
 
+def parse_version(value):
+    """Parse a plain dotted-numeric version string ("1.23.0") into a tuple
+    of ints for comparison.
+
+    Returns None for anything that is not a clean dotted-numeric string
+    (missing, null, "unknown", pre-release/build suffixes, etc). This
+    project's VERSION strings are always simple X.Y.Z, so no general
+    semver parser is needed — an unparseable value is deliberately treated
+    as "cannot confirm future", never flagged, to keep the future_revision
+    check narrow and free of false positives (issue #463).
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    parts = value.split(".")
+    result = []
+    for part in parts:
+        if not part.isdigit():
+            return None
+        result.append(int(part))
+    return tuple(result)
+
+
+def is_future_revision(base_revision, running_version):
+    """True when base_revision is a parseable version strictly newer than
+    running_version. False (never flagged) when either value is missing or
+    not a clean dotted-numeric string.
+    """
+    base = parse_version(base_revision)
+    running = parse_version(running_version)
+    if base is None or running is None:
+        return False
+    return base > running
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("metadata", help="path to a .rig-manifest.json file")
+    parser.add_argument(
+        "--running-version",
+        default=None,
+        help=(
+            "the currently running installer's own VERSION; when supplied, "
+            "entries whose base_revision is a parseable version strictly "
+            "newer than this are reported in future_revision (issue #463). "
+            "Omit to skip this check entirely (prior behavior)."
+        ),
+    )
     args = parser.parse_args()
 
     try:
@@ -114,6 +180,7 @@ def main():
 
     malformed = []
     legacy = []
+    future_revision = []
     for rel in sorted(entries):
         entry = entries[rel]
         problems = validate_entry(entry)
@@ -125,12 +192,22 @@ def main():
         elif is_legacy(entry):
             legacy.append(rel)
 
-    ok = not malformed
+        if args.running_version and isinstance(entry, dict):
+            base_revision = entry.get("base_revision")
+            if is_future_revision(base_revision, args.running_version):
+                future_revision.append({
+                    "path": rel,
+                    "base_revision": base_revision,
+                    "running_version": args.running_version,
+                })
+
+    ok = not malformed and not future_revision
     print(json.dumps({
         "ok": ok,
         "checked": len(entries),
         "malformed": malformed,
         "legacy_provenance": legacy,
+        "future_revision": future_revision,
     }, separators=(",", ":")))
     return 0 if ok else 1
 

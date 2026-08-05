@@ -239,17 +239,61 @@ PYEOF
 # ── Manifest provenance validation ────────────────────────────────────────────
 # Thin wrapper around installer/validate-manifest-provenance.py. Reports (does
 # not silently ignore) malformed provenance fields in a manifest metadata
-# file, and separately reports entries that simply predate this metadata
-# (legacy/unknown provenance — not an error). Not wired into any upgrade
-# decision or doctor/postflight gate in this lane; callable/testable in
-# isolation for 444-H to consume later.
+# file, entries that simply predate this metadata (legacy/unknown
+# provenance — not an error), and — since issue #463 — entries whose
+# base_revision claims an installer VERSION newer than the one currently
+# running ($INSTALLER_VERSION), the same "impossible future state" class of
+# bug _GLOBAL_STATE_FUTURE/_PROJECT_STATE_FUTURE catch for install-target
+# metadata. Consumed by report_future_manifest_revisions() below during
+# --strategy upgrade/agent-plan/agent-upgrade, and by `rig doctor`'s
+# manifest_provenance gate (templates/project/bin/rig), which calls the
+# underlying script directly with the project's installed .rig/VERSION.
 validate_manifest_provenance() {
   local metadata_file="$1"
   if [[ ! -f "$metadata_file" ]]; then
-    printf '%s\n' '{"ok":true,"checked":0,"malformed":[],"legacy_provenance":[]}'
+    printf '%s\n' '{"ok":true,"checked":0,"malformed":[],"legacy_provenance":[],"future_revision":[]}'
     return 0
   fi
-  python3 "$SCRIPT_DIR/installer/validate-manifest-provenance.py" "$metadata_file"
+  python3 "$SCRIPT_DIR/installer/validate-manifest-provenance.py" "$metadata_file" --running-version "$INSTALLER_VERSION"
+}
+
+# Detects and records (never auto-fixes) manifest entries whose base_revision
+# is a bogus/future installer version relative to the one currently running
+# (issue #463). Mirrors report_stale_manifest_entries()'s call shape and
+# feeds the same UPGRADE_REVIEW_REQUIRED aggregation, so agent-plan/
+# agent-upgrade refuse (status "refused", exit 3) exactly as they already do
+# for skipped-customized/conflict/stale findings — the closest existing
+# precedent available inside this same upgrade-decision flow. A plain
+# --strategy upgrade run still completes (exit 0) but surfaces the finding
+# for manual review via RIG_UPGRADE_REVIEW_REQUIRED, same as those findings.
+# Ordinary manifests (base_revision absent, legacy, or <= INSTALLER_VERSION)
+# make this a complete no-op: zero findings, zero effect on
+# UPGRADE_REVIEW_REQUIRED.
+report_future_manifest_revisions() {
+  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  local metadata_file="$1" label="$2"
+  [[ -f "$metadata_file" ]] || return 0
+  # validate_manifest_provenance() exits 1 (not just non-zero-and-ignorable)
+  # whenever it finds anything to report, including the future_revision
+  # case this function exists to detect — under `set -euo pipefail`, an
+  # unguarded "var=$(cmd)" assignment where cmd exits 1 kills the whole
+  # script. `|| true` is required here, exactly like the existing
+  # read_agent_state() call sites above use "|| _state_status=$?" for the
+  # same reason.
+  local provenance_json
+  provenance_json="$(validate_manifest_provenance "$metadata_file")" || true
+  local rel base_rev
+  while IFS=$'\t' read -r rel base_rev; do
+    [[ -n "$rel" ]] || continue
+    UPGRADE_FUTURE_REVISION_COUNT=$((UPGRADE_FUTURE_REVISION_COUNT + 1))
+    UPGRADE_FUTURE_REVISION_FILES[${#UPGRADE_FUTURE_REVISION_FILES[@]}]="$label:$rel (base_revision $base_rev > running $INSTALLER_VERSION)"
+  done < <(python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+for e in d.get("future_revision") or []:
+    print(e.get("path", "") + "\t" + e.get("base_revision", ""))
+' <<< "$provenance_json")
+  return 0
 }
 
 # Audit a manifest's tracked entries against what's actually on disk.
@@ -817,6 +861,13 @@ UPGRADE_STALE_COUNT=0
 # every missing-entry finding it could.
 UPGRADE_STALE_UNREPAIRED_COUNT=0
 UPGRADE_STALE_FILES=()
+# Manifest entries whose base_revision claims an installer VERSION newer
+# than the one currently running (issue #463) — see
+# report_future_manifest_revisions()/validate_manifest_provenance() below.
+# Always zero for an ordinary manifest; drives UPGRADE_REVIEW_REQUIRED the
+# same way UPGRADE_STALE_UNREPAIRED_COUNT does.
+UPGRADE_FUTURE_REVISION_COUNT=0
+UPGRADE_FUTURE_REVISION_FILES=()
 # Full per-artifact log, one entry per record_upgrade_result() call, encoded as
 # "<rel>\x1e<result>\x1e<detail>" (US = 0x1E, never legal in a path or in the
 # JSON-encoded detail payload). Consumed only by the agent-plan/agent-upgrade
@@ -2177,6 +2228,15 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   _SAVED_MANIFEST_FILE="$MANIFEST_FILE"
   MANIFEST_FILE="$GLOBAL_MANIFEST_FILE"
 
+  # issue #463: must run BEFORE any write below. A legitimate content update
+  # to an entry this run would otherwise silently overwrite a tampered/future
+  # base_revision with the real running INSTALLER_VERSION via the normal
+  # write_manifest_metadata() path, erasing the evidence before a later
+  # check could see it — checking here, against the manifest exactly as it
+  # exists before this run's own writes, is what agent-plan already gets for
+  # free (it never writes at all); this gives agent-upgrade the same view.
+  report_future_manifest_revisions "${GLOBAL_MANIFEST_FILE}.json" global
+
   if has_agent "$GLOBAL_AGENT" claude; then
   if upgrade_prepare_directory "$HOME" "$CLAUDE_DIR" ".claude"; then
     # agent-plan: classification only, never create the global Claude root.
@@ -2297,6 +2357,11 @@ if [[ "$COLLISION_STRATEGY" == upgrade && "$DO_GLOBAL" == true ]]; then
   # 444-E started counting unrepaired stale entries toward
   # UPGRADE_REVIEW_REQUIRED; now it must resolve correctly.
   report_stale_manifest_entries "${GLOBAL_MANIFEST_FILE}.json" "$CLAUDE_DIR" global
+  # report_future_manifest_revisions() for this layer already ran earlier,
+  # before any global-layer write — see the call right after MANIFEST_FILE
+  # is pointed at GLOBAL_MANIFEST_FILE, above. Running it here too would
+  # double-count, and would miss entries a legitimate write this run already
+  # silently corrected (issue #463).
 fi
 
 # Reset backup dir between layers so each layer uses its own base path.
@@ -2519,6 +2584,11 @@ if [[ "$DO_PROJECT" == true ]]; then
     MANIFEST_FILE="$TARGET/.rig/memory/.rig-manifest"
   fi
   PROJECT_TARGET_STATE="$(dirname "$(dirname "$MANIFEST_FILE")")/install-targets.json"
+  # issue #463: must run BEFORE any write below, against the manifest exactly
+  # as it exists at the start of this run — see the matching global-layer
+  # call and comment above for the full explanation of why this cannot run
+  # in postflight instead.
+  report_future_manifest_revisions "${MANIFEST_FILE}.json" project
   if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
     # agent-plan: classification only, never recover an interrupted transaction.
     if [[ "$AGENT_DRY_RUN" != true ]]; then
@@ -3260,6 +3330,11 @@ PYEOF
     else
       report_stale_manifest_entries "${MANIFEST_FILE}.json" "$TARGET" project
     fi
+    # report_future_manifest_revisions() for this layer already ran earlier,
+    # before any project-layer write — see the call right after
+    # PROJECT_TARGET_STATE is set, above. Running it here too would
+    # double-count, and would miss entries a legitimate write this run
+    # already silently corrected (issue #463).
   fi
 
   echo ""
@@ -3342,6 +3417,11 @@ if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
   [[ "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" -gt 0 ]] && UPGRADE_REVIEW_REQUIRED=1
   [[ "$UPGRADE_SKIPPED_CONFLICT_COUNT" -gt 0 ]] && UPGRADE_REVIEW_REQUIRED=1
   [[ "$UPGRADE_STALE_UNREPAIRED_COUNT" -gt 0 ]] && UPGRADE_REVIEW_REQUIRED=1
+  # issue #463: a manifest entry claiming a future/bogus base_revision is
+  # never silently accepted — same fail-closed treatment as the findings
+  # above, which is what drives agent-plan/agent-upgrade's "refused" exit 3
+  # below for this condition too.
+  [[ "$UPGRADE_FUTURE_REVISION_COUNT" -gt 0 ]] && UPGRADE_REVIEW_REQUIRED=1
 fi
 
 if [[ -n "$AGENT_MODE" ]]; then
@@ -3511,6 +3591,7 @@ if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
   echo "Skipped conflicts: $UPGRADE_SKIPPED_CONFLICT_COUNT"
   echo "Skipped untracked user-owned: $UPGRADE_SKIPPED_UNTRACKED_COUNT"
   echo "Stale/missing tracked artifacts: $UPGRADE_STALE_COUNT"
+  echo "Future/bogus manifest base_revision: $UPGRADE_FUTURE_REVISION_COUNT"
   if [[ "$UPGRADE_STALE_COUNT" -gt 0 ]]; then
     echo "Stale artifacts requiring explicit repair or migration:"
     for _stale_file in "${UPGRADE_STALE_FILES[@]}"; do
@@ -3529,6 +3610,13 @@ if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
     echo "Conflicting legacy artifacts requiring explicit repair:"
     for _conflict_file in "${UPGRADE_SKIPPED_CONFLICT_FILES[@]}"; do
       echo "  - $_conflict_file"
+    done
+  fi
+  if [[ "$UPGRADE_FUTURE_REVISION_COUNT" -gt 0 ]]; then
+    UPGRADE_REVIEW_REQUIRED=1
+    echo "Manifest entries claiming a future/bogus base_revision (issue #463 — requires review):"
+    for _future_file in "${UPGRADE_FUTURE_REVISION_FILES[@]}"; do
+      echo "  - $_future_file"
     done
   fi
   python3 -c 'import json,sys
