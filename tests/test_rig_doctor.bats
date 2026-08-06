@@ -257,7 +257,8 @@ EOF
 {
   "schema_version": 1,
   "entries": {
-    "CLAUDE.md": {"sha256": "x", "owner": "user"}
+    "CLAUDE.md": {"sha256": "x", "owner": "user"},
+    ".claude/commands/task.md": {"sha256": "45a050504d3a25441a1882ab4ffdfd0de8c4c6e91ef82910f29986acbb8cf423", "owner": "rig", "mode": "644"}
   }
 }
 EOF
@@ -292,7 +293,7 @@ EOF
   "schema_version": 1,
   "entries": {
     "CLAUDE.md": {"sha256": "x", "owner": "user", "base_revision": "1.0.0", "generator": "install.sh", "provider": "claude"},
-    ".claude/commands/task.md": {"sha256": "x", "owner": "user", "base_revision": "0.9.0", "generator": "install.sh", "provider": "claude"}
+    ".claude/commands/task.md": {"sha256": "45a050504d3a25441a1882ab4ffdfd0de8c4c6e91ef82910f29986acbb8cf423", "owner": "rig", "mode": "644", "base_revision": "0.9.0", "generator": "install.sh", "provider": "claude"}
   }
 }
 EOF
@@ -337,6 +338,27 @@ EOF
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="manifest_mode_hash"); assert not c["ok"] and "ship.md" in c["detail"] and "hash mismatch" in c["detail"] and "CLAUDE.md" not in c["detail"]'
+}
+
+@test "manifest mode/hash gate fails instead of vacuously passing when entries exist but none are Rig-owned (retro-audit finding, PR #450)" {
+  # An installed Rig project always has dozens of Rig-owned manifest
+  # entries. A manifest with SOME entries but zero owner:rig ones is
+  # suspicious -- e.g. an upgrade that only ever needed to record
+  # user-owned hashes, never touching a single Rig-owned file that
+  # session. Silently passing here would be the same "no evidence
+  # recorded, so assume safe" anti-pattern already fixed elsewhere
+  # (issue #470/#471) — this must fail, not pass vacuously.
+  cat > "$CASE_DIR/.rig/memory/.rig-manifest.json" <<EOF
+{
+  "schema_version": 1,
+  "entries": {
+    "CLAUDE.md": {"sha256": "irrelevant-because-user-owned", "owner": "user", "mode": "644"}
+  }
+}
+EOF
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="manifest_mode_hash"); assert not c["ok"] and "none are Rig-owned" in c["detail"]'
 }
 
 @test "stale manifest entries are reported for artifacts missing from disk" {

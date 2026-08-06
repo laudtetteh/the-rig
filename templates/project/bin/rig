@@ -786,13 +786,23 @@ if manifest_metadata.is_file():
                     drift.append(f"{rel}: mode {actual_mode} != {expected_mode}")
         if drift_checked:
             mode_hash_detail = f"{drift_checked - len(drift)}/{drift_checked} rig-owned artifacts match manifest"
+            if drift:
+                mode_hash_detail += "; drift: " + ", ".join(drift[:5])
+                if len(drift) > 5:
+                    mode_hash_detail += f" and {len(drift) - 5} more"
+            check("manifest_mode_hash", not drift, mode_hash_detail)
+        elif manifest_entries:
+            # The manifest has entries but none are Rig-owned. For any
+            # actually-installed Rig project this is suspicious — dozens of
+            # Rig-owned files always exist. Silently passing here would be
+            # the same "no evidence recorded, so assume safe" anti-pattern
+            # already fixed elsewhere (issue #470/#471) — surface it as a
+            # failure instead of folding it into a vacuous pass alongside
+            # the genuine "no manifest file at all yet" case below.
+            check("manifest_mode_hash", False,
+                  "manifest has entries but none are Rig-owned — unexpected for an installed Rig project")
         else:
-            mode_hash_detail = "no rig-owned manifest entries to check"
-        if drift:
-            mode_hash_detail += "; drift: " + ", ".join(drift[:5])
-            if len(drift) > 5:
-                mode_hash_detail += f" and {len(drift) - 5} more"
-        check("manifest_mode_hash", not drift, mode_hash_detail)
+            check("manifest_mode_hash", True, "no rig-owned manifest entries to check")
 
         # Stale-state: any manifest entry (any owner) whose artifact no longer
         # exists on disk at all. This mirrors report_stale_manifest_entries()'s
