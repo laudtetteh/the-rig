@@ -113,6 +113,30 @@ print($1)
   [ "$(json_field "len(d['artifacts'])")" != "0" ]
 }
 
+@test "agent-plan stdout is exactly one JSON document, not preflight narration followed by JSON (retro-audit finding, PR #446)" {
+  # The documented contract (UPGRADE_WORKFLOW.md, and this PR's own code
+  # comment) is "prints exactly one JSON document on stdout." The preflight
+  # narrative summary ("Target matrix: ...", "Missing prerequisites: ...",
+  # etc.) was gated only on JSON_OUTPUT (true only for the separate,
+  # explicit --preflight --json mode) -- never on AGENT_MODE -- so it
+  # always printed several lines of human-oriented text before the real
+  # result on every agent-plan/agent-upgrade run. A caller doing
+  # json.loads(stdout) on the first (or only) line would break.
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  run_installer --strategy agent-plan
+  [ "$status" -eq 0 ]
+
+  local nonblank_lines
+  nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
+  [ "$nonblank_lines" -eq 1 ]
+  [[ "$output" != *"Target matrix:"* ]]
+  [[ "$output" != *"Missing prerequisites:"* ]]
+  [[ "$output" == \{* ]]
+}
+
 @test "agent-plan on a target with a customized file emits refused with populated conflicts and exits 3" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
