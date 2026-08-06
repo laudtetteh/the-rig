@@ -183,7 +183,26 @@ write_manifest_metadata() {
   case "$source" in
     generated-codex|codex-native) provider="codex" ;;
     claude-native) provider="claude" ;;
-    *) provider="$layer_agent" ;;
+    *)
+      # Global-layer CLAUDE.md and personal skills fall through to the
+      # generic "project-user" classification above -- manifest_artifact_
+      # source() only recognizes a .claude/-prefixed rel as claude-native,
+      # but the global layer records these un-prefixed ("CLAUDE.md",
+      # "skills/$name.md"). Unlike the project layer's CLAUDE.md (which
+      # really is Codex-shared, merged into .codex/config.toml as an
+      # instruction fallback), the global CLAUDE.md/skills have no
+      # Codex-side equivalent anywhere in this script -- Codex's global
+      # artifacts are the entirely separate .agents/skills/* tree, already
+      # correctly classified as generated-codex above. Treat these as
+      # unambiguously Claude-only regardless of GLOBAL_AGENT, instead of
+      # stamping them with the layer's agent selection (which could wrongly
+      # record "both" or "codex" when --global-agent picks either).
+      if [[ "$manifest_file" == "$GLOBAL_MANIFEST_FILE" && ( "$rel" == "CLAUDE.md" || "$rel" == skills/* ) ]]; then
+        provider="claude"
+      else
+        provider="$layer_agent"
+      fi
+      ;;
   esac
 
   # base_revision: the trusted upstream template revision this artifact was
@@ -2224,17 +2243,20 @@ _stealth_install_git_hook() {
     echo "  A backup will be saved to .rig-backup/ (or the external backups/ dir) before installing the Rig hook."
   fi
 
-  if [[ -f "$hook_dest" && ! -L "$hook_dest" ]]; then
-    ensure_upgrade_transaction "$TARGET"
-    backup_file "$hook_dest" "$TARGET"
-  elif [[ ! -e "$hook_dest" && ! -L "$hook_dest" ]]; then
-    # First install of this hook: nothing to back up, but still journal it as
-    # "created" (matching copy_file()'s own new-file path) so an interrupted
-    # run rolls back to "hook absent" rather than leaving a half-installed
-    # file with no journal record of how it got there.
-    ensure_upgrade_transaction "$TARGET"
-    record_created "$TARGET" "$hook_dest"
-  fi
+  # Routes through the same no-follow, refuse-on-symlink choke point every
+  # other direct-writer mutation uses (issue #470/#471's review found this
+  # hand-rolled -f/-L/-e check had a gap: a symlinked .git/hooks/<name>
+  # matched neither branch, so no backup/journal happened here, yet the cp
+  # below still ran — cp follows an existing symlink and silently overwrites
+  # whatever it points to, in place, with no recovery path, even if that
+  # target lives outside the project entirely. A dangling symlink hit the
+  # same gap and crashed the installer mid-transaction under set -e.
+  # upgrade_prepare_mutation() already backs up an existing regular file
+  # (matching this function's prior first branch), treats a missing
+  # destination as safe-to-create (matching the prior second branch), and
+  # refuses — rather than silently destroying something — on a symlink or
+  # any other unexpected destination state.
+  upgrade_prepare_mutation "$TARGET" "$hook_dest" "$rel" || return 0
   # agent-plan: classification only, never write the hook file.
   [[ "$AGENT_DRY_RUN" == true ]] || cp "$hook_src" "$hook_dest"
   [[ "$AGENT_DRY_RUN" == true ]] || chmod +x "$hook_dest"

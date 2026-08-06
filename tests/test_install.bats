@@ -588,8 +588,16 @@ is_rig_owned_stub() {
   [[ "$output" == *"Updated: CLAUDE.md"* ]]
 
   # Real writer, real rewrite: fresh provenance recorded for real, mid-upgrade.
+  # provider must be "claude", not the layer's --global-agent selection
+  # ("both") — the global CLAUDE.md has no Codex-side equivalent anywhere
+  # in install.sh (unlike the project-layer CLAUDE.md, which really is
+  # Codex-shared via the .codex/config.toml fallback merge). This
+  # previously asserted "both" as correct, codifying a real bug
+  # (retro-audit finding, PR #448) where manifest_artifact_source()'s
+  # generic project-user fallback let the layer's agent selection leak
+  # into a provider-specific artifact's provenance.
   jq -e '.entries["CLAUDE.md"].generator == "install.sh"
-    and .entries["CLAUDE.md"].provider == "both"
+    and .entries["CLAUDE.md"].provider == "claude"
     and .entries["CLAUDE.md"].base_revision == .entries["CLAUDE.md"].installer_version' "$claude_metadata" >/dev/null
 
   # Real validator against the real global Claude-layer manifest.
