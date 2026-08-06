@@ -83,13 +83,34 @@ def read_manifest_paths(rig_dir):
 
 
 def discover_launcher_paths(target):
-    """Safety net: any bin/rig* file physically present in the target,
-    even if it predates manifest tracking or the manifest is unreadable."""
+    """Safety net: any launcher The Rig actually ships, physically present
+    in the target, even if it predates manifest tracking or the manifest is
+    unreadable. Scoped to the installer's own real template source rather
+    than a name.startswith("rig") heuristic on the target's directory
+    listing -- retro-audit finding, PR #449: that heuristic matched ANY
+    bin/ file starting with "rig", not just ones The Rig generated. A user's
+    own unrelated script (e.g. bin/rig-my-deploy-script.sh) was silently
+    misclassified as a leak, and the documented manual-repair workflow
+    (repair-stealth.py) would then append it to .git/info/exclude, hiding
+    real content from git -- exactly the failure install.sh's own
+    stealth-exclude enumeration explicitly reasons about and rejects a
+    "bin/rig*" glob for. Mirrors install.sh: enumerate the real template
+    source, never guess from a name pattern. If the template source isn't
+    colocated (a normal downstream install, not this repo's own checkout),
+    there is no safety net for un-manifested legacy launchers -- correct,
+    since guessing from names is exactly the bug being fixed here.
+    """
+    template_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "..", "templates", "project", "bin")
+    try:
+        known_names = set(os.listdir(template_bin))
+    except OSError:
+        return set()
     bin_dir = os.path.join(target, "bin")
     found = set()
     try:
         for name in os.listdir(bin_dir):
-            if name.startswith("rig"):
+            if name in known_names:
                 found.add(f"bin/{name}")
     except OSError:
         pass
