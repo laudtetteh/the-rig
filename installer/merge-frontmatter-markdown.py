@@ -157,6 +157,23 @@ def main():
         print(json.dumps({"ok": False, "conflicts": conflicts}))
         return 1
 
+    # render()'s dict-mode reconstruction always drops any comment or blank
+    # line inside the frontmatter block -- parse_fields() has to skip them
+    # to build a dict at all, and there's no way back from a dict to the
+    # comments that weren't stored in it. Retro-audit finding, PR #452: this
+    # was unconditional, on every successful merge, silently discarding any
+    # user-added frontmatter comment even when nothing about the actual
+    # field values needed to change on that side. Mirrors merge-toml.py's
+    # own render_final() pattern: when the merged fields turn out to be
+    # exactly one side's original parsed fields, reuse that side's raw text
+    # verbatim (comments, blank lines, and all) instead of resynthesizing
+    # a dict-only reconstruction that can't represent them.
+    if use_dict and "frontmatter" in merged:
+        if cur_parsed is not None and merged["frontmatter"] == cur_parsed and cur_raw is not None:
+            merged["frontmatter"] = cur_raw
+        elif inc_parsed is not None and merged["frontmatter"] == inc_parsed and inc_raw is not None:
+            merged["frontmatter"] = inc_raw
+
     directory = os.path.dirname(os.path.abspath(args.output)) or "."
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".rig-merge-md.")
     try:
