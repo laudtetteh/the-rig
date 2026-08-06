@@ -2933,11 +2933,21 @@ if [[ "$DO_PROJECT" == true ]]; then
   if has_agent "$PROJECT_AGENT" codex; then
     _CODEX_CONFIG="$TARGET/.codex/config.toml"
     if upgrade_prepare_mutation "$TARGET" "$_CODEX_CONFIG" ".codex/config.toml"; then
-      if ! _codex_merge_result="$(python3 "$SCRIPT_DIR/installer/merge-codex-config.py" "$_CODEX_CONFIG")"; then
-        error "Codex project config was not changed. Fix $_CODEX_CONFIG and retry."
-        exit 1
+      # agent-plan: classification only, never invoke the merge script --
+      # it performs a real write via merge-codex-config.py's atomic_write()
+      # (including creating .codex/config.toml and its parent directory if
+      # absent). Retro-audit finding, PR #446: this call had no
+      # AGENT_DRY_RUN gate at all, unlike every other direct-writer
+      # mutation in this file -- agent-plan (documented and relied upon
+      # elsewhere as "zero writes, read-only") actually mutated
+      # .codex/config.toml whenever --project-agent codex/both was passed.
+      if [[ "$AGENT_DRY_RUN" != true ]]; then
+        if ! _codex_merge_result="$(python3 "$SCRIPT_DIR/installer/merge-codex-config.py" "$_CODEX_CONFIG")"; then
+          error "Codex project config was not changed. Fix $_CODEX_CONFIG and retry."
+          exit 1
+        fi
+        success "Codex project instructions: CLAUDE.md fallback ${_codex_merge_result}"
       fi
-      success "Codex project instructions: CLAUDE.md fallback ${_codex_merge_result}"
     else
       info "Skipped Codex project config due to a conflicting destination."
     fi

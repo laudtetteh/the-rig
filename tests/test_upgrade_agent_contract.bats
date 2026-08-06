@@ -140,6 +140,44 @@ print($1)
   grep -q "locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
 }
 
+@test "agent-plan never writes .codex/config.toml, even with --project-agent codex (retro-audit finding, PR #446)" {
+  # Every other direct-writer mutation in install.sh (.rig/VERSION,
+  # .rigpath, CLAUDE.md/settings.json substitution, the stealth git-hook
+  # install loop) is wrapped in an AGENT_DRY_RUN guard. The Codex project-
+  # config merge (merge-codex-config.py, invoked whenever --project-agent
+  # is codex/both) had no such guard at all -- agent-plan actually mutated
+  # .codex/config.toml on disk, violating the documented "zero writes,
+  # read-only" contract this whole file exists to prove.
+  #
+  # The merge is idempotent once CLAUDE.md is already in
+  # project_doc_fallback_filenames, so a fixture starting from that already-
+  # merged state would mask the bug: the second write reuses identical
+  # bytes and a plain content snapshot can't tell a real skipped write from
+  # a same-content rewrite. A real prior --project-agent both install is
+  # still required first, so every other Codex artifact (.codex/hooks.json,
+  # .codex/hooks/rig-adapter.sh, .agents/skills) exists and agent-plan's own
+  # postflight smoke check passes -- then the merged config.toml is reset
+  # to an unmerged state (simulating a pre-existing Codex config Rig hasn't
+  # touched yet) so a real (buggy) merge would visibly change its content.
+  run_installer --strategy upgrade --project-agent both
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+  [ -f "$TEST_PROJECT/.codex/config.toml" ]
+
+  printf 'model = "gpt-5"\n' > "$TEST_PROJECT/.codex/config.toml"
+
+  local before after
+  before="$(tree_snapshot)"
+
+  run_installer --strategy agent-plan --project-agent both
+  [ "$status" -eq 0 ]
+
+  after="$(tree_snapshot)"
+  [ "$before" = "$after" ]
+  grep -q '^model = "gpt-5"$' "$TEST_PROJECT/.codex/config.toml"
+  ! grep -q 'project_doc_fallback_filenames' "$TEST_PROJECT/.codex/config.toml"
+}
+
 @test "agent-upgrade on a clean target applies updates and exits 0" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
