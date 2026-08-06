@@ -77,6 +77,43 @@ tree_snapshot() {
   [ -n "$output" ]
 }
 
+@test "a symlinked git hook is refused, never silently destroying its target (retro-audit finding, PR #451)" {
+  # Before this fix, a symlinked .git/hooks/<name> matched neither of
+  # _stealth_install_git_hook()'s backup-gating branches (both required
+  # "not a symlink"), so no backup/journal happened, yet cp still ran --
+  # cp follows an existing symlink and overwrites whatever it points to,
+  # in place, even if that target lives entirely outside the project.
+  install_stealth
+  [ "$status" -eq 0 ]
+
+  local external_target="$TEMP_DIR/external-hook-target.sh"
+  printf '#!/bin/sh\necho this-file-lives-outside-the-project\n' > "$external_target"
+  rm -f "$TEST_PROJECT/.git/hooks/pre-commit"
+  ln -s "$external_target" "$TEST_PROJECT/.git/hooks/pre-commit"
+
+  install_stealth
+  [ "$status" -eq 0 ]
+
+  # The external file must survive completely untouched.
+  grep -q 'this-file-lives-outside-the-project' "$external_target"
+  # The symlink itself must still point at it (never replaced with a
+  # regular file copy of the Rig hook).
+  [ -L "$TEST_PROJECT/.git/hooks/pre-commit" ]
+  [[ "$(readlink "$TEST_PROJECT/.git/hooks/pre-commit")" == "$external_target" ]]
+}
+
+@test "a dangling symlinked git hook is refused without crashing the installer (retro-audit finding, PR #451)" {
+  install_stealth
+  [ "$status" -eq 0 ]
+
+  rm -f "$TEST_PROJECT/.git/hooks/pre-commit"
+  ln -s "$TEMP_DIR/does-not-exist.sh" "$TEST_PROJECT/.git/hooks/pre-commit"
+
+  install_stealth
+  [ "$status" -eq 0 ]
+  [ -L "$TEST_PROJECT/.git/hooks/pre-commit" ]
+}
+
 @test "agent-upgrade refuses to overwrite a customized git hook and reports a conflict" {
   install_stealth
   [ "$status" -eq 0 ]
