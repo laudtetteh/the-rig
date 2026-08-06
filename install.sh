@@ -3090,12 +3090,27 @@ PYEOF
   # _stealth_install_git_hook() itself gates every actual filesystem mutation
   # behind AGENT_DRY_RUN, so running it here under agent-plan still writes
   # nothing; it only classifies and records.
+  # .rigpath's conflict-detection must run unconditionally, same as
+  # .rig/VERSION above and the git-hook fix below it -- only the actual
+  # write stays gated on AGENT_DRY_RUN. Retro-audit finding, PR #460: this
+  # upgrade_prepare_mutation() call used to live entirely inside the
+  # AGENT_DRY_RUN guard, so agent-plan never evaluated .rigpath's
+  # destination state at all -- a real conflict there (e.g. a symlinked
+  # .rigpath) would surface for the first time as an agent-upgrade refusal
+  # the plan never warned about, the exact failure mode issue #458 was
+  # filed to eliminate for the git-hook install loop.
+  _RIGPATH_MUTATION_OK=false
+  if [[ ( "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ) && -n "$RIGPATH_FILE" ]] \
+     && upgrade_prepare_mutation "$TARGET" "$RIGPATH_FILE" ".rigpath"; then
+    _RIGPATH_MUTATION_OK=true
+  fi
+
   if [[ "$AGENT_DRY_RUN" != true ]]; then
 
   # ── EXTERNAL .rig/ — write .rigpath and update git excludes ──────────────
   if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
     # Write the pointer file so hooks can resolve RIG_DIR at runtime
-    if upgrade_prepare_mutation "$TARGET" "$RIGPATH_FILE" ".rigpath"; then
+    if [[ "$_RIGPATH_MUTATION_OK" == true ]]; then
       echo "$EXTERNAL_RIG_DIR" > "$RIGPATH_FILE"
       success "Created .rigpath → $EXTERNAL_RIG_DIR"
     else

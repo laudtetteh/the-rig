@@ -848,6 +848,30 @@ is_rig_owned_stub() {
   [[ "$output" == *"Preserved conflicting upgrade destination: .rigpath (symlink)"* ]]
 }
 
+@test "agent-plan detects a symlinked .rigpath conflict instead of silently missing it (retro-audit finding, PR #460)" {
+  # Same bug class issue #458 fixed for the stealth git-hook install loop:
+  # the .rigpath conflict-detection call used to live entirely inside the
+  # AGENT_DRY_RUN guard, so agent-plan never evaluated it at all -- a real
+  # conflict here would surface for the first time as an agent-upgrade
+  # refusal the plan never warned about.
+  local rig_ext="$TEMP_DIR/external-rig"
+  run_installer --strategy skip --tracking stealth --rig-dir "$rig_ext"
+  [ "$status" -eq 0 ]
+
+  local pointer="$TEST_PROJECT/.rigpath"
+  local outside_pointer="$TEMP_DIR/outside-rigpath"
+  printf '%s\n' "$rig_ext" > "$outside_pointer"
+  rm "$pointer"
+  ln -s "$outside_pointer" "$pointer"
+
+  run_installer --strategy agent-plan --tracking stealth --rig-dir "$rig_ext"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'".rigpath"'* ]]
+  # Zero writes: agent-plan must never mutate the symlink itself.
+  [ -L "$pointer" ]
+  [ "$(cat "$outside_pointer")" = "$rig_ext" ]
+}
+
 matrix_upgrade_case() {
   local tracking="$1" agent="$2" project rig_dir state_file settings_file
   project="$TEMP_DIR/matrix-${tracking}-${agent}"
