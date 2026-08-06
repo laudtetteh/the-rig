@@ -1428,6 +1428,30 @@ backup_file() {
   cp "$src" "$dest"
 }
 
+# ── UNCONDITIONAL BACKUP-BEFORE-WRITE (issue #470) ────────────────────────────
+# Every collision-path write that could overwrite an existing file MUST go
+# through this function instead of calling `cp` directly. Backing up used to
+# be a per-branch responsibility — each classification branch independently
+# decided whether a backup was needed before its own `cp` call. That pattern
+# is exactly what let a real historical bug (see docs/lessons-learned.md #14)
+# silently destroy user-owned CLAUDE.md/PROJECT_BRIEF.md content with no
+# recovery path: a classification branch wrongly concluded no backup was
+# needed. This function makes "back up first" a structural invariant no
+# classification branch can bypass, regardless of which strategy or code path
+# led here — init_backup_dir() already branches correctly per
+# $COLLISION_STRATEGY (transactional .in-progress dir for `upgrade`, a plain
+# timestamped dir for every other strategy), so calling backup_file()
+# unconditionally here is safe for all of them.
+_upgrade_write() {
+  local src="$1" dest="$2" base="$3"
+  # agent-plan: classification only, never write or back up.
+  [[ "$AGENT_DRY_RUN" == true ]] && return 0
+  if [[ ( -e "$dest" || -L "$dest" ) && -n "$base" ]]; then
+    backup_file "$dest" "$base"
+  fi
+  cp "$src" "$dest"
+}
+
 record_created() {
   local base="$1" destination="$2"
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
@@ -1669,7 +1693,7 @@ copy_file() {
   case "$COLLISION_STRATEGY" in
     interactive)
       if confirm "Overwrite existing: ${dest#${base}/}?"; then
-        cp "$src" "$dest"
+        _upgrade_write "$src" "$dest" "$base"
         success "Updated ${dest#${base}/}"
         if [[ -n "$rel" && "$(basename "$rel")" != "settings.json" ]]; then
           write_manifest_entry "$(sha256_file "$dest")" "$rel" "$MANIFEST_FILE" "$dest"
@@ -1683,13 +1707,30 @@ copy_file() {
       ;;
     overwrite)
       # For user-owned files that have been customized since install:
-      # warn and require confirmation before overwriting.
+      # warn and require confirmation before overwriting. The documented
+      # contract for this strategy is "replace all Rig-owned files" — user-
+      # owned files were never meant to be blindly replaced, customized or
+      # not. A missing manifest entry must be treated exactly like a detected
+      # customization (same as issue #140's fix for the `upgrade` strategy):
+      # we cannot prove the file is untouched, so never silently overwrite it.
       if [[ -n "$rel" ]] && ! is_rig_owned "$rel" && [[ "$(basename "$rel")" != "settings.json" ]]; then
         local _dest_hash _manifest_hash _src_hash
         _dest_hash="$(sha256_file "$dest")"
         _src_hash="$(sha256_file "$src")"
         _manifest_hash="$(read_manifest_hash "$rel")"
-        if [[ -n "$_manifest_hash" && "$_dest_hash" != "$_manifest_hash" && "$_dest_hash" != "$_src_hash" ]]; then
+        if [[ -z "$_manifest_hash" ]]; then
+          echo ""
+          warn "User-owned file with no recorded baseline: ${rel}"
+          echo "  This file has never been tracked by an Upgrade run, so whether"
+          echo "  it's been customized can't be determined. A backup will be"
+          echo "  saved to .rig-backup/ before overwriting."
+          echo ""
+          if ! confirm "Overwrite ${rel} with the new template?" "n"; then
+            info "Skipped (kept your version, recorded its current hash): ${rel}"
+            write_manifest_entry "$_dest_hash" "$rel" "$MANIFEST_FILE" "$dest"
+            return
+          fi
+        elif [[ "$_dest_hash" != "$_manifest_hash" && "$_dest_hash" != "$_src_hash" ]]; then
           echo ""
           warn "User-modified file: ${rel}"
           echo "  Your version differs from what The Rig originally installed."
@@ -1701,8 +1742,7 @@ copy_file() {
           fi
         fi
       fi
-      if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
-      cp "$src" "$dest"
+      _upgrade_write "$src" "$dest" "$base"
       success "Overwrote ${dest#${base}/}"
       if [[ -n "$rel" && "$(basename "$rel")" != "settings.json" ]]; then
         write_manifest_entry "$(sha256_file "$dest")" "$rel" "$MANIFEST_FILE" "$dest"
@@ -1721,8 +1761,7 @@ copy_file() {
         escaped_target="${abs_target//\//\\/}"
         sed "s/\\[REPO_ROOT\\]/${escaped_target}/g" "$src" > "$tmp_src_subst"
         if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged"; then
-          if [[ "$COLLISION_STRATEGY" == upgrade && -n "$base" ]]; then backup_file "$dest" "$base"; fi
-          cp "$tmp_merged" "$dest"
+          _upgrade_write "$tmp_merged" "$dest" "$base"
           success "Merged .claude/settings.json"
         else
           info "Skipped settings.json (merge failed — see warning above)"
@@ -1873,8 +1912,8 @@ _copy_upgrade_existing() {
     if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged"; then
       # agent-plan: classification only, never write the merged result.
       if [[ "$AGENT_DRY_RUN" != true ]]; then
-        if [[ -n "$base" ]]; then ensure_upgrade_transaction "$base"; backup_file "$dest" "$base"; fi
-        cp "$tmp_merged" "$dest"
+        [[ -n "$base" ]] && ensure_upgrade_transaction "$base"
+        _upgrade_write "$tmp_merged" "$dest" "$base"
       fi
       success "Merged .claude/settings.json"
       record_upgrade_result merged "$rel"
@@ -1898,9 +1937,7 @@ _copy_upgrade_existing() {
     else
       warn "sha256 unavailable — cannot detect customizations in: ${rel}"
       if confirm "Overwrite ${rel} with new version?" "y"; then
-        if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
-        # agent-plan: classification only, never write.
-        [[ "$AGENT_DRY_RUN" == true ]] || cp "$src" "$dest"
+        _upgrade_write "$src" "$dest" "$base"
         success "Updated: ${rel}"
         record_upgrade_result updated "$rel"
       else
@@ -1932,9 +1969,7 @@ _copy_upgrade_existing() {
       record_upgrade_result skipped-customized "$rel"
       write_manifest_entry "$dest_hash" "$rel" "$manifest_file" "$dest"
     elif [[ "$rig_owned_default" == true ]] || is_rig_owned "$rel"; then
-      if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
-      # agent-plan: classification only, never write.
-      [[ "$AGENT_DRY_RUN" == true ]] || cp "$src" "$dest"
+      _upgrade_write "$src" "$dest" "$base"
       success "Updated: ${rel}"
       record_upgrade_result updated "$rel"
       write_manifest_entry "$new_hash" "$rel" "$manifest_file" "$dest"
@@ -1946,9 +1981,7 @@ _copy_upgrade_existing() {
     fi
   elif [[ "$dest_hash" == "$manifest_hash" ]]; then
     # Matches manifest → unmodified since install. Safe to overwrite.
-    if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
-    # agent-plan: classification only, never write.
-    [[ "$AGENT_DRY_RUN" == true ]] || cp "$src" "$dest"
+    _upgrade_write "$src" "$dest" "$base"
     success "Updated: ${rel}"
     record_upgrade_result updated "$rel"
     write_manifest_entry "$new_hash" "$rel" "$manifest_file" "$dest"
@@ -1977,8 +2010,7 @@ _copy_upgrade_existing() {
       local _converged_output
       if _converged_output="$(attempt_convergence_merge "$src" "$dest" "$rel")"; then
         if [[ "$AGENT_DRY_RUN" != true ]]; then
-          [[ -n "$base" ]] && backup_file "$dest" "$base"
-          cp "$_converged_output" "$dest"
+          _upgrade_write "$_converged_output" "$dest" "$base"
           write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file" "$dest"
         fi
         rm -f "$_converged_output"
@@ -2003,8 +2035,7 @@ _copy_upgrade_existing() {
       read -r -p "$(echo -e "  ${BOLD}?${RESET} (o)verwrite  (s)kip  (d)iff  [o/s/d]: ")" choice
       case "${choice:-}" in
         o|O)
-          if [[ -n "$base" ]]; then backup_file "$dest" "$base"; fi
-          cp "$src" "$dest"
+          _upgrade_write "$src" "$dest" "$base"
           success "Updated (overwritten): ${rel}"
           record_upgrade_result updated "$rel"
           write_manifest_entry "$new_hash" "$rel" "$manifest_file" "$dest"
@@ -2037,14 +2068,23 @@ _copy_file_upgrade() {
 
 # ── GLOBAL UPGRADE HANDLER ───────────────────────────────────────────────────
 # Thin global-layer wrapper around the shared existing-file upgrade handler.
-# All files passed here are treated as Rig-owned — the caller never passes
-# PROFILE.md (personal data that must never be auto-overwritten).
+# Files passed here default to Rig-owned (global skills/hooks paths like
+# "skills/$name" don't match is_rig_owned()'s patterns, so they need this
+# forced default to stay auto-updatable) — the caller never passes PROFILE.md
+# (personal data that must never be auto-overwritten). CLAUDE.md is the same
+# class of exception: it's explicitly user-owned (is_rig_owned() already
+# knows this), so its caller passes rig_owned_default=false explicitly rather
+# than relying on this function's true-by-default (issue #470/#471 review —
+# the global CLAUDE.md previously took the unconditional-overwrite branch on
+# a missing manifest entry regardless of is_rig_owned(), the exact bug class
+# this hardening pass exists to eliminate, just at the global layer).
 _copy_global_file_upgrade() {
   local src="$1"
   local dest="$2"
   local base="${3:-}"
   local rel="${4:-}"
   local manifest_file="${5:-$GLOBAL_MANIFEST_FILE}"
+  local rig_owned_default="${6:-true}"
   local destination_state
 
   destination_state="$(upgrade_destination_state "$base" "$dest")"
@@ -2069,7 +2109,7 @@ _copy_global_file_upgrade() {
     return
   fi
   _copy_upgrade_existing "$src" "$dest" "$base" "$rel" \
-    "$manifest_file" none true
+    "$manifest_file" none "$rig_owned_default"
 }
 
 # Retire the hook merged into stop.sh in v1.21.0 only when the manifest proves
@@ -2284,7 +2324,10 @@ PYEOF
 
   # ── CLAUDE.md ──────────────────────────────────────────────────────────────
   if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
-    _copy_global_file_upgrade "$GLOBAL_TEMPLATES/CLAUDE.md" "$DEST_CLAUDE" "$CLAUDE_DIR" "CLAUDE.md"
+    # rig_owned_default=false: CLAUDE.md is user-owned (see is_rig_owned()'s
+    # own classification comment), unlike the skills files below — a missing
+    # manifest entry must default to skip-and-warn, not silent overwrite.
+    _copy_global_file_upgrade "$GLOBAL_TEMPLATES/CLAUDE.md" "$DEST_CLAUDE" "$CLAUDE_DIR" "CLAUDE.md" "$GLOBAL_MANIFEST_FILE" false
   else
     copy_file "$GLOBAL_TEMPLATES/CLAUDE.md" "$DEST_CLAUDE" "$CLAUDE_DIR" "CLAUDE.md"
   fi
