@@ -494,11 +494,8 @@ same transaction machinery `copy_file()`'s own upgrade path already used, so
 
 ### Safe `.git/hooks/` lifecycle in stealth mode
 
-> Implemented under issue #444 lane 444-G (PR #451), and hardened in v1.25.0
-> after `/rig-surface-review`'s first real run found the original fix only
-> actually applied under `--strategy upgrade` — not `merge`, the default for
-> every fresh install (see `docs/decisions.md` #20 and
-> `docs/lessons-learned.md` #15 in The Rig's own repo).
+> Also implemented under issue #444 lane 444-G, in PR #451 (open, CI pending
+> as of this writing).
 
 Stealth-mode `.git/hooks/` writes previously bypassed the manifest and
 backup system entirely (a plain `cp` over whatever was already there). They
@@ -506,12 +503,12 @@ are now manifest-tracked and customization-aware, using the same
 missing/unmodified/customized states as every other Rig-owned artifact: a
 hook with no manifest entry, a hash mismatch against its manifest entry, or a
 symlink destination is treated as customized or foreign, never silently
-overwritten — under every install strategy, not only `upgrade`. In ordinary
-interactive/non-interactive (non-agent) runs the hook is still always
-installed, but a customized one is backed up first. In `agent-upgrade` mode
-(`AGENT_MODE=apply`), a customized hook is never overwritten — it is refused
-and reported in `conflicts[]` via the existing `skipped-customized`
-classification, exactly like any other customized artifact.
+overwritten. In ordinary interactive/non-interactive (non-agent) runs the
+hook is still always installed, but a customized one is backed up first. In
+`agent-upgrade` mode (`AGENT_MODE=apply`), a customized hook is never
+overwritten — it is refused and reported in `conflicts[]` via the existing
+`skipped-customized` classification, exactly like any other customized
+artifact.
 
 ### Post-upgrade verification: `bin/rig doctor` gates
 
