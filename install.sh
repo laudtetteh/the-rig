@@ -3486,18 +3486,27 @@ bold "── Checking dependencies ──"
 blank
 
 GITLEAKS_OK=false
-if command -v gitleaks >/dev/null 2>&1; then
-  GITLEAKS_OK=true
-elif [[ -x "/usr/local/bin/gitleaks" || -x "/opt/homebrew/bin/gitleaks" ]]; then
-  GITLEAKS_OK=true
+if [[ ",${_RIG_TEST_MISSING_COMMANDS:-}," != *",gitleaks,"* ]]; then
+  if command -v gitleaks >/dev/null 2>&1; then
+    GITLEAKS_OK=true
+  elif [[ -x "/usr/local/bin/gitleaks" || -x "/opt/homebrew/bin/gitleaks" ]]; then
+    GITLEAKS_OK=true
+  fi
 fi
 
 if [[ "$GITLEAKS_OK" == true ]]; then
   success "gitleaks is installed — secret scanning is active"
 else
   warn "gitleaks is NOT installed — secret scanning will be skipped on commits"
-  echo "  Install it: brew install gitleaks"
-  echo "  Docs: https://github.com/gitleaks/gitleaks"
+  # Retro-audit finding, PR #446 follow-up: these two lines were plain
+  # echo, not routed through the warn()/blank() AGENT_MODE-gating
+  # convention above -- the only leak of its kind still reachable when
+  # gitleaks isn't on PATH, breaking agent-plan/agent-upgrade's "exactly
+  # one JSON document on stdout" contract in exactly that environment.
+  if [[ -z "$AGENT_MODE" ]]; then
+    echo "  Install it: brew install gitleaks"
+    echo "  Docs: https://github.com/gitleaks/gitleaks"
+  fi
 fi
 
 # ── IN-PLACE CLEANUP ─────────────────────────────────────────────────────────

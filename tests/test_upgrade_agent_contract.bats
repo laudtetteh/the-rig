@@ -137,6 +137,38 @@ print($1)
   [[ "$output" == \{* ]]
 }
 
+@test "agent-plan stdout stays exactly one JSON document when gitleaks is missing (retro-audit finding, PR #446 follow-up)" {
+  # The previous test proved the render-preflight.py narrative summary no
+  # longer leaks ahead of the JSON. It missed a second, unrelated leak in
+  # the same file: the GITLEAKS CHECK block's remediation lines ("Install
+  # it: ...", "Docs: ...") were plain echo, never routed through the
+  # warn()/blank() AGENT_MODE-gating convention the rest of that block
+  # already uses. This is invisible on any machine that happens to have
+  # gitleaks installed (including wherever the previous test normally
+  # runs), which is exactly how it shipped undetected and then broke CI,
+  # where gitleaks isn't installed. _RIG_TEST_MISSING_COMMANDS forces the
+  # check to behave as if gitleaks is absent regardless of the actual
+  # host, so this test is portable and doesn't depend on the machine's
+  # actual gitleaks state.
+  run env _RIG_TEST_MISSING_COMMANDS=gitleaks bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" --project-name "TestProject" --tracking repo \
+    --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  run env _RIG_TEST_MISSING_COMMANDS=gitleaks bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" --project-name "TestProject" --tracking repo \
+    --strategy agent-plan
+  [ "$status" -eq 0 ]
+
+  local nonblank_lines
+  nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
+  [ "$nonblank_lines" -eq 1 ]
+  [[ "$output" != *"Install it:"* ]]
+  [[ "$output" != *"Docs: https://github.com/gitleaks"* ]]
+  [[ "$output" == \{* ]]
+}
+
 @test "agent-plan on a target with a customized file emits refused with populated conflicts and exits 3" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
