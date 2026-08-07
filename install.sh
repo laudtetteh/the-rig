@@ -1610,7 +1610,7 @@ preflight_snapshot_project() {
     local keep=4 count="${#existing[@]}" i
     if (( count > keep )); then
       for (( i = 0; i < count - keep; i++ )); do
-        rm -rf "${existing[$i]}"
+        rm -rf "${existing[$i]}" || { error "Cannot prune old pre-flight snapshot: ${existing[$i]}"; exit 1; }
       done
     fi
   fi
@@ -1633,7 +1633,7 @@ preflight_snapshot_project() {
     src="${base}/${rel}"
     [[ -e "$src" || -L "$src" ]] || continue
     dst="${snap_dir}/${rel}"
-    mkdir -p "$(dirname "$dst")"
+    mkdir -p "$(dirname "$dst")" || { error "Cannot create pre-flight snapshot directory: $(dirname "$dst")"; exit 1; }
     cp -R "$src" "$dst" 2>/dev/null || { error "Pre-flight snapshot failed copying $src"; exit 1; }
   done
 
@@ -1648,7 +1648,7 @@ preflight_snapshot_project() {
   # re-embedding the separately-accumulating, retention-less per-file
   # backup/transaction history on every run.
   if [[ ( "$RIG_TRACKING" == "stealth" || "$RIG_TRACKING" == "external" ) && -n "$EXTERNAL_RIG_DIR" && -d "$EXTERNAL_RIG_DIR" ]]; then
-    mkdir -p "${snap_dir}/.rig"
+    mkdir -p "${snap_dir}/.rig" || { error "Cannot create pre-flight snapshot directory: ${snap_dir}/.rig"; exit 1; }
     local entry name
     while IFS= read -r -d '' entry; do
       name="$(basename "$entry")"
@@ -1659,6 +1659,9 @@ preflight_snapshot_project() {
     done < <(find "$EXTERNAL_RIG_DIR" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
   fi
 
+  # Deliberately left for a future consumer (issue #473's post-upgrade
+  # doctor validation is expected to diff this snapshot against
+  # post-upgrade state) -- not read anywhere else in this change.
   PREFLIGHT_SNAPSHOT_DIR="$snap_dir"
   info "Pre-flight snapshot: $snap_dir"
 }
