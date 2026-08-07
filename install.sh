@@ -1651,7 +1651,7 @@ preflight_snapshot_project() {
   local -a rel_paths=(
     "CLAUDE.md" "PROJECT_BRIEF.md" ".claude" ".agents" ".codex" ".mcp.json"
     ".playwright-mcp" ".github" ".gitleaks.toml" "docs/features/README.md"
-    ".husky" ".rigpath" "bin/rig"
+    ".husky" ".rigpath" "bin/rig" ".git/hooks"
   )
   # Tracked .rig/ lives at $base/.rig for repo/exclude tracking, so it's just
   # another base-relative path. external/stealth tracking is handled below —

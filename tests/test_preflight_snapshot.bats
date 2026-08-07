@@ -38,6 +38,42 @@ teardown() { rm -rf "$TEMP_DIR"; }
   [ -d "$snap_dir/.claude" ]
   [ -d "$snap_dir/.rig" ]
   [ -f "$snap_dir/.rig/VERSION" ]
+  # /rig-surface-review finding on PR #480: .git/hooks/ is documented
+  # (install.sh's own footprint comment) as part of what Rig manages, and
+  # is exactly the path lesson #15's original bug (a symlinked git hook
+  # silently overwritten) hit -- without it in the snapshot, issue #473's
+  # symlink-replaced doctor check would have no baseline to catch a
+  # regression there.
+  [ -d "$snap_dir/.git/hooks" ]
+  [ -f "$snap_dir/.git/hooks/pre-commit.sample" ]
+}
+
+@test "pre-flight snapshot captures .git/hooks/, closing the gap that would leave issue #473's symlink check blind at the exact path lesson #15's bug hit" {
+  # Lesson #15's original bug was specifically in stealth mode: repo/local
+  # tracking installs git hooks via .husky/, never writing real (non
+  # ".sample") files under .git/hooks/ at all -- only stealth mode's
+  # _stealth_install_git_hook() does that, so stealth is the tracking mode
+  # that must be tested here to match the actual historical bug shape.
+  local rig_ext="$TEMP_DIR/external-rig"
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$rig_ext" --strategy merge
+  [ "$status" -eq 0 ]
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$rig_ext" --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local snap_dir
+  snap_dir="$(find "$rig_ext/preflight-snapshots" -mindepth 1 -maxdepth 1 -type d)"
+  [ -f "$snap_dir/.git/hooks/pre-commit" ]
+
+  # Simulate the exact lesson #15 signature at this specific path: the
+  # snapshot shows a symlink, current state shows a regular file.
+  rm -f "$snap_dir/.git/hooks/pre-commit"
+  ln -s /etc/hosts "$snap_dir/.git/hooks/pre-commit"
+  [ -L "$snap_dir/.git/hooks/pre-commit" ]
+  [ -f "$TEST_PROJECT/.git/hooks/pre-commit" ]
+  [ ! -L "$TEST_PROJECT/.git/hooks/pre-commit" ]
 }
 
 @test "pre-flight snapshot in external/stealth tracking lands under EXTERNAL_RIG_DIR and includes the external .rig/ contents" {
