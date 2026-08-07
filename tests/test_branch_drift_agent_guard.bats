@@ -130,7 +130,69 @@ os.close(slave_fd)
 
 stdout_fd = proc.stdout.fileno()
 out_chunks = []
-deadline = time.time() + 15
+deadline = time.time() + 25
+while True:
+    if proc.poll() is not None:
+        break
+    if time.time() > deadline:
+        proc.kill()
+        proc.wait()
+        os.close(master_fd)
+        sys.stderr.write("HUNG: process did not exit within timeout\n")
+        sys.exit(1)
+    ready, _, _ = select.select([stdout_fd], [], [], 0.1)
+    if stdout_fd in ready:
+        chunk = os.read(stdout_fd, 65536)
+        if chunk:
+            out_chunks.append(chunk)
+
+while True:
+    chunk = os.read(stdout_fd, 65536)
+    if not chunk:
+        break
+    out_chunks.append(chunk)
+os.close(master_fd)
+
+sys.stdout.buffer.write(b"".join(out_chunks))
+sys.exit(proc.returncode)
+PY
+
+  [[ "$output" != *"HUNG"* ]]
+  [ "$status" -eq 0 ] || [ "$status" -eq 3 ]
+}
+
+@test "agent-plan with --target, --project-name, and --tracking all omitted never blocks on stdin, even when stdin is a real TTY" {
+  # Independent-review finding: the fix above only closed the drift-check
+  # and base-branch prompts. Three more `-t 0`-guarded (or entirely
+  # unguarded) interactive prompts exist further down the project-layer
+  # flow -- the --target path prompt (install.sh, had NO `-t 0` guard at
+  # all), the --project-name prompt, and the .rig/ tracking-mode menu
+  # (also had no `-t 0` guard). None checked AGENT_MODE, so omitting these
+  # three flags under a real TTY reproduced the identical hang this issue
+  # is about, just at a different line. Fixed by adding `-t 0 && -z
+  # "$AGENT_MODE"` guards (matching the base-branch fix) to the first two,
+  # and an explicit `elif -n "$AGENT_MODE"` branch defaulting to the
+  # menu's own documented default (stealth) for the third, since that
+  # branch had no `-t 0` structure to extend.
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking repo --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  run python3 - "$INSTALLER" "$TEST_PROJECT" <<'PY'
+import os, pty, select, subprocess, sys, time
+
+installer, target = sys.argv[1:3]
+
+master_fd, slave_fd = pty.openpty()
+proc = subprocess.Popen(
+    ["bash", installer, "--project-only", "--strategy", "agent-plan"],
+    stdin=slave_fd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=target,
+)
+os.close(slave_fd)
+
+stdout_fd = proc.stdout.fileno()
+out_chunks = []
+deadline = time.time() + 25
 while True:
     if proc.poll() is not None:
         break

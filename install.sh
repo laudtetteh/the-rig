@@ -2548,9 +2548,19 @@ if [[ "$DO_PROJECT" == true ]]; then
     TARGET="$_FLAG_TARGET"
   else
     DEFAULT_TARGET="$(pwd)"
-    ask "Target project directory?"
-    read -r -p "    Path [${DEFAULT_TARGET}]: " TARGET_INPUT || true
-    TARGET="${TARGET_INPUT:-$DEFAULT_TARGET}"
+    # Independent-review finding on issue #476: this prompt had no `-t 0`
+    # guard at all (unlike every sibling prompt below it), so it read
+    # unconditionally whenever --target was omitted -- reachable by an
+    # agent-plan/agent-upgrade invocation with a real TTY attached and no
+    # --target flag, hanging exactly like the drift check and base-branch
+    # prompt did before their fixes.
+    if [[ -t 0 && -z "$AGENT_MODE" ]]; then
+      ask "Target project directory?"
+      read -r -p "    Path [${DEFAULT_TARGET}]: " TARGET_INPUT || true
+      TARGET="${TARGET_INPUT:-$DEFAULT_TARGET}"
+    else
+      TARGET="$DEFAULT_TARGET"
+    fi
   fi
 
   if [[ ! -d "$TARGET" ]]; then
@@ -2571,7 +2581,11 @@ if [[ "$DO_PROJECT" == true ]]; then
     PROJECT_NAME="$_FLAG_PROJECT_NAME"
   else
     DEFAULT_PROJECT_NAME="$(basename "$TARGET")"
-    if [[ -t 0 ]]; then
+    # Independent-review finding on issue #476: same class as the
+    # base-branch prompt fix above -- this `-t 0` check had no AGENT_MODE
+    # guard, so it blocked under a real TTY whenever --project-name was
+    # omitted, regardless of --strategy.
+    if [[ -t 0 && -z "$AGENT_MODE" ]]; then
       ask "Project name (used in CLAUDE.md)?"
       read -r -p "    Name [${DEFAULT_PROJECT_NAME}]: " PROJECT_NAME_INPUT
       PROJECT_NAME="${PROJECT_NAME_INPUT:-$DEFAULT_PROJECT_NAME}"
@@ -2694,6 +2708,15 @@ if [[ "$DO_PROJECT" == true ]]; then
       RIG_TRACKING="external"
     fi
     info "Detected .rigpath — using ${RIG_TRACKING} mode: $EXTERNAL_RIG_DIR"
+  elif [[ -n "$AGENT_MODE" ]]; then
+    # Independent-review finding on issue #476: this whole interactive
+    # tracking-mode menu had no `-t 0` guard at all -- it read
+    # unconditionally whenever none of --tracking/--rig-dir/.rigpath were
+    # present, reachable by an agent-plan/agent-upgrade invocation with a
+    # real TTY attached. Fall back to the menu's own documented default
+    # (stealth) instead of prompting, matching option 4 below exactly.
+    RIG_TRACKING="stealth"
+    EXTERNAL_RIG_DIR="${HOME}/.rig/projects/${PROJECT_NAME}"
   else
     echo "How should .rig/ be tracked in git?"
     blank
