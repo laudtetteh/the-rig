@@ -999,6 +999,48 @@ upgrade_set_executable_bits() {
   done < <(find -P "$directory" -maxdepth 1 -type f -name "$pattern" -print0)
 }
 
+# Shared no-follow safety check for any direct-writer mutation: only a
+# missing destination or an existing regular file is writable; anything
+# else (symlink, directory, other) is refused rather than silently
+# destroyed. Strategy-agnostic on purpose -- see upgrade_prepare_mutation()
+# below for the upgrade-only wrapper most callers actually want, and
+# _stealth_install_git_hook() for the one caller that needs this check
+# unconditionally, regardless of COLLISION_STRATEGY (retro-audit finding,
+# found by /rig-surface-review's first real end-to-end run on
+# chore/1.24.0-retro-audit itself: upgrade_prepare_mutation()'s own
+# upgrade-only guard, below, silently no-ops under every strategy except
+# "upgrade" -- including "merge", the default for every fresh install --
+# so the #451 symlink-refusal fix it was meant to deliver never actually
+# applied to a merge-strategy re-run with an existing customized/symlinked
+# hook. Proven via direct repro: a merge-strategy install onto a project
+# with .git/hooks/pre-commit symlinked outside the project silently
+# overwrote the symlink's target in place, printing "A backup will be
+# saved..." while creating zero backup.)
+guard_destination_before_write() {
+  local base="$1" destination="$2" rel="$3" state
+  state="$(upgrade_destination_state "$base" "$destination")"
+  case "$state" in
+    missing)
+      # Journal a first-ever creation the same way copy_file()/
+      # _copy_global_file_upgrade()'s own missing-destination branches
+      # already do, so an interrupted run rolls back to "absent" rather
+      # than leaving a half-written file with no recovery record.
+      ensure_upgrade_transaction "$base"
+      record_created "$base" "$destination"
+      return 0
+      ;;
+    regular-file)
+      ensure_upgrade_transaction "$base"
+      backup_file "$destination" "$base"
+      return 0
+      ;;
+    *)
+      record_upgrade_destination_conflict "$rel" "$state"
+      return 1
+      ;;
+  esac
+}
+
 # Guard upgrade-only mutations that happen after the manifest-aware copy path.
 # These operations must have the same no-follow semantics as copy_file(): only
 # a missing destination or an existing regular file is writable. A conflict is
@@ -1014,37 +1056,17 @@ upgrade_set_executable_bits() {
 # destination is now journaled and backed up here, once, before the caller
 # is allowed to mutate it — same transaction/journal machinery copy_file()
 # already uses, so recover_upgrade_transaction() restores it identically.
+#
+# Upgrade-only by design: these callers are semantically upgrade operations
+# (comparing against a prior install's manifest baseline), so it's correct
+# for this wrapper to no-op under every other strategy. Do NOT add a new
+# caller here that needs protection under every strategy -- call
+# guard_destination_before_write() directly instead, as
+# _stealth_install_git_hook() does.
 upgrade_prepare_mutation() {
-  local base="$1" destination="$2" rel="$3" state
+  local base="$1" destination="$2" rel="$3"
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
-  state="$(upgrade_destination_state "$base" "$destination")"
-  case "$state" in
-    missing)
-      # Journal a first-ever creation the same way copy_file()/
-      # _copy_global_file_upgrade()'s own missing-destination branches
-      # already do, so an interrupted run rolls back to "absent" rather
-      # than leaving a half-written file with no recovery record. Retro-
-      # audit finding on chore/1.24.0-retro-audit itself (found by the
-      # independent whole-branch review, before merge): routing
-      # _stealth_install_git_hook() through this function for its symlink-
-      # refusal fix (#451) exposed a pre-existing gap here -- this branch
-      # never journaled creation for ANY of its ~13 callers (.rigpath,
-      # .rig/VERSION, .codex/config.toml, CLAUDE.md substitution, etc.),
-      # not just the newly-routed git-hook writer.
-      ensure_upgrade_transaction "$base"
-      record_created "$base" "$destination"
-      return 0
-      ;;
-    regular-file)
-      ensure_upgrade_transaction "$base"
-      backup_file "$destination" "$base"
-      return 0
-      ;;
-    *)
-      record_upgrade_destination_conflict "$rel" "$state"
-      return 1
-      ;;
-  esac
+  guard_destination_before_write "$base" "$destination" "$rel"
 }
 
 upgrade_prepare_directory() {
@@ -2286,12 +2308,16 @@ _stealth_install_git_hook() {
   # whatever it points to, in place, with no recovery path, even if that
   # target lives outside the project entirely. A dangling symlink hit the
   # same gap and crashed the installer mid-transaction under set -e.
-  # upgrade_prepare_mutation() already backs up an existing regular file
-  # (matching this function's prior first branch), treats a missing
-  # destination as safe-to-create (matching the prior second branch), and
-  # refuses — rather than silently destroying something — on a symlink or
-  # any other unexpected destination state.
-  upgrade_prepare_mutation "$TARGET" "$hook_dest" "$rel" || return 0
+  #
+  # Calls guard_destination_before_write() directly, NOT the
+  # upgrade_prepare_mutation() wrapper -- that wrapper only runs under
+  # COLLISION_STRATEGY==upgrade, but this function installs hooks under
+  # every strategy (merge is the default for every fresh install). Retro-
+  # audit finding, found by /rig-surface-review's first real end-to-end
+  # run: calling the wrapper here made this whole check a silent no-op
+  # under merge/skip/overwrite/interactive, so the #451 symlink-refusal
+  # fix never actually applied outside an explicit --strategy upgrade run.
+  guard_destination_before_write "$TARGET" "$hook_dest" "$rel" || return 0
   # agent-plan: classification only, never write the hook file.
   [[ "$AGENT_DRY_RUN" == true ]] || cp "$hook_src" "$hook_dest"
   [[ "$AGENT_DRY_RUN" == true ]] || chmod +x "$hook_dest"

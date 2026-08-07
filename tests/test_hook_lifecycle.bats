@@ -132,6 +132,43 @@ tree_snapshot() {
   [[ "$(readlink "$TEST_PROJECT/.git/hooks/pre-commit")" == "$external_target" ]]
 }
 
+@test "a symlinked git hook is refused under --strategy merge too, not just upgrade (retro-audit finding, /rig-surface-review's first real run)" {
+  # The test above proves symlink refusal under --strategy upgrade (this
+  # file's install_stealth() helper hardcodes that strategy). It never
+  # covered --strategy merge -- the actual default for every fresh
+  # install -- and that gap hid a real regression: _stealth_install_git_
+  # hook() routed its refusal check through upgrade_prepare_mutation(),
+  # whose very first line is `[[ "$COLLISION_STRATEGY" == upgrade ]] ||
+  # return 0`. Under merge (or skip/overwrite/interactive), that guard
+  # silently no-ops the entire check -- no backup, no refusal -- and the
+  # unconditional `cp` below it ran anyway, following the symlink and
+  # overwriting whatever it pointed to, in place, even outside the
+  # project. Fixed by extracting the check into guard_destination_before_
+  # write() and calling that directly, unconditionally, instead of the
+  # upgrade-only wrapper.
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$RIG_EXT" \
+    --strategy merge
+  [ "$status" -eq 0 ]
+
+  local external_target="$TEMP_DIR/external-hook-target-merge.sh"
+  printf '#!/bin/sh\necho this-file-lives-outside-the-project\n' > "$external_target"
+  rm -f "$TEST_PROJECT/.git/hooks/pre-commit"
+  ln -s "$external_target" "$TEST_PROJECT/.git/hooks/pre-commit"
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$RIG_EXT" \
+    --strategy merge
+  [ "$status" -eq 0 ]
+
+  # The external file must survive completely untouched.
+  grep -q 'this-file-lives-outside-the-project' "$external_target"
+  # The symlink itself must still point at it (never replaced with a
+  # regular file copy of the Rig hook).
+  [ -L "$TEST_PROJECT/.git/hooks/pre-commit" ]
+  readlink "$TEST_PROJECT/.git/hooks/pre-commit" | grep -qF "$external_target"
+}
+
 @test "a dangling symlinked git hook is refused without crashing the installer (retro-audit finding, PR #451)" {
   install_stealth
   [ "$status" -eq 0 ]
