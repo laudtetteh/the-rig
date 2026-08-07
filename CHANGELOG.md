@@ -11,6 +11,103 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.25.0] — 2026-08-07
+
+v1.24.0 shipped destructive regressions because the work leading up to it
+was reviewed reactively — each fix checked only against the bug it claimed
+to close, never against the full surface of what the installer does. This
+release is a retroactive defensive audit of every PR merged since v1.23.0,
+plus two structural gaps found along the way: an unconditional
+backup-before-write invariant, and a new dev-only fresh-eyes review process
+(`/rig-surface-review`) that caught a live data-loss bug in its first real
+run.
+
+### Fixed
+
+- `bin/rig doctor`'s `manifest_mode_hash` and `stale_manifest_entries` gates
+  resolved every manifest path against the project root unconditionally,
+  false-failing on every stealth/external install — `.rig/`-prefixed
+  entries actually live at `RIG_DIR` (via `.rigpath`) in stealth mode, not
+  `root/.rig`. Added a `resolve_artifact(rel)` helper mirroring
+  `install.sh`'s own existing redirect logic. [#468]
+- Backup-before-overwrite had two live gaps of the same shape as the
+  historical bug described below: the `interactive` strategy's overwrite
+  confirmation never called `backup_file` at all, and the `merge`
+  strategy's settings.json path gated its backup call on a condition
+  (`$COLLISION_STRATEGY == upgrade`) that can never be true inside the
+  `merge)` branch, so it silently never fired. [#470]
+- `rig doctor`'s `manifest_mode_hash` no longer vacuously passes when the
+  manifest has entries but none are Rig-owned. [#450]
+- Global `CLAUDE.md`/`skills/*` manifest entries get correct `provider`
+  metadata instead of inheriting the layer's agent selection. [#448]
+- A symlinked git hook destination is refused, never silently destroys its
+  target — and unlike the original fix, this protection now applies under
+  every install strategy, not just `--strategy upgrade`. The default
+  `merge` strategy (every fresh install) was still silently vulnerable;
+  found by `/rig-surface-review`'s first real end-to-end run and confirmed
+  via direct reproduction against a live checkout. [#451]
+- `agent-plan` detects `.rigpath` conflicts instead of silently missing
+  them. [#460]
+- `agent-plan` no longer writes `.codex/config.toml` — a dry-run contract
+  violation. [#446]
+- `agent-plan`/`agent-upgrade` no longer leak narrative text — including
+  preflight banners and gitleaks-missing remediation text — before their
+  JSON output, restoring the documented "exactly one JSON document on
+  stdout" contract. [#446]
+- Stealth audit stops misclassifying a user's own file as a launcher leak.
+  [#449]
+- Frontmatter convergence merge no longer silently drops user comments on
+  every successful merge. [#452]
+- `upgrade_prepare_mutation()` journals first-ever file/hook creation, and
+  no backup transaction is ever silently orphaned across the global/project
+  layer boundary. [#470]
+
+### Added
+
+- New advisory `template_placeholder_content` doctor gate: flags when
+  `CLAUDE.md`/`PROJECT_BRIEF.md` still shows the raw template's
+  core-content placeholder. Deliberately worded as uncertain — it cannot
+  distinguish "never filled in" from "reset by a historical bug" from disk
+  state alone, especially on stealth installs where these files are
+  git-excluded and there's no diff to catch it. [#468]
+- `_upgrade_write()`: a single choke-point function that every collision-
+  path write now goes through, making backup-before-overwrite a structural
+  invariant instead of a per-branch responsibility. [#470]
+- `guard_destination_before_write()`: extracted the symlink-refusal/backup
+  logic into a strategy-agnostic helper, so a caller that needs this
+  protection under every strategy (not just `upgrade`) can use it directly
+  instead of the upgrade-only `upgrade_prepare_mutation()` wrapper. [#451]
+
+### Documentation
+
+- `docs/lessons-learned.md` #14: a months-old, already-fixed installer bug
+  (v1.10.0 → v1.10.1) had silently reset `CLAUDE.md`/`PROJECT_BRIEF.md` to
+  raw template content on several real projects, undetected for months on
+  stealth installs where git shows no diff. Recovered on all affected
+  projects; incident and recovery method documented.
+- `docs/decisions.md` #19: backup-before-write as a structural invariant,
+  not a per-branch responsibility.
+
+### Known gaps (tracked, not blocking)
+
+The same reachability class that hid the git-hook symlink bug above (a
+narrow flag/strategy combination that no existing test exercised) surfaced
+in two more places during review. Neither is introduced by this release —
+both are pre-existing, narrower in reach, and tracked for a fast follow:
+
+- `agent-plan`/`agent-upgrade` can still leak CHANGELOG "BREAKING" bullets
+  onto stdout when upgrading a project whose installed version has an
+  intervening breaking entry. [#475]
+- The installer's own branch-drift check runs before `AGENT_MODE` is set,
+  so it can print unguarded output — or, on a TTY, block on an interactive
+  read — during an agent-driven run. [#476]
+- The notification-helper and Codex-config writes have the same
+  strategy-only guard gap the git-hook fix above closes, reachable via
+  `--notifications` or `--project-agent codex` under the default `merge`
+  strategy. [#477]
+
+---
+
 ## [1.24.0] — 2026-08-05
 
 ### Added
