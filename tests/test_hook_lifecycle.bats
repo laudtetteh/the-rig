@@ -73,11 +73,19 @@ tree_snapshot() {
   # .in-progress), and the finalized journal must record at least one hook
   # as "created" -- proving this run actually journaled recovery state for
   # its first-ever hook writes, not just silently created them.
+  #
+  # A single project-only install opens more than one backup transaction
+  # (each distinct `base` path passed to ensure_upgrade_transaction() gets
+  # its own timestamped .rig-backup/<ts>_N dir and .journal), and the
+  # git-hook "created" lines land in whichever one covers .git/hooks/. Search
+  # every journal, not just the first one `find` happens to enumerate --
+  # that enumeration order isn't guaranteed to put the hook-owning journal
+  # first, which made this test flaky when it grabbed only `head -1`.
   [ ! -e "$TEST_PROJECT/.rig-backup/.in-progress" ]
-  local journal
-  journal="$(find "$TEST_PROJECT/.rig-backup" -name .journal -type f | head -1)"
-  [ -n "$journal" ]
-  /usr/bin/grep -qE '^created[[:space:]]+\.git/hooks/pre-commit$' "$journal"
+  local journals
+  journals="$(find "$TEST_PROJECT/.rig-backup" -name .journal -type f)"
+  [ -n "$journals" ]
+  echo "$journals" | xargs /usr/bin/grep -qE '^created[[:space:]]+\.git/hooks/pre-commit$'
 }
 
 @test "ordinary upgrade backs up a customized git hook before overwriting it" {
