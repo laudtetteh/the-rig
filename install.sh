@@ -519,9 +519,28 @@ INSTALLER_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "unknown")"
 CAPABILITY_MANIFEST="${_RIG_CAPABILITY_MANIFEST:-$SCRIPT_DIR/installer/capabilities.v1.json}"
 _EARLY_PREFLIGHT=false
 _EARLY_PREFLIGHT_JSON=false
-for _early_arg in "$@"; do
-  [[ "$_early_arg" == --preflight ]] && _EARLY_PREFLIGHT=true
-  [[ "$_early_arg" == --json ]] && _EARLY_PREFLIGHT_JSON=true
+# issue #476: the real AGENT_MODE assignment happens much later, inside the
+# --strategy case statement below (it needs TARGET/COLLISION_STRATEGY
+# resolution machinery that isn't set up yet this early). The drift check
+# right below this loop runs before that point, so it can't just read
+# AGENT_MODE -- it needs its own early, standalone lookahead over $@,
+# exactly like the --preflight/--json scan above, to know whether
+# agent-plan/agent-upgrade was requested before deciding whether it's safe
+# to print unguarded narration or block on an interactive prompt.
+_EARLY_AGENT_MODE=false
+_early_args=("$@")
+for ((_early_i = 0; _early_i < ${#_early_args[@]}; _early_i++)); do
+  case "${_early_args[$_early_i]}" in
+    --preflight) _EARLY_PREFLIGHT=true ;;
+    --json) _EARLY_PREFLIGHT_JSON=true ;;
+    --strategy)
+      if [[ $((_early_i + 1)) -lt ${#_early_args[@]} ]]; then
+        case "${_early_args[$((_early_i + 1))]}" in
+          agent-plan|agent-upgrade) _EARLY_AGENT_MODE=true ;;
+        esac
+      fi
+      ;;
+  esac
 done
 
 # ── Installer branch drift check ─────────────────────────────────────────────
@@ -529,8 +548,19 @@ done
 # remote tracking branch. A stale installer installs stale templates.
 # Runs silently if there's no remote, no network, or no git.
 # Tests can override _RIG_DRIFT_DIR to point to a mock repo.
+#
+# Never for agent-plan/agent-upgrade (issue #476): this block used to be
+# gated only on _EARLY_PREFLIGHT, and every warn()/echo call inside it is
+# either unconditional or gated on the real AGENT_MODE variable, which
+# isn't assigned yet at this point in the script regardless of --strategy.
+# That meant an agent-plan/agent-upgrade run whose installer checkout was
+# behind its remote always leaked this block's narration onto stdout ahead
+# of the documented single JSON document -- and, far worse, if stdin was
+# also a TTY (not uncommon for CI runners or interactive agent sessions),
+# fell into the interactive `read` a few lines down and hung indefinitely
+# waiting for input that would never come.
 _DRIFT_DIR="${_RIG_DRIFT_DIR:-$SCRIPT_DIR}"
-if [[ "$_EARLY_PREFLIGHT" != true ]] && git -C "$_DRIFT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+if [[ "$_EARLY_PREFLIGHT" != true && "$_EARLY_AGENT_MODE" != true ]] && git -C "$_DRIFT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$_DRIFT_DIR" fetch --quiet 2>/dev/null || true
   _TRACKING=$(git -C "$_DRIFT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
   if [[ -n "$_TRACKING" ]]; then
@@ -2575,7 +2605,15 @@ if [[ "$DO_PROJECT" == true ]]; then
     fi
     _DEFAULT_BASE="${_DETECTED_BASE:-main}"
     # Only prompt when stdin is a TTY (skip in non-interactive/CI contexts).
-    if [[ -t 0 ]]; then
+    # Also never for agent-plan/agent-upgrade (found live while testing
+    # issue #476's fix): a real TTY attached to an agent invocation reached
+    # this exact same "-t 0" pattern and blocked on this read too, just
+    # like the branch-drift check did before that fix -- AGENT_MODE is
+    # already reliably assigned by this point in execution (the --strategy
+    # case statement runs during flag parsing, well before this point), so
+    # this fix is a straightforward extra guard rather than needing its own
+    # early lookahead.
+    if [[ -t 0 && -z "$AGENT_MODE" ]]; then
       ask "What is the base branch for this repo?"
       read -r -p "    Branch [${_DEFAULT_BASE}]: " _BASE_INPUT
       BASE_BRANCH="${_BASE_INPUT:-$_DEFAULT_BASE}"
