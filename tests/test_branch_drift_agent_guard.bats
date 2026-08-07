@@ -174,6 +174,16 @@ PY
   # and an explicit `elif -n "$AGENT_MODE"` branch defaulting to the
   # menu's own documented default (stealth) for the third, since that
   # branch had no `-t 0` structure to extend.
+  #
+  # Note on why this baseline install exercises the new AGENT_MODE branch
+  # rather than the earlier repo/local auto-detect (install.sh's "Upgrade:
+  # auto-detect existing tracking mode" block): that auto-detect only
+  # fires when `git ls-files -- ".rig/"` finds tracked files, and this
+  # setup deliberately never runs `git add`/`git commit` after installing
+  # -- so .rig/ is present on disk but untracked in git, auto-detect finds
+  # nothing, and execution reaches the new AGENT_MODE branch as intended.
+  # If a future change makes this baseline commit .rig/, this test would
+  # silently stop covering that branch.
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking repo --strategy upgrade
   [ "$status" -eq 0 ]
