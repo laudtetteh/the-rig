@@ -1574,6 +1574,95 @@ finish_upgrade_transaction() {
   UPGRADE_TRANSACTION_BASE=""
 }
 
+# ── PRE-FLIGHT SNAPSHOT (issue #472) ──────────────────────────────────────────
+# Independent of and prior to the per-file backup_file()/_upgrade_write()
+# mechanism above, which only ever backs up a file the copy loop actually
+# decides to touch: takes one full recursive "before" snapshot of the target
+# project's entire Rig/Claude/Codex footprint into its own timestamped
+# location, so a full-tree diff is possible regardless of what the copy loop
+# touches. Runs once per real (non-dry-run) upgrade-family invocation, before
+# any project-layer write begins. agent-plan (AGENT_DRY_RUN=true) mutates
+# nothing, so there is nothing to protect and no snapshot is taken.
+PREFLIGHT_SNAPSHOT_DIR=""
+preflight_snapshot_project() {
+  local base="$1"
+  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  [[ "$AGENT_DRY_RUN" == true ]] && return 0
+
+  local snap_root
+  if [[ ( "$RIG_TRACKING" == "stealth" || "$RIG_TRACKING" == "external" ) && -n "$EXTERNAL_RIG_DIR" ]]; then
+    snap_root="${EXTERNAL_RIG_DIR}/preflight-snapshots"
+  else
+    snap_root="${base}/.rig-backup/preflight-snapshots"
+  fi
+
+  # Retention: keep the 5 most recent snapshots, pruning the oldest before
+  # adding a new one. Scoped only to preflight-snapshots/ — independent of
+  # the separately-accumulating per-file .rig-backup/<ts>_$$ dirs above,
+  # which have no retention policy of their own (out of scope for #472).
+  # Snapshot dirs are always our own "<timestamp>_<pid>" names (no spaces,
+  # no newlines), so plain lexicographic `sort` on one-per-line output is
+  # safe here without needing NUL-delimited find/sort (sort -z is GNU-only
+  # and unavailable on macOS's BSD sort).
+  if [[ -d "$snap_root" ]]; then
+    local -a existing=()
+    while IFS= read -r entry; do existing+=("$entry"); done < <(find "$snap_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+    local keep=4 count="${#existing[@]}" i
+    if (( count > keep )); then
+      for (( i = 0; i < count - keep; i++ )); do
+        rm -rf "${existing[$i]}"
+      done
+    fi
+  fi
+
+  local snap_dir="${snap_root}/${BACKUP_TS}_$$"
+  mkdir -p "$snap_dir" || { error "Cannot create pre-flight snapshot directory: $snap_dir"; exit 1; }
+
+  local -a rel_paths=(
+    "CLAUDE.md" "PROJECT_BRIEF.md" ".claude" ".agents" ".codex" ".mcp.json"
+    ".playwright-mcp" ".github" ".gitleaks.toml" "docs/features/README.md"
+    ".husky" ".rigpath" "bin/rig"
+  )
+  # Tracked .rig/ lives at $base/.rig for repo/exclude tracking, so it's just
+  # another base-relative path. external/stealth tracking is handled below —
+  # $EXTERNAL_RIG_DIR lives outside $base entirely.
+  [[ "$RIG_TRACKING" == "repo" || "$RIG_TRACKING" == "exclude" ]] && rel_paths+=(".rig")
+
+  local rel src dst
+  for rel in "${rel_paths[@]}"; do
+    src="${base}/${rel}"
+    [[ -e "$src" || -L "$src" ]] || continue
+    dst="${snap_dir}/${rel}"
+    mkdir -p "$(dirname "$dst")"
+    cp -R "$src" "$dst" 2>/dev/null || { error "Pre-flight snapshot failed copying $src"; exit 1; }
+  done
+
+  # External/stealth .rig/ lives outside $base entirely, at $EXTERNAL_RIG_DIR
+  # — which, in this mode, is also this snapshot's own ancestor directory
+  # (preflight-snapshots/, backups/, and .rig-backup/ all live inside it;
+  # tracked-mode .rig/ never includes .rig-backup/ in the first place, since
+  # that lives as a sibling of $base/.rig, not inside it — excluding it here
+  # too keeps both tracking modes' snapshot contents consistent). Copy real
+  # contents in under snap_dir/.rig, skipping all three so the snapshot never
+  # recurses into the snapshot/backup mechanism itself or balloons in size by
+  # re-embedding the separately-accumulating, retention-less per-file
+  # backup/transaction history on every run.
+  if [[ ( "$RIG_TRACKING" == "stealth" || "$RIG_TRACKING" == "external" ) && -n "$EXTERNAL_RIG_DIR" && -d "$EXTERNAL_RIG_DIR" ]]; then
+    mkdir -p "${snap_dir}/.rig"
+    local entry name
+    while IFS= read -r -d '' entry; do
+      name="$(basename "$entry")"
+      case "$name" in
+        backups|preflight-snapshots|.rig-backup) continue ;;
+      esac
+      cp -R "$entry" "${snap_dir}/.rig/${name}" 2>/dev/null || { error "Pre-flight snapshot failed copying $entry"; exit 1; }
+    done < <(find "$EXTERNAL_RIG_DIR" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+  fi
+
+  PREFLIGHT_SNAPSHOT_DIR="$snap_dir"
+  info "Pre-flight snapshot: $snap_dir"
+}
+
 # ── BREAKING CHANGE CHECK ─────────────────────────────────────────────────────
 # Print any "### Changed — BREAKING" bullets from CHANGELOG sections that are
 # newer than $current_version, then prompt the user to confirm before continuing.
@@ -2739,6 +2828,10 @@ if [[ "$DO_PROJECT" == true ]]; then
       fi
     fi
     if [[ "$RECOVER_ONLY" == true ]]; then exit 0; fi
+    # Take the whole-tree "known good before" snapshot only after any
+    # interrupted prior transaction has been recovered, so it reflects
+    # consistent state — never a mid-rollback one.
+    preflight_snapshot_project "$TARGET"
   fi
   _PROJECT_STATE_FUTURE=false
   PREVIOUS_PROJECT_AGENT=""
