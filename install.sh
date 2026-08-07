@@ -1604,9 +1604,18 @@ _show_breaking_changes() {
   blank
   warn "Breaking changes since v${current_version} — review before upgrading:"
   blank
-  while IFS= read -r line; do
-    echo "  $line"
-  done <<< "$breaking_lines"
+  # warn()/blank() above already self-gate on AGENT_MODE, but this raw echo
+  # loop printing each CHANGELOG bullet did not (issue #475) -- reachable by
+  # any agent-plan/agent-upgrade run against a project whose installed
+  # version has a BREAKING changelog entry ahead of it, violating the
+  # documented "exactly one JSON document on stdout" contract those modes
+  # rely on. The Rig's own CHANGELOG.md has a real BREAKING section under
+  # [1.18.0], so this was concretely reachable, not just theoretical.
+  if [[ -z "$AGENT_MODE" ]]; then
+    while IFS= read -r line; do
+      echo "  $line"
+    done <<< "$breaking_lines"
+  fi
   blank
   if ! confirm "Continue upgrade with the above breaking changes?" "y"; then
     info "Upgrade cancelled. No files were modified."

@@ -364,3 +364,72 @@ print($1)
     --project-name "TestProject" --tracking repo --strategy bogus-value < /dev/null
   [[ "$output" != *'"schema_version"'* ]]
 }
+
+# ── Issue #475: CHANGELOG BREAKING-bullet stdout leak ─────────────────────────
+#
+# _show_breaking_changes() prints each CHANGELOG "BREAKING" bullet via a raw,
+# unguarded `echo` inside a while-loop -- unlike every other narrative helper
+# in this file (warn/info/blank), which self-gate on AGENT_MODE. It runs
+# unconditionally whenever COLLISION_STRATEGY==upgrade, which both
+# agent-plan and agent-upgrade set internally, so any run against a target
+# whose installed version has a BREAKING changelog entry ahead of it leaked
+# these bullet lines onto stdout ahead of the documented single JSON
+# document. This repo's own CHANGELOG.md has a real BREAKING section under
+# [1.18.0], so this was concretely reachable, not just theoretical.
+
+write_breaking_changelog_fixture() {
+  cat > "$TEMP_DIR/fixture-changelog.md" <<'EOF'
+# Changelog
+
+## [1.18.0]
+
+### Changed — BREAKING
+
+- Some breaking change bullet one
+- Some breaking change bullet two
+
+## [1.17.0]
+
+### Added
+
+- something
+EOF
+}
+
+@test "agent-plan stdout stays exactly one JSON document when the target has a BREAKING changelog entry ahead of its installed version (issue #475)" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+  write_breaking_changelog_fixture
+  printf '1.17.0\n' > "$TEST_PROJECT/.rig/VERSION"
+
+  run env _RIG_TEST_CHANGELOG="$TEMP_DIR/fixture-changelog.md" \
+    bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name "TestProject" --tracking repo --strategy agent-plan
+
+  local nonblank_lines
+  nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
+  [ "$nonblank_lines" -eq 1 ]
+  [[ "$output" != *"Some breaking change bullet"* ]]
+  [[ "$output" == \{* ]]
+  [ "$(json_field "d['schema_version']")" = "1" ]
+}
+
+@test "agent-upgrade stdout stays exactly one JSON document when the target has a BREAKING changelog entry ahead of its installed version (issue #475)" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+  write_breaking_changelog_fixture
+  printf '1.17.0\n' > "$TEST_PROJECT/.rig/VERSION"
+
+  run env _RIG_TEST_CHANGELOG="$TEMP_DIR/fixture-changelog.md" \
+    bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name "TestProject" --tracking repo --strategy agent-upgrade
+
+  local nonblank_lines
+  nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
+  [ "$nonblank_lines" -eq 1 ]
+  [[ "$output" != *"Some breaking change bullet"* ]]
+  [[ "$output" == \{* ]]
+  [ "$(json_field "d['schema_version']")" = "1" ]
+}
