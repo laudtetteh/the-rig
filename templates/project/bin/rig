@@ -837,6 +837,67 @@ check("idempotence", True,
       "not verified live (would require mutating the live project tree from a read-only command); "
       "run: bats tests/test_install_idempotence.bats")
 
+# ── Post-upgrade validation against known historical bug patterns (issue #473) ──
+# Diffs the most recent #472 pre-flight snapshot against current state for a
+# small, deliberately narrow set of patterns that are genuinely expressible as
+# a before/after file diff. Embedded here rather than a separate file under
+# installer/, because bin/rig is a self-contained script copied into every
+# target project -- it has no access back to the installer's own source repo
+# once deployed. Most of docs/lessons-learned.md's entries are process/
+# environment lessons (worktree confusion, hook mistiming, migration typos)
+# with no file-content signature to check; only two meet that bar today.
+# Designed to grow as more diffable patterns are identified.
+def _latest_preflight_snapshot():
+    if rigpath.exists():
+        snap_root = rig / "preflight-snapshots"
+    else:
+        snap_root = root / ".rig-backup" / "preflight-snapshots"
+    if not snap_root.is_dir():
+        return None
+    candidates = sorted((p for p in snap_root.iterdir() if p.is_dir()), key=lambda p: p.name)
+    return candidates[-1] if candidates else None
+
+snapshot_dir = _latest_preflight_snapshot()
+if snapshot_dir is None:
+    check("upgrade_pattern_blanked_file", True, "no pre-flight snapshot found (issue #472) -- nothing to compare yet")
+    check("upgrade_pattern_symlink_replaced", True, "no pre-flight snapshot found (issue #472) -- nothing to compare yet")
+else:
+    # Lesson #14: a file that had already been personalized (its
+    # "[Project Name]" placeholder substituted at install time) reverted to
+    # raw, unsubstituted template content after an upgrade.
+    blanked = []
+    for rel_name in ("CLAUDE.md", "PROJECT_BRIEF.md"):
+        before_path = snapshot_dir / rel_name
+        after_path = root / rel_name
+        if not before_path.is_file() or not after_path.is_file():
+            continue
+        if "[Project Name]" not in read(before_path) and "[Project Name]" in read(after_path):
+            blanked.append(rel_name)
+    check("upgrade_pattern_blanked_file", not blanked,
+          "none detected" if not blanked else
+          "reverted to raw template (lesson #14): " + ", ".join(blanked))
+
+    # Lesson #15: a path that was a symlink before the upgrade now exists as
+    # a regular file -- the exact signature of a symlink-refusal guard being
+    # bypassed and its target silently overwritten in place.
+    replaced = []
+    for before_path in snapshot_dir.rglob("*"):
+        if not before_path.is_symlink():
+            continue
+        rel = before_path.relative_to(snapshot_dir)
+        # External/stealth snapshots nest the external .rig/ dir's own
+        # contents under a top-level ".rig" name (see #472) -- map those
+        # back to the real external location, not $TARGET/.rig.
+        if rigpath.exists() and rel.parts and rel.parts[0] == ".rig":
+            after_path = rig.joinpath(*rel.parts[1:])
+        else:
+            after_path = root / rel
+        if after_path.is_file() and not after_path.is_symlink():
+            replaced.append(str(rel))
+    check("upgrade_pattern_symlink_replaced", not replaced,
+          "none detected" if not replaced else
+          "symlink silently replaced by a regular file (lesson #15): " + ", ".join(replaced))
+
 result = {"ok": all(item["ok"] for item in checks), "command": "doctor", "root": str(root), "rig_dir": str(rig), "checks": checks}
 if "--json" in sys.argv[1:]:
     print(json.dumps(result, separators=(",", ":")))
