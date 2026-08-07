@@ -351,3 +351,49 @@ This is exactly the kind of gap "add tests, don't just trust the diff"
 review is supposed to catch — worth remembering as the standing reason PR
 review can't be skipped even when the diff already includes new tests for
 the scope it claims to cover.
+
+---
+
+## 20. `/rig-surface-review`: a dev-only holistic pre-merge review, distinct from per-fix review
+
+**Decided:** Added a new Rig-only, dev-internal command (`.claude/commands/
+rig-surface-review.md`, mirrored to `.agents/skills/rig-surface-review/` —
+never shipped to `templates/`) that dispatches one fresh-eyes review agent
+per merge/release, explicitly briefed to ignore all prior findings and walk
+the whole diff against the full combinatorial surface of what `install.sh`
+actually does (layer × agent selection × tracking mode × strategy ×
+optional components × install lifecycle stage), rather than chasing a
+specific bug. Supports three scope modes: a specific PR/branch vs. its own
+base, the accumulated state of `main` since the last release tag
+(`--since-last-release`, the default with no argument), or a specific
+PR/branch diffed from the last release tag instead of its own base (so a
+pending parent PR can be checked against everything that will actually ship
+alongside it, not just its own isolated diff).
+
+**Rejected:** Relying solely on per-fix/per-PR review (the pre-1.24.0 norm)
+plus one whole-branch review at the end. Both are still done and both still
+matter, but neither is structurally capable of the thing this command does:
+a pass with zero prior bug to anchor on, reasoning fresh about interaction
+effects across flag combinations nobody was specifically thinking about.
+
+**Rationale:** v1.24.0 shipped destructive regressions specifically because
+every review that preceded it was reactive in this way. The retroactive
+9-PR audit that produced this same release cycle's other fixes (see the
+`chore/1.24.0-retro-audit` branch, PR #474) already went through nine
+individual fix reviews and one whole-branch review — and this command's
+first real end-to-end run *still* found a live, previously-undiscovered
+data-loss bug that survived all of that plus 585+ passing CI tests (see
+`docs/lessons-learned.md` #15). That result is the actual justification for
+this command existing as a standing, reusable step, not a one-off.
+
+**Consequences:** Run this before merging any branch touching `install.sh`/
+`installer/*.py`/`templates/project/bin/rig`, and always before cutting a
+release, in addition to (never instead of) `/pre-release-review` and normal
+per-commit review. The command was itself validated the same way it asks
+reviewers to work: four parallel test agents, each cold-reading the command
+document with no design context, running its Steps 1–3 for real against
+this repo and reporting friction; the ambiguities they hit (an unworkable
+Step 3 exclusion criterion, a real correctness bug in branch-base
+resolution, missing guidance on combining scope flags) were fixed before
+the command's first real production run — self-review by the author alone
+had already missed some of them.
