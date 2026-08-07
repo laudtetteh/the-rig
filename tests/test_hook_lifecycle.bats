@@ -58,6 +58,28 @@ tree_snapshot() {
   grep -qF '.git/hooks/commit-msg' "$RIG_EXT/memory/.rig-manifest"
 }
 
+@test "a first-ever stealth git hook install journals a recovery record (retro-audit finding, found by the whole-branch review before merge)" {
+  # Routing _stealth_install_git_hook() through upgrade_prepare_mutation()
+  # for the symlink-refusal fix exposed a pre-existing gap in that shared
+  # function: its "missing" branch never called ensure_upgrade_transaction()
+  # / record_created() for ANY of its ~13 callers, not just the newly-routed
+  # git-hook writer -- so a first-ever install left zero recovery record. If
+  # the installer were killed mid-run, --recover would have nothing to roll
+  # back to for a partially-written hook.
+  install_stealth
+  [ "$status" -eq 0 ]
+
+  # The transaction must have been opened and finalized (not left
+  # .in-progress), and the finalized journal must record at least one hook
+  # as "created" -- proving this run actually journaled recovery state for
+  # its first-ever hook writes, not just silently created them.
+  [ ! -e "$TEST_PROJECT/.rig-backup/.in-progress" ]
+  local journal
+  journal="$(find "$TEST_PROJECT/.rig-backup" -name .journal -type f | head -1)"
+  [ -n "$journal" ]
+  /usr/bin/grep -qE '^created[[:space:]]+\.git/hooks/pre-commit$' "$journal"
+}
+
 @test "ordinary upgrade backs up a customized git hook before overwriting it" {
   install_stealth
   [ "$status" -eq 0 ]

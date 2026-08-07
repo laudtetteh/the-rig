@@ -1019,7 +1019,22 @@ upgrade_prepare_mutation() {
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
   state="$(upgrade_destination_state "$base" "$destination")"
   case "$state" in
-    missing) return 0 ;;
+    missing)
+      # Journal a first-ever creation the same way copy_file()/
+      # _copy_global_file_upgrade()'s own missing-destination branches
+      # already do, so an interrupted run rolls back to "absent" rather
+      # than leaving a half-written file with no recovery record. Retro-
+      # audit finding on chore/1.24.0-retro-audit itself (found by the
+      # independent whole-branch review, before merge): routing
+      # _stealth_install_git_hook() through this function for its symlink-
+      # refusal fix (#451) exposed a pre-existing gap here -- this branch
+      # never journaled creation for ANY of its ~13 callers (.rigpath,
+      # .rig/VERSION, .codex/config.toml, CLAUDE.md substitution, etc.),
+      # not just the newly-routed git-hook writer.
+      ensure_upgrade_transaction "$base"
+      record_created "$base" "$destination"
+      return 0
+      ;;
     regular-file)
       ensure_upgrade_transaction "$base"
       backup_file "$destination" "$base"
@@ -2449,7 +2464,22 @@ if [[ "$COLLISION_STRATEGY" == upgrade && "$DO_GLOBAL" == true ]]; then
   # silently corrected (issue #463).
 fi
 
-# Reset backup dir between layers so each layer uses its own base path.
+# Finalize any transaction still open before resetting BACKUP_DIR between
+# layers -- retro-audit finding, root cause of the "interrupted upgrade
+# transaction exists" regression the unconditional end-of-script
+# finish_upgrade_transaction() call (below, near "── Done ──") didn't
+# actually fix: this reset blindly clears BACKUP_DIR without finalizing
+# first. UPGRADE_TRANSACTION_ACTIVE stays true, but with BACKUP_DIR now
+# empty, finish_upgrade_transaction()'s own guard
+# ([[ "$UPGRADE_TRANSACTION_ACTIVE" == true && -n "$BACKUP_DIR" ]]) can
+# never be satisfied again -- the original .rig-backup/.in-progress from
+# before this reset is silently orphaned no matter how many finalize calls
+# run afterward, since none of them can rediscover its path. Confirmed live
+# on a real, previously-installed machine: a stale .in-progress from an
+# earlier global-layer run (predating this fix) sat unfinalized for days,
+# invisibly, until the next such run hit it and refused with "recovery is
+# required."
+[[ "$UPGRADE_TRANSACTION_ACTIVE" == true ]] && finish_upgrade_transaction
 BACKUP_DIR=""
 
 # ── PROJECT LAYER ─────────────────────────────────────────────────────────────
@@ -3740,6 +3770,23 @@ print("Exact next steps: " + ("; ".join(d["next_steps"]) or "none"))' "$GLOBAL_A
   [[ "$DO_PROJECT" == true ]] && echo "Project smoke tests (expected signal: passed): ${_project_smoke:-none}"
   blank
 fi
+
+# Unconditional safety net: finalize any transaction still open at this
+# point, regardless of which specific write path last touched it. Retro-
+# audit finding, found by re-running the full suite after fixing
+# upgrade_prepare_mutation()'s missing-branch journal gap above: that fix
+# made install-targets.json's first-ever write (after the global Codex
+# skills loop's own explicit finish_upgrade_transaction call) open a *new*
+# transaction with nothing left in the script to finalize it, leaving
+# .rig-backup/.in-progress on disk and causing every subsequent upgrade run
+# to fail closed with "interrupted upgrade transaction exists." Explicit
+# per-call-site finalize calls are easy to miss when a fix adds a new
+# transaction-opening write path partway through the script; one
+# unconditional call at the very end, after all layers have finished,
+# closes this class of gap structurally instead of per call site.
+# finish_upgrade_transaction() already no-ops safely when nothing is open.
+finish_upgrade_transaction
+
 bold "── Done ──"
 blank
 if [[ "$COLLISION_STRATEGY" != upgrade ]]; then
