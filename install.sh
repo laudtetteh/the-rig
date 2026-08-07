@@ -2369,14 +2369,22 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   fi
 
   if [[ "$INSTALL_NOTIFICATIONS" == true && "$AGENT_DRY_RUN" != true ]]; then
-    if upgrade_prepare_mutation "$HOME" "$CLAUDE_DIR/bin/rig-notify" ".claude/bin/rig-notify"; then
+    # guard_destination_before_write() directly, NOT the upgrade_prepare_mutation()
+    # wrapper -- that wrapper only runs under COLLISION_STRATEGY==upgrade, but
+    # notifications can be installed under any strategy (--notifications works
+    # alongside the default merge strategy too). Same gap and same fix as
+    # _stealth_install_git_hook()'s guard_destination_before_write() call
+    # (issue #451/#470/#471): under merge/skip/overwrite/interactive,
+    # upgrade_prepare_mutation() silently no-ops and returns success without
+    # ever checking for a symlinked or conflicting destination (issue #477).
+    if guard_destination_before_write "$HOME" "$CLAUDE_DIR/bin/rig-notify" ".claude/bin/rig-notify"; then
       mkdir -p "$CLAUDE_DIR/bin"
       cp "$GLOBAL_TEMPLATES/bin/rig-notify" "$CLAUDE_DIR/bin/rig-notify"
       chmod +x "$CLAUDE_DIR/bin/rig-notify"
     else
       info "Skipped notification helper due to a conflicting destination."
     fi
-    if upgrade_prepare_mutation "$HOME" "$CLAUDE_DIR/settings.json" ".claude/settings.json"; then
+    if guard_destination_before_write "$HOME" "$CLAUDE_DIR/settings.json" ".claude/settings.json"; then
       _notif_channel=terminal_bell
       [[ -n "${KITTY_WINDOW_ID:-}" ]] && _notif_channel=kitty
       [[ -n "${GHOSTTY_RESOURCES_DIR:-}" ]] && _notif_channel=ghostty
@@ -3008,7 +3016,13 @@ if [[ "$DO_PROJECT" == true ]]; then
   # precedence according to Codex's instruction discovery order.
   if has_agent "$PROJECT_AGENT" codex; then
     _CODEX_CONFIG="$TARGET/.codex/config.toml"
-    if upgrade_prepare_mutation "$TARGET" "$_CODEX_CONFIG" ".codex/config.toml"; then
+    # guard_destination_before_write() directly, NOT upgrade_prepare_mutation()
+    # -- same gap and fix as the notification-helper call sites above and the
+    # .git/hooks/* fix (issue #451/#470/#471): the wrapper silently no-ops
+    # under every strategy except "upgrade", so a merge-strategy install with
+    # --project-agent codex never actually refused a symlinked/conflicting
+    # .codex/config.toml (issue #477).
+    if guard_destination_before_write "$TARGET" "$_CODEX_CONFIG" ".codex/config.toml"; then
       # agent-plan: classification only, never invoke the merge script --
       # it performs a real write via merge-codex-config.py's atomic_write()
       # (including creating .codex/config.toml and its parent directory if
