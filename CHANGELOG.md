@@ -9,6 +9,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `templates/global/CLAUDE.md`: new Working style bullet — when the agent
+  notices the user repeating an instruction or preference for at least the
+  second time, it proactively offers to codify it as a command, skill, or
+  CLAUDE.md/rules bullet, rather than only complying again silently.
+
 ---
 
 ## [1.25.0] — 2026-08-07
