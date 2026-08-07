@@ -864,7 +864,13 @@ if snapshot_dir is None:
 else:
     # Lesson #14: a file that had already been personalized (its
     # "[Project Name]" placeholder substituted at install time) reverted to
-    # raw, unsubstituted template content after an upgrade.
+    # raw, unsubstituted template content after an upgrade. Coverage is
+    # asymmetric between the two files: install.sh substitutes
+    # "[Project Name]" in CLAUDE.md on every install/upgrade run, but never
+    # touches PROJECT_BRIEF.md's own copy of that placeholder -- so this
+    # check only fires for PROJECT_BRIEF.md if a user manually edited that
+    # exact title line away from the placeholder themselves. Not a false
+    # positive risk, just weaker practical coverage for that one file.
     blanked = []
     for rel_name in ("CLAUDE.md", "PROJECT_BRIEF.md"):
         before_path = snapshot_dir / rel_name
@@ -881,7 +887,11 @@ else:
     # a regular file -- the exact signature of a symlink-refusal guard being
     # bypassed and its target silently overwritten in place.
     replaced = []
-    for before_path in snapshot_dir.rglob("*"):
+    try:
+        snapshot_paths = list(snapshot_dir.rglob("*"))
+    except OSError:
+        snapshot_paths = []
+    for before_path in snapshot_paths:
         if not before_path.is_symlink():
             continue
         rel = before_path.relative_to(snapshot_dir)
