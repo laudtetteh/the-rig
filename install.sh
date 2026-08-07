@@ -2554,7 +2554,24 @@ if [[ "$DO_PROJECT" == true ]]; then
     # agent-plan/agent-upgrade invocation with a real TTY attached and no
     # --target flag, hanging exactly like the drift check and base-branch
     # prompt did before their fixes.
-    if [[ -t 0 && -z "$AGENT_MODE" ]]; then
+    #
+    # Regression found by tests/test_install.bats after the first attempt
+    # at this fix added a `-t 0` check here (matching the sibling prompts'
+    # pattern): unlike those siblings, this call site's original absence of
+    # a `-t 0` guard was load-bearing -- several existing tests drive the
+    # interactive installer non-interactively via a piped heredoc (e.g.
+    # "stealth mode: warns when .husky/ exists in target project"), which
+    # is not a TTY, relying on this prompt reading its answer from stdin
+    # regardless. Adding `-t 0` silently skipped that read and defaulted to
+    # $(pwd) instead, desynchronizing every subsequent piped answer (the
+    # tracking-menu choice consumed the target path meant for this prompt).
+    # `-z "$AGENT_MODE"` alone is both necessary and sufficient: it closes
+    # the actual hang (agent-plan/agent-upgrade always skip this prompt,
+    # regardless of stdin), and a plain `read` on non-agent, non-tty stdin
+    # (closed, /dev/null, or a heredoc) never blocks -- it returns
+    # immediately, empty on EOF or populated from the pipe, exactly
+    # matching this call site's original safe behavior.
+    if [[ -z "$AGENT_MODE" ]]; then
       ask "Target project directory?"
       read -r -p "    Path [${DEFAULT_TARGET}]: " TARGET_INPUT || true
       TARGET="${TARGET_INPUT:-$DEFAULT_TARGET}"
