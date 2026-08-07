@@ -113,6 +113,62 @@ print($1)
   [ "$(json_field "len(d['artifacts'])")" != "0" ]
 }
 
+@test "agent-plan stdout is exactly one JSON document, not preflight narration followed by JSON (retro-audit finding, PR #446)" {
+  # The documented contract (UPGRADE_WORKFLOW.md, and this PR's own code
+  # comment) is "prints exactly one JSON document on stdout." The preflight
+  # narrative summary ("Target matrix: ...", "Missing prerequisites: ...",
+  # etc.) was gated only on JSON_OUTPUT (true only for the separate,
+  # explicit --preflight --json mode) -- never on AGENT_MODE -- so it
+  # always printed several lines of human-oriented text before the real
+  # result on every agent-plan/agent-upgrade run. A caller doing
+  # json.loads(stdout) on the first (or only) line would break.
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  run_installer --strategy agent-plan
+  [ "$status" -eq 0 ]
+
+  local nonblank_lines
+  nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
+  [ "$nonblank_lines" -eq 1 ]
+  [[ "$output" != *"Target matrix:"* ]]
+  [[ "$output" != *"Missing prerequisites:"* ]]
+  [[ "$output" == \{* ]]
+}
+
+@test "agent-plan stdout stays exactly one JSON document when gitleaks is missing (retro-audit finding, PR #446 follow-up)" {
+  # The previous test proved the render-preflight.py narrative summary no
+  # longer leaks ahead of the JSON. It missed a second, unrelated leak in
+  # the same file: the GITLEAKS CHECK block's remediation lines ("Install
+  # it: ...", "Docs: ...") were plain echo, never routed through the
+  # warn()/blank() AGENT_MODE-gating convention the rest of that block
+  # already uses. This is invisible on any machine that happens to have
+  # gitleaks installed (including wherever the previous test normally
+  # runs), which is exactly how it shipped undetected and then broke CI,
+  # where gitleaks isn't installed. _RIG_TEST_MISSING_COMMANDS forces the
+  # check to behave as if gitleaks is absent regardless of the actual
+  # host, so this test is portable and doesn't depend on the machine's
+  # actual gitleaks state.
+  run env _RIG_TEST_MISSING_COMMANDS=gitleaks bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" --project-name "TestProject" --tracking repo \
+    --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  run env _RIG_TEST_MISSING_COMMANDS=gitleaks bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" --project-name "TestProject" --tracking repo \
+    --strategy agent-plan
+  [ "$status" -eq 0 ]
+
+  local nonblank_lines
+  nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
+  [ "$nonblank_lines" -eq 1 ]
+  [[ "$output" != *"Install it:"* ]]
+  [[ "$output" != *"Docs: https://github.com/gitleaks"* ]]
+  [[ "$output" == \{* ]]
+}
+
 @test "agent-plan on a target with a customized file emits refused with populated conflicts and exits 3" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
@@ -138,6 +194,44 @@ print($1)
 
   # The customized file itself must be untouched.
   grep -q "locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+}
+
+@test "agent-plan never writes .codex/config.toml, even with --project-agent codex (retro-audit finding, PR #446)" {
+  # Every other direct-writer mutation in install.sh (.rig/VERSION,
+  # .rigpath, CLAUDE.md/settings.json substitution, the stealth git-hook
+  # install loop) is wrapped in an AGENT_DRY_RUN guard. The Codex project-
+  # config merge (merge-codex-config.py, invoked whenever --project-agent
+  # is codex/both) had no such guard at all -- agent-plan actually mutated
+  # .codex/config.toml on disk, violating the documented "zero writes,
+  # read-only" contract this whole file exists to prove.
+  #
+  # The merge is idempotent once CLAUDE.md is already in
+  # project_doc_fallback_filenames, so a fixture starting from that already-
+  # merged state would mask the bug: the second write reuses identical
+  # bytes and a plain content snapshot can't tell a real skipped write from
+  # a same-content rewrite. A real prior --project-agent both install is
+  # still required first, so every other Codex artifact (.codex/hooks.json,
+  # .codex/hooks/rig-adapter.sh, .agents/skills) exists and agent-plan's own
+  # postflight smoke check passes -- then the merged config.toml is reset
+  # to an unmerged state (simulating a pre-existing Codex config Rig hasn't
+  # touched yet) so a real (buggy) merge would visibly change its content.
+  run_installer --strategy upgrade --project-agent both
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+  [ -f "$TEST_PROJECT/.codex/config.toml" ]
+
+  printf 'model = "gpt-5"\n' > "$TEST_PROJECT/.codex/config.toml"
+
+  local before after
+  before="$(tree_snapshot)"
+
+  run_installer --strategy agent-plan --project-agent both
+  [ "$status" -eq 0 ]
+
+  after="$(tree_snapshot)"
+  [ "$before" = "$after" ]
+  grep -q '^model = "gpt-5"$' "$TEST_PROJECT/.codex/config.toml"
+  ! grep -q 'project_doc_fallback_filenames' "$TEST_PROJECT/.codex/config.toml"
 }
 
 @test "agent-upgrade on a clean target applies updates and exits 0" {

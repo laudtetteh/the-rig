@@ -36,6 +36,16 @@ warn()    { [[ -n "$AGENT_MODE" ]] && return 0; echo -e "${YELLOW}!${RESET} $*";
 error()   { echo -e "${RED}✗${RESET} $*" >&2; }
 bold()    { [[ -n "$AGENT_MODE" ]] && return 0; echo -e "${BOLD}$*${RESET}"; }
 ask()     { [[ -n "$AGENT_MODE" ]] && return 0; echo -e "${BOLD}?${RESET} $*"; }
+# Blank-line spacer for human-readable narrative sections. Retro-audit
+# finding, PR #446: bare `echo ""` calls used purely for visual spacing were
+# never routed through this file's own AGENT_MODE self-gating convention
+# (every other narrative output helper above already is), so a real
+# agent-plan/agent-upgrade run leaked several blank lines onto stdout ahead
+# of its single documented JSON line -- a caller doing
+# json.loads(stdout.strip().splitlines()[0]) still breaks on blank lines
+# preceding the real content, and any strict "stdout is exactly one line"
+# consumer breaks outright.
+blank()   { [[ -n "$AGENT_MODE" ]] && return 0; echo ""; }
 
 confirm() {
   local msg="$1"
@@ -183,7 +193,26 @@ write_manifest_metadata() {
   case "$source" in
     generated-codex|codex-native) provider="codex" ;;
     claude-native) provider="claude" ;;
-    *) provider="$layer_agent" ;;
+    *)
+      # Global-layer CLAUDE.md and personal skills fall through to the
+      # generic "project-user" classification above -- manifest_artifact_
+      # source() only recognizes a .claude/-prefixed rel as claude-native,
+      # but the global layer records these un-prefixed ("CLAUDE.md",
+      # "skills/$name.md"). Unlike the project layer's CLAUDE.md (which
+      # really is Codex-shared, merged into .codex/config.toml as an
+      # instruction fallback), the global CLAUDE.md/skills have no
+      # Codex-side equivalent anywhere in this script -- Codex's global
+      # artifacts are the entirely separate .agents/skills/* tree, already
+      # correctly classified as generated-codex above. Treat these as
+      # unambiguously Claude-only regardless of GLOBAL_AGENT, instead of
+      # stamping them with the layer's agent selection (which could wrongly
+      # record "both" or "codex" when --global-agent picks either).
+      if [[ "$manifest_file" == "$GLOBAL_MANIFEST_FILE" && ( "$rel" == "CLAUDE.md" || "$rel" == skills/* ) ]]; then
+        provider="claude"
+      else
+        provider="$layer_agent"
+      fi
+      ;;
   esac
 
   # base_revision: the trusted upstream template revision this artifact was
@@ -509,18 +538,18 @@ if [[ "$_EARLY_PREFLIGHT" != true ]] && git -C "$_DRIFT_DIR" rev-parse --git-dir
     if [[ "$_BEHIND" -gt 0 ]]; then
       warn "The installer is ${_BEHIND} commit(s) behind ${_TRACKING}."
       warn "Running from a stale version may install outdated hooks and commands."
-      echo ""
+      blank
       if [[ ! -t 0 ]]; then
         # Non-interactive (CI / piped stdin): warn and continue, don't block.
         warn "Run: git -C \"$_DRIFT_DIR\" pull   to get the latest version first."
         warn "Proceeding with the current version..."
-        echo ""
+        blank
       else
         echo "  Options:"
         echo "    1) Update now and re-run (recommended)"
         echo "    2) Continue with current version"
         echo "    3) Exit"
-        echo ""
+        blank
         read -r -p "  Choice [1/2/3]: " _STALE_CHOICE || true
         case "${_STALE_CHOICE:-}" in
           1)
@@ -530,7 +559,7 @@ if [[ "$_EARLY_PREFLIGHT" != true ]] && git -C "$_DRIFT_DIR" rev-parse --git-dir
             ;;
           2)
             warn "Proceeding with stale installer. Some installed files may be outdated."
-            echo ""
+            blank
             ;;
           *)
             echo "Exiting."
@@ -603,9 +632,9 @@ for arg in "$@"; do
       ;;
     --help|-h)
       echo "Usage: ./install.sh [options]"
-      echo ""
+      blank
       echo "Interactive (no flags): prompts 'What are you doing?' and guides from there."
-      echo ""
+      blank
       echo "Layer flags (override the intent menu):"
       echo "  --global-only         Install ~/.claude/ layer only (CLAUDE.md + skills)"
       echo "  --project-only        Scaffold project layer only"
@@ -615,7 +644,7 @@ for arg in "$@"; do
       echo "  --recover             Restore the last interrupted upgrade transaction"
       echo "  --repair-stale        Remove only confirmed-missing manifest entries"
       echo "  --json                Emit JSON (valid only with --preflight)"
-      echo ""
+      blank
       echo "Non-interactive flags (bypass all prompts — useful for scripting and CI):"
       echo "  --strategy <name>     Set strategy directly."
       echo "                        Values: merge | skip | overwrite | upgrade | interactive |"
@@ -641,7 +670,7 @@ for arg in "$@"; do
       echo "                        external — .rig/ outside the repo (requires --rig-dir)"
       echo "                        stealth  — zero Rig traces; hooks go to .git/hooks/"
       echo "                        Orthogonal to --target: both can be used together."
-      echo ""
+      blank
       echo "Other:"
       echo "  --rig-dir <path>      Install .rig/ to an external path outside the repo."
       echo "                        Writes a .rigpath pointer file at the project root."
@@ -970,6 +999,48 @@ upgrade_set_executable_bits() {
   done < <(find -P "$directory" -maxdepth 1 -type f -name "$pattern" -print0)
 }
 
+# Shared no-follow safety check for any direct-writer mutation: only a
+# missing destination or an existing regular file is writable; anything
+# else (symlink, directory, other) is refused rather than silently
+# destroyed. Strategy-agnostic on purpose -- see upgrade_prepare_mutation()
+# below for the upgrade-only wrapper most callers actually want, and
+# _stealth_install_git_hook() for the one caller that needs this check
+# unconditionally, regardless of COLLISION_STRATEGY (retro-audit finding,
+# found by /rig-surface-review's first real end-to-end run on
+# chore/1.24.0-retro-audit itself: upgrade_prepare_mutation()'s own
+# upgrade-only guard, below, silently no-ops under every strategy except
+# "upgrade" -- including "merge", the default for every fresh install --
+# so the #451 symlink-refusal fix it was meant to deliver never actually
+# applied to a merge-strategy re-run with an existing customized/symlinked
+# hook. Proven via direct repro: a merge-strategy install onto a project
+# with .git/hooks/pre-commit symlinked outside the project silently
+# overwrote the symlink's target in place, printing "A backup will be
+# saved..." while creating zero backup.)
+guard_destination_before_write() {
+  local base="$1" destination="$2" rel="$3" state
+  state="$(upgrade_destination_state "$base" "$destination")"
+  case "$state" in
+    missing)
+      # Journal a first-ever creation the same way copy_file()/
+      # _copy_global_file_upgrade()'s own missing-destination branches
+      # already do, so an interrupted run rolls back to "absent" rather
+      # than leaving a half-written file with no recovery record.
+      ensure_upgrade_transaction "$base"
+      record_created "$base" "$destination"
+      return 0
+      ;;
+    regular-file)
+      ensure_upgrade_transaction "$base"
+      backup_file "$destination" "$base"
+      return 0
+      ;;
+    *)
+      record_upgrade_destination_conflict "$rel" "$state"
+      return 1
+      ;;
+  esac
+}
+
 # Guard upgrade-only mutations that happen after the manifest-aware copy path.
 # These operations must have the same no-follow semantics as copy_file(): only
 # a missing destination or an existing regular file is writable. A conflict is
@@ -985,22 +1056,17 @@ upgrade_set_executable_bits() {
 # destination is now journaled and backed up here, once, before the caller
 # is allowed to mutate it — same transaction/journal machinery copy_file()
 # already uses, so recover_upgrade_transaction() restores it identically.
+#
+# Upgrade-only by design: these callers are semantically upgrade operations
+# (comparing against a prior install's manifest baseline), so it's correct
+# for this wrapper to no-op under every other strategy. Do NOT add a new
+# caller here that needs protection under every strategy -- call
+# guard_destination_before_write() directly instead, as
+# _stealth_install_git_hook() does.
 upgrade_prepare_mutation() {
-  local base="$1" destination="$2" rel="$3" state
+  local base="$1" destination="$2" rel="$3"
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
-  state="$(upgrade_destination_state "$base" "$destination")"
-  case "$state" in
-    missing) return 0 ;;
-    regular-file)
-      ensure_upgrade_transaction "$base"
-      backup_file "$destination" "$base"
-      return 0
-      ;;
-    *)
-      record_upgrade_destination_conflict "$rel" "$state"
-      return 1
-      ;;
-  esac
+  guard_destination_before_write "$base" "$destination" "$rel"
 }
 
 upgrade_prepare_directory() {
@@ -1055,11 +1121,11 @@ sed_inplace() {
 
 # ─────────────────────────────────────────────────────────────────────────────
 if [[ "$JSON_OUTPUT" != true ]]; then
-  echo ""
+  blank
   bold "╔══════════════════════════════════════╗"
   bold "║         The Rig — Installer          ║"
   bold "╚══════════════════════════════════════╝"
-  echo ""
+  blank
 fi
 
 # ── INSTALL INTENT ────────────────────────────────────────────────────────────
@@ -1117,7 +1183,7 @@ elif [[ "$PREFLIGHT_ONLY" == true ]]; then
   _SKIP_COMPONENT_SELECTION=true
 else
   echo "What are you doing?"
-  echo ""
+  blank
   echo "  1) First install  — set up The Rig on this machine for the first time"
   echo "                      (installs global layer + scaffolds a project)"
   echo "  2) New project    — scaffold The Rig into a project"
@@ -1127,7 +1193,7 @@ else
   echo "  4) Repair         — overwrite all Rig-owned files and start fresh"
   echo "                      (backs up originals to .rig-backup/)"
   echo "  5) Custom         — full control over layers, strategy, and components"
-  echo ""
+  blank
   read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3/4/5] (default: 2): ")" intent_input || true
   intent_input="${intent_input:-2}"
 
@@ -1160,14 +1226,14 @@ else
       ;;
     5)
       # Custom: full interactive flow — strategy and component selection both shown.
-      echo ""
+      blank
       echo "Collision strategy:"
       echo "  1) Interactive  — ask me for each file"
       echo "  2) Skip         — keep all existing files, only install new ones"
       echo "  3) Overwrite    — replace everything (backs up originals to .rig-backup/)"
       echo "  4) Merge        — smart-merge .claude/settings.json; skip everything else"
       echo "  5) Upgrade      — update Rig-owned files; skip user-owned; diff on custom"
-      echo ""
+      blank
       read -r -p "$(echo -e "${BOLD}?${RESET} Choose strategy [1/2/3/4/5] (default: 2): ")" strategy_input
       strategy_input="${strategy_input:-2}"
       case "$strategy_input" in
@@ -1192,8 +1258,8 @@ else
   esac
 fi
 
-[[ "$JSON_OUTPUT" != true ]] && echo ""
-if [[ "$JSON_OUTPUT" != true ]]; then info "Strategy: ${COLLISION_STRATEGY}"; echo ""; fi
+[[ "$JSON_OUTPUT" != true ]] && blank
+if [[ "$JSON_OUTPUT" != true ]]; then info "Strategy: ${COLLISION_STRATEGY}"; blank; fi
 
 choose_agent_target() {
   local layer="$1" choice
@@ -1203,7 +1269,7 @@ choose_agent_target() {
   case "${choice:-1}" in 1) echo claude;; 2) echo codex;; 3) echo both;; 4) echo none;; *) error "Invalid target choice"; return 2;; esac
 }
 _INTERACTIVE_AGENT_CHOICE=false
-if [[ -t 0 && "$PREFLIGHT_ONLY" != true ]]; then
+if [[ -t 0 && "$PREFLIGHT_ONLY" != true && -z "$AGENT_MODE" ]]; then
   [[ "$DO_GLOBAL" == true && -z "$_FLAG_GLOBAL_AGENT" ]] && GLOBAL_AGENT="$(choose_agent_target global)"
   [[ "$DO_PROJECT" == true && -z "$_FLAG_PROJECT_AGENT" ]] && PROJECT_AGENT="$(choose_agent_target project)"
   _INTERACTIVE_AGENT_CHOICE=true
@@ -1282,8 +1348,18 @@ fi
   set +e
   _preflight_json="$(python3 "$SCRIPT_DIR/installer/render-preflight.py" "${_render_args[@]}" ${_state_args[@]+"${_state_args[@]}"})"; _preflight_status=$?
   set -e
+  # agent-plan/agent-upgrade must print exactly one JSON document on
+  # stdout, as their own contract (and templates/project/.rig/processes/
+  # UPGRADE_WORKFLOW.md) explicitly documents. Retro-audit finding, PR
+  # #446: this narrative summary was gated only on JSON_OUTPUT (true only
+  # for the separate, explicit --preflight --json mode), so it always
+  # printed ahead of the real result on every agent-mode run -- a caller
+  # doing json.loads(stdout) on the first/only line would break. AGENT_MODE
+  # is non-empty for both agent-plan and agent-upgrade; suppress this
+  # intermediate preflight narration (and its own separate JSON blob,
+  # which is not the final single document either) for both.
   if [[ "$JSON_OUTPUT" == true ]]; then printf '%s\n' "$_preflight_json"
-  else
+  elif [[ -z "$AGENT_MODE" ]]; then
     echo "Target matrix: global=$GLOBAL_AGENT project=$PROJECT_AGENT"
     python3 -c 'import json,sys; d=json.load(sys.stdin); print("Missing prerequisites: " + (", ".join(x["id"] for x in d["dependencies"] if x["status"] != "ok" and x["classification"] != "optional") or "none")); print("Degraded features: " + (", ".join(d["degraded_features"]) or "none")); print("Next steps: " + (", ".join(d["next_steps"]) or "none"))' <<< "$_preflight_json"
   fi
@@ -1525,18 +1601,18 @@ _show_breaking_changes() {
 
   [[ -n "$breaking_lines" ]] || return 0
 
-  echo ""
+  blank
   warn "Breaking changes since v${current_version} — review before upgrading:"
-  echo ""
+  blank
   while IFS= read -r line; do
     echo "  $line"
   done <<< "$breaking_lines"
-  echo ""
+  blank
   if ! confirm "Continue upgrade with the above breaking changes?" "y"; then
     info "Upgrade cancelled. No files were modified."
     exit 0
   fi
-  echo ""
+  blank
 }
 
 # ── SMART MERGE: .claude/settings.json ───────────────────────────────────────
@@ -1719,23 +1795,23 @@ copy_file() {
         _src_hash="$(sha256_file "$src")"
         _manifest_hash="$(read_manifest_hash "$rel")"
         if [[ -z "$_manifest_hash" ]]; then
-          echo ""
+          blank
           warn "User-owned file with no recorded baseline: ${rel}"
           echo "  This file has never been tracked by an Upgrade run, so whether"
           echo "  it's been customized can't be determined. A backup will be"
           echo "  saved to .rig-backup/ before overwriting."
-          echo ""
+          blank
           if ! confirm "Overwrite ${rel} with the new template?" "n"; then
             info "Skipped (kept your version, recorded its current hash): ${rel}"
             write_manifest_entry "$_dest_hash" "$rel" "$MANIFEST_FILE" "$dest"
             return
           fi
         elif [[ "$_dest_hash" != "$_manifest_hash" && "$_dest_hash" != "$_src_hash" ]]; then
-          echo ""
+          blank
           warn "User-modified file: ${rel}"
           echo "  Your version differs from what The Rig originally installed."
           echo "  A backup will be saved to .rig-backup/ before overwriting."
-          echo ""
+          blank
           if ! confirm "Overwrite ${rel} with the new template?" "n"; then
             info "Skipped (kept your version): ${rel}"
             return
@@ -1990,11 +2066,11 @@ _copy_upgrade_existing() {
     # Show what changed and ask before overwriting (agent mode: this is
     # narrative-only chatter ahead of the JSON result, so suppress it).
     if [[ -z "$AGENT_MODE" ]]; then
-      echo ""
+      blank
       warn "Customized file detected: ${rel}"
       echo "  Your version differs from what The Rig originally installed."
       echo "  The new Rig version also modifies this file."
-      echo ""
+      blank
     fi
     # Agent mode (issue #444 lane 444-C): before falling back to the
     # non-interactive skip below, try the structure-aware/three-way
@@ -2047,11 +2123,11 @@ _copy_upgrade_existing() {
           break
           ;;
         d|D)
-          echo ""
+          blank
           echo "  ── diff: your version (a) → new Rig version (b) ──"
           diff -u "$dest" "$src" | head -100 || true
           echo "  ── end diff ──"
-          echo ""
+          blank
           ;;
         *)
           echo "  Please enter o, s, or d."
@@ -2224,17 +2300,24 @@ _stealth_install_git_hook() {
     echo "  A backup will be saved to .rig-backup/ (or the external backups/ dir) before installing the Rig hook."
   fi
 
-  if [[ -f "$hook_dest" && ! -L "$hook_dest" ]]; then
-    ensure_upgrade_transaction "$TARGET"
-    backup_file "$hook_dest" "$TARGET"
-  elif [[ ! -e "$hook_dest" && ! -L "$hook_dest" ]]; then
-    # First install of this hook: nothing to back up, but still journal it as
-    # "created" (matching copy_file()'s own new-file path) so an interrupted
-    # run rolls back to "hook absent" rather than leaving a half-installed
-    # file with no journal record of how it got there.
-    ensure_upgrade_transaction "$TARGET"
-    record_created "$TARGET" "$hook_dest"
-  fi
+  # Routes through the same no-follow, refuse-on-symlink choke point every
+  # other direct-writer mutation uses (issue #470/#471's review found this
+  # hand-rolled -f/-L/-e check had a gap: a symlinked .git/hooks/<name>
+  # matched neither branch, so no backup/journal happened here, yet the cp
+  # below still ran — cp follows an existing symlink and silently overwrites
+  # whatever it points to, in place, with no recovery path, even if that
+  # target lives outside the project entirely. A dangling symlink hit the
+  # same gap and crashed the installer mid-transaction under set -e.
+  #
+  # Calls guard_destination_before_write() directly, NOT the
+  # upgrade_prepare_mutation() wrapper -- that wrapper only runs under
+  # COLLISION_STRATEGY==upgrade, but this function installs hooks under
+  # every strategy (merge is the default for every fresh install). Retro-
+  # audit finding, found by /rig-surface-review's first real end-to-end
+  # run: calling the wrapper here made this whole check a silent no-op
+  # under merge/skip/overwrite/interactive, so the #451 symlink-refusal
+  # fix never actually applied outside an explicit --strategy upgrade run.
+  guard_destination_before_write "$TARGET" "$hook_dest" "$rel" || return 0
   # agent-plan: classification only, never write the hook file.
   [[ "$AGENT_DRY_RUN" == true ]] || cp "$hook_src" "$hook_dest"
   [[ "$AGENT_DRY_RUN" == true ]] || chmod +x "$hook_dest"
@@ -2246,7 +2329,7 @@ _stealth_install_git_hook() {
 # ── GLOBAL LAYER ─────────────────────────────────────────────────────────────
 if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   bold "── Global layer ──"
-  echo ""
+  blank
 
   CLAUDE_DIR="$HOME/.claude"
   SKILLS_DIR="$CLAUDE_DIR/skills"
@@ -2374,7 +2457,7 @@ PYEOF
 
   finish_upgrade_transaction
 
-  echo ""
+  blank
   fi
 fi
 
@@ -2407,13 +2490,28 @@ if [[ "$COLLISION_STRATEGY" == upgrade && "$DO_GLOBAL" == true ]]; then
   # silently corrected (issue #463).
 fi
 
-# Reset backup dir between layers so each layer uses its own base path.
+# Finalize any transaction still open before resetting BACKUP_DIR between
+# layers -- retro-audit finding, root cause of the "interrupted upgrade
+# transaction exists" regression the unconditional end-of-script
+# finish_upgrade_transaction() call (below, near "── Done ──") didn't
+# actually fix: this reset blindly clears BACKUP_DIR without finalizing
+# first. UPGRADE_TRANSACTION_ACTIVE stays true, but with BACKUP_DIR now
+# empty, finish_upgrade_transaction()'s own guard
+# ([[ "$UPGRADE_TRANSACTION_ACTIVE" == true && -n "$BACKUP_DIR" ]]) can
+# never be satisfied again -- the original .rig-backup/.in-progress from
+# before this reset is silently orphaned no matter how many finalize calls
+# run afterward, since none of them can rediscover its path. Confirmed live
+# on a real, previously-installed machine: a stale .in-progress from an
+# earlier global-layer run (predating this fix) sat unfinalized for days,
+# invisibly, until the next such run hit it and refused with "recovery is
+# required."
+[[ "$UPGRADE_TRANSACTION_ACTIVE" == true ]] && finish_upgrade_transaction
 BACKUP_DIR=""
 
 # ── PROJECT LAYER ─────────────────────────────────────────────────────────────
 if [[ "$DO_PROJECT" == true ]]; then
   bold "── Project layer ──"
-  echo ""
+  blank
 
   # Determine target directory
   if [[ -n "$_FLAG_TARGET" ]]; then
@@ -2461,7 +2559,7 @@ if [[ "$DO_PROJECT" == true ]]; then
     warn "Project name contained only invalid characters — using directory name: $PROJECT_NAME"
   fi
 
-  echo ""
+  blank
 
   # ── BASE BRANCH ──────────────────────────────────────────────────────────────
   # The main integration branch for this repo (main, master, integration, etc.).
@@ -2492,7 +2590,7 @@ if [[ "$DO_PROJECT" == true ]]; then
     warn "Invalid base branch name — defaulting to 'main'"
   fi
   info "Base branch: $BASE_BRANCH"
-  echo ""
+  blank
 
   # ── GIT TRACKING FOR .rig/ ────────────────────────────────────────────────
   # How should .rig/ appear (or not appear) in git?
@@ -2560,14 +2658,14 @@ if [[ "$DO_PROJECT" == true ]]; then
     info "Detected .rigpath — using ${RIG_TRACKING} mode: $EXTERNAL_RIG_DIR"
   else
     echo "How should .rig/ be tracked in git?"
-    echo ""
+    blank
     echo "  1) In the repo      — committed with the project (not recommended for shared repos)"
     echo "  2) Local only       — added to .git/info/exclude; invisible to teammates, no .gitignore change"
     echo "  3) External         — install .rig/ to a path outside this repo entirely"
     echo "  4) Stealth          — zero Rig traces in git: all Rig files excluded or external; (default)"
     echo "                        git hooks go to .git/hooks/ (no Husky required)"
     echo "                        Use for multi-contributor repos where teammates must not see Rig files."
-    echo ""
+    blank
     read -r -p "$(echo -e "${BOLD}?${RESET} Choose [1/2/3/4] (default: 4): ")" rig_tracking_input || true
     rig_tracking_input="${rig_tracking_input:-4}"
 
@@ -2585,7 +2683,7 @@ if [[ "$DO_PROJECT" == true ]]; then
       4) RIG_TRACKING="stealth"
          # Default the external .rig/ path — user can override
          _STEALTH_DEFAULT_RIG="${HOME}/.rig/projects/${PROJECT_NAME}"
-         echo ""
+         blank
          echo "  Stealth mode: all Rig artifacts will be excluded from git tracking."
          echo "  .rig/ files will be stored outside this repo."
          read -r -p "$(echo -e "  ${BOLD}?${RESET} External .rig/ path (default: ${_STEALTH_DEFAULT_RIG}): ")" EXTERNAL_RIG_DIR || true
@@ -2673,7 +2771,7 @@ if [[ "$DO_PROJECT" == true ]]; then
     _show_breaking_changes "$_installed_version" "$_changelog_path"
   fi
 
-  echo ""
+  blank
 
   # ── COMPONENT SELECTION ───────────────────────────────────────────────────
   # Skipped for intents 1–4 and when --target flag is provided.
@@ -2682,10 +2780,10 @@ if [[ "$DO_PROJECT" == true ]]; then
     component_choice="a"
   else
     echo "Which components do you want to install?"
-    echo ""
+    blank
     echo "  a) All (recommended)"
     echo "  b) Let me choose"
-    echo ""
+    blank
     read -r -p "$(echo -e "${BOLD}?${RESET} Choose [a/b] (default: a): ")" component_choice
     component_choice="${component_choice:-a}"
   fi
@@ -2714,7 +2812,7 @@ if [[ "$DO_PROJECT" == true ]]; then
     if [[ "$RIG_TRACKING" == "external" ]]; then
       RIG_LABEL="${EXTERNAL_RIG_DIR}/"
     fi
-    echo ""
+    blank
     confirm "Install CLAUDE.md (project brain template)?" "y"     && INSTALL_CLAUDE_MD=true    || INSTALL_CLAUDE_MD=false
     confirm "Install memory system (${RIG_LABEL}memory/, PROGRESS, ERRORS)?" "y" && INSTALL_MEMORY=true   || INSTALL_MEMORY=false
     confirm "Install task lifecycle (${RIG_LABEL}tasks/backlog, active, done)?" "y" && INSTALL_TASKS=true  || INSTALL_TASKS=false
@@ -2725,10 +2823,10 @@ if [[ "$DO_PROJECT" == true ]]; then
     confirm "Install git hooks (.husky/, .gitleaks.toml)?" "y"     && INSTALL_GIT_HOOKS=true   || INSTALL_GIT_HOOKS=false
     confirm "Install GitHub templates (.github/)?" "y"             && INSTALL_GITHUB=true       || INSTALL_GITHUB=false
     confirm "Install PROJECT_BRIEF.md template?" "y"               && INSTALL_PROJECT_BRIEF=true || INSTALL_PROJECT_BRIEF=false
-    echo ""
+    blank
   fi
 
-  echo ""
+  blank
   info "Scaffolding into: $TARGET"
   info "Project name:     $PROJECT_NAME"
   if [[ "$RIG_TRACKING" == "external" ]]; then
@@ -2738,7 +2836,7 @@ if [[ "$DO_PROJECT" == true ]]; then
   elif [[ "$RIG_TRACKING" == "stealth" ]]; then
     info ".rig/ location:   $EXTERNAL_RIG_DIR (stealth — all Rig files excluded from git)"
   fi
-  echo ""
+  blank
 
   # ── FILE → COMPONENT MAPPING ──────────────────────────────────────────────
   # Returns 0 (install) or 1 (skip) for a given relative path.
@@ -2911,11 +3009,21 @@ if [[ "$DO_PROJECT" == true ]]; then
   if has_agent "$PROJECT_AGENT" codex; then
     _CODEX_CONFIG="$TARGET/.codex/config.toml"
     if upgrade_prepare_mutation "$TARGET" "$_CODEX_CONFIG" ".codex/config.toml"; then
-      if ! _codex_merge_result="$(python3 "$SCRIPT_DIR/installer/merge-codex-config.py" "$_CODEX_CONFIG")"; then
-        error "Codex project config was not changed. Fix $_CODEX_CONFIG and retry."
-        exit 1
+      # agent-plan: classification only, never invoke the merge script --
+      # it performs a real write via merge-codex-config.py's atomic_write()
+      # (including creating .codex/config.toml and its parent directory if
+      # absent). Retro-audit finding, PR #446: this call had no
+      # AGENT_DRY_RUN gate at all, unlike every other direct-writer
+      # mutation in this file -- agent-plan (documented and relied upon
+      # elsewhere as "zero writes, read-only") actually mutated
+      # .codex/config.toml whenever --project-agent codex/both was passed.
+      if [[ "$AGENT_DRY_RUN" != true ]]; then
+        if ! _codex_merge_result="$(python3 "$SCRIPT_DIR/installer/merge-codex-config.py" "$_CODEX_CONFIG")"; then
+          error "Codex project config was not changed. Fix $_CODEX_CONFIG and retry."
+          exit 1
+        fi
+        success "Codex project instructions: CLAUDE.md fallback ${_codex_merge_result}"
       fi
-      success "Codex project instructions: CLAUDE.md fallback ${_codex_merge_result}"
     else
       info "Skipped Codex project config due to a conflicting destination."
     fi
@@ -3068,12 +3176,27 @@ PYEOF
   # _stealth_install_git_hook() itself gates every actual filesystem mutation
   # behind AGENT_DRY_RUN, so running it here under agent-plan still writes
   # nothing; it only classifies and records.
+  # .rigpath's conflict-detection must run unconditionally, same as
+  # .rig/VERSION above and the git-hook fix below it -- only the actual
+  # write stays gated on AGENT_DRY_RUN. Retro-audit finding, PR #460: this
+  # upgrade_prepare_mutation() call used to live entirely inside the
+  # AGENT_DRY_RUN guard, so agent-plan never evaluated .rigpath's
+  # destination state at all -- a real conflict there (e.g. a symlinked
+  # .rigpath) would surface for the first time as an agent-upgrade refusal
+  # the plan never warned about, the exact failure mode issue #458 was
+  # filed to eliminate for the git-hook install loop.
+  _RIGPATH_MUTATION_OK=false
+  if [[ ( "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ) && -n "$RIGPATH_FILE" ]] \
+     && upgrade_prepare_mutation "$TARGET" "$RIGPATH_FILE" ".rigpath"; then
+    _RIGPATH_MUTATION_OK=true
+  fi
+
   if [[ "$AGENT_DRY_RUN" != true ]]; then
 
   # ── EXTERNAL .rig/ — write .rigpath and update git excludes ──────────────
   if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
     # Write the pointer file so hooks can resolve RIG_DIR at runtime
-    if upgrade_prepare_mutation "$TARGET" "$RIGPATH_FILE" ".rigpath"; then
+    if [[ "$_RIGPATH_MUTATION_OK" == true ]]; then
       echo "$EXTERNAL_RIG_DIR" > "$RIGPATH_FILE"
       success "Created .rigpath → $EXTERNAL_RIG_DIR"
     else
@@ -3108,7 +3231,7 @@ PYEOF
     # Stale in-repo .rig/ cleanup: if the project has an old in-repo .rig/
     # (e.g. migrating from repo/local to stealth/external), offer to remove it.
     if [[ -d "$TARGET/.rig" ]]; then
-      echo ""
+      blank
       warn "In-repo .rig/ found at $TARGET/.rig/ — superseded by the external install at $EXTERNAL_RIG_DIR."
       if confirm "Remove the stale in-repo .rig/ now?" "y"; then
         rm -rf "$TARGET/.rig"
@@ -3297,7 +3420,7 @@ PYEOF
   # from agent-plan or agent-upgrade regardless of default behavior.
   if [[ "$INSTALL_GIT_HOOKS" == true && "$RIG_TRACKING" != "stealth" && -z "$AGENT_MODE" ]]; then
     if [[ -f "$TARGET/package.json" ]]; then
-      echo ""
+      blank
       info "package.json detected."
       if confirm "Initialize Husky? (runs: npx husky install)"; then
         if command -v npx >/dev/null 2>&1; then
@@ -3322,7 +3445,7 @@ PYEOF
 
   # ── BACKUP REPORT ─────────────────────────────────────────────────────────
   if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
-    echo ""
+    blank
     info "Originals backed up to: $BACKUP_DIR"
   fi
 
@@ -3335,7 +3458,7 @@ PYEOF
     _husky_changed=$(git -C "$TARGET" status --porcelain -- ".husky/" 2>/dev/null \
       | grep -v "^??" || true)
     if [[ -n "$_husky_changed" ]]; then
-      echo ""
+      blank
       info "Hook files modified — stage and commit to apply them:"
       while IFS= read -r _line; do
         info "  $_line"
@@ -3380,27 +3503,36 @@ PYEOF
     # already silently corrected (issue #463).
   fi
 
-  echo ""
+  blank
 fi
 
 # ── GITLEAKS CHECK ────────────────────────────────────────────────────────────
-echo ""
+blank
 bold "── Checking dependencies ──"
-echo ""
+blank
 
 GITLEAKS_OK=false
-if command -v gitleaks >/dev/null 2>&1; then
-  GITLEAKS_OK=true
-elif [[ -x "/usr/local/bin/gitleaks" || -x "/opt/homebrew/bin/gitleaks" ]]; then
-  GITLEAKS_OK=true
+if [[ ",${_RIG_TEST_MISSING_COMMANDS:-}," != *",gitleaks,"* ]]; then
+  if command -v gitleaks >/dev/null 2>&1; then
+    GITLEAKS_OK=true
+  elif [[ -x "/usr/local/bin/gitleaks" || -x "/opt/homebrew/bin/gitleaks" ]]; then
+    GITLEAKS_OK=true
+  fi
 fi
 
 if [[ "$GITLEAKS_OK" == true ]]; then
   success "gitleaks is installed — secret scanning is active"
 else
   warn "gitleaks is NOT installed — secret scanning will be skipped on commits"
-  echo "  Install it: brew install gitleaks"
-  echo "  Docs: https://github.com/gitleaks/gitleaks"
+  # Retro-audit finding, PR #446 follow-up: these two lines were plain
+  # echo, not routed through the warn()/blank() AGENT_MODE-gating
+  # convention above -- the only leak of its kind still reachable when
+  # gitleaks isn't on PATH, breaking agent-plan/agent-upgrade's "exactly
+  # one JSON document on stdout" contract in exactly that environment.
+  if [[ -z "$AGENT_MODE" ]]; then
+    echo "  Install it: brew install gitleaks"
+    echo "  Docs: https://github.com/gitleaks/gitleaks"
+  fi
 fi
 
 # ── IN-PLACE CLEANUP ─────────────────────────────────────────────────────────
@@ -3421,20 +3553,20 @@ if [[ "$DO_PROJECT" == true && -n "${TARGET_ABS:-}" && -z "$AGENT_MODE" ]]; then
     # Guard: if install.sh is committed in this repo, we're inside The Rig's own
     # source tree — skip cleanup to avoid deleting project source files.
     if ! git -C "$SCRIPT_ABS" ls-files --error-unmatch install.sh &>/dev/null 2>&1; then
-      echo ""
+      blank
       warn "The installer was run from inside the target project directory."
       echo "  The following The Rig source files are no longer needed in your project:"
-      echo ""
+      blank
       echo "    templates/     — scaffolding source (already consumed)"
       echo "    docs/          — The Rig's own architecture docs"
       echo "    CHANGELOG.md   — The Rig's changelog"
       echo "    install.sh     — this installer"
       echo "    LICENSE        — The Rig's MIT license"
       echo "    README.md      — The Rig's README (replace with your project's)"
-      echo ""
+      blank
       echo "  Your project files (CLAUDE.md, .rig/, .claude/, .husky/, PROJECT_BRIEF.md, etc.)"
       echo "  are NOT affected."
-      echo ""
+      blank
       if confirm "Remove these Rig source files from your project directory?" "y"; then
         for rig_file in templates docs CHANGELOG.md install.sh LICENSE README.md; do
           if [[ -e "$TARGET_ABS/$rig_file" ]]; then
@@ -3442,7 +3574,7 @@ if [[ "$DO_PROJECT" == true && -n "${TARGET_ABS:-}" && -z "$AGENT_MODE" ]]; then
             success "Removed $rig_file"
           fi
         done
-        echo ""
+        blank
         warn "README.md was removed. Create a new one for your project:"
         echo "  Your project description, setup instructions, and usage go here."
       else
@@ -3624,7 +3756,7 @@ PYEOF
   exit 0
 fi
 
-echo ""
+blank
 if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
   bold "── Upgrade summary ──"
   echo "Updated: $UPGRADE_UPDATED_COUNT"
@@ -3671,10 +3803,27 @@ print("Degraded/skipped capabilities: " + (", ".join(d["degraded_features"]) or 
 print("Exact next steps: " + ("; ".join(d["next_steps"]) or "none"))' "$GLOBAL_AGENT" "$PROJECT_AGENT" <<< "$_preflight_json"
   [[ "$DO_GLOBAL" == true ]] && echo "Global smoke tests (expected signal: passed): ${_global_smoke:-none}"
   [[ "$DO_PROJECT" == true ]] && echo "Project smoke tests (expected signal: passed): ${_project_smoke:-none}"
-  echo ""
+  blank
 fi
+
+# Unconditional safety net: finalize any transaction still open at this
+# point, regardless of which specific write path last touched it. Retro-
+# audit finding, found by re-running the full suite after fixing
+# upgrade_prepare_mutation()'s missing-branch journal gap above: that fix
+# made install-targets.json's first-ever write (after the global Codex
+# skills loop's own explicit finish_upgrade_transaction call) open a *new*
+# transaction with nothing left in the script to finalize it, leaving
+# .rig-backup/.in-progress on disk and causing every subsequent upgrade run
+# to fail closed with "interrupted upgrade transaction exists." Explicit
+# per-call-site finalize calls are easy to miss when a fix adds a new
+# transaction-opening write path partway through the script; one
+# unconditional call at the very end, after all layers have finished,
+# closes this class of gap structurally instead of per call site.
+# finish_upgrade_transaction() already no-ops safely when nothing is open.
+finish_upgrade_transaction
+
 bold "── Done ──"
-echo ""
+blank
 if [[ "$COLLISION_STRATEGY" != upgrade ]]; then
   echo "Target matrix: global=$GLOBAL_AGENT project=$PROJECT_AGENT"
   echo "Missing required prerequisites: none"
@@ -3690,31 +3839,31 @@ if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
 else
   echo "The Rig is installed. Next steps:"
 fi
-echo ""
+blank
 
 if [[ "$DO_GLOBAL" == true ]] && has_agent "$GLOBAL_AGENT" claude; then
   echo "  1. Fill in ~/.claude/CLAUDE.md:"
   echo "     - '## Personal context' — your name, role, stack, and working style"
   echo "     - '## Stack defaults' — the languages and frameworks you use"
-  echo ""
+  blank
 fi
 
 if [[ "$DO_GLOBAL" == true ]] && has_agent "$GLOBAL_AGENT" codex; then
   echo "  Codex personal skills are installed under ~/.agents/skills/."
-  echo ""
+  blank
 fi
 
 if [[ "$DO_PROJECT" == true ]]; then
   echo "  3. Fill in ${TARGET:-your-project}/CLAUDE.md"
   echo "     (stack, conventions, off-limits paths)"
-  echo ""
+  blank
   if has_agent "$PROJECT_AGENT" claude; then
     echo "  4. Open a Claude Code session in your project and run /kickoff or /task"
-    echo ""
+    blank
   fi
   if has_agent "$PROJECT_AGENT" codex; then
     echo "  4. Open a Codex session in your project and run \$kickoff or \$task"
-    echo ""
+    blank
   fi
 fi
 
@@ -3724,7 +3873,7 @@ if has_agent "$GLOBAL_AGENT" codex || has_agent "$PROJECT_AGENT" codex; then
 fi
 
 echo "Documentation: https://github.com/laudtetteh/the-rig"
-echo ""
+blank
 if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
   echo "RIG_UPGRADE_REVIEW_REQUIRED=$UPGRADE_REVIEW_REQUIRED"
 fi

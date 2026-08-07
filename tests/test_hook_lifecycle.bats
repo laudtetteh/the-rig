@@ -58,6 +58,36 @@ tree_snapshot() {
   grep -qF '.git/hooks/commit-msg' "$RIG_EXT/memory/.rig-manifest"
 }
 
+@test "a first-ever stealth git hook install journals a recovery record (retro-audit finding, found by the whole-branch review before merge)" {
+  # Routing _stealth_install_git_hook() through upgrade_prepare_mutation()
+  # for the symlink-refusal fix exposed a pre-existing gap in that shared
+  # function: its "missing" branch never called ensure_upgrade_transaction()
+  # / record_created() for ANY of its ~13 callers, not just the newly-routed
+  # git-hook writer -- so a first-ever install left zero recovery record. If
+  # the installer were killed mid-run, --recover would have nothing to roll
+  # back to for a partially-written hook.
+  install_stealth
+  [ "$status" -eq 0 ]
+
+  # The transaction must have been opened and finalized (not left
+  # .in-progress), and the finalized journal must record at least one hook
+  # as "created" -- proving this run actually journaled recovery state for
+  # its first-ever hook writes, not just silently created them.
+  #
+  # A single project-only install opens more than one backup transaction
+  # (each distinct `base` path passed to ensure_upgrade_transaction() gets
+  # its own timestamped .rig-backup/<ts>_N dir and .journal), and the
+  # git-hook "created" lines land in whichever one covers .git/hooks/. Search
+  # every journal, not just the first one `find` happens to enumerate --
+  # that enumeration order isn't guaranteed to put the hook-owning journal
+  # first, which made this test flaky when it grabbed only `head -1`.
+  [ ! -e "$TEST_PROJECT/.rig-backup/.in-progress" ]
+  local journals
+  journals="$(find "$TEST_PROJECT/.rig-backup" -name .journal -type f)"
+  [ -n "$journals" ]
+  echo "$journals" | xargs /usr/bin/grep -qE '^created[[:space:]]+\.git/hooks/pre-commit$'
+}
+
 @test "ordinary upgrade backs up a customized git hook before overwriting it" {
   install_stealth
   [ "$status" -eq 0 ]
@@ -75,6 +105,80 @@ tree_snapshot() {
   run grep -rl 'hand-written-hook-marker' "$TEST_PROJECT/.rig-backup"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
+}
+
+@test "a symlinked git hook is refused, never silently destroying its target (retro-audit finding, PR #451)" {
+  # Before this fix, a symlinked .git/hooks/<name> matched neither of
+  # _stealth_install_git_hook()'s backup-gating branches (both required
+  # "not a symlink"), so no backup/journal happened, yet cp still ran --
+  # cp follows an existing symlink and overwrites whatever it points to,
+  # in place, even if that target lives entirely outside the project.
+  install_stealth
+  [ "$status" -eq 0 ]
+
+  local external_target="$TEMP_DIR/external-hook-target.sh"
+  printf '#!/bin/sh\necho this-file-lives-outside-the-project\n' > "$external_target"
+  rm -f "$TEST_PROJECT/.git/hooks/pre-commit"
+  ln -s "$external_target" "$TEST_PROJECT/.git/hooks/pre-commit"
+
+  install_stealth
+  [ "$status" -eq 0 ]
+
+  # The external file must survive completely untouched.
+  grep -q 'this-file-lives-outside-the-project' "$external_target"
+  # The symlink itself must still point at it (never replaced with a
+  # regular file copy of the Rig hook).
+  [ -L "$TEST_PROJECT/.git/hooks/pre-commit" ]
+  [[ "$(readlink "$TEST_PROJECT/.git/hooks/pre-commit")" == "$external_target" ]]
+}
+
+@test "a symlinked git hook is refused under --strategy merge too, not just upgrade (retro-audit finding, /rig-surface-review's first real run)" {
+  # The test above proves symlink refusal under --strategy upgrade (this
+  # file's install_stealth() helper hardcodes that strategy). It never
+  # covered --strategy merge -- the actual default for every fresh
+  # install -- and that gap hid a real regression: _stealth_install_git_
+  # hook() routed its refusal check through upgrade_prepare_mutation(),
+  # whose very first line is `[[ "$COLLISION_STRATEGY" == upgrade ]] ||
+  # return 0`. Under merge (or skip/overwrite/interactive), that guard
+  # silently no-ops the entire check -- no backup, no refusal -- and the
+  # unconditional `cp` below it ran anyway, following the symlink and
+  # overwriting whatever it pointed to, in place, even outside the
+  # project. Fixed by extracting the check into guard_destination_before_
+  # write() and calling that directly, unconditionally, instead of the
+  # upgrade-only wrapper.
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$RIG_EXT" \
+    --strategy merge
+  [ "$status" -eq 0 ]
+
+  local external_target="$TEMP_DIR/external-hook-target-merge.sh"
+  printf '#!/bin/sh\necho this-file-lives-outside-the-project\n' > "$external_target"
+  rm -f "$TEST_PROJECT/.git/hooks/pre-commit"
+  ln -s "$external_target" "$TEST_PROJECT/.git/hooks/pre-commit"
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$RIG_EXT" \
+    --strategy merge
+  [ "$status" -eq 0 ]
+
+  # The external file must survive completely untouched.
+  grep -q 'this-file-lives-outside-the-project' "$external_target"
+  # The symlink itself must still point at it (never replaced with a
+  # regular file copy of the Rig hook).
+  [ -L "$TEST_PROJECT/.git/hooks/pre-commit" ]
+  readlink "$TEST_PROJECT/.git/hooks/pre-commit" | grep -qF "$external_target"
+}
+
+@test "a dangling symlinked git hook is refused without crashing the installer (retro-audit finding, PR #451)" {
+  install_stealth
+  [ "$status" -eq 0 ]
+
+  rm -f "$TEST_PROJECT/.git/hooks/pre-commit"
+  ln -s "$TEMP_DIR/does-not-exist.sh" "$TEST_PROJECT/.git/hooks/pre-commit"
+
+  install_stealth
+  [ "$status" -eq 0 ]
+  [ -L "$TEST_PROJECT/.git/hooks/pre-commit" ]
 }
 
 @test "agent-upgrade refuses to overwrite a customized git hook and reports a conflict" {

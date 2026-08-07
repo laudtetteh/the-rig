@@ -183,6 +183,42 @@ open(p, 'w').write(new_text)
   [ "$merged_body" = "$original_body" ]
 }
 
+@test "agent-upgrade converging a frontmatter+Markdown file preserves a user comment inside frontmatter (retro-audit finding, PR #452)" {
+  # render()'s dict-mode reconstruction (merge-frontmatter-markdown.py) has
+  # to parse frontmatter into a flat dict to merge it -- and dicts can't
+  # represent comment/blank lines, so parse_fields() drops them. Previously
+  # this reconstruction ran unconditionally on every successful merge,
+  # silently deleting any comment a user added inside a command/agent
+  # frontmatter block, reported as a clean "converged" success.
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  local agent_file="$TEST_PROJECT/.claude/agents/code-reviewer.md"
+  [ -f "$agent_file" ]
+
+  # Add both a comment and a new key to the frontmatter -- the comment must
+  # survive, and the new key must still be applied.
+  python3 -c "
+p = '$agent_file'
+text = open(p).read()
+marker = 'description:'
+idx = text.index(marker)
+end_of_line = text.index(chr(10), idx)
+new_text = text[:end_of_line + 1] + '# note: do not remove this comment\ntools: read\n' + text[end_of_line + 1:]
+open(p, 'w').write(new_text)
+"
+  grep -q '^# note: do not remove this comment$' "$agent_file"
+
+  run_installer --strategy agent-upgrade
+  [ "$status" -eq 0 ]
+  [ "$(json_field "'.claude/agents/code-reviewer.md' in [a['path'] for a in d['artifacts'] if a['classification'] == 'converged']")" = "True" ]
+
+  grep -q '^# note: do not remove this comment$' "$agent_file"
+  grep -q "^tools: read$" "$agent_file"
+  grep -q "^name: code-reviewer$" "$agent_file"
+}
+
 @test "agent-plan reports a body conflict for a frontmatter+Markdown file when the prose body was customized" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]

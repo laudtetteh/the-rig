@@ -56,6 +56,26 @@ make_leaky_stealth_fixture() {
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); a={x["path"]:x["status"] for x in d["artifacts"]}; assert a["bin/rig"] == "excluded"'
 }
 
+@test "audit: a user's own file that merely starts with 'rig' is never classified as a leak (retro-audit finding, PR #449)" {
+  # discover_launcher_paths() previously matched ANY bin/ file whose name
+  # started with "rig" -- not just launchers The Rig actually generated.
+  # A user's own unrelated script coincidentally named this way would be
+  # silently misclassified as untracked_leak, and the documented manual
+  # repair workflow (repair-stealth.py) would then append it to
+  # .git/info/exclude, hiding real content from git. Now scoped to the
+  # installer's own real template source, mirroring install.sh's own
+  # stealth-exclude enumeration.
+  local project="$BATS_TEST_TMPDIR/project"
+  local external="$BATS_TEST_TMPDIR/external"
+  make_leaky_stealth_fixture "$project" "$external"
+  printf '#!/bin/sh\necho my own deploy script\n' > "$project/bin/rig-my-deploy-script.sh"
+
+  run python3 "$AUDIT" "$project"
+  [ "$status" -eq 1 ]
+  json_assert() { JSON_OUTPUT="$output" python3 -c "$1"; }
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); paths={x["path"] for x in d["artifacts"]}; assert "bin/rig-my-deploy-script.sh" not in paths'
+}
+
 @test "audit: a fully covered stealth project reports zero leaks" {
   local project="$BATS_TEST_TMPDIR/project"
   local external="$BATS_TEST_TMPDIR/external"

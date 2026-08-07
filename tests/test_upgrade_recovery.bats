@@ -125,6 +125,37 @@ recover() {
   [[ "$output" == *"Recovery complete."* ]]
 }
 
+@test "a global-agent-codex upgrade never leaves an orphaned in-progress transaction (retro-audit finding, found by the whole-branch review before merge)" {
+  # Root cause: BACKUP_DIR="" between the global and project layers was
+  # unconditional -- it never checked whether a transaction was still
+  # active before wiping the pointer needed to finalize it. This was
+  # reachable before this fix too (in principle, for any layer-boundary
+  # transaction left open), but making upgrade_prepare_mutation()'s
+  # missing-destination branch actually open a transaction (a separate fix
+  # in this same audit) made it concretely reachable via
+  # install-targets.json's first-ever write, right after the global Codex
+  # skills loop's own transaction. Confirmed live on a real, previously-
+  # installed machine: this exact scenario left a stale .in-progress
+  # sitting unfinalized for days, invisibly, until the next such run hit it
+  # and refused with "interrupted upgrade transaction exists... recovery is
+  # required" -- on a completely clean, otherwise-successful upgrade.
+  local fake_home="$TEMP_DIR/fake-home-codex"
+  mkdir -p "$fake_home"
+
+  run env HOME="$fake_home" bash "$INSTALLER" \
+    --global-only --global-agent codex --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ ! -e "$fake_home/.rig-backup/.in-progress" ]
+
+  # The real-world symptom: a second, otherwise-unrelated run must still
+  # succeed -- it must not hit a phantom "interrupted transaction" left by
+  # the first.
+  run env HOME="$fake_home" bash "$INSTALLER" \
+    --global-only --global-agent codex --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ ! -e "$fake_home/.rig-backup/.in-progress" ]
+}
+
 # ── Issue #444, lane 444-F: transaction coverage for direct-writer mutations ──
 #
 # Before this lane, upgrade_prepare_mutation() only classified a destination
