@@ -451,7 +451,17 @@ if [[ -f "$MANIFEST" ]]; then
     [[ "$line" =~ ^# ]] && continue; [[ -z "$line" ]] && continue
     manifest_hash=$(echo "$line" | awk '{print $1}')
     rel_path=$(echo "$line" | awk '{print $2}')
-    installed_path="$REPO/$rel_path"
+    # .rig/-prefixed entries live at the external $RIG_DIR in stealth/external
+    # tracking, not $REPO/.rig/ -- resolving them as $REPO/$rel_path silently
+    # skips every one of them (the -f check finds nothing there and the loop
+    # just continues), undercounting real customizations. For repo/local
+    # tracking $RIG_DIR already equals $REPO/.rig, so this resolves to the
+    # same path either way.
+    if [[ "$rel_path" == .rig/* ]]; then
+      installed_path="$RIG_DIR/${rel_path#.rig/}"
+    else
+      installed_path="$REPO/$rel_path"
+    fi
     [[ -f "$installed_path" ]] || continue
     current_hash=$(shasum -a 256 "$installed_path" 2>/dev/null | awk '{print $1}' || sha256sum "$installed_path" 2>/dev/null | awk '{print $1}')
     [[ "$current_hash" != "$manifest_hash" ]] && echo "USER-MODIFIED: $rel_path"
