@@ -1,6 +1,6 @@
 # Lessons learned
 
-Seventeen documented pitfalls — from the original LaudBot pilot (#1-#13) through
+Nineteen documented pitfalls — from the original LaudBot pilot (#1-#13) through
 The Rig's own ongoing development (#14 onward) — the failures that shaped The Rig.
 
 Every component in this system exists because something went wrong without it. These are the incidents, in the order they were discovered.
@@ -216,3 +216,27 @@ The manifest was later extended (v1.10.0) to track **all** files — not just Ri
 **Fix**: Reverted to `[[ -z "$AGENT_MODE" ]]` alone, with no `-t 0` component, for this one call site. That's both necessary and sufficient: it still closes the actual hang (agent-plan/agent-upgrade unconditionally skip the prompt regardless of stdin), and a plain `read` on non-agent, non-tty stdin — closed, `/dev/null`, or a heredoc — never blocks; it just returns immediately.
 
 **Watch for**: Several similar-looking guards sitting near each other in a script does not mean they should all be normalized to the identical pattern. Before "fixing" one to match its neighbors, check what its *current* behavior is actually depended on — via existing tests, not just by reading the code — since the neighbors' guards may already be safe for reasons this particular call site isn't.
+
+---
+
+## 18. An apostrophe inside a single-quoted `awk` program string silently corrupted `install.sh`, undetected by `bash -n`
+
+**Symptom**: A documentation-only comment added inside `_show_breaking_changes()`'s `awk -v ver="$current_version" '...'` program (a plain single-quoted bash string, not a heredoc) used natural contractions — "repo's own CHANGELOG.md", "bullet's printed output". `bash -n install.sh` reported clean syntax. At runtime, any `--strategy upgrade` run against a version range with a BREAKING changelog entry — the exact path the surrounding fix itself changed — failed with `awk: can't open file own` / `install.sh: line N: An: command not found`, exit 127. Two bats tests that had passed cleanly minutes earlier, in an independently-spawned reviewer worktree, suddenly failed with no corresponding logic change.
+
+**Root cause**: An unescaped `'` inside any single-quoted bash string terminates that string immediately — not a bash-3.2-specific quirk, fundamental POSIX shell quoting, and unlike a heredoc it applies to a single embedded one-liner (`awk '...'`, `sed '...'`) just as much as a multi-line block. The first apostrophe in the comment closed the awk program's string early; everything after it — the rest of the comment, the remaining awk rules, and the closing `' "$changelog")` — was re-parsed as literal bash tokens instead of awk program text. `bash -n` cannot catch this class of bug: it only validates that quotes balance globally across the whole file, not that a given string closes where the author intended.
+
+**Fix**: Reworded the comment without any apostrophe or contraction. Caught by reproducing the exact failure manually outside bats (after first, incorrectly, suspecting local test-environment flakiness) and reading the raw `awk`/`bash` stderr, which named the cause directly.
+
+**Watch for**: Never use an apostrophe or contraction inside a comment or string content that lives inside an existing single-quoted bash string — most commonly an embedded `awk`/`sed`/`perl` one-liner in `install.sh`. `bash -n` passing is not proof a single-quoted block's boundaries are where you think they are; after any edit inside one, do a live/functional re-run of the affected code path, not just a syntax check, even for a change that looks purely cosmetic.
+
+---
+
+## 19. A bare-repo-clone test fixture, copied verbatim from an already-passing test file, broke on hosted CI because no existing test exercised the code path it depended on
+
+**Symptom**: A three-issue sprint's hosted CI failed exactly one test out of 651 — a brand-new test asserting that a branch-drift warning appears under a specific `--strategy` combination — with `remote HEAD refers to nonexistent ref, unable to checkout` in the captured output. The test, and its fixture, had passed on every local run throughout development.
+
+**Root cause**: The fixture (copied from an existing, currently-passing sibling test file covering issue #476) creates a bare git repo, clones it once, pushes a `main` branch to it, then clones it a second time. A bare repo's `HEAD` symref is fixed at `git init --bare` time from `init.defaultBranch`, independent of whatever branch is later pushed to it. The hosted CI runner's git default differs from `main`; the second clone therefore cannot check out any working-tree branch at all, leaving no local branch and no `@{u}` upstream — so the drift-check's own `@{u}` resolution silently finds nothing to report. The original sibling test file's own tests never caught this because every one of them only asserts that the drift-check block is *skipped* (agent-mode suppression, TTY-hang prevention) — none of them assert the *positive* case that actually depends on `@{u}` resolving, so the fixture's fragility had no way to surface until a new test needed that positive case.
+
+**Fix**: Forced a local `main` branch explicitly tracking `origin/main` after the second clone (`git checkout -B main --track origin/main`), making `@{u}` resolution environment-independent regardless of the bare repo's `HEAD` symref. Reproduced the exact CI failure locally first — without a CI account — by forcing `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=init.defaultBranch GIT_CONFIG_VALUE_0=master` on the test invocation, confirmed the fix resolves it, and proof-by-reverted under the same forced environment.
+
+**Watch for**: An existing test fixture "already proven to work" only proves what the tests currently using it actually exercise — not every code path a new test built on the same fixture might depend on. Before trusting a copied fixture, check whether the *existing* tests using it exercise the same dependent behavior your *new* test needs, not just whether the setup lines look identical. `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_N`/`GIT_CONFIG_VALUE_N` env vars can force a single command's git config without touching global state — useful for reproducing environment-dependent git behavior locally.

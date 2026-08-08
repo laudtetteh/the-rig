@@ -388,7 +388,7 @@ titles, transcripts, or singleton state.
 
 - [How it works](docs/how-it-works.md) — architecture deep-dive with diagrams
 - [Key decisions](docs/decisions.md) — design rationale and tradeoffs
-- [Lessons learned](docs/lessons-learned.md) — 17 documented pitfalls, from the pilot through ongoing development
+- [Lessons learned](docs/lessons-learned.md) — 19 documented pitfalls, from the pilot through ongoing development
 - [Customizing](docs/customizing.md) — adapting The Rig for your stack
 
 ---
