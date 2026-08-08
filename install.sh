@@ -1076,23 +1076,34 @@ guard_destination_before_write() {
 # a missing destination or an existing regular file is writable. A conflict is
 # reported once and preserved for explicit operator repair.
 #
-# Covers the "direct writer" mutation family (settings merges, .rigpath,
-# .rig/VERSION, target-state metadata, .codex/config.toml, and placeholder
-# substitutions) that mutate a destination in place rather than copying a
-# template file into it via copy_file(). Unlike copy_file()'s own upgrade
-# path, these callers never called backup_file() themselves, so an
-# interrupted run between two of these direct writes previously had nothing
-# to roll back to (issue #444, lane 444-F). An existing regular-file
-# destination is now journaled and backed up here, once, before the caller
-# is allowed to mutate it — same transaction/journal machinery copy_file()
-# already uses, so recover_upgrade_transaction() restores it identically.
+# Covers the "direct writer" mutation family that mutate a destination in
+# place rather than copying a template file into it via copy_file(). Unlike
+# copy_file()'s own upgrade path, these callers never called backup_file()
+# themselves, so an interrupted run between two of these direct writes
+# previously had nothing to roll back to (issue #444, lane 444-F). An
+# existing regular-file destination is now journaled and backed up here,
+# once, before the caller is allowed to mutate it — same transaction/journal
+# machinery copy_file() already uses, so recover_upgrade_transaction()
+# restores it identically.
 #
-# Upgrade-only by design: these callers are semantically upgrade operations
-# (comparing against a prior install's manifest baseline), so it's correct
-# for this wrapper to no-op under every other strategy. Do NOT add a new
-# caller here that needs protection under every strategy -- call
-# guard_destination_before_write() directly instead, as
-# _stealth_install_git_hook() does.
+# Upgrade-only by design: correct ONLY for callers whose write is itself
+# semantically upgrade-only (comparing against a prior install's manifest
+# baseline, or gated behind an enclosing `COLLISION_STRATEGY == upgrade`
+# check the caller already has) -- for those, no-oping under every other
+# strategy is the intended behavior. Settings merges, .rigpath, .rig/VERSION,
+# target-state metadata, .codex/config.toml, and placeholder substitutions
+# were originally routed through this wrapper on the mistaken assumption
+# that they were all upgrade-only too, even though most of them write on
+# every strategy (merge is the default for every fresh install) -- the
+# wrapper silently skipped their symlink-refusal/backup protection outside
+# an explicit --strategy upgrade run. Issue #482's audit swept every then-
+# existing call site and migrated everything reached under a non-upgrade
+# strategy to guard_destination_before_write() directly, matching the
+# .git/hooks/*, notification-helper, global settings.json, and Codex-config
+# precedent (issues #451/#470/#471, #477). Do NOT add a new caller here
+# unless its write is provably upgrade-only by one of the two tests above --
+# call guard_destination_before_write() directly instead, as every other
+# direct-writer mutation in this file now does.
 upgrade_prepare_mutation() {
   local base="$1" destination="$2" rel="$3"
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
@@ -2608,7 +2619,7 @@ fi
 if [[ "$DO_GLOBAL" == true ]]; then
   _global_smoke="$(run_capability_smoke global "$GLOBAL_AGENT" "$HOME/.claude")" || { error "Postflight smoke failed: $_global_smoke"; exit 1; }
   if [[ "$_GLOBAL_STATE_FUTURE" != true ]] && \
-     upgrade_prepare_mutation "$HOME" "$GLOBAL_TARGET_STATE" ".rig/install-targets.json"; then
+     guard_destination_before_write "$HOME" "$GLOBAL_TARGET_STATE" ".rig/install-targets.json"; then
     write_agent_state "$GLOBAL_TARGET_STATE" global "$GLOBAL_AGENT"
   fi
   success "Postflight targets: global=$GLOBAL_AGENT; smoke=$_global_smoke"
@@ -3249,7 +3260,7 @@ if [[ "$DO_PROJECT" == true ]]; then
     else
       _rig_version_base="$TARGET"
     fi
-    if upgrade_prepare_mutation "$_rig_version_base" "$_RIG_VER_DEST" ".rig/VERSION"; then
+    if guard_destination_before_write "$_rig_version_base" "$_RIG_VER_DEST" ".rig/VERSION"; then
       # agent-plan: classification only, never write .rig/VERSION.
       if [[ "$AGENT_DRY_RUN" != true ]]; then
         mkdir -p "$(dirname "$_RIG_VER_DEST")" 2>/dev/null || true
@@ -3268,6 +3279,14 @@ if [[ "$DO_PROJECT" == true ]]; then
   # absolute paths in settings still point at the old root. Rewrite the JSON
   # atomically before the normal placeholder substitution so hooks remain
   # bound to the current project without touching unrelated files.
+  # Audited under issue #482's upgrade_prepare_mutation() call-site sweep and
+  # deliberately left on the upgrade-only wrapper, unlike the other call
+  # sites this sweep migrated to guard_destination_before_write(): the
+  # enclosing `COLLISION_STRATEGY == upgrade` check right below already
+  # restricts this whole block to upgrade-only, so the wrapper's own gate
+  # is correct here, not a silent no-op under merge/skip/overwrite --
+  # moved-project detection (_PREVIOUS_PROJECT_ROOT) is inherently an
+  # upgrade-only concept in the first place.
   if [[ "$COLLISION_STRATEGY" == upgrade && -n "${_PREVIOUS_PROJECT_ROOT:-}" &&
         "$_PREVIOUS_PROJECT_ROOT" != "$TARGET_ABS" ]]; then
     if upgrade_prepare_mutation "$TARGET" "$TARGET/.claude/settings.json" ".claude/settings.json"; then
@@ -3283,7 +3302,7 @@ if [[ "$DO_PROJECT" == true ]]; then
 
   TARGET_CLAUDE="$TARGET/CLAUDE.md"
   if [[ -f "$TARGET_CLAUDE" ]] && \
-     upgrade_prepare_mutation "$TARGET" "$TARGET_CLAUDE" "CLAUDE.md"; then
+     guard_destination_before_write "$TARGET" "$TARGET_CLAUDE" "CLAUDE.md"; then
     # agent-plan: classification only, never substitute placeholders.
     if [[ "$AGENT_DRY_RUN" != true ]]; then
       sed_inplace "s/\\[Project Name\\]/${PROJECT_NAME}/g" "$TARGET_CLAUDE"
@@ -3296,7 +3315,7 @@ if [[ "$DO_PROJECT" == true ]]; then
   # When INSTALL_SUBAGENTS=true (via --subagents or auto-detect), inject the
   # SubagentStart entry with [REPO_ROOT] placeholder; it is substituted below.
   if [[ "$INSTALL_SUBAGENTS" == true && "$AGENT_DRY_RUN" != true && -f "$TARGET/.claude/settings.json" ]] && \
-     upgrade_prepare_mutation "$TARGET" "$TARGET/.claude/settings.json" ".claude/settings.json"; then
+     guard_destination_before_write "$TARGET" "$TARGET/.claude/settings.json" ".claude/settings.json"; then
     if command -v python3 >/dev/null 2>&1; then
       python3 - "$TARGET/.claude/settings.json" <<'PYEOF' 2>/dev/null || true
 import json, sys
@@ -3319,7 +3338,7 @@ PYEOF
   # This step runs after copy/merge to ensure the final file has the real path.
   TARGET_SETTINGS="$TARGET/.claude/settings.json"
   if [[ -f "$TARGET_SETTINGS" ]] && \
-     upgrade_prepare_mutation "$TARGET" "$TARGET_SETTINGS" ".claude/settings.json"; then
+     guard_destination_before_write "$TARGET" "$TARGET_SETTINGS" ".claude/settings.json"; then
     # agent-plan: classification only, never substitute placeholders.
     if [[ "$AGENT_DRY_RUN" != true ]]; then
       ESCAPED_PATH="${TARGET_ABS//\//\\/}"
@@ -3339,7 +3358,7 @@ PYEOF
       base="$target_rig_dir"
       rel=".rig/${f#"$target_rig_dir"/}"
     fi
-    upgrade_prepare_mutation "$base" "$f" "$rel" || return 0
+    guard_destination_before_write "$base" "$f" "$rel" || return 0
     # agent-plan: classification only, never substitute placeholders.
     [[ "$AGENT_DRY_RUN" == true ]] && return 0
     sed_inplace "s/\\[BASE_BRANCH\\]/${_BASE_ESC}/g" "$f"
@@ -3384,7 +3403,7 @@ PYEOF
   # filed to eliminate for the git-hook install loop.
   _RIGPATH_MUTATION_OK=false
   if [[ ( "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ) && -n "$RIGPATH_FILE" ]] \
-     && upgrade_prepare_mutation "$TARGET" "$RIGPATH_FILE" ".rigpath"; then
+     && guard_destination_before_write "$TARGET" "$RIGPATH_FILE" ".rigpath"; then
     _RIGPATH_MUTATION_OK=true
   fi
 
@@ -3416,7 +3435,7 @@ PYEOF
     # Update CLAUDE.md @imports to use absolute paths for the external .rig/ dir
     TARGET_CLAUDE="$TARGET/CLAUDE.md"
     if [[ -f "$TARGET_CLAUDE" ]] && \
-       upgrade_prepare_mutation "$TARGET" "$TARGET_CLAUDE" "CLAUDE.md"; then
+       guard_destination_before_write "$TARGET" "$TARGET_CLAUDE" "CLAUDE.md"; then
       ESCAPED_EXT="${EXTERNAL_RIG_DIR//\//\\/}"
       sed_inplace "s|@\\.rig/|@${ESCAPED_EXT}/|g" "$TARGET_CLAUDE"
       # Also update the context-loading paths in the prose
@@ -3674,7 +3693,7 @@ PYEOF
       _project_state_base="$TARGET"
       _project_state_rel=".rig/install-targets.json"
     fi
-    if upgrade_prepare_mutation "$_project_state_base" "$PROJECT_TARGET_STATE" "$_project_state_rel"; then
+    if guard_destination_before_write "$_project_state_base" "$PROJECT_TARGET_STATE" "$_project_state_rel"; then
       write_agent_state "$PROJECT_TARGET_STATE" project "$PROJECT_AGENT" "$TARGET_ABS"
     fi
   fi
