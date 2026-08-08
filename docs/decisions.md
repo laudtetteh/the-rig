@@ -397,3 +397,41 @@ Step 3 exclusion criterion, a real correctness bug in branch-base
 resolution, missing guidance on combining scope flags) were fixed before
 the command's first real production run — self-review by the author alone
 had already missed some of them.
+
+---
+
+## 21. Issue #473's doctor validation covers only 2 of 15 lessons-learned entries, deliberately
+
+**Decided:** Issue #473 asked for `bin/rig doctor` to gain "post-upgrade
+validation against known historical bug patterns," diffing issue #472's new
+pre-flight snapshot against post-upgrade state. Scoped the implementation to
+exactly 2 patterns — lesson #14 (a personalized file reverting to raw
+template content) and lesson #15 (a symlink silently replaced by a regular
+file) — both genuinely expressible as a before/after file diff. The other 13
+entries in `docs/lessons-learned.md` were surveyed and explicitly excluded.
+
+**Rejected:** Forcing all 15 (now 17) entries into some form of automated
+check, including ones with no real file-content signature — worktree
+confusion, hook mistiming, Docker volume shadowing, a migration table typo,
+a FastAPI route-decorator gotcha. These are process/environment lessons, not
+file-diffable patterns; any "check" for them would have been a weak
+heuristic dressed up as coverage.
+
+**Rationale:** Confirmed with the user before implementing, not a
+unilateral scope cut. A registry that claims to cover "known historical bug
+patterns" but silently no-ops or false-negatives on most of the patterns it
+implies coverage of is worse than one that's honest about a narrower, real
+scope — false confidence in a safety net is worse than no safety net.
+
+**Consequences:** The two implemented checks
+(`upgrade_pattern_blanked_file`, `upgrade_pattern_symlink_replaced` — see
+`docs/customizing.md`'s "Verifying an upgrade" section) are genuinely
+reliable, live-tested in both tracked and stealth/external tracking modes.
+Future lessons-learned entries should be evaluated against the same bar
+(is this genuinely expressible as a before/after file diff?) before being
+added to this registry — resist scope pressure to "cover everything" at the
+cost of check quality. The registry is embedded directly as Python data in
+`templates/project/bin/rig`'s `doctor()` function rather than a separate
+file under `installer/`, since `bin/rig` is a self-contained script with no
+access back to the installer's own source repo once deployed to a target
+project.
