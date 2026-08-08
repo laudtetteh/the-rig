@@ -1722,10 +1722,10 @@ _show_breaking_changes() {
     # A continuation line runs until the next "### " header, with no
     # blank-line boundary of its own (issue #481 fixed the common case:
     # a 2-space-indented wrapped bullet, matching every real entry in this
-    # repo's own CHANGELOG.md). An indented aside placed after a blank line
-    # inside the same BREAKING section, before the next header, would still
-    # be swept into the preceding bullet's printed output -- not a known
-    # case in this file today, but worth knowing if the format ever grows one.
+    # CHANGELOG.md as of this fix). An indented aside placed after a blank
+    # line inside the same BREAKING section, before the next header, would
+    # still be swept into the preceding bullet output -- not a known case
+    # in this file today, but worth knowing if the format ever grows one.
     in_breaking && /^  / { print }
   ' "$changelog")
 
