@@ -44,6 +44,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the same symlink-refusal/backup-before-write guard under every
   strategy, not just `--strategy upgrade` — matching the precedent set by
   the `.git/hooks/*` fix (#477).
+- CHANGELOG "BREAKING" bullets spanning multiple lines were truncated to
+  just their first line when printed during `--strategy upgrade`; indented
+  continuation lines now print in full (#481).
+- A duplicated `--strategy` flag (e.g. `--strategy agent-plan --strategy
+  merge`) could silently suppress the installer-behind-remote branch-drift
+  warning even when the run actually resolved to a normal, human-capable
+  strategy — the early lookahead used seen-anywhere semantics instead of
+  matching the real flag parser's last-wins behavior (#483).
+- Extended the symlink-refusal/backup-before-write guard above to 7 more
+  direct-writer destinations under every strategy, not just `--strategy
+  upgrade`: `.rig/VERSION`, `.rigpath`, global and project
+  `install-targets.json`, and CLAUDE.md's placeholder substitutions (#482).
+  Three narrow gaps of the same class remain and are tracked as follow-ups,
+  not fixed in this release: the global `~/.claude` root directory and the
+  manifest bookkeeping file still lack the guard under non-upgrade
+  strategies (#489, #490), and CLAUDE.md's backup can capture an
+  intermediate state rather than the pristine original when more than one
+  write touches it in the same run (#491).
 
 ---
 
