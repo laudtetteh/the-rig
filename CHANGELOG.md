@@ -11,6 +11,28 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.26.1] — 2026-08-08
+
+### Fixed
+
+- `/rig-upgrade` Phase 1e ("Check for user-modified Rig-owned files")
+  resolved every manifest path as `$REPO/$rel_path`, so `.rig/`-prefixed
+  entries in stealth/external tracking pointed at a path that never
+  exists — silently missing user-modified files that needed review during
+  an upgrade. The same bug was also present in Phase 2b-classic's diff and
+  manifest-hash commands, fixed alongside it (#494).
+- `install.sh`'s stealth git-hook installer treated a missing manifest
+  baseline as automatic customization, with no fallback comparison against
+  the incoming hook content — unlike every other Rig-owned file's upgrade
+  handling. A hook installed before manifest tracking existed (or whose
+  entry was lost) that still matched the current template was permanently
+  misreported as needing manual review (#495).
+
+Both found via a cold, zero-context subagent test of `/rig-upgrade` against
+a real stealth-mode project, immediately after cutting v1.26.0.
+
+---
+
 ## [1.26.0] — 2026-08-08
 
 ### Added
