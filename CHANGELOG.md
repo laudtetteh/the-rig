@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [1.26.0] — 2026-08-08
+
 ### Added
 
 - `templates/global/CLAUDE.md`: new Working style bullet — when the agent
