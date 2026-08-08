@@ -191,3 +191,27 @@ The manifest was later extended (v1.10.0) to track **all** files — not just Ri
 **Fix**: Extracted the state-check/backup/refuse logic into a new strategy-agnostic `guard_destination_before_write()`, leaving `upgrade_prepare_mutation()` as a thin upgrade-only wrapper around it — verified byte-identical for its other callers by diffing the extracted body against the original. `_stealth_install_git_hook()` now calls the unconditional guard directly. Added a regression test that repeats the existing symlink-refusal test under `--strategy merge` explicitly, proven via revert against the pre-fix code.
 
 **Watch for**: A fix routed through a shared helper inherits that helper's own scoping assumptions, which may not match the new call site's actual requirements — "this function already does the safety check I need" is not the same claim as "this function performs that check under every condition my call site can be reached from." Independent review — including this session's own prior whole-branch review and holistic combinatorial-matrix pass, both of which reported zero findings on this exact branch — is not a substitute for actually exercising the default, most-common invocation path (`merge`, no flags) rather than only the paths a reviewer's own test scenarios happen to reach. Two more instances of the identical bug class (notification-helper and Codex-config writes, reachable via `--notifications`/`--project-agent codex` under `merge`) were found in the same review pass and filed separately (#477) rather than fixed immediately, since they were outside this specific commit's claimed scope.
+
+---
+
+## 16. `bin/rig` at the installer repo's own root is a stale dev-tooling copy, not the shipped source
+
+**Symptom**: While implementing issue #473's new `bin/rig doctor` checks, every live test against a real target project reported "no pre-flight snapshot found" even when one genuinely existed. Syntax was clean, the logic traced correctly on paper — the checks simply weren't running against the file that mattered.
+
+**Root cause**: This repo dogfoods itself, and `bin/rig` exists in two places that can silently diverge: the repo root's own copy (untracked, `.git/info/exclude`d, part of this repo's own stealth-mode dev tooling, refreshed via `bin/rig worktree bootstrap` from whichever checkout happens to be primary) and `templates/project/bin/rig` (tracked, the actual file copied into every downstream project on install/upgrade). All the implementation and testing had gone into the untracked root copy — confirmed after the fact to have different byte counts and different code from the tracked template it was assumed to be identical to.
+
+**Fix**: Restored the accidentally-edited root copy from the primary checkout, reapplied the real fix to `templates/project/bin/rig`, and re-validated by installing that file into a real throwaway target project (the only way `bin/rig`'s own root-resolution logic correctly points at a target project rather than back at the installer's own worktree).
+
+**Watch for**: Before editing `bin/rig` for any reason, confirm which copy you're looking at with `git ls-files bin/rig templates/project/bin/rig` — the working file's presence or absence in that output is definitive. `git status --short bin/rig` showing nothing at all, even immediately after an edit, is itself the tell that you're looking at the untracked dev copy rather than the shipped source.
+
+---
+
+## 17. A `-t 0` guard added "for consistency with its neighbors" broke a call site whose lack of that guard was itself load-bearing
+
+**Symptom**: Fixing issue #476's `--target` path prompt by adding a `[[ -t 0 && -z "$AGENT_MODE" ]]` guard — matching the pattern already used on the neighboring `--project-name` and base-branch prompts in the same code region — passed its own new regression tests but broke an existing, previously-green test (`tests/test_install.bats`, "stealth mode: warns when .husky/ exists in target project").
+
+**Root cause**: That test drives the interactive installer non-interactively by piping its answers through a heredoc (`<<<`) — not a real TTY. It depended on the `--target` prompt's original, guard-free behavior of always attempting to read from stdin regardless of TTY-ness; unlike its sibling prompts, this one had never had a `-t 0` check at all, and that absence was load-bearing. Adding `-t 0` made the non-tty heredoc skip the read and silently default to `$(pwd)` instead, which desynchronized every subsequent piped answer in the test — the tracking-menu's own read then consumed the string meant for a different prompt entirely.
+
+**Fix**: Reverted to `[[ -z "$AGENT_MODE" ]]` alone, with no `-t 0` component, for this one call site. That's both necessary and sufficient: it still closes the actual hang (agent-plan/agent-upgrade unconditionally skip the prompt regardless of stdin), and a plain `read` on non-agent, non-tty stdin — closed, `/dev/null`, or a heredoc — never blocks; it just returns immediately.
+
+**Watch for**: Several similar-looking guards sitting near each other in a script does not mean they should all be normalized to the identical pattern. Before "fixing" one to match its neighbors, check what its *current* behavior is actually depended on — via existing tests, not just by reading the code — since the neighbors' guards may already be safe for reasons this particular call site isn't.
