@@ -534,9 +534,17 @@ for ((_early_i = 0; _early_i < ${#_early_args[@]}; _early_i++)); do
     --preflight) _EARLY_PREFLIGHT=true ;;
     --json) _EARLY_PREFLIGHT_JSON=true ;;
     --strategy)
+      # Last-wins, matching the real _FLAG_STRATEGY parser further down
+      # (a plain forward-loop overwrite is naturally last-wins) -- every
+      # occurrence must unconditionally reassign _EARLY_AGENT_MODE, not
+      # just set it true and never reset it, or a duplicated --strategy
+      # flag (e.g. "--strategy agent-plan --strategy merge") leaves this
+      # true even though the run actually resolves to a human-capable
+      # strategy (issue #483).
       if [[ $((_early_i + 1)) -lt ${#_early_args[@]} ]]; then
         case "${_early_args[$((_early_i + 1))]}" in
           agent-plan|agent-upgrade) _EARLY_AGENT_MODE=true ;;
+          *) _EARLY_AGENT_MODE=false ;;
         esac
       fi
       ;;
