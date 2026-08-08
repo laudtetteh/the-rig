@@ -3558,7 +3558,8 @@ _extract_breaking_changes() {
     stop { next }
     /^### .*BREAKING/ { in_breaking=1; next }
     /^### / { in_breaking=0 }
-    in_breaking && /^- / { print }
+    in_breaking && /^- / { print; next }
+    in_breaking && /^  / { print }
   ' "$changelog")
 
   [[ -n "$breaking_lines" ]] || return 1
@@ -3706,6 +3707,68 @@ CLEOF
   _RIG_TEST_CHANGELOG="$fixture" run_installer --strategy upgrade
   [ "$status" -eq 0 ]
   [[ "$output" != *"Breaking changes since"* ]]
+}
+
+@test "breaking change detection: multi-line bullet's indented continuation lines are not truncated to the first line (#481)" {
+  local changelog="$TEMP_DIR/CHANGELOG.md"
+  cat > "$changelog" <<'CLEOF'
+# Changelog
+
+## [Unreleased]
+
+### Changed — BREAKING
+- Default install tracking mode changed to stealth: the interactive
+  prompt now defaults to option 4 (stealth) instead of option 1 (in-repo). All Rig
+  files are stored in the external tracking dir by default — no `.rig/` is committed
+  to the project repo. Users who prefer in-repo tracking must choose option 1 explicitly
+  or pass `--tracking repo`. This affects all fresh installs where no `--tracking` flag
+  is provided.
+
+## [1.0.0] — 2025-01-01
+
+### Added
+- Initial release
+CLEOF
+
+  run _extract_breaking_changes "1.0.0" "$changelog"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Default install tracking mode changed to stealth"* ]]
+  [[ "$output" == *"prompt now defaults to option 4 (stealth) instead of option 1 (in-repo)"* ]]
+  [[ "$output" == *"files are stored in the external tracking dir by default"* ]]
+  [[ "$output" == *"to the project repo. Users who prefer in-repo tracking"* ]]
+  [[ "$output" == *"or pass \`--tracking repo\`. This affects all fresh installs"* ]]
+  [[ "$output" == *"is provided."* ]]
+}
+
+@test "breaking change detection: upgrade prints every continuation line of a multi-line breaking bullet, not just the first (#481)" {
+  local fixture="$TEMP_DIR/fixture-multiline-breaking.md"
+  cat > "$fixture" <<'CLEOF'
+# Changelog
+
+## [Unreleased]
+
+### Changed — BREAKING
+- Default install tracking mode changed to stealth: the interactive
+  prompt now defaults to option 4 (stealth) instead of option 1 (in-repo). All Rig
+  files are stored in the external tracking dir by default — no `.rig/` is committed
+  to the project repo.
+
+## [1.0.0] — 2025-01-01
+
+### Added
+- Initial release
+CLEOF
+
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+  echo "1.0.0" > "$TEST_PROJECT/.rig/VERSION"
+
+  _RIG_TEST_CHANGELOG="$fixture" run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Default install tracking mode changed to stealth"* ]]
+  [[ "$output" == *"prompt now defaults to option 4 (stealth) instead of option 1 (in-repo)"* ]]
+  [[ "$output" == *"files are stored in the external tracking dir by default"* ]]
+  [[ "$output" == *"to the project repo."* ]]
 }
 
 # ── permission-request.sh: RIG_DIR write auto-approval ───────────────────────

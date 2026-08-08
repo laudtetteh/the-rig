@@ -580,8 +580,9 @@ for the full Phase 2/2a-agent/2b-agent/3d flow.
 ### Verifying an upgrade: `bin/rig doctor` gates
 
 After any upgrade, `bin/rig doctor` (or `bin/rig doctor --json` for scripting)
-runs a set of postflight checks, including five added under issue #444 lane
-444-H:
+runs a set of postflight checks — five added under issue #444 lane 444-H, plus
+two more added under issue #473 for post-upgrade validation against known
+historical bug patterns:
 
 | Gate | What it verifies | Degrades to "skipped" (not "failed") when |
 |---|---|---|
@@ -590,6 +591,16 @@ runs a set of postflight checks, including five added under issue #444 lane
 | `manifest_mode_hash` | Every Rig-owned artifact's file mode and content hash still match what the manifest recorded (catches hand-edits outside the installer) | No manifest metadata file exists |
 | `stale_manifest_entries` | No manifest entry points at a path that no longer exists on disk | No manifest metadata file exists |
 | `idempotence` | Not verified live by `doctor` itself (a read-only command has no safe way to mutate and roll back a real project tree) — always reports the documented procedure: run `bats tests/test_install_idempotence.bats` | Never fails on its own; it's a pointer to the real check, not a live result |
+| `upgrade_pattern_blanked_file` | `CLAUDE.md`/`PROJECT_BRIEF.md` didn't revert to raw, unsubstituted template content (i.e. reintroduce the `[Project Name]` placeholder) since the last pre-flight snapshot — the signature of lessons-learned #14 | No pre-flight snapshot exists yet (issue #472 hasn't taken one — e.g. no upgrade-family run has happened on this project since the check shipped) |
+| `upgrade_pattern_symlink_replaced` | No path that was a symlink in the last pre-flight snapshot now exists as a regular file — the signature of a symlink-refusal guard being bypassed (lessons-learned #15) | No pre-flight snapshot exists yet |
+
+Both new gates diff the most recent pre-flight snapshot (issue #472,
+`.rig-backup/preflight-snapshots/` for tracked installs or the external
+`.rig/`'s own `preflight-snapshots/` for stealth/external) against current
+state. They cover exactly 2 of the incidents in `docs/lessons-learned.md` —
+deliberately: the rest are process/environment lessons (worktree confusion,
+hook mistiming, Docker volume shadowing) with no file-content signature an
+automated diff can check.
 
 `installer/validate-manifest-provenance.py` and `installer/audit-stealth.py`
 are release-engineering tools that live in The Rig's own source repo — they
