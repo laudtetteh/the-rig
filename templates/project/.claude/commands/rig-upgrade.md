@@ -669,12 +669,21 @@ Watch for:
 
 For each file the installer reported as `"Customized file detected:"`:
 
-1. Show what changed in the template:
+1. Show what changed in the template. `$rel` is the same manifest-relative path
+   format install.sh's own "Customized file detected:" output uses — for a
+   `.rig/`-prefixed path in stealth/external tracking, that file lives under
+   the external `$RIG_DIR`, not `$REPO/.rig/` (identical reasoning to Phase 1e
+   above; see issue #494):
    ```bash
    tmp=$(mktemp)
    sed "s/\[BASE_BRANCH\]/${BASE_BRANCH}/g; s|\[REPO_ROOT\]|${REPO}|g" \
      "$TEMPLATES/$rel" > "$tmp"
-   diff "$REPO/$rel" "$tmp"
+   if [[ "$rel" == .rig/* ]]; then
+     installed_path="$RIG_DIR/${rel#.rig/}"
+   else
+     installed_path="$REPO/$rel"
+   fi
+   diff "$installed_path" "$tmp"
    rm -f "$tmp"
    ```
 
@@ -685,10 +694,12 @@ For each file the installer reported as `"Customized file detected:"`:
    > - **[k] Keep yours** — skip this file (your edits stay; you may miss upstream fixes)
    > - **[s] Show full file** — read both versions in full before deciding
 
-4. If user chooses **[a]**: copy the template (with substitutions) over the installed file.
+4. If user chooses **[a]**: copy the template (with substitutions) over the installed file
+   at `$installed_path` (resolved in step 1 above — the external `$RIG_DIR` path for
+   `.rig/`-prefixed files in stealth/external tracking, `$REPO/$rel` otherwise).
    Then update the manifest entry and record the result:
    ```bash
-   NEW_HASH=$(shasum -a 256 "$REPO/$rel" 2>/dev/null | awk '{print $1}')
+   NEW_HASH=$(shasum -a 256 "$installed_path" 2>/dev/null | awk '{print $1}')
    # Replace the old hash line in .rig-manifest
    sed -i '' "/$rel$/s/^[a-f0-9]* /$NEW_HASH /" "$MANIFEST" 2>/dev/null || \
    sed -i "/$rel$/s/^[a-f0-9]* /$NEW_HASH /" "$MANIFEST"
@@ -1019,7 +1030,7 @@ Then say:
 | Installer on wrong branch | `git -C ~/tools/the-rig checkout main && git pull origin main` |
 | `settings.json` still has duplicates after upgrade | Run Phase 3b manually; edit file directly |
 | `.rig/VERSION` shows old version | Run Phase 3a fix block manually |
-| A Rig-owned file wasn't updated (no prompt either) | Copy from template manually: `cp $TEMPLATES/$rel $REPO/$rel` |
+| A Rig-owned file wasn't updated (no prompt either) | Copy from template manually: `cp $TEMPLATES/$rel $REPO/$rel` — or, for a `.rig/`-prefixed `$rel` in stealth/external tracking, `cp $TEMPLATES/$rel $RIG_DIR/${rel#.rig/}` |
 | Global CLAUDE.md was overwritten with placeholders | Restore from `.rig-backup/` + re-apply surgical edits |
 | `git add` in hook fails with `index.lock` | Use `git update-index --add <file>` inside hooks instead of `git add` |
 | `agent-upgrade` exits `3` (`status: "refused"`) | Not a failure — every safe action was still applied. Resolve each `conflicts[]` entry using its own `repair_guidance`, then re-run `/rig-upgrade` |
