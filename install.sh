@@ -1551,6 +1551,16 @@ backup_file() {
   if [[ -z "$BACKUP_DIR" || "$UPGRADE_TRANSACTION_BASE" != "$base" ]]; then init_backup_dir "$base"; fi
   local rel="${src#"$base"/}"
   local dest="${BACKUP_DIR}/${rel}"
+  # A single run can route the same destination through more than one
+  # direct-writer mutation (e.g. CLAUDE.md: [Project Name] substitution,
+  # then _subst_base_branch(), then the external/stealth @.rig/ rewrite).
+  # BACKUP_TS is fixed for the whole run, so $dest is the same path across
+  # every such call for a given destination -- if it already exists, an
+  # earlier call this run already captured the file's true pre-run state;
+  # a later call backing up again would silently overwrite that with this
+  # run's own intermediate, already-mutated content instead (issue #482
+  # review, filed as #491).
+  [[ -e "$dest" ]] && return 0
   mkdir -p "$(dirname "$dest")"
   journal_append backup "$rel"
   cp "$src" "$dest"
@@ -3325,8 +3335,26 @@ if [[ "$DO_PROJECT" == true ]]; then
   # The settings.json template omits SubagentStart by default (it's opt-in).
   # When INSTALL_SUBAGENTS=true (via --subagents or auto-detect), inject the
   # SubagentStart entry with [REPO_ROOT] placeholder; it is substituted below.
+  #
+  # Reverted from guard_destination_before_write() back to
+  # upgrade_prepare_mutation() (issue #482 follow-up): this step and the
+  # [REPO_ROOT] substitution step right below it both run immediately after
+  # the SAME settings.json was just created or smart-merged earlier in this
+  # SAME run (see the "settings.json: always smart-merge" branch in
+  # copy_file(), whose own _upgrade_write() call already correctly backs up
+  # a genuinely pre-existing settings.json before overwriting it).
+  # guard_destination_before_write()'s regular-file classification cannot
+  # distinguish "this file existed before this run started" from "this file
+  # was written moments ago by an earlier step in this same run" -- so
+  # migrating this call site took a second, spurious backup of the
+  # just-created/just-merged file, silently clobbering the smart-merge's
+  # own correct backup with this run's own intermediate content. Broke a
+  # previously-passing regression test (issue #470) on a fresh CI run.
+  # Filed as a follow-up (#493) to fix properly with same-run-creation
+  # tracking; reverted here to unblock, matching the precedent already set
+  # for the moved-project settings.json rewrite a few hundred lines up.
   if [[ "$INSTALL_SUBAGENTS" == true && "$AGENT_DRY_RUN" != true && -f "$TARGET/.claude/settings.json" ]] && \
-     guard_destination_before_write "$TARGET" "$TARGET/.claude/settings.json" ".claude/settings.json"; then
+     upgrade_prepare_mutation "$TARGET" "$TARGET/.claude/settings.json" ".claude/settings.json"; then
     if command -v python3 >/dev/null 2>&1; then
       python3 - "$TARGET/.claude/settings.json" <<'PYEOF' 2>/dev/null || true
 import json, sys
@@ -3346,10 +3374,13 @@ PYEOF
   fi
 
   # Substitute [REPO_ROOT] in settings.json with the absolute project path.
-  # This step runs after copy/merge to ensure the final file has the real path.
+  # This step runs after copy/merge to ensure the final file has the real
+  # path. Reverted from guard_destination_before_write() back to
+  # upgrade_prepare_mutation() -- see the SubagentStart injection comment
+  # immediately above for why (issue #482 follow-up, #493).
   TARGET_SETTINGS="$TARGET/.claude/settings.json"
   if [[ -f "$TARGET_SETTINGS" ]] && \
-     guard_destination_before_write "$TARGET" "$TARGET_SETTINGS" ".claude/settings.json"; then
+     upgrade_prepare_mutation "$TARGET" "$TARGET_SETTINGS" ".claude/settings.json"; then
     # agent-plan: classification only, never substitute placeholders.
     if [[ "$AGENT_DRY_RUN" != true ]]; then
       ESCAPED_PATH="${TARGET_ABS//\//\\/}"
