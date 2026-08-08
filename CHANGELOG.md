@@ -15,6 +15,35 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   notices the user repeating an instruction or preference for at least the
   second time, it proactively offers to codify it as a command, skill, or
   CLAUDE.md/rules bullet, rather than only complying again silently.
+- A full pre-flight snapshot of a project's entire Rig/Claude/Codex
+  footprint (including `.git/hooks/`) is now taken before any write in an
+  `upgrade`/`agent-upgrade` strategy run, independent of and prior to the
+  existing per-file backup mechanism. Stored under
+  `.rig-backup/preflight-snapshots/` (tracked installs) or the external
+  `.rig/`'s own `preflight-snapshots/` (stealth/external), with 5-snapshot
+  retention (#472).
+- `bin/rig doctor` gained 2 new post-upgrade validation checks
+  (`upgrade_pattern_blanked_file`, `upgrade_pattern_symlink_replaced`)
+  that diff the new pre-flight snapshot against current state for the 2
+  historical bug patterns from `docs/lessons-learned.md` that are
+  genuinely expressible as a before/after file diff (#473).
+
+### Fixed
+
+- `agent-plan`/`agent-upgrade` no longer leak CHANGELOG "BREAKING" bullets
+  onto stdout, which broke the documented single-JSON-document contract
+  whenever the target's installed version had a BREAKING changelog entry
+  ahead of it (#475).
+- `agent-plan`/`agent-upgrade` can no longer hang on a blocking interactive
+  read. Fixed for the originally-reported branch-drift check, plus two
+  more previously-undiscovered hangs of the identical class found via
+  live TTY testing (a `--project-name` prompt and the `.rig/`
+  tracking-mode menu) (#476).
+- The notification-helper (`~/.claude/bin/rig-notify`, global
+  `settings.json`) and Codex-config (`.codex/config.toml`) writes now get
+  the same symlink-refusal/backup-before-write guard under every
+  strategy, not just `--strategy upgrade` — matching the precedent set by
+  the `.git/hooks/*` fix (#477).
 
 ---
 
