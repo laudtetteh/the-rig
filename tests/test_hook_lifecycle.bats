@@ -347,3 +347,90 @@ conflict_paths = [c['path'] for c in doc['conflicts']]
 assert '.git/hooks/pre-commit' not in conflict_paths, conflict_paths
 "
 }
+
+# issue #495: _stealth_install_git_hook() treated "no manifest entry" as
+# an automatic customization, with no fallback comparison against the
+# incoming hook content -- unlike _copy_file_upgrade()'s handling of every
+# other Rig-owned file, which checks dest_hash == incoming_hash first. A
+# hook installed by a pre-manifest-tracking Rig version (or one whose
+# manifest entry was lost/never written) that still byte-for-byte matches
+# the current template was permanently misreported as "customized" and
+# stuck needing manual review forever, even though its content was never
+# actually touched by hand. This test simulates that missing-baseline
+# state directly (strip the manifest line after a normal install) and
+# proves the fix falls back to a content comparison instead of assuming
+# customization.
+@test "agent-plan classifies a hook with no manifest baseline as up to date when its content already matches, not customized (issue #495)" {
+  install_stealth
+  [ "$status" -eq 0 ]
+
+  # Simulate a hook installed before manifest tracking existed: same content
+  # on disk, but no baseline entry recorded.
+  grep -vF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest" > "$TEMP_DIR/manifest.tmp"
+  mv "$TEMP_DIR/manifest.tmp" "$RIG_EXT/memory/.rig-manifest"
+  ! grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"
+
+  local before_hash
+  before_hash="$(_sha256 "$TEST_PROJECT/.git/hooks/pre-commit")"
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$RIG_EXT" \
+    --strategy agent-plan
+
+  printf '%s\n' "$output" > "$TEMP_DIR/agent-plan-no-baseline-result.json"
+  python3 -c "
+import json
+lines = [l for l in open('$TEMP_DIR/agent-plan-no-baseline-result.json') if l.strip()]
+doc = json.loads(lines[-1])
+entries = {a['path']: a for a in doc['artifacts']}
+assert '.git/hooks/pre-commit' in entries, entries.keys()
+assert entries['.git/hooks/pre-commit']['classification'] == 'up-to-date', entries['.git/hooks/pre-commit']
+conflict_paths = [c['path'] for c in doc['conflicts']]
+assert '.git/hooks/pre-commit' not in conflict_paths, conflict_paths
+"
+
+  # agent-plan never writes: the hook content must be untouched and the
+  # manifest must still be missing the entry (only agent-upgrade would
+  # actually record a fresh baseline).
+  local after_hash
+  after_hash="$(_sha256 "$TEST_PROJECT/.git/hooks/pre-commit")"
+  [ "$before_hash" = "$after_hash" ]
+  ! grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"
+}
+
+# Companion to the agent-plan test above: agent-upgrade (the real apply
+# mode) must not just classify the no-baseline hook correctly but also
+# heal the gap by writing a fresh manifest entry, so the false positive
+# doesn't recur on every future run.
+@test "agent-upgrade heals a hook with no manifest baseline by writing a fresh entry, without touching its content (issue #495)" {
+  install_stealth
+  [ "$status" -eq 0 ]
+
+  grep -vF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest" > "$TEMP_DIR/manifest.tmp"
+  mv "$TEMP_DIR/manifest.tmp" "$RIG_EXT/memory/.rig-manifest"
+  ! grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"
+
+  local before_hash
+  before_hash="$(_sha256 "$TEST_PROJECT/.git/hooks/pre-commit")"
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$RIG_EXT" \
+    --strategy agent-upgrade
+
+  printf '%s\n' "$output" > "$TEMP_DIR/agent-upgrade-no-baseline-result.json"
+  python3 -c "
+import json
+lines = [l for l in open('$TEMP_DIR/agent-upgrade-no-baseline-result.json') if l.strip()]
+doc = json.loads(lines[-1])
+entries = {a['path']: a for a in doc['artifacts']}
+assert '.git/hooks/pre-commit' in entries, entries.keys()
+assert entries['.git/hooks/pre-commit']['classification'] == 'up-to-date', entries['.git/hooks/pre-commit']
+conflict_paths = [c['path'] for c in doc['conflicts']]
+assert '.git/hooks/pre-commit' not in conflict_paths, conflict_paths
+"
+
+  local after_hash
+  after_hash="$(_sha256 "$TEST_PROJECT/.git/hooks/pre-commit")"
+  [ "$before_hash" = "$after_hash" ]
+  grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"
+}
