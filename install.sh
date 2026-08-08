@@ -519,9 +519,28 @@ INSTALLER_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "unknown")"
 CAPABILITY_MANIFEST="${_RIG_CAPABILITY_MANIFEST:-$SCRIPT_DIR/installer/capabilities.v1.json}"
 _EARLY_PREFLIGHT=false
 _EARLY_PREFLIGHT_JSON=false
-for _early_arg in "$@"; do
-  [[ "$_early_arg" == --preflight ]] && _EARLY_PREFLIGHT=true
-  [[ "$_early_arg" == --json ]] && _EARLY_PREFLIGHT_JSON=true
+# issue #476: the real AGENT_MODE assignment happens much later, inside the
+# --strategy case statement below (it needs TARGET/COLLISION_STRATEGY
+# resolution machinery that isn't set up yet this early). The drift check
+# right below this loop runs before that point, so it can't just read
+# AGENT_MODE -- it needs its own early, standalone lookahead over $@,
+# exactly like the --preflight/--json scan above, to know whether
+# agent-plan/agent-upgrade was requested before deciding whether it's safe
+# to print unguarded narration or block on an interactive prompt.
+_EARLY_AGENT_MODE=false
+_early_args=("$@")
+for ((_early_i = 0; _early_i < ${#_early_args[@]}; _early_i++)); do
+  case "${_early_args[$_early_i]}" in
+    --preflight) _EARLY_PREFLIGHT=true ;;
+    --json) _EARLY_PREFLIGHT_JSON=true ;;
+    --strategy)
+      if [[ $((_early_i + 1)) -lt ${#_early_args[@]} ]]; then
+        case "${_early_args[$((_early_i + 1))]}" in
+          agent-plan|agent-upgrade) _EARLY_AGENT_MODE=true ;;
+        esac
+      fi
+      ;;
+  esac
 done
 
 # ── Installer branch drift check ─────────────────────────────────────────────
@@ -529,8 +548,19 @@ done
 # remote tracking branch. A stale installer installs stale templates.
 # Runs silently if there's no remote, no network, or no git.
 # Tests can override _RIG_DRIFT_DIR to point to a mock repo.
+#
+# Never for agent-plan/agent-upgrade (issue #476): this block used to be
+# gated only on _EARLY_PREFLIGHT, and every warn()/echo call inside it is
+# either unconditional or gated on the real AGENT_MODE variable, which
+# isn't assigned yet at this point in the script regardless of --strategy.
+# That meant an agent-plan/agent-upgrade run whose installer checkout was
+# behind its remote always leaked this block's narration onto stdout ahead
+# of the documented single JSON document -- and, far worse, if stdin was
+# also a TTY (not uncommon for CI runners or interactive agent sessions),
+# fell into the interactive `read` a few lines down and hung indefinitely
+# waiting for input that would never come.
 _DRIFT_DIR="${_RIG_DRIFT_DIR:-$SCRIPT_DIR}"
-if [[ "$_EARLY_PREFLIGHT" != true ]] && git -C "$_DRIFT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+if [[ "$_EARLY_PREFLIGHT" != true && "$_EARLY_AGENT_MODE" != true ]] && git -C "$_DRIFT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$_DRIFT_DIR" fetch --quiet 2>/dev/null || true
   _TRACKING=$(git -C "$_DRIFT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
   if [[ -n "$_TRACKING" ]]; then
@@ -1574,6 +1604,98 @@ finish_upgrade_transaction() {
   UPGRADE_TRANSACTION_BASE=""
 }
 
+# ── PRE-FLIGHT SNAPSHOT (issue #472) ──────────────────────────────────────────
+# Independent of and prior to the per-file backup_file()/_upgrade_write()
+# mechanism above, which only ever backs up a file the copy loop actually
+# decides to touch: takes one full recursive "before" snapshot of the target
+# project's entire Rig/Claude/Codex footprint into its own timestamped
+# location, so a full-tree diff is possible regardless of what the copy loop
+# touches. Runs once per real (non-dry-run) upgrade-family invocation, before
+# any project-layer write begins. agent-plan (AGENT_DRY_RUN=true) mutates
+# nothing, so there is nothing to protect and no snapshot is taken.
+PREFLIGHT_SNAPSHOT_DIR=""
+preflight_snapshot_project() {
+  local base="$1"
+  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  [[ "$AGENT_DRY_RUN" == true ]] && return 0
+
+  local snap_root
+  if [[ ( "$RIG_TRACKING" == "stealth" || "$RIG_TRACKING" == "external" ) && -n "$EXTERNAL_RIG_DIR" ]]; then
+    snap_root="${EXTERNAL_RIG_DIR}/preflight-snapshots"
+  else
+    snap_root="${base}/.rig-backup/preflight-snapshots"
+  fi
+
+  # Retention: keep the 5 most recent snapshots, pruning the oldest before
+  # adding a new one. Scoped only to preflight-snapshots/ — independent of
+  # the separately-accumulating per-file .rig-backup/<ts>_$$ dirs above,
+  # which have no retention policy of their own (out of scope for #472).
+  # Snapshot dirs are always our own "<timestamp>_<pid>" names (no spaces,
+  # no newlines), so plain lexicographic `sort` on one-per-line output is
+  # safe here without needing NUL-delimited find/sort (sort -z is GNU-only
+  # and unavailable on macOS's BSD sort).
+  if [[ -d "$snap_root" ]]; then
+    local -a existing=()
+    while IFS= read -r entry; do existing+=("$entry"); done < <(find "$snap_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+    local keep=4 count="${#existing[@]}" i
+    if (( count > keep )); then
+      for (( i = 0; i < count - keep; i++ )); do
+        rm -rf "${existing[$i]}" || { error "Cannot prune old pre-flight snapshot: ${existing[$i]}"; exit 1; }
+      done
+    fi
+  fi
+
+  local snap_dir="${snap_root}/${BACKUP_TS}_$$"
+  mkdir -p "$snap_dir" || { error "Cannot create pre-flight snapshot directory: $snap_dir"; exit 1; }
+
+  local -a rel_paths=(
+    "CLAUDE.md" "PROJECT_BRIEF.md" ".claude" ".agents" ".codex" ".mcp.json"
+    ".playwright-mcp" ".github" ".gitleaks.toml" "docs/features/README.md"
+    ".husky" ".rigpath" "bin/rig" ".git/hooks"
+  )
+  # Tracked .rig/ lives at $base/.rig for repo/exclude tracking, so it's just
+  # another base-relative path. external/stealth tracking is handled below —
+  # $EXTERNAL_RIG_DIR lives outside $base entirely.
+  [[ "$RIG_TRACKING" == "repo" || "$RIG_TRACKING" == "exclude" ]] && rel_paths+=(".rig")
+
+  local rel src dst
+  for rel in "${rel_paths[@]}"; do
+    src="${base}/${rel}"
+    [[ -e "$src" || -L "$src" ]] || continue
+    dst="${snap_dir}/${rel}"
+    mkdir -p "$(dirname "$dst")" || { error "Cannot create pre-flight snapshot directory: $(dirname "$dst")"; exit 1; }
+    cp -R "$src" "$dst" 2>/dev/null || { error "Pre-flight snapshot failed copying $src"; exit 1; }
+  done
+
+  # External/stealth .rig/ lives outside $base entirely, at $EXTERNAL_RIG_DIR
+  # — which, in this mode, is also this snapshot's own ancestor directory
+  # (preflight-snapshots/, backups/, and .rig-backup/ all live inside it;
+  # tracked-mode .rig/ never includes .rig-backup/ in the first place, since
+  # that lives as a sibling of $base/.rig, not inside it — excluding it here
+  # too keeps both tracking modes' snapshot contents consistent). Copy real
+  # contents in under snap_dir/.rig, skipping all three so the snapshot never
+  # recurses into the snapshot/backup mechanism itself or balloons in size by
+  # re-embedding the separately-accumulating, retention-less per-file
+  # backup/transaction history on every run.
+  if [[ ( "$RIG_TRACKING" == "stealth" || "$RIG_TRACKING" == "external" ) && -n "$EXTERNAL_RIG_DIR" && -d "$EXTERNAL_RIG_DIR" ]]; then
+    mkdir -p "${snap_dir}/.rig" || { error "Cannot create pre-flight snapshot directory: ${snap_dir}/.rig"; exit 1; }
+    local entry name
+    while IFS= read -r -d '' entry; do
+      name="$(basename "$entry")"
+      case "$name" in
+        backups|preflight-snapshots|.rig-backup) continue ;;
+      esac
+      cp -R "$entry" "${snap_dir}/.rig/${name}" 2>/dev/null || { error "Pre-flight snapshot failed copying $entry"; exit 1; }
+    done < <(find "$EXTERNAL_RIG_DIR" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+  fi
+
+  # Deliberately left for a future consumer (issue #473's post-upgrade
+  # doctor validation is expected to diff this snapshot against
+  # post-upgrade state) -- not read anywhere else in this change.
+  PREFLIGHT_SNAPSHOT_DIR="$snap_dir"
+  info "Pre-flight snapshot: $snap_dir"
+}
+
 # ── BREAKING CHANGE CHECK ─────────────────────────────────────────────────────
 # Print any "### Changed — BREAKING" bullets from CHANGELOG sections that are
 # newer than $current_version, then prompt the user to confirm before continuing.
@@ -1604,9 +1726,18 @@ _show_breaking_changes() {
   blank
   warn "Breaking changes since v${current_version} — review before upgrading:"
   blank
-  while IFS= read -r line; do
-    echo "  $line"
-  done <<< "$breaking_lines"
+  # warn()/blank() above already self-gate on AGENT_MODE, but this raw echo
+  # loop printing each CHANGELOG bullet did not (issue #475) -- reachable by
+  # any agent-plan/agent-upgrade run against a project whose installed
+  # version has a BREAKING changelog entry ahead of it, violating the
+  # documented "exactly one JSON document on stdout" contract those modes
+  # rely on. The Rig's own CHANGELOG.md has a real BREAKING section under
+  # [1.18.0], so this was concretely reachable, not just theoretical.
+  if [[ -z "$AGENT_MODE" ]]; then
+    while IFS= read -r line; do
+      echo "  $line"
+    done <<< "$breaking_lines"
+  fi
   blank
   if ! confirm "Continue upgrade with the above breaking changes?" "y"; then
     info "Upgrade cancelled. No files were modified."
@@ -2369,14 +2500,22 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   fi
 
   if [[ "$INSTALL_NOTIFICATIONS" == true && "$AGENT_DRY_RUN" != true ]]; then
-    if upgrade_prepare_mutation "$HOME" "$CLAUDE_DIR/bin/rig-notify" ".claude/bin/rig-notify"; then
+    # guard_destination_before_write() directly, NOT the upgrade_prepare_mutation()
+    # wrapper -- that wrapper only runs under COLLISION_STRATEGY==upgrade, but
+    # notifications can be installed under any strategy (--notifications works
+    # alongside the default merge strategy too). Same gap and same fix as
+    # _stealth_install_git_hook()'s guard_destination_before_write() call
+    # (issue #451/#470/#471): under merge/skip/overwrite/interactive,
+    # upgrade_prepare_mutation() silently no-ops and returns success without
+    # ever checking for a symlinked or conflicting destination (issue #477).
+    if guard_destination_before_write "$HOME" "$CLAUDE_DIR/bin/rig-notify" ".claude/bin/rig-notify"; then
       mkdir -p "$CLAUDE_DIR/bin"
       cp "$GLOBAL_TEMPLATES/bin/rig-notify" "$CLAUDE_DIR/bin/rig-notify"
       chmod +x "$CLAUDE_DIR/bin/rig-notify"
     else
       info "Skipped notification helper due to a conflicting destination."
     fi
-    if upgrade_prepare_mutation "$HOME" "$CLAUDE_DIR/settings.json" ".claude/settings.json"; then
+    if guard_destination_before_write "$HOME" "$CLAUDE_DIR/settings.json" ".claude/settings.json"; then
       _notif_channel=terminal_bell
       [[ -n "${KITTY_WINDOW_ID:-}" ]] && _notif_channel=kitty
       [[ -n "${GHOSTTY_RESOURCES_DIR:-}" ]] && _notif_channel=ghostty
@@ -2518,9 +2657,36 @@ if [[ "$DO_PROJECT" == true ]]; then
     TARGET="$_FLAG_TARGET"
   else
     DEFAULT_TARGET="$(pwd)"
-    ask "Target project directory?"
-    read -r -p "    Path [${DEFAULT_TARGET}]: " TARGET_INPUT || true
-    TARGET="${TARGET_INPUT:-$DEFAULT_TARGET}"
+    # Independent-review finding on issue #476: this prompt had no `-t 0`
+    # guard at all (unlike every sibling prompt below it), so it read
+    # unconditionally whenever --target was omitted -- reachable by an
+    # agent-plan/agent-upgrade invocation with a real TTY attached and no
+    # --target flag, hanging exactly like the drift check and base-branch
+    # prompt did before their fixes.
+    #
+    # Regression found by tests/test_install.bats after the first attempt
+    # at this fix added a `-t 0` check here (matching the sibling prompts'
+    # pattern): unlike those siblings, this call site's original absence of
+    # a `-t 0` guard was load-bearing -- several existing tests drive the
+    # interactive installer non-interactively via a piped heredoc (e.g.
+    # "stealth mode: warns when .husky/ exists in target project"), which
+    # is not a TTY, relying on this prompt reading its answer from stdin
+    # regardless. Adding `-t 0` silently skipped that read and defaulted to
+    # $(pwd) instead, desynchronizing every subsequent piped answer (the
+    # tracking-menu choice consumed the target path meant for this prompt).
+    # `-z "$AGENT_MODE"` alone is both necessary and sufficient: it closes
+    # the actual hang (agent-plan/agent-upgrade always skip this prompt,
+    # regardless of stdin), and a plain `read` on non-agent, non-tty stdin
+    # (closed, /dev/null, or a heredoc) never blocks -- it returns
+    # immediately, empty on EOF or populated from the pipe, exactly
+    # matching this call site's original safe behavior.
+    if [[ -z "$AGENT_MODE" ]]; then
+      ask "Target project directory?"
+      read -r -p "    Path [${DEFAULT_TARGET}]: " TARGET_INPUT || true
+      TARGET="${TARGET_INPUT:-$DEFAULT_TARGET}"
+    else
+      TARGET="$DEFAULT_TARGET"
+    fi
   fi
 
   if [[ ! -d "$TARGET" ]]; then
@@ -2541,7 +2707,11 @@ if [[ "$DO_PROJECT" == true ]]; then
     PROJECT_NAME="$_FLAG_PROJECT_NAME"
   else
     DEFAULT_PROJECT_NAME="$(basename "$TARGET")"
-    if [[ -t 0 ]]; then
+    # Independent-review finding on issue #476: same class as the
+    # base-branch prompt fix above -- this `-t 0` check had no AGENT_MODE
+    # guard, so it blocked under a real TTY whenever --project-name was
+    # omitted, regardless of --strategy.
+    if [[ -t 0 && -z "$AGENT_MODE" ]]; then
       ask "Project name (used in CLAUDE.md)?"
       read -r -p "    Name [${DEFAULT_PROJECT_NAME}]: " PROJECT_NAME_INPUT
       PROJECT_NAME="${PROJECT_NAME_INPUT:-$DEFAULT_PROJECT_NAME}"
@@ -2575,7 +2745,15 @@ if [[ "$DO_PROJECT" == true ]]; then
     fi
     _DEFAULT_BASE="${_DETECTED_BASE:-main}"
     # Only prompt when stdin is a TTY (skip in non-interactive/CI contexts).
-    if [[ -t 0 ]]; then
+    # Also never for agent-plan/agent-upgrade (found live while testing
+    # issue #476's fix): a real TTY attached to an agent invocation reached
+    # this exact same "-t 0" pattern and blocked on this read too, just
+    # like the branch-drift check did before that fix -- AGENT_MODE is
+    # already reliably assigned by this point in execution (the --strategy
+    # case statement runs during flag parsing, well before this point), so
+    # this fix is a straightforward extra guard rather than needing its own
+    # early lookahead.
+    if [[ -t 0 && -z "$AGENT_MODE" ]]; then
       ask "What is the base branch for this repo?"
       read -r -p "    Branch [${_DEFAULT_BASE}]: " _BASE_INPUT
       BASE_BRANCH="${_BASE_INPUT:-$_DEFAULT_BASE}"
@@ -2656,6 +2834,15 @@ if [[ "$DO_PROJECT" == true ]]; then
       RIG_TRACKING="external"
     fi
     info "Detected .rigpath — using ${RIG_TRACKING} mode: $EXTERNAL_RIG_DIR"
+  elif [[ -n "$AGENT_MODE" ]]; then
+    # Independent-review finding on issue #476: this whole interactive
+    # tracking-mode menu had no `-t 0` guard at all -- it read
+    # unconditionally whenever none of --tracking/--rig-dir/.rigpath were
+    # present, reachable by an agent-plan/agent-upgrade invocation with a
+    # real TTY attached. Fall back to the menu's own documented default
+    # (stealth) instead of prompting, matching option 4 below exactly.
+    RIG_TRACKING="stealth"
+    EXTERNAL_RIG_DIR="${HOME}/.rig/projects/${PROJECT_NAME}"
   else
     echo "How should .rig/ be tracked in git?"
     blank
@@ -2739,6 +2926,10 @@ if [[ "$DO_PROJECT" == true ]]; then
       fi
     fi
     if [[ "$RECOVER_ONLY" == true ]]; then exit 0; fi
+    # Take the whole-tree "known good before" snapshot only after any
+    # interrupted prior transaction has been recovered, so it reflects
+    # consistent state — never a mid-rollback one.
+    preflight_snapshot_project "$TARGET"
   fi
   _PROJECT_STATE_FUTURE=false
   PREVIOUS_PROJECT_AGENT=""
@@ -3008,7 +3199,13 @@ if [[ "$DO_PROJECT" == true ]]; then
   # precedence according to Codex's instruction discovery order.
   if has_agent "$PROJECT_AGENT" codex; then
     _CODEX_CONFIG="$TARGET/.codex/config.toml"
-    if upgrade_prepare_mutation "$TARGET" "$_CODEX_CONFIG" ".codex/config.toml"; then
+    # guard_destination_before_write() directly, NOT upgrade_prepare_mutation()
+    # -- same gap and fix as the notification-helper call sites above and the
+    # .git/hooks/* fix (issue #451/#470/#471): the wrapper silently no-ops
+    # under every strategy except "upgrade", so a merge-strategy install with
+    # --project-agent codex never actually refused a symlinked/conflicting
+    # .codex/config.toml (issue #477).
+    if guard_destination_before_write "$TARGET" "$_CODEX_CONFIG" ".codex/config.toml"; then
       # agent-plan: classification only, never invoke the merge script --
       # it performs a real write via merge-codex-config.py's atomic_write()
       # (including creating .codex/config.toml and its parent directory if
