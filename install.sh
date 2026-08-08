@@ -2454,7 +2454,24 @@ _stealth_install_git_hook() {
     local dest_hash manifest_hash
     dest_hash="$(sha256_file "$hook_dest")"
     manifest_hash="$(read_manifest_hash "$rel" "$MANIFEST_FILE")"
-    if [[ -z "$manifest_hash" || "$dest_hash" != "$manifest_hash" ]]; then
+    if [[ -z "$manifest_hash" ]]; then
+      # No manifest baseline yet -- e.g. this hook was installed by a Rig
+      # version before hook manifest tracking existed. Unlike a real hash
+      # mismatch, this alone doesn't mean customized: fall back to comparing
+      # against the INCOMING hook directly, matching _copy_file_upgrade()'s
+      # own no-manifest-entry handling for every other Rig-owned file
+      # (issue #495) -- an installed hook that already matches what would be
+      # installed is not a customization, just a missing baseline, and
+      # should never be permanently misreported as needing manual review.
+      local src_hash
+      src_hash="$(sha256_file "$hook_src")"
+      if [[ "$dest_hash" == "$src_hash" ]]; then
+        write_manifest_entry "$dest_hash" "$rel" "$MANIFEST_FILE" "$hook_dest"
+        record_upgrade_result up-to-date "$rel"
+        return 0
+      fi
+      customized=true
+    elif [[ "$dest_hash" != "$manifest_hash" ]]; then
       customized=true
     fi
   elif [[ -e "$hook_dest" ]]; then
