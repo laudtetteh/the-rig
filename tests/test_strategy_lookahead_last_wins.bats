@@ -61,6 +61,17 @@ setup() {
   git clone -q "$REMOTE" "$DRIFT_REPO"
   git -C "$DRIFT_REPO" config user.email test@test.com
   git -C "$DRIFT_REPO" config user.name Test
+  # A bare repo's HEAD symref is fixed at `git init --bare` time from
+  # init.defaultBranch, independent of which branch is later pushed to it.
+  # If the environment's default differs from "main" (observed on the
+  # hosted CI runner, not reproducible on every local machine), this clone
+  # cannot check out any working-tree branch at all ("remote HEAD refers
+  # to nonexistent ref, unable to checkout") and leaves no local branch,
+  # so @{u} never resolves and the drift check silently finds nothing to
+  # report -- not a real product bug, a test-fixture gap. Force a local
+  # main tracking origin/main explicitly so @{u} resolution is
+  # environment-independent, regardless of the bare repo's HEAD symref.
+  git -C "$DRIFT_REPO" checkout -q -B main --track origin/main
 
   # Push a second commit DRIFT_REPO hasn't fetched yet -- its own `git
   # fetch` inside the drift check will discover it and see itself as
