@@ -76,10 +76,17 @@ teardown() { rm -rf "$TEMP_DIR"; }
   local nonblank_lines
   nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
   [ "$nonblank_lines" -eq 1 ]
-  [[ "$output" != *"commit(s) behind"* ]]
-  [[ "$output" != *"Options:"* ]]
-  [[ "$output" != *"Update now and re-run"* ]]
   [[ "$output" == \{* ]]
+  # Substring checks for drift-check narration (e.g. *"Options:"*) are NOT
+  # safe here and were removed: this repo's own real command files
+  # (ship.md, rig-upgrade.md, rig-gaps.md) legitimately contain that exact
+  # text, and a classified-file diff can embed their content directly in
+  # the JSON's "current"/"incoming" fields -- a real, valid single-line
+  # JSON document can coincidentally contain any of these substrings
+  # without anything having leaked. A single non-blank line that parses as
+  # JSON is the actual contract and the only reliable proof of it; this
+  # bit a real CI run once (false failure on this exact substring check).
+  printf '%s\n' "$output" | python3 -c 'import json, sys; json.load(sys.stdin)'
 }
 
 @test "agent-upgrade against a behind-remote installer checkout emits exactly one JSON document, with zero drift-check narration leaked" {
@@ -91,9 +98,8 @@ teardown() { rm -rf "$TEMP_DIR"; }
   local nonblank_lines
   nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
   [ "$nonblank_lines" -eq 1 ]
-  [[ "$output" != *"commit(s) behind"* ]]
-  [[ "$output" != *"Options:"* ]]
   [[ "$output" == \{* ]]
+  printf '%s\n' "$output" | python3 -c 'import json, sys; json.load(sys.stdin)'
 }
 
 @test "agent-plan against a behind-remote installer checkout never blocks on stdin, even when stdin is a real TTY" {
