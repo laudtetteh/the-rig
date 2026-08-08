@@ -1718,7 +1718,8 @@ _show_breaking_changes() {
     stop { next }
     /^### .*BREAKING/ { in_breaking=1; next }
     /^### / { in_breaking=0 }
-    in_breaking && /^- / { print }
+    in_breaking && /^- / { print; next }
+    in_breaking && /^  / { print }
   ' "$changelog")
 
   [[ -n "$breaking_lines" ]] || return 0
