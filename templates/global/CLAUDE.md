@@ -64,6 +64,13 @@ Do not summarise these back to me unless asked.
 - **When the user corrects a mistake or changes an approach, update the relevant
   process, rule, or task file immediately.** Don't just acknowledge — codify it.
   Corrections that aren't written down repeat.
+- **When the user repeats an instruction or preference for at least the second
+  time, proactively point it out and offer to codify it** — as a new/updated
+  command, a reusable skill, or a bullet in the relevant CLAUDE.md/rules file,
+  whichever fits the scope (a global habit vs. a project-specific rule). Don't
+  wait to be asked; this is what "self-improving" means in practice. Confirm
+  before editing a shared or global instruction file — don't silently rewrite
+  one.
 - **When you see a compaction warning** (e.g. "8% until auto-compact"), run `/wrap`
   immediately — before the next tool call. Compaction destroys in-flight context.
   A timely `/wrap` means the next session can resume cleanly.
