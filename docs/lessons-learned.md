@@ -1,6 +1,6 @@
 # Lessons learned
 
-Nineteen documented pitfalls — from the original LaudBot pilot (#1-#13) through
+Twenty documented pitfalls — from the original LaudBot pilot (#1-#13) through
 The Rig's own ongoing development (#14 onward) — the failures that shaped The Rig.
 
 Every component in this system exists because something went wrong without it. These are the incidents, in the order they were discovered.
@@ -240,3 +240,15 @@ The manifest was later extended (v1.10.0) to track **all** files — not just Ri
 **Fix**: Forced a local `main` branch explicitly tracking `origin/main` after the second clone (`git checkout -B main --track origin/main`), making `@{u}` resolution environment-independent regardless of the bare repo's `HEAD` symref. Reproduced the exact CI failure locally first — without a CI account — by forcing `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=init.defaultBranch GIT_CONFIG_VALUE_0=master` on the test invocation, confirmed the fix resolves it, and proof-by-reverted under the same forced environment.
 
 **Watch for**: An existing test fixture "already proven to work" only proves what the tests currently using it actually exercise — not every code path a new test built on the same fixture might depend on. Before trusting a copied fixture, check whether the *existing* tests using it exercise the same dependent behavior your *new* test needs, not just whether the setup lines look identical. `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_N`/`GIT_CONFIG_VALUE_N` env vars can force a single command's git config without touching global state — useful for reproducing environment-dependent git behavior locally.
+
+---
+
+## 20. A parenthesized issue reference inside a `git commit -m "$(cat <<'EOF' ... EOF)"` heredoc broke command parsing — but only when run through the agent tool's shell layer, not in a plain script
+
+**Symptom**: `git commit -m "$(cat <<'EOF' ... a line ending in "(#494, #495)." ... EOF )"` failed immediately with `bash: line 9: bad substitution: no closing `)'`, before git ever ran. Happened twice in the same session — once for a commit message, once for a `gh pr create --body "$(cat <<'EOF' ...)"` call — both times triggered specifically by parenthesized text (an issue-number citation like `(#494, #495)`) inside the heredoc body.
+
+**Root cause**: Reproduced and isolated directly. The identical heredoc, containing the identical parenthesized text, parses and runs correctly when written to a plain `.sh` file and executed with `bash script.sh` — proving the heredoc syntax itself is not the defect. It only fails when the same command is issued through this agent environment's Bash-tool execution path (which wraps the supplied command through its own additional shell invocation before it reaches the target shell). The extra wrapping layer evaluates parens for its own quoting/substitution purposes before the heredoc's quoted (`<<'EOF'`) body is treated as fully literal, so a `)` inside the heredoc content can prematurely appear to close the outer `$(...)`.
+
+**Fix**: Avoid inline `$(cat <<'EOF' ... EOF)` heredocs for any commit message, PR body, or issue body that will contain parentheses (issue references like `(#N)`, asides, etc.) when running through this tool. Write the text to a scratch file with the `Write` tool instead, then pass it via `git commit -F <file>` or `gh pr create --body-file <file>` / `gh issue create --body-file <file>`. This sidesteps the wrapping layer entirely and has no parenthesis restriction.
+
+**Watch for**: This is specific to the agent tool's command-execution wrapping, not a general bash or heredoc gotcha — don't "fix" it by restructuring heredoc syntax, and don't assume a `bash -n install.sh`-style syntax check would have caught it (the broken text was never going into `install.sh`; it was a shell command being executed directly). Any multi-line text destined for `-m`/`--body`/`--notes` that might contain a parenthesis is safer written to a file and passed by path from the very first attempt, rather than discovered by trial and error after a cryptic `bad substitution` error.
