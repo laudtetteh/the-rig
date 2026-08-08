@@ -1110,6 +1110,11 @@ upgrade_prepare_mutation() {
   guard_destination_before_write "$base" "$destination" "$rel"
 }
 
+# Same upgrade-only gate as upgrade_prepare_mutation() had before issue #482's
+# audit -- its one call site (global .claude root creation) has no enclosing
+# COLLISION_STRATEGY==upgrade check, so this silently no-ops under merge too.
+# Out of #482's scope (that audit covered upgrade_prepare_mutation() call
+# sites specifically); tracked separately as issue #489.
 upgrade_prepare_directory() {
   local base="$1" destination="$2" rel="$3" state
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
@@ -1131,6 +1136,12 @@ upgrade_manifest_base() {
   esac
 }
 
+# Same upgrade-only gate as upgrade_prepare_mutation() had before issue #482's
+# audit -- called from write_manifest_entry() on nearly every write this
+# script performs, under every strategy, so manifest-file symlink protection
+# is effectively dead outside --strategy upgrade. Out of #482's scope (that
+# audit covered upgrade_prepare_mutation() call sites specifically); tracked
+# separately as issue #490.
 upgrade_manifest_mutation_allowed() {
   local manifest_file="$1" rel="$2" base state destination
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0

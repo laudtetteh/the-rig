@@ -186,6 +186,16 @@ teardown() { rm -rf "$TEMP_DIR"; }
 }
 
 @test "CLAUDE.md: an existing regular file's content is backed up before placeholder substitution overwrites it in place" {
+  # Known limitation, not covered by this test (filed as issue #491): CLAUDE.md
+  # can be touched by up to three separate guard_destination_before_write()
+  # calls in one run ([Project Name], [BASE_BRANCH] via _subst_base_branch(),
+  # and the external/stealth @.rig/ rewrite), each backing up to the same
+  # fixed path -- a later call's backup silently overwrites an earlier one's,
+  # so the surviving backup can be an intermediate substituted state rather
+  # than the true pre-run original. This test only proves *a* backup happens
+  # at all (the #482 behavior in scope here), via marker text untouched by
+  # either sed call, which can't distinguish a pristine backup from a
+  # clobbered intermediate one. See #491 for the backup-collision fix.
   printf '# [Project Name]\n\nBase branch: [BASE_BRANCH]\n\nhand-written CLAUDE.md marker\n' \
     > "$TEST_PROJECT/CLAUDE.md"
 
