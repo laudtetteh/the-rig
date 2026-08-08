@@ -88,12 +88,27 @@ source, target = map(pathlib.Path, sys.argv[1:])
 paths = [".rigpath","CLAUDE.md","PROJECT_BRIEF.md",".gitleaks.toml","bin/rig",
          ".claude",".agents",".codex",".mcp.json",".playwright-mcp",".github",
          "docs/features/README.md"]
+# Linked worktrees live under the primary's own .claude/worktrees/ (see the
+# stealth CLAUDE.md's off-limits note on that path), so copying ".claude"
+# whole would recurse into every sibling worktree checkout nested there --
+# including, self-referentially, the very worktree this run is bootstrapping.
+# shutil.copytree re-scans each directory as it descends rather than
+# snapshotting the whole tree upfront, so once it reaches that self-reference
+# it keeps finding its own just-written output as new input: the destination
+# grows a nested .claude/worktrees/<name>/.claude/worktrees/<name>/... chain
+# with no natural base case, consuming disk until a filesystem limit (e.g.
+# ENAMETOOLONG) finally aborts it. Reproduced live: ~110MB and 30+ directory
+# levels in under 2 minutes from a single bootstrap call with sibling
+# worktrees already present. "worktrees" is never itself a stealth artifact
+# to restore -- each linked worktree bootstraps its own independently -- so
+# it is always excluded from every directory copy here, not just ".claude"'s.
+ignore_worktrees = shutil.ignore_patterns("worktrees")
 copied=[]
 for rel in paths:
     src, dst = source/rel, target/rel
     if not src.exists() or src.is_symlink() or dst.exists(): continue
     dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(src,dst) if src.is_dir() else shutil.copy2(src,dst)
+    shutil.copytree(src,dst,ignore=ignore_worktrees) if src.is_dir() else shutil.copy2(src,dst)
     copied.append(rel)
 print("Bootstrapped linked worktree: " + (", ".join(copied) if copied else "already complete"))
 PY
