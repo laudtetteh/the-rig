@@ -92,13 +92,20 @@ teardown() { rm -rf "$TEMP_DIR"; }
 
 @test "an existing regular-file .codex/config.toml is backed up before being merged under --strategy merge" {
   mkdir -p "$TEST_PROJECT/.codex"
-  printf 'hand-written codex marker = true\n' > "$TEST_PROJECT/.codex/config.toml"
+  # Must be valid TOML: a bare key can't contain unquoted spaces. An earlier
+  # version of this fixture ("hand-written codex marker = true") was invalid
+  # TOML that happened to pass on machines without Python's tomllib (< 3.11,
+  # where merge-codex-config.py falls back to a regex-based parser that never
+  # validates the whole file) but failed for real once tomllib parsed it and
+  # raised TOMLDecodeError -- caught in CI, which runs a newer Python than
+  # this repo's primary dev machine.
+  printf 'marker = "hand-written-codex-config"\n' > "$TEST_PROJECT/.codex/config.toml"
 
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking repo --project-agent codex --strategy merge
   [ "$status" -eq 0 ]
 
-  run grep -rl 'hand-written codex marker' "$TEST_PROJECT/.rig-backup"
+  run grep -rl 'hand-written-codex-config' "$TEST_PROJECT/.rig-backup"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
 }
