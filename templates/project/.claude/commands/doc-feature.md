@@ -107,13 +107,24 @@ leaving them empty. Never leave placeholder brackets in the final file.
 
 ### Step 5 — Update the index
 
-Add a row to the index table in `$DOCS_DIR/README.md`:
+Add a row to the feature index table in `$DOCS_DIR/README.md`:
 
 ```
 | <Feature name> | [<slug>.md](<slug>.md) | YYYY-MM-DD |
 ```
 
 If the index table currently has the "none yet" placeholder row, replace it.
+
+Then update the project docs index at the parent docs directory:
+
+- If `$DOCS_DIR` is `.../docs/features`, the project index is `$DOCS_DIR/../INDEX.md`.
+- Ensure it contains a row for `features/<slug>.md`:
+
+```
+| [`features/<slug>.md`](features/<slug>.md) | Feature: <Feature name> |
+```
+
+If `docs/INDEX.md` is missing, create it using the canonical table format before adding the row.
 
 ---
 

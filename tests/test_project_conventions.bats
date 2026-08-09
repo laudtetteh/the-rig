@@ -85,3 +85,12 @@ run_installer() {
   grep -Fxq "[REPO]/CLAUDE.md" "$POLICY"
   grep -Fxq "[REPO]/.claude/hooks/" "$POLICY"
 }
+
+@test "template CLAUDE.md documents docs category conventions without placeholder" {
+  run grep -F '[other docs]' "$REPO_ROOT/templates/project/CLAUDE.md"
+  [ "$status" -ne 0 ]
+  grep -Fq 'docs/INDEX.md' "$REPO_ROOT/templates/project/CLAUDE.md"
+  grep -Fq 'architecture/' "$REPO_ROOT/templates/project/CLAUDE.md"
+  grep -Fq 'decisions/' "$REPO_ROOT/templates/project/CLAUDE.md"
+  grep -Fq 'troubleshooting/' "$REPO_ROOT/templates/project/CLAUDE.md"
+}

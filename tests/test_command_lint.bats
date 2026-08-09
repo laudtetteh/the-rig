@@ -128,6 +128,13 @@ _fail_with_list() {
   [ "$status" -ne 0 ]
 }
 
+@test "docs index convention is wired into feature doc commands" {
+  grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'architecture/' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/doc-feature.md"
+  grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/refresh-feature-doc.md"
+}
+
 # ── PR description freshness ───────────────────────────────────────────────────
 
 @test "wrap.md: contains PR description freshness step" {

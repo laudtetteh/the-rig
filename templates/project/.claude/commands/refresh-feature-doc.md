@@ -108,6 +108,15 @@ Do **not** rewrite the Summary unless the feature's fundamental purpose changed.
 1. **Update the index** — update the `Last updated` date for this feature in
    `docs/features/README.md`.
 
+   Also update `docs/INDEX.md` in the parent docs directory so it has one row
+   for this feature doc:
+
+   ```
+   | [`features/<slug>.md`](features/<slug>.md) | Feature: <Feature name> |
+   ```
+
+   If the feature's scope changed, refresh that one-line description too.
+
 2. **Log bugs to ERRORS.md** — if re-verifying the doc revealed a real bug
    (not a doc inaccuracy — an actual code problem), log it in
    `$RIG_DIR/memory/ERRORS.md` using the standard format:

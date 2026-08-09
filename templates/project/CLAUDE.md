@@ -48,8 +48,11 @@
 │   ├── rules/        # Coding standards, git conventions, security, verification
 │   └── tasks/        # active/, backlog/, done/
 ├── docs/
-│   ├── features/     # Feature docs (README.md index + one .md per feature)
-│   └── [other docs]  # Architecture, decisions, PRD
+│   ├── INDEX.md      # Canonical docs index (`docs/INDEX.md`); one row per docs file
+│   ├── architecture/ # System design, runtime flow, integration notes
+│   ├── decisions/    # Decision records and tradeoff notes
+│   ├── troubleshooting/ # Symptoms, causes, and fixes
+│   └── features/     # Feature docs (README.md index + one .md per feature)
 ├── CLAUDE.md         # This file
 └── README.md
 ```
