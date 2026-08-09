@@ -63,3 +63,31 @@ print(d['entries'].get('$rel', {}).get('sha256', ''))
     [ "$output" = "$actual" ]
   done
 }
+
+@test "CLAUDE.md's manifest hash matches its on-disk content after the external/stealth @.rig/ import-path rewrite" {
+  # A third CLAUDE.md mutation site, distinct from _subst_base_branch()'s own
+  # touch: under external/stealth tracking only, install.sh separately
+  # rewrites @.rig/ imports and context-loading paths to point at the
+  # external $RIG_DIR, after _subst_base_branch() already ran and correctly
+  # refreshed the manifest hash for ITS edit. This later rewrite has its own
+  # write_manifest_entry() call now, same fix pattern as the rest of this
+  # file -- found live via /rig-surface-review against the parent PR, not
+  # caught by the sibling test above since that one only exercises
+  # --tracking repo, which never reaches this external-only code path.
+  local rig_dir="$TEMP_DIR/external-rig"
+  mkdir -p "$rig_dir"
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking external --rig-dir "$rig_dir" --strategy merge
+  [ "$status" -eq 0 ]
+
+  [ -f "$TEST_PROJECT/CLAUDE.md" ]
+  run grep -q '@\.rig/' "$TEST_PROJECT/CLAUDE.md"
+  [ "$status" -ne 0 ]
+
+  local actual manifest
+  actual="$(sha256sum "$TEST_PROJECT/CLAUDE.md" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$TEST_PROJECT/CLAUDE.md" | awk '{print $1}')"
+  manifest="$(grep "  CLAUDE.md$" "$rig_dir/memory/.rig-manifest" 2>/dev/null | awk '{print $1}')"
+  [ -n "$manifest" ]
+  [ "$actual" = "$manifest" ]
+}

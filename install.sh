@@ -3586,6 +3586,12 @@ PYEOF
       sed_inplace "s|\`.rig/memory/|\`${EXTERNAL_RIG_DIR}/memory/|g" "$TARGET_CLAUDE"
       sed_inplace "s|\`.rig/tasks/|\`${EXTERNAL_RIG_DIR}/tasks/|g" "$TARGET_CLAUDE"
       success "Updated CLAUDE.md to reference external .rig/ path"
+      # Refresh the manifest hash for whatever this rewrite just changed --
+      # same staleness bug #498 fixed for _subst_base_branch()'s touches,
+      # just a third CLAUDE.md mutation site that fix didn't reach (this one
+      # only runs for external/stealth tracking, after _subst_base_branch()
+      # already ran and correctly refreshed the hash for its own edit).
+      write_manifest_entry "$(sha256_file "$TARGET_CLAUDE")" "CLAUDE.md" "$MANIFEST_FILE" "$TARGET_CLAUDE"
     fi
 
     # Stale in-repo .rig/ cleanup: if the project has an old in-repo .rig/
