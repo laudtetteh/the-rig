@@ -121,6 +121,12 @@ _fail_with_list() {
   done
 }
 
+@test "handoff-checklist preserves explicit two-gate consent" {
+  grep -Fq 'explicitly agreed' "$COMMAND_DIR/handoff-checklist.md"
+  grep -Fq 'Silence, hesitation, or an ambiguous answer is not consent' "$COMMAND_DIR/handoff-checklist.md"
+  grep -Fq 'Do not run `/post-merge`, `/wrap`, or any checklist step' "$COMMAND_DIR/handoff-checklist.md"
+}
+
 # ── PR description freshness ───────────────────────────────────────────────────
 
 @test "wrap.md: contains PR description freshness step" {
