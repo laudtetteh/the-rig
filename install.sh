@@ -2302,6 +2302,23 @@ _copy_upgrade_existing() {
 
   manifest_hash="$(read_manifest_hash "$rel" "$manifest_file")"
 
+  if [[ -n "$manifest_hash" && "$dest_hash" != "$manifest_hash" ]] &&
+     grep -q '\[BASE_BRANCH\]' "$src" 2>/dev/null; then
+    local rendered_src rendered_hash
+    rendered_src="$(mktemp /tmp/rig-base-branch-rendered-XXXXXX)"
+    sed "s/\\[BASE_BRANCH\\]/${BASE_BRANCH//\//\\/}/g" "$src" > "$rendered_src"
+    rendered_hash="$(sha256_file "$rendered_src")"
+    rm -f "$rendered_src"
+    if [[ -n "$rendered_hash" && "$dest_hash" == "$rendered_hash" ]]; then
+      info "Up to date: ${rel}"
+      record_upgrade_result up-to-date "$rel"
+      if [[ "$AGENT_DRY_RUN" != true ]]; then
+        write_manifest_entry "$dest_hash" "$rel" "$manifest_file" "$dest"
+      fi
+      return
+    fi
+  fi
+
   if [[ -z "$manifest_hash" ]]; then
     # No manifest entry. Two cases:
     #   Rig-owned:  first upgrade before manifest tracking existed → safe to overwrite,
