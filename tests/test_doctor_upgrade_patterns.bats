@@ -91,7 +91,7 @@ else:
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking repo --strategy upgrade
   [ "$status" -eq 0 ]
-  ! /usr/bin/grep -q '\[Project Name\]' "$TEST_PROJECT/CLAUDE.md"
+  if /usr/bin/grep -q '\[Project Name\]' "$TEST_PROJECT/CLAUDE.md"; then return 1; fi
 
   cp "$REPO_ROOT/templates/project/CLAUDE.md" "$TEST_PROJECT/CLAUDE.md"
   /usr/bin/grep -q '\[Project Name\]' "$TEST_PROJECT/CLAUDE.md"

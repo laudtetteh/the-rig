@@ -100,7 +100,7 @@ EOF
 
   run_start
 
-  ! context | grep -Eq '/debug|/rig-gaps'
+  if context | grep -Eq '/debug|/rig-gaps'; then return 1; fi
   [ ! -e "$RIG_DIR/memory/tips/.tip-debug-errors-shown" ]
   [ ! -e "$RIG_DIR/memory/tips/.tip-rig-gaps-shown" ]
 }
@@ -174,7 +174,7 @@ EOF
   [ -f "$RIG_DIR/memory/tips/.tip-sprint-shown" ]
 
   run_start
-  ! context | grep -Fq '/sprint'
+  if context | grep -Fq '/sprint'; then return 1; fi
 }
 
 @test "#317 regression: enabled fewer-prompts feature stays suppressed" {
@@ -182,7 +182,7 @@ EOF
   mkdir -p "$RIG_DIR/memory/tips"
   touch "$RIG_DIR/memory/tips/.tip-session-name-shown"
   run_start
-  ! context | grep -Fq '.fewer-prompts-enabled'
+  if context | grep -Fq '.fewer-prompts-enabled'; then return 1; fi
   [ ! -e "$RIG_DIR/memory/tips/.tip-fewer-prompts-shown" ]
 }
 
@@ -208,5 +208,5 @@ EOF
   [ ! -e "$marker" ]
   [ "$(tip_count)" -eq 1 ]
   context | grep -Fq '/debug'
-  ! context | grep -Fq 'touch'
+  if context | grep -Fq 'touch'; then return 1; fi
 }

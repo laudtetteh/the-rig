@@ -11,7 +11,7 @@ import sys
 root = pathlib.Path(sys.argv[1])
 bare = re.compile(r'^\s*\[\[.*\]\]\s*$')
 inline_bare = re.compile(r';\s*\[\[.*\]\]\s*$')
-negated = re.compile(r'^\s*!\s+(grep|jq|find|git|cmp|diff|python|python3|test)\b')
+negated = re.compile(r'^\s*!\s+')
 failures = []
 
 for path in sorted(root.glob("*.bats")):

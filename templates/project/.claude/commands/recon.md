@@ -49,8 +49,10 @@ the keyword. This saves tokens and surfaces existing documentation immediately.
 
 **0a — Feature docs:**
 ```bash
-ls "$RIG_DIR/docs/features/" 2>/dev/null | grep -i "<keyword>" || true
-grep -ril "<keyword>" "$RIG_DIR/docs/features/" 2>/dev/null || true
+REPO=$(git rev-parse --show-toplevel)
+DOCS_DIR="$REPO/docs/features"
+ls "$DOCS_DIR/" 2>/dev/null | grep -i "<keyword>" || true
+grep -ril "<keyword>" "$DOCS_DIR/" 2>/dev/null || true
 ```
 If a matching feature doc exists, read its `## Summary` and `## Current state`
 sections and display them. Tell the user:

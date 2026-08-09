@@ -134,7 +134,7 @@ _fail_with_list() {
   grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/doc-feature.md"
   grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/refresh-feature-doc.md"
   grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/rig-help.md"
-  run grep -R '\$RIG_DIR/docs' "$COMMAND_DIR/doc-list.md" "$COMMAND_DIR/doc-feature.md" "$COMMAND_DIR/refresh-feature-doc.md"
+  run grep -R '\$RIG_DIR/docs' "$COMMAND_DIR"
   [ "$status" -ne 0 ]
 }
 
