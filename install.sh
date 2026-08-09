@@ -1993,7 +1993,7 @@ copy_file() {
   local dir destination_state
   dir="$(dirname "$dest")"
 
-  if [[ "$COLLISION_STRATEGY" == upgrade && -n "$base" ]]; then
+  if [[ -n "$base" ]]; then
     destination_state="$(upgrade_destination_state "$base" "$dest")"
     case "$destination_state" in
       symlinked-parent|symlinked-root|parent-wrong-type|outside-root|directory|wrong-type)
@@ -2714,9 +2714,9 @@ PYEOF
     skill_name="$(basename "$skill_src")"
     skill_dest="$SKILLS_DIR/$skill_name"
     if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
-      _copy_global_file_upgrade "$skill_src" "$skill_dest" "$SKILLS_DIR" "skills/$skill_name"
+      _copy_global_file_upgrade "$skill_src" "$skill_dest" "$CLAUDE_DIR" "skills/$skill_name"
     else
-      copy_file "$skill_src" "$skill_dest" "$SKILLS_DIR" "skills/$skill_name"
+      copy_file "$skill_src" "$skill_dest" "$CLAUDE_DIR" "skills/$skill_name"
     fi
   done
   fi

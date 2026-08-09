@@ -39,7 +39,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
 
   run env HOME="$FAKE_HOME" bash "$INSTALLER" \
     --global-only --global-agent claude --strategy merge
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
 
   # A bare `[[ "$output" == *pattern* ]]` (or `!`-negated) assertion that
   # isn't the last statement in the test does not reliably trip bats'
@@ -53,6 +53,8 @@ teardown() { rm -rf "$TEMP_DIR"; }
 
   [ -L "$FAKE_HOME/.claude" ]
   readlink "$FAKE_HOME/.claude" | grep -qF "$external_target"
+  [ ! -e "$external_target/CLAUDE.md" ]
+  [ ! -e "$external_target/skills" ]
 }
 
 @test "global .claude root: a missing destination is still created normally under --strategy merge" {
