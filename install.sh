@@ -1199,14 +1199,35 @@ upgrade_manifest_base() {
 # still destroys it with zero protection). Issue #490; out of #482's scope,
 # which covered upgrade_prepare_mutation() call sites specifically.
 upgrade_manifest_mutation_allowed() {
-  local manifest_file="$1" rel="$2" base state destination
+  local manifest_file="$1" rel="$2" base state destination manifest_rel
   base="$(upgrade_manifest_base "$manifest_file")"
+  manifest_rel="${manifest_file#"$base"/}"
   for destination in "$manifest_file" "${manifest_file}.json"; do
     state="$(upgrade_destination_state "$base" "$destination")"
     case "$state" in
       missing|regular-file) ;;
       *)
-        record_upgrade_destination_conflict "$rel" "$state"
+        # Every call site passes its OWN triggering file's $rel (e.g.
+        # ".husky/pre-commit"), not the manifest's -- but the actual
+        # conflict is always the shared manifest destination itself, not
+        # whichever file happened to trigger this particular write. Using
+        # record_upgrade_destination_conflict() here (as every other call
+        # site in this file correctly does) would misattribute the warning
+        # to $rel and repeat it once per file processed this run. Warn
+        # about the real destination instead, once per run per distinct
+        # manifest file -- _WARNED_MANIFEST_CONFLICTS is a plain delimited-
+        # string set (bash 3.2 has no associative arrays). Still record
+        # per-file bookkeeping under the caller's own $rel, unchanged --
+        # that's genuinely about which files' manifest entries were
+        # skipped, not about the conflict's location. Issue #503.
+        case "${_WARNED_MANIFEST_CONFLICTS:-}" in
+          *"|${manifest_file}|"*) ;;
+          *)
+            warn "Preserved conflicting upgrade destination: ${manifest_rel} (${state}) — manifest bookkeeping skipped for every file this run until this is resolved"
+            _WARNED_MANIFEST_CONFLICTS="${_WARNED_MANIFEST_CONFLICTS:-}|${manifest_file}|"
+            ;;
+        esac
+        record_upgrade_result skipped-conflict "$rel"
         return 1
         ;;
     esac

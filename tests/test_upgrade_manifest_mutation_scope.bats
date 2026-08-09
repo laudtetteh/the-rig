@@ -72,3 +72,35 @@ teardown() { rm -rf "$TEMP_DIR"; }
   [ ! -L "$TEST_PROJECT/.rig/memory/.rig-manifest" ]
   [ -f "$TEST_PROJECT/.rig/memory/.rig-manifest.json" ]
 }
+
+@test ".rig-manifest: the conflict warning names the manifest itself, once, not every file that happened to trigger a manifest write" {
+  # Issue #503: upgrade_manifest_mutation_allowed() used to call
+  # record_upgrade_destination_conflict() with the TRIGGERING file's own
+  # $rel (e.g. ".husky/pre-commit"), not the manifest's -- so every write
+  # this run printed a warning claiming an unrelated, perfectly normal file
+  # was the symlinked conflict, once per file processed. Confirmed live
+  # before this fix: 75 misleading warnings for a single symlinked
+  # .rig-manifest, each naming a different unrelated file.
+  mkdir -p "$TEST_PROJECT/.rig/memory"
+  local external_target="$TEMP_DIR/external-manifest.txt"
+  printf 'attacker-controlled manifest content\n' > "$external_target"
+  ln -s "$external_target" "$TEST_PROJECT/.rig/memory/.rig-manifest"
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking repo --strategy merge
+  [ "$status" -eq 0 ]
+  local install_output="$output"
+
+  run grep -c "Preserved conflicting upgrade destination" <<< "$install_output"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 1 ]
+
+  run grep -qF "Preserved conflicting upgrade destination: memory/.rig-manifest (symlink)" <<< "$install_output"
+  [ "$status" -eq 0 ]
+
+  # The old, misattributed wording must not appear for any unrelated file.
+  run grep -qF "Preserved conflicting upgrade destination: .husky/pre-commit" <<< "$install_output"
+  [ "$status" -ne 0 ]
+  run grep -qF "Preserved conflicting upgrade destination: CLAUDE.md" <<< "$install_output"
+  [ "$status" -ne 0 ]
+}
