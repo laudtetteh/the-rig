@@ -1144,15 +1144,19 @@ upgrade_manifest_base() {
   esac
 }
 
-# Same upgrade-only gate as upgrade_prepare_mutation() had before issue #482's
-# audit -- called from write_manifest_entry() on nearly every write this
-# script performs, under every strategy, so manifest-file symlink protection
-# is effectively dead outside --strategy upgrade. Out of #482's scope (that
-# audit covered upgrade_prepare_mutation() call sites specifically); tracked
-# separately as issue #490.
+# Strategy-agnostic on purpose, matching guard_destination_before_write() --
+# called from write_manifest_entry() on nearly every write this script
+# performs, under every strategy (merge is the default for every fresh
+# install), not just upgrade. Previously gated on COLLISION_STRATEGY==upgrade
+# like upgrade_prepare_mutation() was before issue #482's audit, so manifest-
+# file symlink protection was effectively dead outside --strategy upgrade.
+# Confirmed live: a symlinked .rig-manifest under --strategy merge was
+# silently replaced with no refusal or warning (write_manifest_entry()'s
+# rename-based write drops the symlink itself rather than following it, but
+# still destroys it with zero protection). Issue #490; out of #482's scope,
+# which covered upgrade_prepare_mutation() call sites specifically.
 upgrade_manifest_mutation_allowed() {
   local manifest_file="$1" rel="$2" base state destination
-  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
   base="$(upgrade_manifest_base "$manifest_file")"
   for destination in "$manifest_file" "${manifest_file}.json"; do
     state="$(upgrade_destination_state "$base" "$destination")"
