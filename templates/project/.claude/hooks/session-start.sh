@@ -202,7 +202,7 @@ case "$SOURCE" in
 
     FULL_CTX="$CONTEXT"
     [[ -n "$WARNINGS" ]] && FULL_CTX="${WARNINGS}"$'\n\n---\n\n'"${FULL_CTX}"
-    [[ -n "$TIPS" ]]    && FULL_CTX="${FULL_CTX}"$'\n\n---\n\n'"${TIPS}"
+    [[ -n "$TIPS" ]]    && FULL_CTX="${FULL_CTX}"$'\n\n---\n\n'"Rig tip relay: say exactly this to the user before other work: ${TIPS}"
     if [[ -z "$AGENT_ID" && "${RIG_AGENT:-claude}" == "claude" && -f "$SESSION_FILE" ]]; then
       RIG_PUBLIC_SESSION_TITLE=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); n=d.get("names",{}); print(n.get("display_title") or n.get("final") or n.get("tentative") or "")' 2>/dev/null || true)
       export RIG_PUBLIC_SESSION_TITLE

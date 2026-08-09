@@ -39,7 +39,7 @@ context() {
 }
 
 tip_count() {
-  context | grep -c 'Tip:' || true
+  context | grep -c 'Rig tip (' || true
 }
 
 @test "priority: one highest-priority tip emits and lower candidates remain unspent" {
@@ -114,6 +114,14 @@ EOF
   context | grep -Fq 'Run /debug'
 }
 
+@test "relay instruction tells the agent to say the Rig tip exactly" {
+  cat > "$RIG_DIR/memory/ERRORS.md" <<'EOF'
+## [2026-07-31] — observed parser failure
+EOF
+  run_start
+  context | grep -Fq 'Rig tip relay: say exactly this to the user before other work: Rig tip (workflow):'
+}
+
 @test "new context: logged workflow gap names evidence and concrete gaps action" {
   cat > "$RIG_DIR/memory/RIG_GAPS.md" <<'EOF'
 ## [2026-07-31] — observed workflow gap
@@ -132,6 +140,30 @@ EOF
 
   context | grep -Fq 'at least two commits ahead'
   context | grep -Fq 'Run /code-review'
+}
+
+@test "project category: docs without an index emits a project-specific tip" {
+  mkdir -p "$REPO/docs" "$RIG_DIR/memory/tips"
+  touch "$RIG_DIR/memory/tips/.tip-session-name-shown"
+
+  run_start
+
+  [ "$(tip_count)" -eq 1 ]
+  context | grep -Fq 'Rig tip (project): docs/ exists without docs/INDEX.md'
+}
+
+@test "re-eligibility: expired sentinels can surface a tip again" {
+  cat > "$RIG_DIR/memory/ERRORS.md" <<'EOF'
+## [2026-07-31] — observed parser failure
+EOF
+  mkdir -p "$RIG_DIR/memory/tips"
+  touch -t 202001010000 "$RIG_DIR/memory/tips/.tip-debug-errors-shown"
+  export RIG_TIP_RESET_SECONDS=1
+
+  run_start
+
+  [ "$(tip_count)" -eq 1 ]
+  context | grep -Fq 'Rig tip (workflow): ERRORS.md contains a recorded failure'
 }
 
 @test "#317 regression: sprint outranks session-name and fires once" {
