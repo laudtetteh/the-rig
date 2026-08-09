@@ -77,7 +77,7 @@ Some features are not installed by default. Pass these flags to `install.sh` (or
 
 | Flag | What it installs |
 |---|---|
-| `--feature-docs` | `/doc-feature`, `/doc-list`, `/feature-context`, `/refresh-feature-doc`, and `docs/features/` — for projects that maintain end-to-end feature traces |
+| `--feature-docs` | `/doc-feature`, `/doc-list`, `/feature-context`, `/refresh-feature-doc`, `docs/INDEX.md`, and `docs/features/` — for projects that maintain end-to-end feature traces |
 | `--subagents` | `subagent-start.sh` hook + `SubagentStart` event wiring in `settings.json` — for projects using multi-agent Claude Code workflows |
 | `--contribute` | `/rig-gaps` and `/rig-propose` — for developers who maintain The Rig or a fork |
 

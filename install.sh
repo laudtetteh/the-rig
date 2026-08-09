@@ -1996,7 +1996,7 @@ copy_file() {
   if [[ -n "$base" ]]; then
     destination_state="$(upgrade_destination_state "$base" "$dest")"
     case "$destination_state" in
-      symlinked-parent|symlinked-root|parent-wrong-type|outside-root|directory|wrong-type)
+      symlink|symlinked-parent|symlinked-root|parent-wrong-type|outside-root|directory|wrong-type)
         record_upgrade_destination_conflict "$rel" "$destination_state"
         return 0
         ;;
@@ -2304,7 +2304,7 @@ _copy_upgrade_existing() {
 
   if [[ -n "$manifest_hash" && "$dest_hash" != "$manifest_hash" ]] &&
      grep -q '\[BASE_BRANCH\]' "$src" 2>/dev/null; then
-    local rendered_src rendered_hash
+    local rendered_src rendered_hash raw_dest raw_dest_hash
     rendered_src="$(mktemp /tmp/rig-base-branch-rendered-XXXXXX)"
     sed "s/\\[BASE_BRANCH\\]/${BASE_BRANCH//\//\\/}/g" "$src" > "$rendered_src"
     rendered_hash="$(sha256_file "$rendered_src")"
@@ -2315,6 +2315,29 @@ _copy_upgrade_existing() {
       if [[ "$AGENT_DRY_RUN" != true ]]; then
         write_manifest_entry "$dest_hash" "$rel" "$manifest_file" "$dest"
       fi
+      return
+    fi
+
+    raw_dest="$(mktemp /tmp/rig-base-branch-raw-dest-XXXXXX)"
+    python3 - "$dest" "$BASE_BRANCH" "$raw_dest" <<'PYEOF'
+import sys
+
+source, base_branch, target = sys.argv[1:]
+with open(source, "r", encoding="utf-8") as fh:
+    content = fh.read()
+content = content.replace(base_branch, "[BASE_BRANCH]")
+with open(target, "w", encoding="utf-8") as fh:
+    fh.write(content)
+PYEOF
+    raw_dest_hash="$(sha256_file "$raw_dest")"
+    rm -f "$raw_dest"
+    if [[ -n "$raw_dest_hash" && "$raw_dest_hash" == "$manifest_hash" ]]; then
+      if [[ "$AGENT_DRY_RUN" != true ]]; then
+        _upgrade_write "$src" "$dest" "$base"
+        write_manifest_entry "$new_hash" "$rel" "$manifest_file" "$dest"
+      fi
+      success "Updated: ${rel}"
+      record_upgrade_result updated "$rel"
       return
     fi
   fi

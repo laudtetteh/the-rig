@@ -133,6 +133,9 @@ _fail_with_list() {
   grep -Fq 'architecture/' "$COMMAND_DIR/doc-list.md"
   grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/doc-feature.md"
   grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/refresh-feature-doc.md"
+  grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/rig-help.md"
+  run grep -R '\$RIG_DIR/docs' "$COMMAND_DIR/doc-list.md" "$COMMAND_DIR/doc-feature.md" "$COMMAND_DIR/refresh-feature-doc.md"
+  [ "$status" -ne 0 ]
 }
 
 @test "handoff-checklist preserves explicit two-gate consent" {

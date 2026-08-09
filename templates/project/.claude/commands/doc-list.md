@@ -4,24 +4,12 @@ Show the documentation index for this project without loading full doc files.
 
 ## What this does
 
-> **RIG_DIR resolution (stealth mode):** Resolve `.rig/` path before reading any files.
+> **Project docs resolution:** Documentation lives in the project tree even when
+> `.rig/` uses stealth or external tracking. Resolve the project root before
+> reading any doc paths.
 > ```bash
 > REPO=$(git rev-parse --show-toplevel)
-> if [[ -f "$REPO/.rigpath" ]]; then
->   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
-> else
->   RIG_DIR="$REPO/.rig"
-> fi
-> ```
->
-> **DOCS_DIR resolution:** Stealth installs keep docs under `$RIG_DIR/docs/`; in-repo
-> installs keep them at `$REPO/docs/`. Resolve before reading any doc paths:
-> ```bash
-> if [[ -f "$REPO/.rigpath" ]]; then
->   DOCS_DIR="$RIG_DIR/docs"
-> else
->   DOCS_DIR="$REPO/docs"
-> fi
+> DOCS_DIR="$REPO/docs"
 > ```
 
 1. Read `$DOCS_DIR/INDEX.md`.

@@ -73,3 +73,41 @@ teardown() { rm -rf "$TEMP_DIR"; }
   [ ! -L "$FAKE_HOME/.claude" ]
   [ -f "$FAKE_HOME/.claude/CLAUDE.md" ]
 }
+
+@test "global CLAUDE.md: a leaf symlink is refused under --strategy overwrite" {
+  local external_target="$TEMP_DIR/outside-claude.md"
+  mkdir -p "$FAKE_HOME/.claude"
+  printf '# outside sentinel\n' > "$external_target"
+  ln -s "$external_target" "$FAKE_HOME/.claude/CLAUDE.md"
+
+  run env HOME="$FAKE_HOME" bash "$INSTALLER" \
+    --global-only --global-agent claude --strategy overwrite
+  [ "$status" -eq 0 ]
+
+  run grep -qF "Preserved conflicting upgrade destination: CLAUDE.md (symlink)" <<< "$output"
+  [ "$status" -eq 0 ]
+
+  [ -L "$FAKE_HOME/.claude/CLAUDE.md" ]
+  readlink "$FAKE_HOME/.claude/CLAUDE.md" | grep -qF "$external_target"
+  grep -qF '# outside sentinel' "$external_target"
+}
+
+@test "project settings.json: a leaf symlink is refused under --strategy merge" {
+  local project="$TEMP_DIR/project"
+  local external_target="$TEMP_DIR/outside-settings.json"
+  mkdir -p "$project/.claude"
+  git -C "$project" init -q
+  printf '{"outside":true}\n' > "$external_target"
+  ln -s "$external_target" "$project/.claude/settings.json"
+
+  run bash "$INSTALLER" --project-only --target "$project" \
+    --project-name Test --strategy merge
+  [ "$status" -eq 0 ]
+
+  run grep -qF "Preserved conflicting upgrade destination: .claude/settings.json (symlink)" <<< "$output"
+  [ "$status" -eq 0 ]
+
+  [ -L "$project/.claude/settings.json" ]
+  readlink "$project/.claude/settings.json" | grep -qF "$external_target"
+  grep -qF '"outside":true' "$external_target"
+}

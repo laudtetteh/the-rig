@@ -33,19 +33,13 @@ If no argument is given, ask: **"Which feature should I document?"**
 
 ## What this does
 
-> **RIG_DIR resolution (stealth mode):** Before reading or writing any feature doc path,
-> resolve where `.rig/` actually lives. If `.rigpath` exists at the project root, read
-> it — it contains the absolute path to the external `.rig/` directory.
+> **Project docs resolution:** Documentation lives in the project tree even when
+> `.rig/` uses stealth or external tracking. Resolve the project root before
+> reading or writing any feature doc path.
 >
 > ```bash
 > REPO=$(git rev-parse --show-toplevel)
-> if [[ -f "$REPO/.rigpath" ]]; then
->   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
->   DOCS_DIR="$RIG_DIR/docs/features"
-> else
->   RIG_DIR="$REPO/.rig"
->   DOCS_DIR="$REPO/docs/features"
-> fi
+> DOCS_DIR="$REPO/docs/features"
 > ```
 >
 > Substitute `$DOCS_DIR` for `docs/features/` in every step below.
