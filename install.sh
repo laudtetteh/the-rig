@@ -1118,14 +1118,18 @@ upgrade_prepare_mutation() {
   guard_destination_before_write "$base" "$destination" "$rel"
 }
 
-# Same upgrade-only gate as upgrade_prepare_mutation() had before issue #482's
-# audit -- its one call site (global .claude root creation) has no enclosing
-# COLLISION_STRATEGY==upgrade check, so this silently no-ops under merge too.
-# Out of #482's scope (that audit covered upgrade_prepare_mutation() call
-# sites specifically); tracked separately as issue #489.
+# Strategy-agnostic on purpose, matching guard_destination_before_write() --
+# its one call site (global .claude root creation) is reached under every
+# strategy, not just upgrade (merge is the default for every fresh global
+# install). Previously gated on COLLISION_STRATEGY==upgrade like
+# upgrade_prepare_mutation() was before issue #482's audit, so a symlinked
+# ~/.claude was silently followed under merge/skip/overwrite/interactive with
+# no refusal or backup -- confirmed live: template files (CLAUDE.md, skills/,
+# manifest) written straight through the symlink into the attacker-controlled
+# target. Issue #489; out of #482's scope, which covered
+# upgrade_prepare_mutation() call sites specifically.
 upgrade_prepare_directory() {
   local base="$1" destination="$2" rel="$3" state
-  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
   state="$(upgrade_destination_state "$base" "$destination")"
   case "$state" in
     missing|directory) return 0 ;;
