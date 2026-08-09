@@ -52,7 +52,7 @@ open(os.environ["TASK_F"],"w").write("\n".join(lines)+"\n")'
   printf '{bad' > "$BATS_TEST_TMPDIR/evidence.json"
   run "$CASE_DIR/bin/rig" sprint audit --all --tracker-evidence "$BATS_TEST_TMPDIR/evidence.json" --json
   [ "$status" -eq 3 ]
-  [[ "$output" == *malformed_tracker_evidence* ]]
+  [[ "$output" == *malformed_tracker_evidence* ]] || return 1
   [ ! -d "$CASE_DIR/.rig/memory/sprints" ]
 }
 
@@ -60,7 +60,7 @@ open(os.environ["TASK_F"],"w").write("\n".join(lines)+"\n")'
   task feat-a '#10' P1 src/a.py
   local token sid bind_result file
   run "$CASE_DIR/bin/rig" sprint plan --all --write --approval-token bogus --json
-  [ "$status" -eq 3 ]; [[ "$output" == *exact_root_session_required* ]]
+  [ "$status" -eq 3 ]; [[ "$output" == *exact_root_session_required* ]] || return 1
   bind_result=$("$CASE_DIR/bin/rig" session bind --agent codex --native-session-id sprint-native --source startup)
   file=$(printf '%s' "$bind_result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
   run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" sprint plan --all --json
@@ -68,9 +68,9 @@ open(os.environ["TASK_F"],"w").write("\n".join(lines)+"\n")'
   token=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["plan"]["approval_token"])')
   sid=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sprint_id"])')
   run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" sprint plan --all --sprint "$sid" --write --approval-token "$token" --json
-  [ "$status" -eq 0 ]; [[ "$output" == *'"document_revision": 1'* ]]
+  [ "$status" -eq 0 ]; [[ "$output" == *'"document_revision": 1'* ]] || return 1
   run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" sprint plan --sprint "$sid" --write --approval-token "$token" --json
-  [ "$status" -eq 0 ]; [[ "$output" == *'"document_revision": 2'* ]]
+  [ "$status" -eq 0 ]; [[ "$output" == *'"document_revision": 2'* ]] || return 1
   run "$CASE_DIR/bin/rig" sprint status --sprint "$sid" --json
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["document_revision"]==2 and d["result"]["supersedes_revision"]==1 and d["result"]["status"]=="ready"'
@@ -87,7 +87,7 @@ open(os.environ["TASK_F"],"w").write("\n".join(lines)+"\n")'
   token=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["plan"]["approval_token"])')
   sid=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sprint_id"])')
   run env RIG_SESSION_FILE="$file_two" "$CASE_DIR/bin/rig" sprint plan --all --sprint "$sid" --write --approval-token "$token" --json
-  [ "$status" -eq 3 ]; [[ "$output" == *approval_required* ]]
+  [ "$status" -eq 3 ]; [[ "$output" == *approval_required* ]] || return 1
   [ ! -d "$CASE_DIR/.rig/memory/sprints/$sid" ]
 }
 
@@ -102,7 +102,7 @@ open(os.environ["TASK_F"],"w").write("\n".join(lines)+"\n")'
   before=$(cksum "$CASE_DIR/.rig/memory/sprints/$sid/revision-1.json")
   printf '\n## Context\nchanged\n' >> "$CASE_DIR/.rig/tasks/backlog/feat-a.md"
   run "$CASE_DIR/bin/rig" sprint status --sprint "$sid" --refresh --json
-  [ "$status" -eq 0 ]; [[ "$output" == *'"detected": true'* ]]
+  [ "$status" -eq 0 ]; [[ "$output" == *'"detected": true'* ]] || return 1
   [ "$before" = "$(cksum "$CASE_DIR/.rig/memory/sprints/$sid/revision-1.json")" ]
 }
 
@@ -111,5 +111,5 @@ open(os.environ["TASK_F"],"w").write("\n".join(lines)+"\n")'
   run "$CASE_DIR/bin/rig" sprint audit --all --json
   [ "$status" -eq 0 ]
   [ ! -e "$CASE_DIR/rig-378-injected" ]; [ ! -e "$CASE_DIR/nope" ]
-  [[ "$output" == *'$(touch rig-378-injected)'* ]]
+  [[ "$output" == *'$(touch rig-378-injected)'* ]] || return 1
 }

@@ -386,10 +386,7 @@ titles, transcripts, or singleton state.
 
 ## Documentation
 
-- [How it works](docs/how-it-works.md) — architecture deep-dive with diagrams
-- [Key decisions](docs/decisions.md) — design rationale and tradeoffs
-- [Lessons learned](docs/lessons-learned.md) — 19 documented pitfalls, from the pilot through ongoing development
-- [Customizing](docs/customizing.md) — adapting The Rig for your stack
+See [docs/INDEX.md](docs/INDEX.md) for the canonical documentation index.
 
 ---
 

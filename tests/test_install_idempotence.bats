@@ -87,12 +87,12 @@ snapshot_tree() {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
   local second_summary; second_summary="$(printf '%s\n' "$output" | grep -E '^(Updated|Merged|Removed obsolete|Skipped customized|Skipped conflicts|Stale/missing tracked artifacts):')"
-  [[ "$output" == *"Stale/missing tracked artifacts: 0"* ]]
+  [[ "$output" == *"Stale/missing tracked artifacts: 0"* ]] || return 1
 
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
   local third_summary; third_summary="$(printf '%s\n' "$output" | grep -E '^(Updated|Merged|Removed obsolete|Skipped customized|Skipped conflicts|Stale/missing tracked artifacts):')"
-  [[ "$output" == *"Stale/missing tracked artifacts: 0"* ]]
+  [[ "$output" == *"Stale/missing tracked artifacts: 0"* ]] || return 1
 
   [ "$second_summary" = "$third_summary" ]
 }

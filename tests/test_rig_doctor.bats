@@ -26,8 +26,8 @@ json_assert() {
 
   run "$CASE_DIR/bin/rig" doctor
   [ "$status" -eq 0 ]
-  [[ "$output" == *"PASS  rig_directory:"* ]]
-  [[ "$output" == *"Rig doctor: healthy"* ]]
+  [[ "$output" == *"PASS  rig_directory:"* ]] || return 1
+  [[ "$output" == *"Rig doctor: healthy"* ]] || return 1
 }
 
 @test "doctor validates connector declarations without claiming session callability" {
@@ -83,7 +83,7 @@ json_assert() {
 
   run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' doctor --json"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"worktree bootstrap"* ]]
+  [[ "$output" == *"worktree bootstrap"* ]] || return 1
   printf 'linked customization\nissue-tracking: none\n' > "$linked/CLAUDE.md"
 
   run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' worktree bootstrap"

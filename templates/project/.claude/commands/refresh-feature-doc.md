@@ -30,19 +30,13 @@ If the argument doesn't match any existing doc, list the docs in
 
 ## What this does
 
-> **RIG_DIR resolution (stealth mode):** Before reading or writing any feature doc path,
-> resolve where `.rig/` actually lives. If `.rigpath` exists at the project root, read
-> it — it contains the absolute path to the external `.rig/` directory.
+> **Project docs resolution:** Documentation lives in the project tree even when
+> `.rig/` uses stealth or external tracking. Resolve the project root before
+> reading or writing any feature doc path.
 >
 > ```bash
 > REPO=$(git rev-parse --show-toplevel)
-> if [[ -f "$REPO/.rigpath" ]]; then
->   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
->   DOCS_DIR="$RIG_DIR/docs/features"
-> else
->   RIG_DIR="$REPO/.rig"
->   DOCS_DIR="$REPO/docs/features"
-> fi
+> DOCS_DIR="$REPO/docs/features"
 > ```
 >
 > Substitute `$DOCS_DIR` for `docs/features/` in every step below.
@@ -107,6 +101,15 @@ Do **not** rewrite the Summary unless the feature's fundamental purpose changed.
 
 1. **Update the index** — update the `Last updated` date for this feature in
    `docs/features/README.md`.
+
+   Also update `docs/INDEX.md` in the parent docs directory so it has one row
+   for this feature doc:
+
+   ```
+   | [`features/<slug>.md`](features/<slug>.md) | Feature: <Feature name> |
+   ```
+
+   If the feature's scope changed, refresh that one-line description too.
 
 2. **Log bugs to ERRORS.md** — if re-verifying the doc revealed a real bug
    (not a doc inaccuracy — an actual code problem), log it in

@@ -34,7 +34,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
 
 @test "every [BASE_BRANCH]-substituted file's manifest hash matches its actual on-disk content immediately after install" {
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
-    --project-name Test --tracking repo --strategy merge
+    --project-name Test --base-branch trunk --tracking repo --strategy merge
   [ "$status" -eq 0 ]
 
   local rel actual manifest
@@ -90,4 +90,128 @@ print(d['entries'].get('$rel', {}).get('sha256', ''))
   manifest="$(grep "  CLAUDE.md$" "$rig_dir/memory/.rig-manifest" 2>/dev/null | awk '{print $1}')"
   [ -n "$manifest" ]
   [ "$actual" = "$manifest" ]
+}
+
+@test "agent-plan treats pre-498 raw-template manifest hashes as up to date when substituted content matches" {
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking repo --strategy merge
+  [ "$status" -eq 0 ]
+
+  local rel raw_hash
+  rel=".claude/commands/post-merge.md"
+  raw_hash="$(sha256sum "$REPO_ROOT/templates/project/$rel" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$REPO_ROOT/templates/project/$rel" | awk '{print $1}')"
+  [ -n "$raw_hash" ]
+  run grep -q '\[BASE_BRANCH\]' "$REPO_ROOT/templates/project/$rel"
+  [ "$status" -eq 0 ]
+  run grep -q '\[BASE_BRANCH\]' "$TEST_PROJECT/$rel"
+  [ "$status" -ne 0 ]
+
+  python3 - "$TEST_PROJECT/.rig/memory/.rig-manifest" "$TEST_PROJECT/.rig/memory/.rig-manifest.json" "$rel" "$raw_hash" <<'PYEOF'
+import json
+import sys
+
+manifest, metadata, rel, raw_hash = sys.argv[1:]
+lines = []
+with open(manifest) as fh:
+    for line in fh:
+        if line.endswith(f"  {rel}\n"):
+            lines.append(f"{raw_hash}  {rel}\n")
+        else:
+            lines.append(line)
+with open(manifest, "w") as fh:
+    fh.writelines(lines)
+
+with open(metadata) as fh:
+    doc = json.load(fh)
+doc["entries"][rel]["sha256"] = raw_hash
+with open(metadata, "w") as fh:
+    json.dump(doc, fh, indent=2)
+    fh.write("\n")
+PYEOF
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking repo --strategy agent-plan
+  [ "$status" -eq 0 ]
+
+  printf '%s\n' "$output" > "$TEMP_DIR/agent-plan.json"
+  python3 - "$TEMP_DIR/agent-plan.json" "$rel" <<'PYEOF'
+import json
+import sys
+
+doc = json.load(open(sys.argv[1]))
+rel = sys.argv[2]
+assert doc["status"] == "success"
+entries = {a["path"]: a for a in doc["artifacts"]}
+assert entries[rel]["classification"] == "up-to-date"
+assert rel not in {c["path"] for c in doc["conflicts"]}
+PYEOF
+}
+
+@test "agent-plan treats clean pre-498 rendered content as updateable after the template changes" {
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking repo --strategy merge
+  [ "$status" -eq 0 ]
+
+  local rel raw_old rendered_old raw_hash
+  rel=".claude/commands/post-merge.md"
+  raw_old="$TEMP_DIR/post-merge-old-raw.md"
+  rendered_old="$TEMP_DIR/post-merge-old-rendered.md"
+
+  python3 - "$REPO_ROOT/templates/project/$rel" "$raw_old" "$rendered_old" <<'PYEOF'
+import sys
+
+current, raw_old, rendered_old = sys.argv[1:]
+with open(current, encoding="utf-8") as fh:
+    content = fh.read()
+old = content.replace("Trigger this command immediately after a PR is merged to main.", "Trigger this command after a PR is merged to main.")
+assert old != content
+assert "[BASE_BRANCH]" in old
+with open(raw_old, "w", encoding="utf-8") as fh:
+    fh.write(old)
+with open(rendered_old, "w", encoding="utf-8") as fh:
+    fh.write(old.replace("[BASE_BRANCH]", "trunk"))
+PYEOF
+  raw_hash="$(sha256sum "$raw_old" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$raw_old" | awk '{print $1}')"
+  [ -n "$raw_hash" ]
+  cp "$rendered_old" "$TEST_PROJECT/$rel"
+
+  python3 - "$TEST_PROJECT/.rig/memory/.rig-manifest" "$TEST_PROJECT/.rig/memory/.rig-manifest.json" "$rel" "$raw_hash" <<'PYEOF'
+import json
+import sys
+
+manifest, metadata, rel, raw_hash = sys.argv[1:]
+lines = []
+with open(manifest) as fh:
+    for line in fh:
+        if line.endswith(f"  {rel}\n"):
+            lines.append(f"{raw_hash}  {rel}\n")
+        else:
+            lines.append(line)
+with open(manifest, "w") as fh:
+    fh.writelines(lines)
+
+with open(metadata) as fh:
+    doc = json.load(fh)
+doc["entries"][rel]["sha256"] = raw_hash
+with open(metadata, "w") as fh:
+    json.dump(doc, fh, indent=2)
+    fh.write("\n")
+PYEOF
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --base-branch trunk --tracking repo --strategy agent-plan
+  [ "$status" -eq 0 ]
+
+  printf '%s\n' "$output" > "$TEMP_DIR/agent-plan.json"
+  python3 - "$TEMP_DIR/agent-plan.json" "$rel" <<'PYEOF'
+import json
+import sys
+
+doc = json.load(open(sys.argv[1]))
+rel = sys.argv[2]
+assert doc["status"] == "success"
+entries = {a["path"]: a for a in doc["artifacts"]}
+assert entries[rel]["classification"] == "unmodified-since-install"
+assert rel not in {c["path"] for c in doc["conflicts"]}
+PYEOF
 }

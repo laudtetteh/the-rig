@@ -88,12 +88,12 @@ _fail_with_list() {
 
 @test "wrap.md: PROGRESS.md trim executes automatically — no confirmation gate" {
   # Must NOT contain the old 'Trim now?' prompt
-  ! grep -q "Trim now?" "$COMMAND_DIR/wrap.md"
+  if grep -q "Trim now?" "$COMMAND_DIR/wrap.md"; then return 1; fi
 }
 
 @test "wrap.md: ERRORS.md logging infers from context — no 'ask' prompt" {
   # Must NOT ask the user whether anything unexpected happened
-  ! grep -q "Did anything unexpected" "$COMMAND_DIR/wrap.md"
+  if grep -q "Did anything unexpected" "$COMMAND_DIR/wrap.md"; then return 1; fi
 }
 
 @test "wrap.md: trim steps reference Wrap report — not standalone confirmations" {
@@ -119,6 +119,29 @@ _fail_with_list() {
     grep -q "Never anchor the insertion to the" "$COMMAND_DIR/$command.md"
     grep -q "own prior PROGRESS edit from the same" "$COMMAND_DIR/$command.md"
   done
+}
+
+@test "rig-help baseline deny patterns match shipped settings.json" {
+  grep -Fq '`rm -rf *`, `git push --force*`, `git push -f*`' "$COMMAND_DIR/rig-help.md"
+
+  run grep -Eq 'DROP TABLE|TRUNCATE' "$COMMAND_DIR/rig-help.md"
+  [ "$status" -ne 0 ]
+}
+
+@test "docs index convention is wired into feature doc commands" {
+  grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'architecture/' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/doc-feature.md"
+  grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/refresh-feature-doc.md"
+  grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/rig-help.md"
+  run grep -R '\$RIG_DIR/docs' "$COMMAND_DIR"
+  [ "$status" -ne 0 ]
+}
+
+@test "handoff-checklist preserves explicit two-gate consent" {
+  grep -Fq 'explicitly agreed' "$COMMAND_DIR/handoff-checklist.md"
+  grep -Fq 'Silence, hesitation, or an ambiguous answer is not consent' "$COMMAND_DIR/handoff-checklist.md"
+  grep -Fq 'Do not run `/post-merge`, `/wrap`, or any checklist step' "$COMMAND_DIR/handoff-checklist.md"
 }
 
 # ── PR description freshness ───────────────────────────────────────────────────

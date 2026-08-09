@@ -31,7 +31,7 @@ assert_marker_contract() {
 
   marker_count="$(/usr/bin/grep -Fxc "$marker" "$errors_file")"
   [ "$marker_count" -eq 1 ]
-  ! /usr/bin/grep -Fq '<!-- Add new entries above this line' "$errors_file"
+  if /usr/bin/grep -Fq '<!-- Add new entries above this line' "$errors_file"; then return 1; fi
 
   marker_line="$(/usr/bin/grep -Fn "$marker" "$errors_file" | cut -d: -f1)"
   example_section_line="$(/usr/bin/grep -n '^## Example entry$' "$errors_file" | cut -d: -f1)"

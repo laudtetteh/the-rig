@@ -21,7 +21,7 @@ write_session() {
   write_session "$CASE_DIR/.rig/memory/sessions/session-2.json" fallback feat/current
   run env RIG_SESSION_FILE="$CASE_DIR/.rig/memory/sessions/session-1.json" "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"anchor": "launcher"'* && "$output" == *'"confidence": "exact"'* ]]
+  [[ "$output" == *'"anchor": "launcher"'* && "$output" == *'"confidence": "exact"'* ]] || return 1
 }
 
 @test "resolver never infers from branch or lone active records" {
@@ -30,8 +30,8 @@ write_session() {
   write_session "$CASE_DIR/.rig/memory/sessions/done/session-old.json" done feat/current complete
   run env RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 1 ]
-  [[ "$output" == *'"reason": "not_found"'* ]]
-  [[ "$output" != *'/done/'* ]]
+  [[ "$output" == *'"reason": "not_found"'* ]] || return 1
+  [[ "$output" != *'/done/'* ]] || return 1
 }
 
 @test "invalid explicit launcher file fails closed instead of selecting another session" {
@@ -39,8 +39,8 @@ write_session() {
   write_session "$CASE_DIR/.rig/memory/sessions/done/session-old.json" done feat/current complete
   run env RIG_SESSION_FILE="$CASE_DIR/.rig/memory/sessions/done/session-old.json" "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 3 ]
-  [[ "$output" == *'"session_file": null'* && "$output" == *'"reason": "invalid_launcher_file"'* ]]
-  [[ "$output" != *'session-1.json'* ]]
+  [[ "$output" == *'"session_file": null'* && "$output" == *'"reason": "invalid_launcher_file"'* ]] || return 1
+  [[ "$output" != *'session-1.json'* ]] || return 1
 }
 
 @test "resolver rejects an outside launcher path without reading or writing it" {
@@ -49,7 +49,7 @@ write_session() {
   before=$(cksum "$outside")
   run env RIG_SESSION_FILE="$outside" "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 3 ]
-  [[ "$output" == *'"reason": "invalid_launcher_file"'* && "$output" == *'"session_file": null'* ]]
+  [[ "$output" == *'"reason": "invalid_launcher_file"'* && "$output" == *'"session_file": null'* ]] || return 1
   after=$(cksum "$outside"); [ "$before" = "$after" ]
 }
 
@@ -59,19 +59,19 @@ write_session() {
   ln -s "$outside" "$link"
   run env RIG_SESSION_FILE="$CASE_DIR/.rig/memory/sessions/../sessions/session-link.json" "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 3 ]
-  [[ "$output" == *'"reason": "invalid_launcher_file"'* ]]
+  [[ "$output" == *'"reason": "invalid_launcher_file"'* ]] || return 1
   rm "$link"
   ln -s "$CASE_DIR/.rig/memory/sessions/missing.json" "$link"
   run env RIG_SESSION_FILE="$link" "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 3 ]
-  [[ "$output" == *'"reason": "invalid_launcher_file"'* ]]
+  [[ "$output" == *'"reason": "invalid_launcher_file"'* ]] || return 1
 }
 
 @test "unmatched explicit launcher anchor fails closed" {
   write_session "$CASE_DIR/.rig/memory/sessions/session-1.json" other feat/current
   run env RIG_SESSION_ANCHOR=missing "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 3 ]
-  [[ "$output" == *'"reason": "launcher_anchor_not_found"'* && "$output" != *'session-1.json'* ]]
+  [[ "$output" == *'"reason": "launcher_anchor_not_found"'* && "$output" != *'session-1.json'* ]] || return 1
 }
 
 @test "resolver supports legacy PPID sentinel" {
@@ -80,7 +80,7 @@ write_session() {
   run env RIG_SESSION_PID=778899 "$CASE_DIR/bin/rig" session resolve --json
   rm -f /tmp/.rig-session-778899.uuid
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"reason": "anchor"'* ]]
+  [[ "$output" == *'"reason": "anchor"'* ]] || return 1
 }
 
 write_native_session() {
@@ -104,7 +104,7 @@ json.dump({
   write_native_session "$CASE_DIR/.rig/memory/sessions/session-native.json" native-anchor ambient-native-id
   run env CLAUDE_CODE_SESSION_ID=ambient-native-id RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"anchor": "native-anchor"'* && "$output" == *'"confidence": "exact"'* && "$output" == *'"reason": "native_id"'* ]]
+  [[ "$output" == *'"anchor": "native-anchor"'* && "$output" == *'"confidence": "exact"'* && "$output" == *'"reason": "native_id"'* ]] || return 1
 }
 
 @test "ambient native session id fails closed on a duplicate binding instead of guessing" {
@@ -112,7 +112,7 @@ json.dump({
   write_native_session "$CASE_DIR/.rig/memory/sessions/session-native-b.json" anchor-b dup-native-id
   run env CLAUDE_CODE_SESSION_ID=dup-native-id "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 2 ]
-  [[ "$output" == *'"reason": "duplicate_native_id"'* ]]
+  [[ "$output" == *'"reason": "duplicate_native_id"'* ]] || return 1
 }
 
 @test "ambient native session id bound to another project fails closed instead of falling back" {
@@ -120,7 +120,7 @@ json.dump({
   PATH_F="$CASE_DIR/.rig/memory/sessions/session-foreign.json" python3 -c 'import json,os; p=os.environ["PATH_F"]; d=json.load(open(p)); d["project"]["identity"]="a-different-project"; json.dump(d,open(p,"w"))'
   run env CLAUDE_CODE_SESSION_ID=foreign-native-id "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 3 ]
-  [[ "$output" == *'"reason": "cross_project"'* ]]
+  [[ "$output" == *'"reason": "cross_project"'* ]] || return 1
 }
 
 @test "ambient native session id with no matching record falls through to legacy anchor fallback unchanged" {
@@ -129,21 +129,21 @@ json.dump({
   run env CLAUDE_CODE_SESSION_ID=unrelated-id RIG_SESSION_PID=778899 "$CASE_DIR/bin/rig" session resolve --json
   rm -f /tmp/.rig-session-778899.uuid
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"reason": "anchor"'* && "$output" == *'"anchor": "legacy"'* ]]
+  [[ "$output" == *'"reason": "anchor"'* && "$output" == *'"anchor": "legacy"'* ]] || return 1
 }
 
 @test "ambient native session id that matches nothing at all still fails closed with not_found" {
   write_session "$CASE_DIR/.rig/memory/sessions/session-1.json" one feat/current
   run env CLAUDE_CODE_SESSION_ID=nothing-matches-this RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 1 ]
-  [[ "$output" == *'"reason": "not_found"'* ]]
+  [[ "$output" == *'"reason": "not_found"'* ]] || return 1
 }
 
 @test "ambient native session id does not resolve a completed session" {
   write_native_session "$CASE_DIR/.rig/memory/sessions/done/session-ended.json" ended-anchor ended-native-id complete
   run env CLAUDE_CODE_SESSION_ID=ended-native-id "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 3 ]
-  [[ "$output" == *'"reason": "ended_record"'* ]]
+  [[ "$output" == *'"reason": "ended_record"'* ]] || return 1
 }
 
 @test "atomic writer preserves shell metacharacters and newlines literally" {
@@ -162,13 +162,13 @@ json.dump({
   : > "$tty"
   python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["tentative_name"]="tent"; d["final_name"]="final"; json.dump(d,open(p,"w"))' "$file"
   run env RIG_SESSION_FILE="$file" RIG_PROJECT_NAME=demo RIG_TITLE_TTY="$tty" RIG_TITLE_ONCE=1 "$CASE_DIR/bin/rig-tab-title-watch"
-  [ "$status" -eq 0 ]; [[ "$(<"$tty")" == *'final'* ]]
+  [ "$status" -eq 0 ]; [[ "$(<"$tty")" == *'final'* ]] || return 1
   python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["final_name"]=None; json.dump(d,open(p,"w"))' "$file"; : > "$tty"
   env RIG_SESSION_FILE="$file" RIG_PROJECT_NAME=demo RIG_TITLE_TTY="$tty" RIG_TITLE_ONCE=1 "$CASE_DIR/bin/rig-tab-title-watch"
-  [[ "$(<"$tty")" == *'tent'* ]]
+  [[ "$(<"$tty")" == *'tent'* ]] || return 1
   python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["tentative_name"]=None; json.dump(d,open(p,"w"))' "$file"; : > "$tty"
   env RIG_SESSION_FILE="$file" RIG_PROJECT_NAME=demo RIG_TITLE_TTY="$tty" RIG_TITLE_ONCE=1 "$CASE_DIR/bin/rig-tab-title-watch"
-  [[ "$(<"$tty")" == *'demo: feat/current'* ]]
+  [[ "$(<"$tty")" == *'demo: feat/current'* ]] || return 1
 }
 
 @test "watcher exits quietly when tty is unwritable" {
@@ -188,7 +188,7 @@ json.dump({
     kill "$watcher_pid" 2>/dev/null || true
     wait "$watcher_pid" 2>/dev/null || true
   '
-  [ "$status" -eq 0 ]; [[ "$(<"$tty")" == *changed* ]]
+  [ "$status" -eq 0 ]; [[ "$(<"$tty")" == *changed* ]] || return 1
 }
 
 @test "watcher strips terminal controls and preserves printable metacharacters byte-for-byte" {
@@ -204,7 +204,7 @@ json.dump({
   printf '#!/usr/bin/env bash\nprintf "codex:%%s watcher:%%s\\n" "$*" "${RIG_SESSION_FILE:-unset}"\n' > "$BATS_TEST_TMPDIR/fakebin/codex"
   chmod +x "$BATS_TEST_TMPDIR/fakebin/codex"
   run env PATH="$BATS_TEST_TMPDIR/fakebin:$PATH" "$CASE_DIR/bin/rig" codex -- --help
-  [ "$status" -eq 0 ]; [[ "$output" == 'codex:--help watcher:'* ]]
+  [ "$status" -eq 0 ]; [[ "$output" == 'codex:--help watcher:'* ]] || return 1
 }
 
 @test "native bind creates a redacted versioned record and exact resolve is read-only" {
@@ -216,7 +216,7 @@ json.dump({
   local before after
   before=$(cksum "$file")
   run "$CASE_DIR/bin/rig" session resolve --agent codex --native-session-id thread-secret --json
-  [ "$status" -eq 0 ]; [[ "$output" == *'"reason": "native_id"'* && "$output" != *'thread-secret'* ]]
+  [ "$status" -eq 0 ]; [[ "$output" == *'"reason": "native_id"'* && "$output" != *'thread-secret'* ]] || return 1
   after=$(cksum "$file"); [ "$before" = "$after" ]
 }
 
@@ -228,7 +228,7 @@ json.dump({
   duplicate="$CASE_DIR/.rig/memory/sessions/session-duplicate.json"
   cp "$file" "$duplicate"
   run "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id native-a --json
-  [ "$status" -eq 2 ]; [[ "$output" == *'"reason": "duplicate_native_id"'* ]]
+  [ "$status" -eq 2 ]; [[ "$output" == *'"reason": "duplicate_native_id"'* ]] || return 1
 }
 
 @test "native binding rejects a launcher hint already bound to another ID without writing" {
@@ -238,7 +238,7 @@ json.dump({
   file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
   before=$(cksum "$file")
   run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id native-b --source startup
-  [ "$status" -eq 3 ]; [[ "$output" == *'"reason": "native_conflict"'* ]]
+  [ "$status" -eq 3 ]; [[ "$output" == *'"reason": "native_conflict"'* ]] || return 1
   after=$(cksum "$file"); [ "$before" = "$after" ]
 }
 
@@ -247,14 +247,14 @@ json.dump({
   write_session "$outside" outside feat/outside
   run env RIG_SESSION_FILE="$outside" "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id outside-id --source startup
   [ "$status" -eq 3 ]
-  [[ "$output" == *'"reason": "invalid_session_path"'* && "$output" == *'"no_write": true'* ]]
+  [[ "$output" == *'"reason": "invalid_session_path"'* && "$output" == *'"no_write": true'* ]] || return 1
   run env RIG_SESSION_FILE="$CASE_DIR/.rig/memory/sessions/../outside.json" "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id traversal-id --source startup
   [ "$status" -eq 3 ]
-  [[ "$output" == *'"reason": "invalid_session_path"'* ]]
+  [[ "$output" == *'"reason": "invalid_session_path"'* ]] || return 1
   ln -s "$outside" "$link"
   run env RIG_SESSION_FILE="$link" "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id symlink-id --source startup
   [ "$status" -eq 3 ]
-  [[ "$output" == *'"reason": "invalid_session_path"'* ]]
+  [[ "$output" == *'"reason": "invalid_session_path"'* ]] || return 1
   [ "$(find "$CASE_DIR/.rig/memory/sessions" -type f -name 'session-*.json' | wc -l | tr -d ' ')" -eq 0 ]
 }
 
@@ -262,7 +262,7 @@ json.dump({
   local bad="$CASE_DIR/.rig/memory/sessions/session-bad.json" before after
   printf '{bad json' > "$bad"; before=$(cksum "$bad")
   run "$CASE_DIR/bin/rig" session resolve --agent codex --native-session-id missing --json
-  [ "$status" -eq 4 ]; [[ "$output" == *'"reason": "malformed_record"'* ]]
+  [ "$status" -eq 4 ]; [[ "$output" == *'"reason": "malformed_record"'* ]] || return 1
   after=$(cksum "$bad"); [ "$before" = "$after" ]
 }
 
@@ -293,7 +293,7 @@ json.dump({
   chmod +x "$BATS_TEST_TMPDIR/fakebin/claude"
   run env PATH="$BATS_TEST_TMPDIR/fakebin:$PATH" RIG_TITLE_ONCE=1 RIG_TITLE_TTY="$BATS_TEST_TMPDIR/tty" "$CASE_DIR/bin/rig" claude -- --model test
   [ "$status" -eq 0 ]
-  [[ "$output" == file=*'/memory/sessions/session-'* && "$output" == *' anchor='* && "$output" == *' project=project args=--model test'* ]]
+  [[ "$output" == file=*'/memory/sessions/session-'* && "$output" == *' anchor='* && "$output" == *' project=project args=--model test'* ]] || return 1
 }
 
 @test "pre-compact hook prefers launcher file and pid" {

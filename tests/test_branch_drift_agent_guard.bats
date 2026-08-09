@@ -76,7 +76,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
   local nonblank_lines
   nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
   [ "$nonblank_lines" -eq 1 ]
-  [[ "$output" == \{* ]]
+  [[ "$output" == \{* ]] || return 1
   # Substring checks for drift-check narration (e.g. *"Options:"*) are NOT
   # safe here and were removed: this repo's own real command files
   # (ship.md, rig-upgrade.md, rig-gaps.md) legitimately contain that exact
@@ -98,7 +98,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
   local nonblank_lines
   nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
   [ "$nonblank_lines" -eq 1 ]
-  [[ "$output" == \{* ]]
+  [[ "$output" == \{* ]] || return 1
   printf '%s\n' "$output" | python3 -c 'import json, sys; json.load(sys.stdin)'
 }
 
@@ -163,7 +163,7 @@ sys.stdout.buffer.write(b"".join(out_chunks))
 sys.exit(proc.returncode)
 PY
 
-  [[ "$output" != *"HUNG"* ]]
+  [[ "$output" != *"HUNG"* ]] || return 1
   [ "$status" -eq 0 ] || [ "$status" -eq 3 ]
 }
 
@@ -235,6 +235,6 @@ sys.stdout.buffer.write(b"".join(out_chunks))
 sys.exit(proc.returncode)
 PY
 
-  [[ "$output" != *"HUNG"* ]]
+  [[ "$output" != *"HUNG"* ]] || return 1
   [ "$status" -eq 0 ] || [ "$status" -eq 3 ]
 }

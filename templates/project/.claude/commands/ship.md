@@ -276,8 +276,8 @@ Do not continue until the user resolves this.
 
 **Check 2 — Feature doc overlap (advisory, only if feature docs are installed)**
 
-Only run this check if `$DOCS_DIR/features/README.md` exists (where `$DOCS_DIR` is
-`$RIG_DIR/docs` for stealth/external installs, `$REPO/docs` otherwise).
+Only run this check if `$DOCS_DIR/features/README.md` exists, with
+`DOCS_DIR="$REPO/docs"` after resolving the project root.
 
 List the files changed in this PR (`git diff --name-only HEAD~1..HEAD 2>/dev/null || git diff --cached --name-only`).
 Cross-reference against `$DOCS_DIR/features/README.md` — if any changed file's path

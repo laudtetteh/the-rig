@@ -90,7 +90,9 @@ EOF
   head_sha=$(git -C "$CASE_DIR" rev-parse HEAD)
   grep -Fxq "merge_sha=$head_sha" "$pending"
   grep -Eq '^merged_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$pending"
-  ! find "$RIG_DIR/memory" -name '.post-merge-pending.tmp.*' | grep -q .
+  if find "$RIG_DIR/memory" -name '.post-merge-pending.tmp.*' | grep -q .; then
+    return 1
+  fi
 }
 
 @test "prompt warning reports merge metadata and preserves consistent skip wording" {
@@ -112,7 +114,7 @@ EOF
     'cd "$1" && exec "$2/session-start.sh"' _ "$CASE_DIR" "$HOOK_DIR" \
     <<<'{"source":"startup"}'
   [ "$status" -eq 0 ]
-  OUTPUT="$output" python3 -c 'import json,os; text=json.loads(os.environ["OUTPUT"])["hookSpecificOutput"]["additionalContext"]; assert "Merge: abc123 at 2026-07-31T10:20:30-07:00." in text; assert "skip for current task" in text; assert "without clearing the reminder" in text; assert "Tip:" in text'
+  OUTPUT="$output" python3 -c 'import json,os; text=json.loads(os.environ["OUTPUT"])["hookSpecificOutput"]["additionalContext"]; assert "Merge: abc123 at 2026-07-31T10:20:30-07:00." in text; assert "skip for current task" in text; assert "without clearing the reminder" in text; assert "Rig tip relay:" in text'
   [ -f "$RIG_DIR/memory/.post-merge-pending" ]
 }
 
@@ -123,12 +125,12 @@ EOF
   run bash -c 'cd "$1" && exec "$2/prompt-submit.sh"' _ "$CASE_DIR" "$HOOK_DIR"
   [ "$status" -eq 0 ]
   [ ! -e /tmp/rig-352-injected ]
-  [[ "$output" == *'$(touch /tmp/rig-352-injected)'* ]]
+  [[ "$output" == *'$(touch /tmp/rig-352-injected)'* ]] || return 1
 
   : > "$RIG_DIR/memory/.post-merge-pending"
   run bash -c 'cd "$1" && exec "$2/prompt-submit.sh"' _ "$CASE_DIR" "$HOOK_DIR"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"skip for current task"* ]]
+  [[ "$output" == *"skip for current task"* ]] || return 1
 }
 
 @test "post-merge command documents metadata-preserving task skip" {

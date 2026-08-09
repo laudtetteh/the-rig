@@ -78,10 +78,19 @@ run_installer() {
 }
 
 @test "project conventions remain writable while governance stays protected" {
-  ! grep -Fq "[RIG_DIR]/memory/PROJECT_CONVENTIONS.md" "$POLICY"
+  if grep -Fq "[RIG_DIR]/memory/PROJECT_CONVENTIONS.md" "$POLICY"; then return 1; fi
   grep -Fxq "[RIG_DIR]/processes/" "$POLICY"
   grep -Fxq "[RIG_DIR]/rules/" "$POLICY"
   grep -Fxq "[REPO]/.husky/" "$POLICY"
   grep -Fxq "[REPO]/CLAUDE.md" "$POLICY"
   grep -Fxq "[REPO]/.claude/hooks/" "$POLICY"
+}
+
+@test "template CLAUDE.md documents docs category conventions without placeholder" {
+  run grep -F '[other docs]' "$REPO_ROOT/templates/project/CLAUDE.md"
+  [ "$status" -ne 0 ]
+  grep -Fq 'docs/INDEX.md' "$REPO_ROOT/templates/project/CLAUDE.md"
+  grep -Fq 'architecture/' "$REPO_ROOT/templates/project/CLAUDE.md"
+  grep -Fq 'decisions/' "$REPO_ROOT/templates/project/CLAUDE.md"
+  grep -Fq 'troubleshooting/' "$REPO_ROOT/templates/project/CLAUDE.md"
 }

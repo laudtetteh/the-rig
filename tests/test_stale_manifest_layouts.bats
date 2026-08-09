@@ -67,9 +67,9 @@ json.dump(d, open(p, 'w'), indent=2, sort_keys=True)
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking stealth --rig-dir "$RIG_EXT" --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Stale/missing tracked artifacts: 2"* ]]
-  [[ "$output" == *"project:missing:.claude/commands/RETIRED_COMMAND.md"* ]]
-  [[ "$output" == *"project:missing:.rig/rules/RETIRED_RULE.md"* ]]
+  [[ "$output" == *"Stale/missing tracked artifacts: 2"* ]] || return 1
+  [[ "$output" == *"project:missing:.claude/commands/RETIRED_COMMAND.md"* ]] || return 1
+  [[ "$output" == *"project:missing:.rig/rules/RETIRED_RULE.md"* ]] || return 1
 }
 
 @test "stale-manifest audit fires for external tracking (both roots)" {
@@ -84,7 +84,7 @@ json.dump(d, open(p, 'w'), indent=2, sort_keys=True)
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking external --rig-dir "$RIG_EXT" --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Stale/missing tracked artifacts: 2"* ]]
+  [[ "$output" == *"Stale/missing tracked artifacts: 2"* ]] || return 1
 }
 
 @test "--repair-stale removes a genuinely missing stealth manifest entry" {
@@ -98,8 +98,8 @@ json.dump(d, open(p, 'w'), indent=2, sort_keys=True)
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking stealth --rig-dir "$RIG_EXT" --repair-stale
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Repaired stale manifest entry: project:.rig/rules/RETIRED_RULE.md"* ]]
-  ! grep -qF '.rig/rules/RETIRED_RULE.md' "$RIG_EXT/memory/.rig-manifest"
+  [[ "$output" == *"Repaired stale manifest entry: project:.rig/rules/RETIRED_RULE.md"* ]] || return 1
+  if grep -qF '.rig/rules/RETIRED_RULE.md' "$RIG_EXT/memory/.rig-manifest"; then return 1; fi
   run python3 -c "
 import json
 d = json.load(open('$manifest_json'))
@@ -119,7 +119,7 @@ raise SystemExit(1 if '.rig/rules/RETIRED_RULE.md' in d['entries'] else 0)
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking repo --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"wrong-type"*".claude/commands/status.md"* ]]
+  [[ "$output" == *"wrong-type"*".claude/commands/status.md"* ]] || return 1
   [ -d "$TEST_PROJECT/.claude/commands/status.md" ]
 
   # --repair-stale must not touch it either — only "missing" is auto-repaired.
@@ -141,7 +141,7 @@ raise SystemExit(1 if '.rig/rules/RETIRED_RULE.md' in d['entries'] else 0)
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking repo --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"dangling-symlink"*".claude/commands/wrap.md"* ]]
+  [[ "$output" == *"dangling-symlink"*".claude/commands/wrap.md"* ]] || return 1
   [ -L "$TEST_PROJECT/.claude/commands/wrap.md" ]
 
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \

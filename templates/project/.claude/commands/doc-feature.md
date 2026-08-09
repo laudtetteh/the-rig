@@ -33,19 +33,13 @@ If no argument is given, ask: **"Which feature should I document?"**
 
 ## What this does
 
-> **RIG_DIR resolution (stealth mode):** Before reading or writing any feature doc path,
-> resolve where `.rig/` actually lives. If `.rigpath` exists at the project root, read
-> it — it contains the absolute path to the external `.rig/` directory.
+> **Project docs resolution:** Documentation lives in the project tree even when
+> `.rig/` uses stealth or external tracking. Resolve the project root before
+> reading or writing any feature doc path.
 >
 > ```bash
 > REPO=$(git rev-parse --show-toplevel)
-> if [[ -f "$REPO/.rigpath" ]]; then
->   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
->   DOCS_DIR="$RIG_DIR/docs/features"
-> else
->   RIG_DIR="$REPO/.rig"
->   DOCS_DIR="$REPO/docs/features"
-> fi
+> DOCS_DIR="$REPO/docs/features"
 > ```
 >
 > Substitute `$DOCS_DIR` for `docs/features/` in every step below.
@@ -107,13 +101,24 @@ leaving them empty. Never leave placeholder brackets in the final file.
 
 ### Step 5 — Update the index
 
-Add a row to the index table in `$DOCS_DIR/README.md`:
+Add a row to the feature index table in `$DOCS_DIR/README.md`:
 
 ```
 | <Feature name> | [<slug>.md](<slug>.md) | YYYY-MM-DD |
 ```
 
 If the index table currently has the "none yet" placeholder row, replace it.
+
+Then update the project docs index at the parent docs directory:
+
+- If `$DOCS_DIR` is `.../docs/features`, the project index is `$DOCS_DIR/../INDEX.md`.
+- Ensure it contains a row for `features/<slug>.md`:
+
+```
+| [`features/<slug>.md`](features/<slug>.md) | Feature: <Feature name> |
+```
+
+If `docs/INDEX.md` is missing, create it using the canonical table format before adding the row.
 
 ---
 

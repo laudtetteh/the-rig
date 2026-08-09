@@ -715,7 +715,7 @@ for arg in "$@"; do
       echo "                        Useful for shared repos where teammates don't use The Rig."
       echo "  --feature-docs        Install feature-documentation commands (opt-in)."
       echo "                        Includes: /doc-feature, /doc-list, /feature-context,"
-      echo "                        /refresh-feature-doc, and docs/features/README.md."
+      echo "                        /refresh-feature-doc, docs/INDEX.md, and docs/features/README.md."
       echo "                        Skipped by default — add for projects that maintain"
       echo "                        end-to-end feature traces."
       echo "  --subagents           Install multi-agent hook (opt-in)."
@@ -1020,7 +1020,11 @@ PYEOF
 
 record_upgrade_destination_conflict() {
   local rel="$1" state="$2"
-  warn "Preserved conflicting upgrade destination: ${rel:-unknown} (${state})"
+  if [[ "$state" == "symlink" && ( "$rel" == .claude/* || "$rel" == .codex/* || "$rel" == .agents/skills/* ) ]]; then
+    warn "Customized symlink detected: ${rel:-unknown}"
+  else
+    warn "Preserved conflicting upgrade destination: ${rel:-unknown} (${state})"
+  fi
   record_upgrade_result skipped-conflict "$rel"
 }
 
@@ -1770,7 +1774,7 @@ preflight_snapshot_project() {
 
   local -a rel_paths=(
     "CLAUDE.md" "PROJECT_BRIEF.md" ".claude" ".agents" ".codex" ".mcp.json"
-    ".playwright-mcp" ".github" ".gitleaks.toml" "docs/features/README.md"
+    ".playwright-mcp" ".github" ".gitleaks.toml" "docs/INDEX.md" "docs/features/README.md"
     ".husky" ".rigpath" "bin/rig" ".git/hooks"
   )
   # Tracked .rig/ lives at $base/.rig for repo/exclude tracking, so it's just
@@ -1993,10 +1997,10 @@ copy_file() {
   local dir destination_state
   dir="$(dirname "$dest")"
 
-  if [[ "$COLLISION_STRATEGY" == upgrade && -n "$base" ]]; then
+  if [[ -n "$base" ]]; then
     destination_state="$(upgrade_destination_state "$base" "$dest")"
     case "$destination_state" in
-      symlinked-parent|symlinked-root|parent-wrong-type|outside-root|directory|wrong-type)
+      symlink|symlinked-parent|symlinked-root|parent-wrong-type|outside-root|directory|wrong-type)
         record_upgrade_destination_conflict "$rel" "$destination_state"
         return 0
         ;;
@@ -2301,6 +2305,46 @@ _copy_upgrade_existing() {
   fi
 
   manifest_hash="$(read_manifest_hash "$rel" "$manifest_file")"
+
+  if [[ -n "$manifest_hash" && "$dest_hash" != "$manifest_hash" ]] &&
+     grep -q '\[BASE_BRANCH\]' "$src" 2>/dev/null; then
+    local rendered_src rendered_hash raw_dest raw_dest_hash
+    rendered_src="$(mktemp /tmp/rig-base-branch-rendered-XXXXXX)"
+    sed "s/\\[BASE_BRANCH\\]/${BASE_BRANCH//\//\\/}/g" "$src" > "$rendered_src"
+    rendered_hash="$(sha256_file "$rendered_src")"
+    rm -f "$rendered_src"
+    if [[ -n "$rendered_hash" && "$dest_hash" == "$rendered_hash" ]]; then
+      info "Up to date: ${rel}"
+      record_upgrade_result up-to-date "$rel"
+      if [[ "$AGENT_DRY_RUN" != true ]]; then
+        write_manifest_entry "$dest_hash" "$rel" "$manifest_file" "$dest"
+      fi
+      return
+    fi
+
+    raw_dest="$(mktemp /tmp/rig-base-branch-raw-dest-XXXXXX)"
+    python3 - "$dest" "$BASE_BRANCH" "$raw_dest" <<'PYEOF'
+import sys
+
+source, base_branch, target = sys.argv[1:]
+with open(source, "r", encoding="utf-8") as fh:
+    content = fh.read()
+content = content.replace(base_branch, "[BASE_BRANCH]")
+with open(target, "w", encoding="utf-8") as fh:
+    fh.write(content)
+PYEOF
+    raw_dest_hash="$(sha256_file "$raw_dest")"
+    rm -f "$raw_dest"
+    if [[ -n "$raw_dest_hash" && "$raw_dest_hash" == "$manifest_hash" ]]; then
+      if [[ "$AGENT_DRY_RUN" != true ]]; then
+        _upgrade_write "$src" "$dest" "$base"
+        write_manifest_entry "$new_hash" "$rel" "$manifest_file" "$dest"
+      fi
+      success "Updated: ${rel}"
+      record_upgrade_result updated "$rel"
+      return
+    fi
+  fi
 
   if [[ -z "$manifest_hash" ]]; then
     # No manifest entry. Two cases:
@@ -2714,9 +2758,9 @@ PYEOF
     skill_name="$(basename "$skill_src")"
     skill_dest="$SKILLS_DIR/$skill_name"
     if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
-      _copy_global_file_upgrade "$skill_src" "$skill_dest" "$SKILLS_DIR" "skills/$skill_name"
+      _copy_global_file_upgrade "$skill_src" "$skill_dest" "$CLAUDE_DIR" "skills/$skill_name"
     else
-      copy_file "$skill_src" "$skill_dest" "$SKILLS_DIR" "skills/$skill_name"
+      copy_file "$skill_src" "$skill_dest" "$CLAUDE_DIR" "skills/$skill_name"
     fi
   done
   fi
@@ -3204,6 +3248,7 @@ if [[ "$DO_PROJECT" == true ]]; then
       .claude/commands/doc-list.md|\
       .claude/commands/feature-context.md|\
       .claude/commands/refresh-feature-doc.md|\
+      docs/INDEX.md|\
       docs/features/*)                     [[ "$INSTALL_FEATURE_DOCS" == true ]]   ;;
       .claude/commands/rig-gaps.md|\
       .claude/commands/rig-propose.md)     [[ "$INSTALL_CONTRIBUTE" == true ]]     ;;
@@ -3272,7 +3317,7 @@ if [[ "$DO_PROJECT" == true ]]; then
   # flag would skip, so the operator can rerun with the matching explicit flag.
   if [[ "$COLLISION_STRATEGY" == upgrade && -f "$TARGET/CLAUDE.md" ]]; then
     if [[ "$INSTALL_FEATURE_DOCS" != true ]] && \
-       grep -Eq 'doc-feature|doc-list|feature-context|refresh-feature-doc|docs/features' "$TARGET/CLAUDE.md"; then
+      grep -Eq 'doc-feature|doc-list|feature-context|refresh-feature-doc|docs/INDEX.md|docs/features' "$TARGET/CLAUDE.md"; then
       warn "CLAUDE.md references feature-docs files that Upgrade will skip; rerun with --feature-docs."
     fi
     if [[ "$INSTALL_CONTRIBUTE" != true ]] && \
@@ -3683,6 +3728,7 @@ PYEOF
       _stealth_exclude ".playwright-mcp/"
       _stealth_exclude ".github/"
       _stealth_exclude ".gitleaks.toml"
+      _stealth_exclude "docs/INDEX.md"
       _stealth_exclude "docs/features/README.md"
       _stealth_exclude ".rig-backup/"
       _stealth_exclude ".rig/"
@@ -3711,7 +3757,7 @@ PYEOF
       # .rigpath is already excluded by the external-mode block above
     else
       warn ".git/info/exclude not found — stealth exclusions could not be applied."
-      warn "Add manually: CLAUDE.md, PROJECT_BRIEF.md, .claude/, .agents/, .codex/, .mcp.json, .playwright-mcp/, .github/, .gitleaks.toml, docs/features/README.md, bin/rig*, .rigpath"
+      warn "Add manually: CLAUDE.md, PROJECT_BRIEF.md, .claude/, .agents/, .codex/, .mcp.json, .playwright-mcp/, .github/, .gitleaks.toml, docs/INDEX.md, docs/features/README.md, bin/rig*, .rigpath"
     fi
   fi
 

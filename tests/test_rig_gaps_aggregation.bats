@@ -50,12 +50,12 @@ write_gap_log() {
   run env HOME="$TEST_HOME" bash "$COLLECTOR"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"2 unique unsubmitted candidate(s)"* ]]
-  [[ "$output" == *"### [rig-core] Hook blocks safe command"* ]]
-  [[ "$output" == *"Projects: alpha, beta"* ]]
-  [[ "$output" == *"Duplicate matches: 2"* ]]
-  [[ "$output" == *"### [project] Hook blocks safe command"* ]]
-  [[ "$output" == *"route to project owner"* ]]
+  [[ "$output" == *"2 unique unsubmitted candidate(s)"* ]] || return 1
+  [[ "$output" == *"### [rig-core] Hook blocks safe command"* ]] || return 1
+  [[ "$output" == *"Projects: alpha, beta"* ]] || return 1
+  [[ "$output" == *"Duplicate matches: 2"* ]] || return 1
+  [[ "$output" == *"### [project] Hook blocks safe command"* ]] || return 1
+  [[ "$output" == *"route to project owner"* ]] || return 1
 }
 
 @test "collector ignores backups and submitted entries while retaining invalid scope" {
@@ -85,20 +85,20 @@ This heading is documentation, not a gap.
   run env HOME="$TEST_HOME" bash "$COLLECTOR"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"1 unique unsubmitted candidate(s)"* ]]
-  [[ "$output" == *"### [needs-review] Missing metadata"* ]]
-  [[ "$output" == *"needs-review (missing or invalid Scope)"* ]]
-  [[ "$output" != *"Entry format"* ]]
-  [[ "$output" != *"Already handled"* ]]
-  [[ "$output" != *"Backup-only trap"* ]]
-  [[ "$output" != *"Suffix backup trap"* ]]
+  [[ "$output" == *"1 unique unsubmitted candidate(s)"* ]] || return 1
+  [[ "$output" == *"### [needs-review] Missing metadata"* ]] || return 1
+  [[ "$output" == *"needs-review (missing or invalid Scope)"* ]] || return 1
+  [[ "$output" != *"Entry format"* ]] || return 1
+  [[ "$output" != *"Already handled"* ]] || return 1
+  [[ "$output" != *"Backup-only trap"* ]] || return 1
+  [[ "$output" != *"Suffix backup trap"* ]] || return 1
 }
 
 @test "collector exits cleanly when no project logs exist" {
   run env HOME="$TEST_HOME" bash "$COLLECTOR"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"No project RIG_GAPS.md files found"* ]]
+  [[ "$output" == *"No project RIG_GAPS.md files found"* ]] || return 1
 }
 
 @test "command documents explicit scope, read-only collection, and no automatic issues" {

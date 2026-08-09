@@ -139,12 +139,12 @@ json.dump(data, open(p, 'w'), indent=2)
   [ "$(json_field "d['status']")" = "refused" ]
   local conflict_entry
   conflict_entry="$(json_field "next(c for c in d['conflicts'] if c['path'] == '.codex/hooks.json')")"
-  [[ -n "$conflict_entry" ]]
+  [[ -n "$conflict_entry" ]] || return 1
   [ "$(json_field "any(x['path'] == 'description' for x in next(c for c in d['conflicts'] if c['path'] == '.codex/hooks.json')['details'])")" = "True" ]
 
   # agent-plan must never write -- the tampered value is still there.
   grep -q "locally customized description" "$hooks"
-  [[ "$(python3 -c "import json; print(json.load(open('$hooks'))['description'])")" != "$original_description" ]]
+  [[ "$(python3 -c "import json; print(json.load(open('$hooks'))['description'])")" != "$original_description" ]] || return 1
 }
 
 @test "agent-upgrade converges a frontmatter+Markdown file when only a new frontmatter key was added" {
@@ -233,7 +233,7 @@ open(p, 'w').write(new_text)
   [ "$(json_field "d['status']")" = "refused" ]
   local conflict_entry
   conflict_entry="$(json_field "next(c for c in d['conflicts'] if c['path'] == '.claude/agents/code-reviewer.md')")"
-  [[ -n "$conflict_entry" ]]
+  [[ -n "$conflict_entry" ]] || return 1
   [ "$(json_field "any(x['path'] == 'body' for x in next(c for c in d['conflicts'] if c['path'] == '.claude/agents/code-reviewer.md')['details'])")" = "True" ]
 
   grep -q "locally customized body content" "$agent_file"
@@ -278,7 +278,7 @@ open(p, 'w').write(new_text)
   [ "$(json_field "d['status']")" = "refused" ]
   local conflict_entry
   conflict_entry="$(json_field "next(c for c in d['conflicts'] if c['path'] == '.claude/hooks/pre-tool.sh')")"
-  [[ -n "$conflict_entry" ]]
+  [[ -n "$conflict_entry" ]] || return 1
   [ "$(json_field "len(next(c for c in d['conflicts'] if c['path'] == '.claude/hooks/pre-tool.sh')['details'])")" != "0" ]
   [ "$(json_field "'lines' in next(c for c in d['conflicts'] if c['path'] == '.claude/hooks/pre-tool.sh')['details'][0]['path']")" = "True" ]
   [ "$(json_field "'locally customized by the user' in next(c for c in d['conflicts'] if c['path'] == '.claude/hooks/pre-tool.sh')['details'][0]['current']")" = "True" ]
@@ -302,7 +302,7 @@ json.dump(data, open(p, 'w'), indent=2)
 
   # Plain upgrade never invokes the convergence engine -- it still just
   # skips-with-review, still prints the legacy marker, still emits no JSON.
-  [[ "$output" == *"RIG_UPGRADE_REVIEW_REQUIRED=1"* ]]
-  [[ "$output" != *'"schema_version"'* ]]
+  [[ "$output" == *"RIG_UPGRADE_REVIEW_REQUIRED=1"* ]] || return 1
+  [[ "$output" != *'"schema_version"'* ]] || return 1
   grep -q "locally customized description" "$TEST_PROJECT/.codex/hooks.json"
 }

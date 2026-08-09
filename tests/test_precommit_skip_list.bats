@@ -49,8 +49,8 @@ run_hook() {
   run_hook
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Debug artifact check blocked this commit."* ]]
-  [[ "$output" == *"src/app.js"* ]]
+  [[ "$output" == *"Debug artifact check blocked this commit."* ]] || return 1
+  [[ "$output" == *"src/app.js"* ]] || return 1
 }
 
 @test "project-specific debug scan exclusions remain effective" {

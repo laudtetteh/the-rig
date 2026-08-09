@@ -39,7 +39,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
 
   run env HOME="$FAKE_HOME" bash "$INSTALLER" \
     --global-only --global-agent claude --strategy merge
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
 
   # A bare `[[ "$output" == *pattern* ]]` (or `!`-negated) assertion that
   # isn't the last statement in the test does not reliably trip bats'
@@ -53,6 +53,8 @@ teardown() { rm -rf "$TEMP_DIR"; }
 
   [ -L "$FAKE_HOME/.claude" ]
   readlink "$FAKE_HOME/.claude" | grep -qF "$external_target"
+  [ ! -e "$external_target/CLAUDE.md" ]
+  [ ! -e "$external_target/skills" ]
 }
 
 @test "global .claude root: a missing destination is still created normally under --strategy merge" {
@@ -70,4 +72,42 @@ teardown() { rm -rf "$TEMP_DIR"; }
   [ -d "$FAKE_HOME/.claude" ]
   [ ! -L "$FAKE_HOME/.claude" ]
   [ -f "$FAKE_HOME/.claude/CLAUDE.md" ]
+}
+
+@test "global CLAUDE.md: a leaf symlink is refused under --strategy overwrite" {
+  local external_target="$TEMP_DIR/outside-claude.md"
+  mkdir -p "$FAKE_HOME/.claude"
+  printf '# outside sentinel\n' > "$external_target"
+  ln -s "$external_target" "$FAKE_HOME/.claude/CLAUDE.md"
+
+  run env HOME="$FAKE_HOME" bash "$INSTALLER" \
+    --global-only --global-agent claude --strategy overwrite
+  [ "$status" -eq 0 ]
+
+  run grep -qF "Preserved conflicting upgrade destination: CLAUDE.md (symlink)" <<< "$output"
+  [ "$status" -eq 0 ]
+
+  [ -L "$FAKE_HOME/.claude/CLAUDE.md" ]
+  readlink "$FAKE_HOME/.claude/CLAUDE.md" | grep -qF "$external_target"
+  grep -qF '# outside sentinel' "$external_target"
+}
+
+@test "project settings.json: a leaf symlink is refused under --strategy merge" {
+  local project="$TEMP_DIR/project"
+  local external_target="$TEMP_DIR/outside-settings.json"
+  mkdir -p "$project/.claude"
+  git -C "$project" init -q
+  printf '{"outside":true}\n' > "$external_target"
+  ln -s "$external_target" "$project/.claude/settings.json"
+
+  run env HOME="$FAKE_HOME" bash "$INSTALLER" --project-only --target "$project" \
+    --project-name Test --strategy merge
+  [ "$status" -eq 0 ]
+
+  run grep -qF "Customized symlink detected: .claude/settings.json" <<< "$output"
+  [ "$status" -eq 0 ]
+
+  [ -L "$project/.claude/settings.json" ]
+  readlink "$project/.claude/settings.json" | grep -qF "$external_target"
+  grep -qF '"outside":true' "$external_target"
 }

@@ -26,6 +26,7 @@ No arguments. Output the table below directly — do not read individual command
 | Command | What it does |
 |---|---|
 | `/wrap` | End a session. Writes `CONTEXT_SNAPSHOT.md`, expands `PROGRESS.md` stubs, captures in-flight task state, names the session. |
+| `/handoff-checklist` | Consent-gated wrap-and-handoff routine for large or costly sessions. Asks before doing any checklist work. |
 | `/post-merge` | Post-merge housekeeping. Run immediately after a PR lands: pulls main, logs the PR to `PROGRESS.md`, moves the task file to done, refreshes `CONTEXT_SNAPSHOT.md`, checks feature doc freshness, and surfaces what's next. |
 | `/status` | Project state dashboard. Shows current branch, active tasks, backlog count, and recent `PROGRESS.md` entries. |
 | `/session-name` | Derive and set a session name from work completed so far. Uses the same tiered format as `/wrap` and `/post-merge` but callable at any time without triggering a full cycle. |
@@ -76,7 +77,7 @@ Some features are not installed by default. Pass these flags to `install.sh` (or
 
 | Flag | What it installs |
 |---|---|
-| `--feature-docs` | `/doc-feature`, `/doc-list`, `/feature-context`, `/refresh-feature-doc`, and `docs/features/` — for projects that maintain end-to-end feature traces |
+| `--feature-docs` | `/doc-feature`, `/doc-list`, `/feature-context`, `/refresh-feature-doc`, `docs/INDEX.md`, and `docs/features/` — for projects that maintain end-to-end feature traces |
 | `--subagents` | `subagent-start.sh` hook + `SubagentStart` event wiring in `settings.json` — for projects using multi-agent Claude Code workflows |
 | `--contribute` | `/rig-gaps` and `/rig-propose` — for developers who maintain The Rig or a fork |
 
@@ -95,7 +96,7 @@ The Rig wires up four mechanisms for controlling what Claude Code can do:
 | `settings.json` `allow`/`deny` | Persistent per-project rules loaded at every session; no prompt for matched patterns | Edit `.claude/settings.json` directly |
 | `/fewer-permission-prompts` | Rig skill — scans transcripts for frequent patterns and bulk-adds them to `settings.json` `allow` | Run `/fewer-permission-prompts` |
 
-**Baseline deny patterns** (shipped in `settings.json`): `rm -rf *`, `git push --force`, `DROP TABLE`, `TRUNCATE`. Add project-specific patterns to the `deny` array as needed.
+**Baseline deny patterns** (shipped in `settings.json`): `rm -rf *`, `git push --force*`, `git push -f*`. Add project-specific shell-command patterns to the `deny` array as needed.
 
 ---
 

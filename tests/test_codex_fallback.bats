@@ -80,7 +80,7 @@ EOF
 
   [ "$status" -eq 0 ]
   first_setting="$(sed -n '/^[^#[:space:]]/p' "$TEST_PROJECT/.codex/config.toml" | head -n 1)"
-  [[ "$first_setting" == project_doc_fallback_filenames* ]]
+  [[ "$first_setting" == project_doc_fallback_filenames* ]] || return 1
   [ "$(/usr/bin/grep -c '^project_doc_fallback_filenames' "$TEST_PROJECT/.codex/config.toml")" -eq 1 ]
   /usr/bin/grep -q '^\[projects\."/tmp/example"\]$' "$TEST_PROJECT/.codex/config.toml"
 }
@@ -93,7 +93,7 @@ EOF
   run_codex_install
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Codex project config was not changed"* ]]
+  [[ "$output" == *"Codex project config was not changed"* ]] || return 1
   [ "$before" = "$(cksum "$TEST_PROJECT/.codex/config.toml")" ]
 }
 

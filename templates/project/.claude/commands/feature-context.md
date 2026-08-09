@@ -28,19 +28,13 @@ If no argument is given, list available feature docs and ask which to load.
 
 ## What this does
 
-> **RIG_DIR resolution (stealth mode):** Before searching for any feature doc,
-> resolve where `.rig/` actually lives. If `.rigpath` exists at the project root, read
-> it — it contains the absolute path to the external `.rig/` directory.
+> **Project docs resolution:** Feature docs live in the project tree even when
+> `.rig/` uses stealth or external tracking. Resolve the project root before
+> searching for any feature doc.
 >
 > ```bash
 > REPO=$(git rev-parse --show-toplevel)
-> if [[ -f "$REPO/.rigpath" ]]; then
->   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
->   DOCS_DIR="$RIG_DIR/docs/features"
-> else
->   RIG_DIR="$REPO/.rig"
->   DOCS_DIR="$REPO/docs/features"
-> fi
+> DOCS_DIR="$REPO/docs/features"
 > ```
 
 ### Step 1 — Find the doc

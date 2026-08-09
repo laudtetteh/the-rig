@@ -66,7 +66,7 @@ else:
   doctor_json
   [ "$(doctor_check_ok upgrade_pattern_blanked_file)" = "true" ]
   [ "$(doctor_check_ok upgrade_pattern_symlink_replaced)" = "true" ]
-  [[ "$(doctor_check_detail upgrade_pattern_blanked_file)" == *"no pre-flight snapshot found"* ]]
+  [[ "$(doctor_check_detail upgrade_pattern_blanked_file)" == *"no pre-flight snapshot found"* ]] || return 1
 }
 
 @test "doctor reports both upgrade-pattern checks as passing on an unmodified project with a real snapshot" {
@@ -91,15 +91,15 @@ else:
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking repo --strategy upgrade
   [ "$status" -eq 0 ]
-  ! /usr/bin/grep -q '\[Project Name\]' "$TEST_PROJECT/CLAUDE.md"
+  if /usr/bin/grep -q '\[Project Name\]' "$TEST_PROJECT/CLAUDE.md"; then return 1; fi
 
   cp "$REPO_ROOT/templates/project/CLAUDE.md" "$TEST_PROJECT/CLAUDE.md"
   /usr/bin/grep -q '\[Project Name\]' "$TEST_PROJECT/CLAUDE.md"
 
   doctor_json
   [ "$(doctor_check_ok upgrade_pattern_blanked_file)" = "false" ]
-  [[ "$(doctor_check_detail upgrade_pattern_blanked_file)" == *"lesson #14"* ]]
-  [[ "$(doctor_check_detail upgrade_pattern_blanked_file)" == *"CLAUDE.md"* ]]
+  [[ "$(doctor_check_detail upgrade_pattern_blanked_file)" == *"lesson #14"* ]] || return 1
+  [[ "$(doctor_check_detail upgrade_pattern_blanked_file)" == *"CLAUDE.md"* ]] || return 1
 }
 
 @test "doctor flags a symlink that was silently replaced by a regular file (lesson #15), in repo tracking mode" {
@@ -117,8 +117,8 @@ else:
 
   doctor_json
   [ "$(doctor_check_ok upgrade_pattern_symlink_replaced)" = "false" ]
-  [[ "$(doctor_check_detail upgrade_pattern_symlink_replaced)" == *"lesson #15"* ]]
-  [[ "$(doctor_check_detail upgrade_pattern_symlink_replaced)" == *".claude/hooks/pre-tool.sh"* ]]
+  [[ "$(doctor_check_detail upgrade_pattern_symlink_replaced)" == *"lesson #15"* ]] || return 1
+  [[ "$(doctor_check_detail upgrade_pattern_symlink_replaced)" == *".claude/hooks/pre-tool.sh"* ]] || return 1
 }
 
 @test "doctor flags a symlink-replaced pattern inside the external .rig/ dir under stealth tracking, mapped back to the real external path" {
@@ -138,5 +138,5 @@ else:
 
   doctor_json
   [ "$(doctor_check_ok upgrade_pattern_symlink_replaced)" = "false" ]
-  [[ "$(doctor_check_detail upgrade_pattern_symlink_replaced)" == *".rig/contextual-tips.sh"* ]]
+  [[ "$(doctor_check_detail upgrade_pattern_symlink_replaced)" == *".rig/contextual-tips.sh"* ]] || return 1
 }

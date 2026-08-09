@@ -76,11 +76,11 @@ EOF
   run bash -c 'grep "^## .*<!-- sid:${1} -->" "$2/memory/PROGRESS.md"' \
     _ current-uuid "$rig_dir"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'test current naming parity #392'* ]]
-  [[ "$output" != *'unrelated'* ]]
-  [[ "$output" != *'#222'* ]]
-  [[ "$output" != *'#333'* ]]
-  [[ "$output" != *'#444'* ]]
+  [[ "$output" == *'test current naming parity #392'* ]] || return 1
+  [[ "$output" != *'unrelated'* ]] || return 1
+  [[ "$output" != *'#222'* ]] || return 1
+  [[ "$output" != *'#333'* ]] || return 1
+  [[ "$output" != *'#444'* ]] || return 1
 
   contract="$rig_dir/rules/session-naming.md"
   grep -Fq 'Every unit in a proposed name must be attributable' "$contract"
@@ -99,8 +99,8 @@ EOF
     "$TEST_PROJECT/.claude/commands/wrap.md" \
     "$TEST_PROJECT/.claude/commands/post-merge.md"; do
     grep -Fq 'unresolved raw launch' "$surface"
-    ! grep -Fq 'Fallback — session-end marker boundary' "$surface"
-    ! grep -Fq 'legacy CONTEXT_SNAPSHOT' "$surface"
+    if grep -Fq 'Fallback — session-end marker boundary' "$surface"; then return 1; fi
+    if grep -Fq 'legacy CONTEXT_SNAPSHOT' "$surface"; then return 1; fi
   done
   grep -Fq 'use conversation context only' \
     "$TEST_PROJECT/.claude/commands/session-name.md"
@@ -119,6 +119,6 @@ EOF
   run_install upgrade
   [ "$status" -eq 0 ]
   grep -Fq 'legacy customized session naming' "$codex"
-  [[ "$output" == *'Non-interactive mode — skipping customized file: .agents/skills/session-name/references/command.md'* ]]
-  [[ "$output" == *'Run the installer interactively to review and update this file.'* ]]
+  [[ "$output" == *'Non-interactive mode — skipping customized file: .agents/skills/session-name/references/command.md'* ]] || return 1
+  [[ "$output" == *'Run the installer interactively to review and update this file.'* ]] || return 1
 }

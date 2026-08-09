@@ -39,7 +39,7 @@ context() {
 }
 
 tip_count() {
-  context | grep -c 'Tip:' || true
+  context | grep -c 'Rig tip (' || true
 }
 
 @test "priority: one highest-priority tip emits and lower candidates remain unspent" {
@@ -100,7 +100,7 @@ EOF
 
   run_start
 
-  ! context | grep -Eq '/debug|/rig-gaps'
+  if context | grep -Eq '/debug|/rig-gaps'; then return 1; fi
   [ ! -e "$RIG_DIR/memory/tips/.tip-debug-errors-shown" ]
   [ ! -e "$RIG_DIR/memory/tips/.tip-rig-gaps-shown" ]
 }
@@ -112,6 +112,14 @@ EOF
   run_start
   context | grep -Fq 'ERRORS.md contains a recorded failure'
   context | grep -Fq 'Run /debug'
+}
+
+@test "relay instruction tells the agent to say the Rig tip exactly" {
+  cat > "$RIG_DIR/memory/ERRORS.md" <<'EOF'
+## [2026-07-31] — observed parser failure
+EOF
+  run_start
+  context | grep -Fq 'Rig tip relay: say exactly this to the user before other work: Rig tip (workflow):'
 }
 
 @test "new context: logged workflow gap names evidence and concrete gaps action" {
@@ -134,6 +142,30 @@ EOF
   context | grep -Fq 'Run /code-review'
 }
 
+@test "project category: docs without an index emits a project-specific tip" {
+  mkdir -p "$REPO/docs" "$RIG_DIR/memory/tips"
+  touch "$RIG_DIR/memory/tips/.tip-session-name-shown"
+
+  run_start
+
+  [ "$(tip_count)" -eq 1 ]
+  context | grep -Fq 'Rig tip (project): docs/ exists without docs/INDEX.md'
+}
+
+@test "re-eligibility: expired sentinels can surface a tip again" {
+  cat > "$RIG_DIR/memory/ERRORS.md" <<'EOF'
+## [2026-07-31] — observed parser failure
+EOF
+  mkdir -p "$RIG_DIR/memory/tips"
+  touch -t 202001010000 "$RIG_DIR/memory/tips/.tip-debug-errors-shown"
+  export RIG_TIP_RESET_SECONDS=1
+
+  run_start
+
+  [ "$(tip_count)" -eq 1 ]
+  context | grep -Fq 'Rig tip (workflow): ERRORS.md contains a recorded failure'
+}
+
 @test "#317 regression: sprint outranks session-name and fires once" {
   printf '[#1] [#2] [#3]\n' > "$RIG_DIR/memory/PROGRESS.md"
   run_start
@@ -142,7 +174,7 @@ EOF
   [ -f "$RIG_DIR/memory/tips/.tip-sprint-shown" ]
 
   run_start
-  ! context | grep -Fq '/sprint'
+  if context | grep -Fq '/sprint'; then return 1; fi
 }
 
 @test "#317 regression: enabled fewer-prompts feature stays suppressed" {
@@ -150,7 +182,7 @@ EOF
   mkdir -p "$RIG_DIR/memory/tips"
   touch "$RIG_DIR/memory/tips/.tip-session-name-shown"
   run_start
-  ! context | grep -Fq '.fewer-prompts-enabled'
+  if context | grep -Fq '.fewer-prompts-enabled'; then return 1; fi
   [ ! -e "$RIG_DIR/memory/tips/.tip-fewer-prompts-shown" ]
 }
 
@@ -176,5 +208,5 @@ EOF
   [ ! -e "$marker" ]
   [ "$(tip_count)" -eq 1 ]
   context | grep -Fq '/debug'
-  ! context | grep -Fq 'touch'
+  if context | grep -Fq 'touch'; then return 1; fi
 }

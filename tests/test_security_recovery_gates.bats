@@ -19,8 +19,8 @@ setup() {
 
   run env RIG_SESSION_FILE="$session_file" "$CASE_DIR/bin/rig" session current --json
   [ "$status" -eq 0 ]
-  [[ "$output" != *release-secret-id* ]]
-  [[ "$output" == *'"confidence": "exact"'* ]]
+  [[ "$output" != *release-secret-id* ]] || return 1
+  [[ "$output" == *'"confidence": "exact"'* ]] || return 1
 }
 
 @test "private connector evidence rejects symlink and broad permissions" {
@@ -39,9 +39,11 @@ setup() {
 }
 
 @test "runtime source does not use provider-private state as normal evidence" {
-  ! grep -REn \
+  if grep -REn \
     '(\.claude|\.codex).*(sqlite|rollout|index)|sqlite.*(\.claude|\.codex)' \
-    templates/project/bin templates/project/.claude/hooks templates/project/.codex/hooks
+    templates/project/bin templates/project/.claude/hooks templates/project/.codex/hooks; then
+    return 1
+  fi
 }
 
 @test "release verification requires atomic-write and recovery evidence" {
@@ -50,7 +52,7 @@ setup() {
     docs/release-verification.md
   [ "$status" -eq 0 ]
   for requirement in atomic interrupted rollback symlink redact gitleaks; do
-    [[ "$output" == *"$requirement"* ]]
+    [[ "$output" == *"$requirement"* ]] || return 1
   done
   grep -Fq 'ShellCheck' docs/release-verification.md
 }
