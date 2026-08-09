@@ -26,6 +26,23 @@ INSTALLER="$REPO_ROOT/install.sh"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+setup_file() {
+  local shared_project="$BATS_FILE_TMPDIR/provenance-project"
+  mkdir -p "$shared_project"
+  git -C "$shared_project" init -q
+  git -C "$shared_project" config user.email "test@test.com"
+  git -C "$shared_project" config user.name "Test"
+  bash "$INSTALLER" --project-only \
+    --target "$shared_project" \
+    --project-name "TestProject" \
+    --tracking repo \
+    --strategy upgrade >/dev/null
+}
+
+teardown_file() {
+  rm -rf "$BATS_FILE_TMPDIR/provenance-project"
+}
+
 setup() {
   # Create an isolated temp dir and a bare git repo inside it for each test.
   TEMP_DIR="$(mktemp -d)"
@@ -49,6 +66,12 @@ run_installer() {
     --project-name "TestProject" \
     --tracking repo \
     "$@"
+}
+
+copy_shared_provenance_project() {
+  rm -rf "$TEST_PROJECT"
+  mkdir -p "$TEST_PROJECT"
+  cp -R "$BATS_FILE_TMPDIR/provenance-project/." "$TEST_PROJECT/"
 }
 
 
@@ -206,8 +229,7 @@ _sha256() {
 }
 
 @test "manifest provenance validator: accepts a legacy manifest lacking provenance fields" {
-  run_installer --strategy upgrade
-  [ "$status" -eq 0 ]
+  copy_shared_provenance_project
 
   local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
   jq 'del(.entries["CLAUDE.md"].base_revision, .entries["CLAUDE.md"].generator, .entries["CLAUDE.md"].provider)' \
@@ -221,8 +243,7 @@ _sha256() {
 }
 
 @test "manifest provenance validator: reports a deliberately malformed provenance entry" {
-  run_installer --strategy upgrade
-  [ "$status" -eq 0 ]
+  copy_shared_provenance_project
 
   local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
   jq '.entries["CLAUDE.md"].generator = "not-a-real-generator"' "$metadata" > "$TEMP_DIR/malformed-metadata.json"
@@ -236,8 +257,7 @@ _sha256() {
 }
 
 @test "manifest provenance validator: base_revision older than the running installer is unaffected" {
-  run_installer --strategy upgrade
-  [ "$status" -eq 0 ]
+  copy_shared_provenance_project
 
   local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
   jq '.entries["CLAUDE.md"].base_revision = "0.0.1"' "$metadata" > "$TEMP_DIR/older-metadata.json"
@@ -250,8 +270,7 @@ _sha256() {
 }
 
 @test "manifest provenance validator: base_revision equal to the running installer is unaffected" {
-  run_installer --strategy upgrade
-  [ "$status" -eq 0 ]
+  copy_shared_provenance_project
 
   local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
   local running_version; running_version="$(cat "$REPO_ROOT/VERSION")"
@@ -265,8 +284,7 @@ _sha256() {
 }
 
 @test "manifest provenance validator: reports a base_revision newer than the running installer as future_revision" {
-  run_installer --strategy upgrade
-  [ "$status" -eq 0 ]
+  copy_shared_provenance_project
 
   local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
   jq '.entries["CLAUDE.md"].base_revision = "99.0.0"' "$metadata" > "$TEMP_DIR/future-metadata.json"
@@ -282,8 +300,7 @@ _sha256() {
 }
 
 @test "manifest provenance validator: omitting --running-version disables the future_revision check" {
-  run_installer --strategy upgrade
-  [ "$status" -eq 0 ]
+  copy_shared_provenance_project
 
   local metadata="$TEST_PROJECT/.rig/memory/.rig-manifest.json"
   jq '.entries["CLAUDE.md"].base_revision = "99.0.0"' "$metadata" > "$TEMP_DIR/future-metadata.json"
@@ -1012,4 +1029,3 @@ print(m.group(1) + (m.group(2) if m.group(2) else '/'))
   result=$(_worktree_redirect_path "/repo/.claude/hooks/pre-tool.sh")
   [ -z "$result" ]
 }
-
