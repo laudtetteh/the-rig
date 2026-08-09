@@ -206,9 +206,22 @@ Detect whether `CLAUDE.md` contains paths that belong to a different tracking mo
 This can happen when an upgrade was run with the wrong tracking flag, writing stealth
 absolute paths into a repo-tracked project's `CLAUDE.md`.
 
+This check needs to know the tracking mode, but Phase 1c (the phase that
+normally computes `$TRACKING`) hasn't run yet at Phase 0e — detect it locally
+here instead of assuming a variable set by a later phase:
+
 ```bash
 CLAUDE_MD="$REPO/CLAUDE.md"
 if [[ -f "$CLAUDE_MD" ]]; then
+  # Local, self-contained tracking-mode detection (Phase 1c computes the
+  # same value later for the rest of the command; duplicated here rather
+  # than referenced forward, since Phase 0e always runs first).
+  if [[ -f "$REPO/.rigpath" ]]; then
+    if [[ -d "$REPO/.husky" ]]; then TRACKING="external"; else TRACKING="stealth"; fi
+  else
+    TRACKING="repo"
+  fi
+
   # Check for stealth-style absolute paths (e.g. /Users/name/.rig/projects/)
   STEALTH_PATHS=$(grep -E '/\.rig/projects/' "$CLAUDE_MD" 2>/dev/null || true)
 
@@ -391,12 +404,31 @@ _diff_tpl() {
 
 Survey these files (adjust paths based on `$TRACKING`):
 
-**Claude hooks** — iterate the template directory so new hooks are never missed:
+**Claude hooks** — iterate the template directory so new hooks are never missed.
+`subagent-start.sh` is opt-in (`--subagents`, or automatic when Codex is a
+selected agent) — it is never installed by default, so treat a missing copy
+of it as expected, not a real gap. Detect whether it was actually opted into
+by checking whether it's already wired into `.claude/settings.json`'s
+`SubagentStart` hook or referenced in `CLAUDE.md`, matching how install.sh's
+own `agent-plan`/`agent-upgrade` classify it (see install.sh's
+`INSTALL_SUBAGENTS` gate). This reconciles Phase 1d's own survey with Phase
+1c-bis's `agent-plan` output, which already omits this file correctly when
+not opted into — without this check, Phase 1d's raw survey would report a
+false `MISSING` that agent-plan doesn't:
 ```bash
 echo "=== Surveying Claude hooks ==="
 for tpl in "$TEMPLATES/.claude/hooks/"*.sh; do
   [[ -f "$tpl" ]] || continue
   f=$(basename "$tpl")
+  if [[ "$f" == "subagent-start.sh" && ! -f "$REPO/.claude/hooks/$f" ]]; then
+    if grep -Fq '"SubagentStart"' "$REPO/.claude/settings.json" 2>/dev/null || \
+       grep -Fq 'subagent-start.sh' "$REPO/CLAUDE.md" 2>/dev/null; then
+      : # was opted into but the hook file itself is missing -- a real gap, fall through
+    else
+      echo "skip (opt-in, not installed): .claude/hooks/$f"
+      continue
+    fi
+  fi
   _diff_tpl ".claude/hooks/$f" "$tpl" "$REPO/.claude/hooks/$f"
 done
 ```
@@ -432,6 +464,22 @@ for tpl in "$TEMPLATES/.rig/processes/"*.md; do
   _diff_tpl ".rig/processes/$f" "$tpl" "$RIG_DIR/processes/$f"
 done
 ```
+
+**Note on `[BASE_BRANCH]` diffs (applies to every survey above, both upgrade
+modes):** `_diff_tpl` already substitutes `[BASE_BRANCH]` before comparing, but
+this is a plain-text simulation of install.sh's own manifest/hash-based
+classification (Phase 1c-bis's `agent-plan` output) — the two can disagree in
+edge cases (confirmed live on `UPGRADE_WORKFLOW.md`: Phase 1d's own `_diff_tpl`
+reported `CHANGED` purely from a `[BASE_BRANCH]` mismatch that `agent-plan`
+correctly classified as `up-to-date`). If Phase 1d's survey and Phase 1c-bis's
+`agent-plan` disagree on a file, **`agent-plan`'s classification is
+authoritative** — it's install.sh's own real hash comparison, not a
+reconstruction of it. Phase 1d's survey exists for quick human-readable
+visibility only; don't block or re-litigate a decision based on it alone.
+This was previously documented only in Phase 2b-classic's own "Note on
+`[BASE_BRANCH]` diffs" (still accurate for that specific interactive-diff
+context) — restated here so agent-mode users get the same guidance without
+needing to fall back to classic mode to find it.
 
 **Other tracked files**:
 ```bash
@@ -492,7 +540,16 @@ Missing files to create:
 Then say:
 > "Ready to upgrade. Proceed?"
 
-**Wait for confirmation before Phase 2.**
+**Wait for confirmation before Phase 2**, in an interactive session with a
+user available to respond.
+
+For an agent-driven/noninteractive execution context with no user available
+to respond, proceed to Phase 2 directly without waiting — matching Phase
+2-mode's own non-interactive fallback a few steps later (default to
+`UPGRADE_MODE=agent`, which never silently overwrites a customized file; see
+"Refusal semantics and exit code 3" in `UPGRADE_WORKFLOW.md`). Treating this
+prompt and Phase 2-mode's prompt inconsistently — blocking here but not
+there — would leave a fully noninteractive run hung on this step alone.
 
 ### 1g — Initialise result accumulators
 
@@ -996,7 +1053,17 @@ Count the total modified files:
 TOTAL_CHANGED=$((${#UPGRADED[@]} + ${#CONVERGED[@]} + ${#CUSTOMIZED_ACCEPTED[@]} + ${#FIXED[@]}))
 ```
 
-If `$TOTAL_CHANGED` > 3:
+If `$TRACKING == stealth` (or `external`), the branch/commit/PR recommendation
+below does not apply: `.claude/` and `.rig/` are wholesale excluded from git
+via `.git/info/exclude` in stealth/external tracking, so there is nothing to
+branch, stage, or commit for those paths, regardless of `$TOTAL_CHANGED`. Say
+instead:
+> "**Commit strategy:** N/A — this is a `$TRACKING`-tracked project.
+> `.claude/`/`.rig/` changes made by this upgrade are excluded from git
+> entirely; there is nothing to commit for them."
+and skip the rest of this phase.
+
+If `$TRACKING == repo` and `$TOTAL_CHANGED` > 3:
 
 > "**Commit strategy:** `$TOTAL_CHANGED` files were modified — use a branch and PR,
 > even if `housekeeping: direct-push` is set:
@@ -1011,7 +1078,7 @@ If `$TOTAL_CHANGED` > 3:
 > `housekeeping: direct-push` applies to memory commits (PROGRESS.md, task file moves)
 > — not to upgrades that modify hooks, commands, and process files."
 
-If `$TOTAL_CHANGED` <= 3:
+If `$TRACKING == repo` and `$TOTAL_CHANGED` <= 3:
 
 > "**Commit strategy:** Only `$TOTAL_CHANGED` file(s) changed — a direct
 > `chore(rig): upgrade to $EXPECTED_VERSION [#N]` commit to `$BASE_BRANCH`

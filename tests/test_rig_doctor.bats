@@ -99,6 +99,39 @@ json_assert() {
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="worktree_bootstrap"); assert c["ok"] and c["detail"]=="complete"'
 }
 
+@test "worktree bootstrap: never copies .claude/worktrees/ into a linked worktree (self-recursion guard)" {
+  printf '%s\n' "$BATS_TEST_TMPDIR/external-rig" > "$CASE_DIR/.rigpath"
+  printf 'secret config\n' > "$CASE_DIR/.gitleaks.toml"
+  printf 'seed\n' > "$CASE_DIR/README.md"
+  git -C "$CASE_DIR" config user.email test@example.com
+  git -C "$CASE_DIR" config user.name Test
+  git -C "$CASE_DIR" add README.md
+  git -C "$CASE_DIR" commit -qm seed
+
+  # A linked worktree living inside the primary's own .claude/worktrees/ is
+  # this repo's real convention. Seed a sibling worktree dir there too --
+  # both conditions together (worktree nested under .claude/, siblings
+  # already present) are what made shutil.copytree walk into its own output
+  # mid-copy and recurse with no base case (found live: ~110MB / 30+ nested
+  # directory levels from a single bootstrap call).
+  mkdir -p "$CASE_DIR/.claude/worktrees/sibling/.claude"
+  git -C "$CASE_DIR" worktree add -q -b child-branch "$CASE_DIR/.claude/worktrees/child"
+
+  run bash -c "cd '$CASE_DIR/.claude/worktrees/child' && '$CASE_DIR/bin/rig' worktree bootstrap"
+  [ "$status" -eq 0 ]
+
+  # The fix: never copy "worktrees" at all -- neither the sibling nor a
+  # self-referential copy of the child's own destination.
+  [ ! -e "$CASE_DIR/.claude/worktrees/child/.claude/worktrees" ]
+
+  # Everything else the bootstrap is actually meant to restore still arrives.
+  [ -f "$CASE_DIR/.claude/worktrees/child/.gitleaks.toml" ]
+  [ -f "$CASE_DIR/.claude/worktrees/child/.rigpath" ]
+  [ -x "$CASE_DIR/.claude/worktrees/child/bin/rig" ]
+  [ -f "$CASE_DIR/.claude/worktrees/child/.claude/settings.json" ]
+  [ -f "$CASE_DIR/.claude/worktrees/child/.claude/commands/task.md" ]
+}
+
 @test "Codex skill ambiguity is reported without guessing" {
   mkdir -p "$CASE_DIR/.agents/skills/task" "$CASE_DIR/.agents/skills/unrelated"
   printf '%s\n' '---' > "$CASE_DIR/.agents/skills/task/SKILL.md"
