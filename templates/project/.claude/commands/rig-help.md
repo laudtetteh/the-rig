@@ -26,6 +26,7 @@ No arguments. Output the table below directly — do not read individual command
 | Command | What it does |
 |---|---|
 | `/wrap` | End a session. Writes `CONTEXT_SNAPSHOT.md`, expands `PROGRESS.md` stubs, captures in-flight task state, names the session. |
+| `/handoff-checklist` | Consent-gated wrap-and-handoff routine for large or costly sessions. Asks before doing any checklist work. |
 | `/post-merge` | Post-merge housekeeping. Run immediately after a PR lands: pulls main, logs the PR to `PROGRESS.md`, moves the task file to done, refreshes `CONTEXT_SNAPSHOT.md`, checks feature doc freshness, and surfaces what's next. |
 | `/status` | Project state dashboard. Shows current branch, active tasks, backlog count, and recent `PROGRESS.md` entries. |
 | `/session-name` | Derive and set a session name from work completed so far. Uses the same tiered format as `/wrap` and `/post-merge` but callable at any time without triggering a full cycle. |
