@@ -32,7 +32,7 @@ field() {
 
   run env RIG_SESSION_FILE="$file_one" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --json
   [ "$status" -eq 0 ]
-  ! grep -Fq "anchor=$anchor_one" "$CASE_DIR/.rig/memory/.wrap-needed"
+  if grep -Fq "anchor=$anchor_one" "$CASE_DIR/.rig/memory/.wrap-needed"; then return 1; fi
   grep -Fxq "anchor=$anchor_two" "$CASE_DIR/.rig/memory/.wrap-needed"
   SESSION_F="$file_one" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["flags"]["wrap_needed"] is False and d["obligations"]["wrap"]["cleared_at"]'
   SESSION_F="$file_two" python3 -c 'import json,os; assert json.load(open(os.environ["SESSION_F"]))["flags"]["wrap_needed"] is True'
@@ -44,7 +44,7 @@ field() {
   : > "$CASE_DIR/.rig/memory/.wrap-needed"
   before=$(cksum "$file")
   run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --json
-  [ "$status" -eq 3 ]; [[ "$output" == *legacy_adoption_required* ]]
+  [ "$status" -eq 3 ]; [[ "$output" == *legacy_adoption_required* ]] || return 1
   [ -f "$CASE_DIR/.rig/memory/.wrap-needed" ]
   [ "$before" = "$(cksum "$file")" ]
   run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy --json
@@ -57,7 +57,7 @@ field() {
   printf 'merge_sha=abc123\nmerged_at=2026-07-31T10:00:00-07:00\n' > "$CASE_DIR/.rig/memory/.post-merge-pending"
   before=$(cksum "$file")
   run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind post-merge --merge-sha wrong --json
-  [ "$status" -eq 3 ]; [[ "$output" == *merge_mismatch* ]]
+  [ "$status" -eq 3 ]; [[ "$output" == *merge_mismatch* ]] || return 1
   [ -f "$CASE_DIR/.rig/memory/.post-merge-pending" ]; [ "$before" = "$(cksum "$file")" ]
   run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind post-merge --merge-sha abc123 --json
   [ "$status" -eq 0 ]; [ ! -e "$CASE_DIR/.rig/memory/.post-merge-pending" ]
@@ -108,6 +108,6 @@ field() {
   SESSION_F="$file" python3 -c 'import json,os; p=os.environ["SESSION_F"]; d=json.load(open(p)); d["lifecycle"]["state"]="superseded"; json.dump(d,open(p,"w"),indent=2)'
   before=$(cksum "$file")
   run "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id lifecycle-id --source resume
-  [ "$status" -eq 3 ]; [[ "$output" == *invalid_lifecycle_transition* ]]
+  [ "$status" -eq 3 ]; [[ "$output" == *invalid_lifecycle_transition* ]] || return 1
   [ "$before" = "$(cksum "$file")" ]
 }

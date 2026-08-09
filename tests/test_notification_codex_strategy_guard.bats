@@ -42,7 +42,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
   grep -q 'this-file-lives-outside-home' "$external_target"
   [ -L "$FAKE_HOME/.claude/bin/rig-notify" ]
   readlink "$FAKE_HOME/.claude/bin/rig-notify" | grep -qF "$external_target"
-  [[ "$output" == *"Skipped notification helper due to a conflicting destination"* ]]
+  [[ "$output" == *"Skipped notification helper due to a conflicting destination"* ]] || return 1
 }
 
 @test "an existing regular-file notification helper is backed up before being overwritten under --strategy merge" {
@@ -53,7 +53,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
     --global-only --global-agent claude --notifications --strategy merge
   [ "$status" -eq 0 ]
 
-  ! grep -q 'hand-written notify marker' "$FAKE_HOME/.claude/bin/rig-notify"
+  if grep -q 'hand-written notify marker' "$FAKE_HOME/.claude/bin/rig-notify"; then return 1; fi
   run grep -rl 'hand-written notify marker' "$FAKE_HOME/.rig-backup"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
@@ -87,7 +87,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
   grep -q 'outside-project' "$external_target"
   [ -L "$TEST_PROJECT/.codex/config.toml" ]
   readlink "$TEST_PROJECT/.codex/config.toml" | grep -qF "$external_target"
-  [[ "$output" == *"Skipped Codex project config due to a conflicting destination"* ]]
+  [[ "$output" == *"Skipped Codex project config due to a conflicting destination"* ]] || return 1
 }
 
 @test "an existing regular-file .codex/config.toml is backed up before being merged under --strategy merge" {

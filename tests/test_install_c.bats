@@ -402,7 +402,7 @@ print(len(s.get('permissions', {}).get('deny', [])))
     <<< "$(printf '%s\n4\n%s\n' "$TEST_PROJECT" "$rig_external")"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *".husky/ detected"* ]]
+  [[ "$output" == *".husky/ detected"* ]] || return 1
 }
 
 @test "--skip-git-hooks: skips .git/hooks/ writes in stealth mode" {
@@ -414,7 +414,7 @@ print(len(s.get('permissions', {}).get('deny', [])))
 
   [ "$status" -eq 0 ]
   [ ! -f "$TEST_PROJECT/.git/hooks/commit-msg" ]
-  [[ "$output" == *"--skip-git-hooks set"* ]]
+  [[ "$output" == *"--skip-git-hooks set"* ]] || return 1
 }
 
 # ── pre-commit: .rig-debug-scan-exclude path exclusions ──────────────────────
@@ -496,7 +496,7 @@ _make_failing_sha_tools() {
   run env HOME="$fake_home" bash "$INSTALLER" --global-only \
     --global-agent codex --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Non-interactive mode — skipping customized file: $skill_rel"* ]]
+  [[ "$output" == *"Non-interactive mode — skipping customized file: $skill_rel"* ]] || return 1
   grep -q 'personal customization' "$skill"
 }
 
@@ -515,7 +515,7 @@ _make_failing_sha_tools() {
   [ "$status" -eq 0 ]
   [ -L "$fake_home/.claude" ]
   [ "$(cat "$outside_claude/sentinel.txt")" = "outside-global-sentinel" ]
-  [[ "$output" == *"Preserved conflicting upgrade destination: .claude (symlink)"* ]]
+  [[ "$output" == *"Preserved conflicting upgrade destination: .claude (symlink)"* ]] || return 1
 }
 
 @test "upgrade strategy: global Rig-owned file updated when hash matches manifest" {
@@ -536,7 +536,7 @@ _make_failing_sha_tools() {
   # Run upgrade — CLAUDE.md hash matches manifest → auto-update
   run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy upgrade"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Updated"* ]]
+  [[ "$output" == *"Updated"* ]] || return 1
 
   # File should no longer contain the old content
   run grep -c '# old version' "$fake_home/.claude/CLAUDE.md"
@@ -593,9 +593,9 @@ _make_failing_sha_tools() {
   run env HOME="$fake_home" PATH="$FAKE_SHA_BIN:$PATH" \
     bash -c "echo '' | bash '$INSTALLER' --global-only --strategy upgrade"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"sha256 unavailable — cannot detect customizations in: CLAUDE.md"* ]]
-  [[ "$output" == *"Updated: CLAUDE.md"* ]]
-  ! grep -q '# stale global version' "$fake_home/.claude/CLAUDE.md"
+  [[ "$output" == *"sha256 unavailable — cannot detect customizations in: CLAUDE.md"* ]] || return 1
+  [[ "$output" == *"Updated: CLAUDE.md"* ]] || return 1
+  if grep -q '# stale global version' "$fake_home/.claude/CLAUDE.md"; then return 1; fi
 }
 
 @test "upgrade strategy: identical global file stays quiet when SHA256 tools fail" {
@@ -608,8 +608,8 @@ _make_failing_sha_tools() {
   run env HOME="$fake_home" PATH="$FAKE_SHA_BIN:$PATH" \
     bash -c "echo '' | bash '$INSTALLER' --global-only --strategy upgrade"
   [ "$status" -eq 0 ]
-  [[ "$output" != *"sha256 unavailable"* ]]
-  [[ "$output" == *"Up to date: CLAUDE.md"* ]]
+  [[ "$output" != *"sha256 unavailable"* ]] || return 1
+  [[ "$output" == *"Up to date: CLAUDE.md"* ]] || return 1
 }
 
 # ── install.sh: branch drift warning ─────────────────────────────────────────
@@ -639,7 +639,7 @@ _make_failing_sha_tools() {
   run bash -c "_RIG_DRIFT_DIR='$local_repo' bash '$INSTALLER' --project-only \
     --target '$TEST_PROJECT' --project-name 'TestProject' --strategy skip"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"behind"* ]]
+  [[ "$output" == *"behind"* ]] || return 1
 }
 
 @test "installer drift check: no warning when installer repo is up to date" {
@@ -662,7 +662,7 @@ _make_failing_sha_tools() {
   run bash -c "_RIG_DRIFT_DIR='$local_repo' bash '$INSTALLER' --project-only \
     --target '$TEST_PROJECT' --project-name 'TestProject' --strategy skip"
   [ "$status" -eq 0 ]
-  [[ "$output" != *"behind"* ]]
+  [[ "$output" != *"behind"* ]] || return 1
 }
 
 @test "installer drift check: non-interactive mode warns and continues without blocking" {
@@ -689,7 +689,7 @@ _make_failing_sha_tools() {
   run bash -c "_RIG_DRIFT_DIR='$local_repo' bash '$INSTALLER' --project-only \
     --target '$TEST_PROJECT' --project-name 'TestProject' --strategy skip"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"behind"* ]]
+  [[ "$output" == *"behind"* ]] || return 1
   # Installer must have continued past the warning — pre-tool.sh is a reliable install marker
   [ -f "$TEST_PROJECT/.claude/hooks/pre-tool.sh" ]
 }
@@ -755,7 +755,7 @@ _status_backlog_count() {
   touch "$rig_dir/memory/.wrap-needed"
 
   result=$(_status_pending_flags "$rig_dir")
-  [[ "$result" == *"wrap-needed"* ]]
+  [[ "$result" == *"wrap-needed"* ]] || return 1
 }
 
 @test "status: both flags detected when both sentinels present" {
@@ -765,8 +765,8 @@ _status_backlog_count() {
   touch "$rig_dir/memory/.post-merge-pending"
 
   result=$(_status_pending_flags "$rig_dir")
-  [[ "$result" == *"wrap-needed"* ]]
-  [[ "$result" == *"post-merge-pending"* ]]
+  [[ "$result" == *"wrap-needed"* ]] || return 1
+  [[ "$result" == *"post-merge-pending"* ]] || return 1
 }
 
 @test "status: backlog count returns correct number of task files" {
@@ -849,7 +849,7 @@ _wrap_release_lock() {
 
   run _wrap_acquire_lock "$lock"
   [ "$status" -eq 0 ]
-  [[ -f "$lock" ]]
+  [[ -f "$lock" ]] || return 1
 }
 
 @test "wrap guard: sentinel removed after lock release" {
@@ -859,6 +859,6 @@ _wrap_release_lock() {
   touch "$lock"
 
   _wrap_release_lock "$lock"
-  [[ ! -f "$lock" ]]
+  [[ ! -f "$lock" ]] || return 1
 }
 

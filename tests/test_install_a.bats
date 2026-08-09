@@ -216,8 +216,8 @@ _sha256() {
 
   run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
-  [[ "$output" == *'"legacy_provenance":["CLAUDE.md"]'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  [[ "$output" == *'"legacy_provenance":["CLAUDE.md"]'* ]] || return 1
 }
 
 @test "manifest provenance validator: reports a deliberately malformed provenance entry" {
@@ -230,9 +230,9 @@ _sha256() {
 
   run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
   [ "$status" -eq 1 ]
-  [[ "$output" == *'"ok":false'* ]]
-  [[ "$output" == *'"path":"CLAUDE.md"'* ]]
-  [[ "$output" == *"not-a-real-generator"* ]]
+  [[ "$output" == *'"ok":false'* ]] || return 1
+  [[ "$output" == *'"path":"CLAUDE.md"'* ]] || return 1
+  [[ "$output" == *"not-a-real-generator"* ]] || return 1
 }
 
 @test "manifest provenance validator: base_revision older than the running installer is unaffected" {
@@ -245,8 +245,8 @@ _sha256() {
 
   run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata" --running-version "$(cat "$REPO_ROOT/VERSION")"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
-  [[ "$output" == *'"future_revision":[]'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  [[ "$output" == *'"future_revision":[]'* ]] || return 1
 }
 
 @test "manifest provenance validator: base_revision equal to the running installer is unaffected" {
@@ -260,8 +260,8 @@ _sha256() {
 
   run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata" --running-version "$running_version"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
-  [[ "$output" == *'"future_revision":[]'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  [[ "$output" == *'"future_revision":[]'* ]] || return 1
 }
 
 @test "manifest provenance validator: reports a base_revision newer than the running installer as future_revision" {
@@ -274,11 +274,11 @@ _sha256() {
 
   run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata" --running-version "$(cat "$REPO_ROOT/VERSION")"
   [ "$status" -eq 1 ]
-  [[ "$output" == *'"ok":false'* ]]
-  [[ "$output" == *'"path":"CLAUDE.md"'* ]]
-  [[ "$output" == *'"base_revision":"99.0.0"'* ]]
+  [[ "$output" == *'"ok":false'* ]] || return 1
+  [[ "$output" == *'"path":"CLAUDE.md"'* ]] || return 1
+  [[ "$output" == *'"base_revision":"99.0.0"'* ]] || return 1
   # malformed/legacy stay empty — future_revision is its own distinct category.
-  [[ "$output" == *'"malformed":[]'* ]]
+  [[ "$output" == *'"malformed":[]'* ]] || return 1
 }
 
 @test "manifest provenance validator: omitting --running-version disables the future_revision check" {
@@ -291,8 +291,8 @@ _sha256() {
 
   run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
-  [[ "$output" == *'"future_revision":[]'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  [[ "$output" == *'"future_revision":[]'* ]] || return 1
 }
 
 @test "upgrade strategy: a pre-provenance manifest entry survives a real upgrade run" {
@@ -323,7 +323,7 @@ _sha256() {
 
   run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
 }
 
 @test "manifest provenance: real writer and real validator agree end-to-end (project layer)" {
@@ -354,7 +354,7 @@ _sha256() {
 
   run_installer --strategy upgrade --project-agent codex
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Updated: .claude/hooks/pre-tool.sh"* ]]
+  [[ "$output" == *"Updated: .claude/hooks/pre-tool.sh"* ]] || return 1
 
   # The real writer must have re-recorded this entry with fresh, correct
   # provenance as part of that real upgrade-time rewrite.
@@ -366,8 +366,8 @@ _sha256() {
   # not a hand-built fixture standing in for it.
   run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$metadata"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
-  [[ "$output" == *'"malformed":[]'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  [[ "$output" == *'"malformed":[]'* ]] || return 1
 
   # Spot-check the generated Codex artifact path agrees with the
   # validator's vocabulary too.
@@ -410,7 +410,7 @@ _sha256() {
 
   run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --global-agent both --strategy upgrade"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Updated: CLAUDE.md"* ]]
+  [[ "$output" == *"Updated: CLAUDE.md"* ]] || return 1
 
   # Real writer, real rewrite: fresh provenance recorded for real, mid-upgrade.
   # provider must be "claude", not the layer's --global-agent selection
@@ -428,16 +428,16 @@ _sha256() {
   # Real validator against the real global Claude-layer manifest.
   run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$claude_metadata"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
-  [[ "$output" == *'"malformed":[]'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  [[ "$output" == *'"malformed":[]'* ]] || return 1
 
   # Real validator against the real global Codex-mirror manifest — a
   # separate manifest file from the Claude one, produced by the same run.
   jq -e '[.entries[] | select(.generator == "codex-mirror" and .provider == "codex")] | length > 0' "$codex_metadata" >/dev/null
   run python3 "$REPO_ROOT/installer/validate-manifest-provenance.py" "$codex_metadata"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
-  [[ "$output" == *'"malformed":[]'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  [[ "$output" == *'"malformed":[]'* ]] || return 1
 }
 
 @test "upgrade strategy: reports missing metadata artifacts without deleting anything" {
@@ -453,8 +453,8 @@ _sha256() {
 
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Stale/missing tracked artifacts: 1"* ]]
-  [[ "$output" == *"project:missing:.rig/legacy-user-file.md"* ]]
+  [[ "$output" == *"Stale/missing tracked artifacts: 1"* ]] || return 1
+  [[ "$output" == *"project:missing:.rig/legacy-user-file.md"* ]] || return 1
   [ ! -e "$sentinel" ]
 }
 
@@ -470,9 +470,9 @@ _sha256() {
 
   run_installer --repair-stale
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Repaired stale manifest entry: project:.rig/removed-by-user.md"* ]]
-  ! jq -e '.entries[".rig/removed-by-user.md"]' "$metadata" >/dev/null
-  ! grep -q '  .rig/removed-by-user.md$' "$manifest"
+  [[ "$output" == *"Repaired stale manifest entry: project:.rig/removed-by-user.md"* ]] || return 1
+  if jq -e '.entries[".rig/removed-by-user.md"]' "$metadata" >/dev/null; then return 1; fi
+  if grep -q '  .rig/removed-by-user.md$' "$manifest"; then return 1; fi
 }
 
 @test "upgrade strategy: preserves customized generated Codex artifacts" {
@@ -487,9 +487,9 @@ _sha256() {
 
   run_installer --strategy upgrade --project-agent codex
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Non-interactive mode — skipping customized file: .codex/hooks/rig-adapter.sh"* ]]
-  [[ "$output" == *"Non-interactive mode — skipping customized file: .agents/skills/"* ]]
-  [[ "$output" == *"Skipped customized:"* ]]
+  [[ "$output" == *"Non-interactive mode — skipping customized file: .codex/hooks/rig-adapter.sh"* ]] || return 1
+  [[ "$output" == *"Non-interactive mode — skipping customized file: .agents/skills/"* ]] || return 1
+  [[ "$output" == *"Skipped customized:"* ]] || return 1
   grep -q 'user hook customization' "$hook"
   grep -q 'user skill customization' "$skill"
 }
@@ -518,10 +518,10 @@ _sha256() {
 
   run_installer --strategy upgrade --project-agent codex
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Updated: $hook_rel"* ]]
-  [[ "$output" == *"Updated: $skill_rel"* ]]
-  ! grep -q 'stale generated hook' "$hook"
-  ! grep -q 'stale generated skill' "$skill"
+  [[ "$output" == *"Updated: $hook_rel"* ]] || return 1
+  [[ "$output" == *"Updated: $skill_rel"* ]] || return 1
+  if grep -q 'stale generated hook' "$hook"; then return 1; fi
+  if grep -q 'stale generated skill' "$skill"; then return 1; fi
 }
 
 @test "upgrade strategy: does not follow a Codex artifact symlink" {
@@ -537,9 +537,9 @@ _sha256() {
 
   run_installer --strategy upgrade --project-agent codex
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Customized symlink detected: .codex/hooks/rig-adapter.sh"* ]]
-  [[ "$output" == *"Skipped conflicts: 1"* ]]
-  [[ -L "$hook" ]]
+  [[ "$output" == *"Customized symlink detected: .codex/hooks/rig-adapter.sh"* ]] || return 1
+  [[ "$output" == *"Skipped conflicts: 1"* ]] || return 1
+  [[ -L "$hook" ]] || return 1
   grep -q 'outside sentinel' "$outside"
 }
 
@@ -554,8 +554,8 @@ _sha256() {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
   [ -d "$hook" ]
-  [[ "$output" == *"Preserved conflicting upgrade destination: .claude/hooks/pre-tool.sh (directory)"* ]]
-  [[ "$output" == *"Skipped conflicts:"* ]]
+  [[ "$output" == *"Preserved conflicting upgrade destination: .claude/hooks/pre-tool.sh (directory)"* ]] || return 1
+  [[ "$output" == *"Skipped conflicts:"* ]] || return 1
 }
 
 @test "upgrade strategy: preserves a dangling artifact symlink" {
@@ -570,8 +570,8 @@ _sha256() {
   [ "$status" -eq 0 ]
   [ -L "$command" ]
   [ ! -e "$command" ]
-  [[ "$output" == *"Customized symlink detected: .claude/commands/status.md"* ]]
-  [[ "$output" == *"Skipped conflicts:"* ]]
+  [[ "$output" == *"Customized symlink detected: .claude/commands/status.md"* ]] || return 1
+  [[ "$output" == *"Skipped conflicts:"* ]] || return 1
 }
 
 @test "upgrade strategy: does not follow a symlinked artifact parent" {
@@ -593,8 +593,8 @@ _sha256() {
   [ -L "$hooks" ]
   [ "$(_sha256 "$outside_hook")" = "$before_hash" ]
   python3 -c "import os, stat; assert stat.S_IMODE(os.stat('$outside_hook').st_mode) == 0o644"
-  [[ "$output" == *"symlinked-parent"* ]]
-  [[ "$output" == *"Skipped conflicts:"* ]]
+  [[ "$output" == *"symlinked-parent"* ]] || return 1
+  [[ "$output" == *"Skipped conflicts:"* ]] || return 1
 }
 
 @test "upgrade strategy: confines post-copy project mutations" {
@@ -626,9 +626,9 @@ _sha256() {
   [ "$(cat "$outside_claude")" = "outside-claude" ]
   [ "$(cat "$outside_settings")" = '{}' ]
   [ "$(cat "$outside_config")" = 'project_doc_fallback_filenames = []' ]
-  [[ "$output" == *"Skipped conflicts:"* ]]
-  [[ "$output" == *".rig/VERSION"* ]]
-  [[ "$output" == *".codex/config.toml"* ]]
+  [[ "$output" == *"Skipped conflicts:"* ]] || return 1
+  [[ "$output" == *".rig/VERSION"* ]] || return 1
+  [[ "$output" == *".codex/config.toml"* ]] || return 1
 }
 
 @test "upgrade strategy: rewrites generated settings paths after project relocation" {
@@ -646,8 +646,8 @@ _sha256() {
   run_installer --strategy upgrade --subagents
   [ "$status" -eq 0 ]
   grep -qF "$new_abs/.claude/hooks/" "$TEST_PROJECT/.claude/settings.json"
-  ! grep -qF "$old_abs/.claude/hooks/" "$TEST_PROJECT/.claude/settings.json"
-  [[ "$output" == *"Updated moved-project paths in .claude/settings.json"* ]]
+  if grep -qF "$old_abs/.claude/hooks/" "$TEST_PROJECT/.claude/settings.json"; then return 1; fi
+  [[ "$output" == *"Updated moved-project paths in .claude/settings.json"* ]] || return 1
 
   cp "$TEST_PROJECT/.claude/settings.json" "$TEMP_DIR/settings-after-move.json"
   run_installer --strategy upgrade --subagents
@@ -670,7 +670,7 @@ _sha256() {
   [ "$status" -eq 0 ]
   [ -L "$pointer" ]
   [ "$(cat "$outside_pointer")" = "$rig_ext" ]
-  [[ "$output" == *"Preserved conflicting upgrade destination: .rigpath (symlink)"* ]]
+  [[ "$output" == *"Preserved conflicting upgrade destination: .rigpath (symlink)"* ]] || return 1
 }
 
 @test "agent-plan detects a symlinked .rigpath conflict instead of silently missing it (retro-audit finding, PR #460)" {
@@ -691,7 +691,7 @@ _sha256() {
 
   run_installer --strategy agent-plan --tracking stealth --rig-dir "$rig_ext"
   [ "$status" -eq 3 ]
-  [[ "$output" == *'".rigpath"'* ]]
+  [[ "$output" == *'".rigpath"'* ]] || return 1
   # Zero writes: agent-plan must never mutate the symlink itself.
   [ -L "$pointer" ]
   [ "$(cat "$outside_pointer")" = "$rig_ext" ]
@@ -759,7 +759,7 @@ matrix_upgrade_case() {
 
   run_installer --strategy upgrade --project-agent codex
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Preserved untracked Codex artifact: .codex/hooks/rig-adapter.sh"* ]]
+  [[ "$output" == *"Preserved untracked Codex artifact: .codex/hooks/rig-adapter.sh"* ]] || return 1
   grep -q 'legacy customization' "$hook"
   grep -q '  .codex/hooks/rig-adapter.sh$' "$manifest"
 }
@@ -849,9 +849,9 @@ matrix_upgrade_case() {
 
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"rerun with --feature-docs"* ]]
-  [[ "$output" == *"rerun with --contribute"* ]]
-  [[ "$output" == *"rerun with --subagents"* ]]
+  [[ "$output" == *"rerun with --feature-docs"* ]] || return 1
+  [[ "$output" == *"rerun with --contribute"* ]] || return 1
+  [[ "$output" == *"rerun with --subagents"* ]] || return 1
 }
 
 @test "upgrade strategy: does not warn when referenced opt-in components are enabled" {
@@ -861,7 +861,7 @@ matrix_upgrade_case() {
 
   run_installer --strategy upgrade --feature-docs --contribute --subagents
   [ "$status" -eq 0 ]
-  [[ "$output" != *"Upgrade will skip"* ]]
+  [[ "$output" != *"Upgrade will skip"* ]] || return 1
 }
 
 @test "overwrite strategy: skips user-modified user-owned file in non-interactive mode" {
@@ -945,14 +945,14 @@ _ship_create_commit_sentinel() {
   mkdir -p "$rig_dir/memory"
 
   _ship_create_commit_sentinel "$rig_dir"
-  [[ -f "$rig_dir/memory/.rig-commit-ok" ]]
+  [[ -f "$rig_dir/memory/.rig-commit-ok" ]] || return 1
 }
 
 @test "ship sentinel: .rig-commit-ok absent before /ship creates it" {
   local rig_dir="$TEMP_DIR/rig"
   mkdir -p "$rig_dir/memory"
 
-  [[ ! -f "$rig_dir/memory/.rig-commit-ok" ]]
+  [[ ! -f "$rig_dir/memory/.rig-commit-ok" ]] || return 1
 }
 
 @test "ship sentinel: pre-tool sentinel check passes once sentinel is created by /ship" {

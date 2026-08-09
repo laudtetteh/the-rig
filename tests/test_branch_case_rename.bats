@@ -59,7 +59,7 @@ load_rename_helper() {
   [ "$(git branch --show-current)" = "example" ]
   git show-ref --verify --quiet refs/heads/tmp/Example-rename
   git show-ref --verify --quiet refs/heads/tmp/Example-rename-1
-  ! git show-ref --verify --quiet refs/heads/tmp/Example-rename-2
+  if git show-ref --verify --quiet refs/heads/tmp/Example-rename-2; then return 1; fi
 }
 
 @test "failed second step restores the original branch" {
@@ -77,6 +77,6 @@ load_rename_helper() {
   run rename_branch_case_safe restoreme
   [ "$status" -ne 0 ]
   [ "$(git branch --show-current)" = "RestoreMe" ]
-  [[ "$output" == *"restored 'RestoreMe'"* ]]
+  [[ "$output" == *"restored 'RestoreMe'"* ]] || return 1
   [ -z "$(git for-each-ref --format='%(refname:short)' 'refs/heads/tmp/*')" ]
 }

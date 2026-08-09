@@ -96,13 +96,13 @@ _sha256() {
   [ "$status" -eq 0 ]
   run "$TEST_PROJECT/bin/rig" --help
   [ "$status" -eq 0 ]
-  [[ "$output" == *"rig session resolve"* ]]
+  [[ "$output" == *"rig session resolve"* ]] || return 1
   run "$TEST_PROJECT/bin/rig" --version
   [ "$status" -eq 0 ]
   [ "$output" = "The Rig v$(cat "$REPO_ROOT/VERSION")" ]
   run "$TEST_PROJECT/bin/rig" memory validate --json
   [ "$status" -eq 0 ]
-  [[ "$output" == '{"ok":true,"command":"memory validate"'* ]]
+  [[ "$output" == '{"ok":true,"command":"memory validate"'* ]] || return 1
 }
 
 @test "dispatcher: stealth install excludes bin/rig and reads external version" {
@@ -135,7 +135,7 @@ _sha256() {
   # actual zero-trace guarantee, not just presence of exclude lines.
   run git -C "$TEST_PROJECT" status --porcelain --untracked-files=all
   [ "$status" -eq 0 ]
-  [[ "$output" != *"bin/rig"* ]]
+  [[ "$output" != *"bin/rig"* ]] || return 1
 }
 
 @test "non-stealth install: bin/rig* launchers are untouched by stealth exclusion logic" {
@@ -158,7 +158,7 @@ _sha256() {
 
   run git -C "$TEST_PROJECT" status --porcelain --untracked-files=all
   [ "$status" -eq 0 ]
-  [[ "$output" == *"?? bin/rig"* ]]
+  [[ "$output" == *"?? bin/rig"* ]] || return 1
 }
 
 @test "skip strategy: does not overwrite existing files" {
@@ -391,7 +391,7 @@ _install_protected_path_policy() {
   repo_root=$(git -C "$TEST_PROJECT" rev-parse --show-toplevel)
   _run_pre_tool_write "$repo_root/CLAUDE.md"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"is a The Rig governance file"* ]]
+  [[ "$output" == *"is a The Rig governance file"* ]] || return 1
 }
 
 @test "path policy: real hook allows unprotected target" {
@@ -403,7 +403,7 @@ _install_protected_path_policy() {
 @test "path policy: real hook fails closed when policy is missing" {
   _run_pre_tool_write "$TEST_PROJECT/src/app.sh"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"policy is missing or unreadable"* ]]
+  [[ "$output" == *"policy is missing or unreadable"* ]] || return 1
 }
 
 @test "path policy: real hook fails closed when policy is malformed" {
@@ -411,7 +411,7 @@ _install_protected_path_policy() {
   printf 'relative/path\n' > "$TEST_PROJECT/.rig/rules/protected-paths.txt"
   _run_pre_tool_write "$TEST_PROJECT/src/app.sh"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"policy is malformed"* ]]
+  [[ "$output" == *"policy is malformed"* ]] || return 1
 }
 
 # ── Self-install detector ─────────────────────────────────────────────────────
@@ -435,7 +435,7 @@ _install_protected_path_policy() {
 
   [ "$status" -eq 0 ]
   [ -f "$rig_dir/install.sh" ]
-  [[ "$output" != *"run from inside the target"* ]]
+  [[ "$output" != *"run from inside the target"* ]] || return 1
 }
 
 @test "self-install detector: offers cleanup when install.sh is not git-tracked" {
@@ -473,7 +473,7 @@ _install_protected_path_policy() {
   printf 'fixed stuff\n' > "$msg_file"
   run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"Conventional Commits"* ]]
+  [[ "$output" == *"Conventional Commits"* ]] || return 1
 }
 
 @test "commit-msg: accepts valid conventional commit message" {
@@ -503,7 +503,7 @@ _install_protected_path_policy() {
   printf 'feat(auth): add login flow\n' > "$msg_file"
   run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"issue reference"* ]]
+  [[ "$output" == *"issue reference"* ]] || return 1
 }
 
 @test "commit-msg: accepts message with [#N] issue ref when issue-tracking: github" {
@@ -558,7 +558,7 @@ _install_protected_path_policy() {
   printf 'feat(auth): add login flow\n' > "$msg_file"
   run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"Linear"* ]]
+  [[ "$output" == *"Linear"* ]] || return 1
 }
 
 @test "commit-msg: accepts message with Linear ref when issue-tracking: linear" {
@@ -587,7 +587,7 @@ _install_protected_path_policy() {
   printf 'feat(auth): add login flow\n' > "$msg_file"
   run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"Trello"* ]]
+  [[ "$output" == *"Trello"* ]] || return 1
 }
 
 @test "commit-msg: accepts message with Trello ref when issue-tracking: trello" {
@@ -616,7 +616,7 @@ _install_protected_path_policy() {
   printf 'feat(auth): add login flow\n' > "$msg_file"
   run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"GUS"* ]]
+  [[ "$output" == *"GUS"* ]] || return 1
 }
 
 @test "commit-msg: accepts message with GUS ref when issue-tracking: gus" {
@@ -712,8 +712,8 @@ CLEOF
 
   run _extract_breaking_changes "1.5.0" "$changelog"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Breaking thing in unreleased"* ]]
-  [[ "$output" == *"Old breaking thing in 2.0.0"* ]]
+  [[ "$output" == *"Breaking thing in unreleased"* ]] || return 1
+  [[ "$output" == *"Old breaking thing in 2.0.0"* ]] || return 1
 }
 
 @test "breaking change detection: surfaces only changes newer than installed version" {
@@ -723,8 +723,8 @@ CLEOF
   # Installed at 2.0.0: only [Unreleased] should be in range
   run _extract_breaking_changes "2.0.0" "$changelog"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Breaking thing in unreleased"* ]]
-  [[ "$output" != *"Old breaking thing in 2.0.0"* ]]
+  [[ "$output" == *"Breaking thing in unreleased"* ]] || return 1
+  [[ "$output" != *"Old breaking thing in 2.0.0"* ]] || return 1
 }
 
 @test "breaking change detection: silent when no breaking changes in range" {
@@ -790,8 +790,8 @@ CLEOF
   # _RIG_TEST_CHANGELOG points the gate at our fixture instead of the real CHANGELOG.
   _RIG_TEST_CHANGELOG="$fixture" run_installer --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Breaking changes since v0.9.0"* ]]
-  [[ "$output" == *"Stealth is now the default tracking mode"* ]]
+  [[ "$output" == *"Breaking changes since v0.9.0"* ]] || return 1
+  [[ "$output" == *"Stealth is now the default tracking mode"* ]] || return 1
 }
 
 @test "breaking change detection: upgrade is silent when no breaking changes in range" {
@@ -818,7 +818,7 @@ CLEOF
 
   _RIG_TEST_CHANGELOG="$fixture" run_installer --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" != *"Breaking changes since"* ]]
+  [[ "$output" != *"Breaking changes since"* ]] || return 1
 }
 
 @test "breaking change detection: multi-line bullet's indented continuation lines are not truncated to the first line (#481)" {
@@ -844,12 +844,12 @@ CLEOF
 
   run _extract_breaking_changes "1.0.0" "$changelog"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Default install tracking mode changed to stealth"* ]]
-  [[ "$output" == *"prompt now defaults to option 4 (stealth) instead of option 1 (in-repo)"* ]]
-  [[ "$output" == *"files are stored in the external tracking dir by default"* ]]
-  [[ "$output" == *"to the project repo. Users who prefer in-repo tracking"* ]]
-  [[ "$output" == *"or pass \`--tracking repo\`. This affects all fresh installs"* ]]
-  [[ "$output" == *"is provided."* ]]
+  [[ "$output" == *"Default install tracking mode changed to stealth"* ]] || return 1
+  [[ "$output" == *"prompt now defaults to option 4 (stealth) instead of option 1 (in-repo)"* ]] || return 1
+  [[ "$output" == *"files are stored in the external tracking dir by default"* ]] || return 1
+  [[ "$output" == *"to the project repo. Users who prefer in-repo tracking"* ]] || return 1
+  [[ "$output" == *"or pass \`--tracking repo\`. This affects all fresh installs"* ]] || return 1
+  [[ "$output" == *"is provided."* ]] || return 1
 }
 
 @test "breaking change detection: upgrade prints every continuation line of a multi-line breaking bullet, not just the first (#481)" {
@@ -877,9 +877,9 @@ CLEOF
 
   _RIG_TEST_CHANGELOG="$fixture" run_installer --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Default install tracking mode changed to stealth"* ]]
-  [[ "$output" == *"prompt now defaults to option 4 (stealth) instead of option 1 (in-repo)"* ]]
-  [[ "$output" == *"files are stored in the external tracking dir by default"* ]]
-  [[ "$output" == *"to the project repo."* ]]
+  [[ "$output" == *"Default install tracking mode changed to stealth"* ]] || return 1
+  [[ "$output" == *"prompt now defaults to option 4 (stealth) instead of option 1 (in-repo)"* ]] || return 1
+  [[ "$output" == *"files are stored in the external tracking dir by default"* ]] || return 1
+  [[ "$output" == *"to the project repo."* ]] || return 1
 }
 

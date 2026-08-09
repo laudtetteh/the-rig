@@ -43,8 +43,8 @@ run_probe() {
   commit_file two
   run_probe
   [ "$status" -eq 0 ]
-  [[ "$output" == *"commits=2"* ]]
-  [[ "$output" == *"signals=1" ]]
+  [[ "$output" == *"commits=2"* ]] || return 1
+  [[ "$output" == *"signals=1" ]] || return 1
 }
 
 @test "kickoff guard: shallow history does not falsely look established" {
@@ -64,8 +64,8 @@ run_probe() {
   git -C "$TEST_REPO" tag v1.2.3
   run_probe
   [ "$status" -eq 0 ]
-  [[ "$output" == *"release_tags=1"* ]]
-  [[ "$output" == *"signals=1" ]]
+  [[ "$output" == *"release_tags=1"* ]] || return 1
+  [[ "$output" == *"signals=1" ]] || return 1
 }
 
 @test "kickoff guard: semver-like glob matches are rejected" {
@@ -75,23 +75,23 @@ run_probe() {
   git -C "$TEST_REPO" tag release-v1.2.3
   run_probe
   [ "$status" -eq 0 ]
-  [[ "$output" == *"release_tags=0"* ]]
-  [[ "$output" == *"signals=0" ]]
+  [[ "$output" == *"release_tags=0"* ]] || return 1
+  [[ "$output" == *"signals=0" ]] || return 1
 }
 
 @test "kickoff guard: placeholder CLAUDE.md is not considered filled" {
   printf '# [PROJECT_NAME]\n' > "$TEST_REPO/CLAUDE.md"
   run_probe
   [ "$status" -eq 0 ]
-  [[ "$output" == *"claude_filled=0"* ]]
+  [[ "$output" == *"claude_filled=0"* ]] || return 1
 }
 
 @test "kickoff guard: filled CLAUDE.md is a maturity signal" {
   printf '# Acme project\n' > "$TEST_REPO/CLAUDE.md"
   run_probe
   [ "$status" -eq 0 ]
-  [[ "$output" == *"claude_filled=1"* ]]
-  [[ "$output" == *"signals=1" ]]
+  [[ "$output" == *"claude_filled=1"* ]] || return 1
+  [[ "$output" == *"signals=1" ]] || return 1
 }
 
 @test "kickoff guard: backlog files are detected through .rigpath" {
@@ -101,8 +101,8 @@ run_probe() {
   touch "$external_rig/tasks/backlog/feat-one.md"
   run_probe
   [ "$status" -eq 0 ]
-  [[ "$output" == *"backlog_nonempty=1"* ]]
-  [[ "$output" == *"signals=1" ]]
+  [[ "$output" == *"backlog_nonempty=1"* ]] || return 1
+  [[ "$output" == *"signals=1" ]] || return 1
 }
 
 @test "kickoff guard: multiple independent signals identify an established repository" {
@@ -113,10 +113,10 @@ run_probe() {
   touch "$TEST_REPO/.rig/tasks/done/feat-shipped.md"
   run_probe
   [ "$status" -eq 0 ]
-  [[ "$output" == *"commits=2"* ]]
-  [[ "$output" == *"claude_filled=1"* ]]
-  [[ "$output" == *"backlog_nonempty=1"* ]]
-  [[ "$output" == *"signals=3" ]]
+  [[ "$output" == *"commits=2"* ]] || return 1
+  [[ "$output" == *"claude_filled=1"* ]] || return 1
+  [[ "$output" == *"backlog_nonempty=1"* ]] || return 1
+  [[ "$output" == *"signals=3" ]] || return 1
 }
 
 @test "kickoff guard: explicit confirmation and task handoff are required" {

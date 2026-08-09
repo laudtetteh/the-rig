@@ -32,7 +32,7 @@ SHIP_WORKFLOW="$REPO_ROOT/templates/project/.rig/processes/SHIP_WORKFLOW.md"
 @test "ship command makes manual reruns optional without false attestation" {
   grep -q 'Optional manual validation' "$SHIP_COMMAND"
   grep -q 'it does not claim you personally' "$SHIP_COMMAND"
-  ! grep -q 'user confirmed local testing' "$SHIP_COMMAND"
+  if grep -q 'user confirmed local testing' "$SHIP_COMMAND"; then return 1; fi
 }
 
 @test "ship command reuses evidence in PR Test plan" {

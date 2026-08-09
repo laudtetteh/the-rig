@@ -88,8 +88,8 @@ teardown() { rm -rf "$TEMP_DIR"; }
     --project-name Test --tracking repo \
     --strategy agent-plan --strategy merge
   [ "$status" -eq 0 ]
-  [[ "$output" == *"behind"*"main"* ]] || [[ "$output" == *"is 1 commit(s) behind"* ]]
-  [[ "$output" == *"Proceeding with the current version"* ]]
+  [[ "$output" == *"behind"*"main"* ]] || [[ "$output" == *"is 1 commit(s) behind"* ]] || return 1
+  [[ "$output" == *"Proceeding with the current version"* ]] || return 1
 }
 
 @test "a duplicated --strategy flag resolving to agent-upgrade still suppresses the branch-drift warning" {
@@ -105,6 +105,6 @@ teardown() { rm -rf "$TEMP_DIR"; }
   local nonblank_lines
   nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
   [ "$nonblank_lines" -eq 1 ]
-  [[ "$output" == \{* ]]
+  [[ "$output" == \{* ]] || return 1
   printf '%s\n' "$output" | python3 -c 'import json, sys; json.load(sys.stdin)'
 }

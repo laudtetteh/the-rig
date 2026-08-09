@@ -105,7 +105,7 @@ print($1)
   after="$(tree_snapshot)"
   [ "$before" = "$after" ]
 
-  [[ "$(last_json_line)" == \{* ]]
+  [[ "$(last_json_line)" == \{* ]] || return 1
   [ "$(json_field "d['schema_version']")" = "1" ]
   [ "$(json_field "d['mode']")" = "plan" ]
   [ "$(json_field "d['status']")" = "success" ]
@@ -132,9 +132,9 @@ print($1)
   local nonblank_lines
   nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
   [ "$nonblank_lines" -eq 1 ]
-  [[ "$output" != *"Target matrix:"* ]]
-  [[ "$output" != *"Missing prerequisites:"* ]]
-  [[ "$output" == \{* ]]
+  [[ "$output" != *"Target matrix:"* ]] || return 1
+  [[ "$output" != *"Missing prerequisites:"* ]] || return 1
+  [[ "$output" == \{* ]] || return 1
 }
 
 @test "agent-plan stdout stays exactly one JSON document when gitleaks is missing (retro-audit finding, PR #446 follow-up)" {
@@ -164,9 +164,9 @@ print($1)
   local nonblank_lines
   nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
   [ "$nonblank_lines" -eq 1 ]
-  [[ "$output" != *"Install it:"* ]]
-  [[ "$output" != *"Docs: https://github.com/gitleaks"* ]]
-  [[ "$output" == \{* ]]
+  [[ "$output" != *"Install it:"* ]] || return 1
+  [[ "$output" != *"Docs: https://github.com/gitleaks"* ]] || return 1
+  [[ "$output" == \{* ]] || return 1
 }
 
 @test "agent-plan on a target with a customized file emits refused with populated conflicts and exits 3" {
@@ -231,7 +231,7 @@ print($1)
   after="$(tree_snapshot)"
   [ "$before" = "$after" ]
   grep -q '^model = "gpt-5"$' "$TEST_PROJECT/.codex/config.toml"
-  ! grep -q 'project_doc_fallback_filenames' "$TEST_PROJECT/.codex/config.toml"
+  if grep -q 'project_doc_fallback_filenames' "$TEST_PROJECT/.codex/config.toml"; then return 1; fi
 }
 
 @test "agent-upgrade on a clean target applies updates and exits 0" {
@@ -346,8 +346,8 @@ print($1)
   # Plain upgrade still exits 0 even when review is required (only the new
   # agent-* strategies gained exit code 3) and still prints the legacy
   # RIG_UPGRADE_REVIEW_REQUIRED marker instead of JSON.
-  [[ "$output" == *"RIG_UPGRADE_REVIEW_REQUIRED=1"* ]]
-  [[ "$output" != *'"schema_version"'* ]]
+  [[ "$output" == *"RIG_UPGRADE_REVIEW_REQUIRED=1"* ]] || return 1
+  [[ "$output" != *'"schema_version"'* ]] || return 1
   [ -f "$TEST_PROJECT/.claude/commands/status.md" ]
   grep -q "locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
 }
@@ -355,14 +355,14 @@ print($1)
 @test "--help documents both new agent strategy values" {
   run bash "$INSTALLER" --help
   [ "$status" -eq 0 ]
-  [[ "$output" == *"agent-plan"* ]]
-  [[ "$output" == *"agent-upgrade"* ]]
+  [[ "$output" == *"agent-plan"* ]] || return 1
+  [[ "$output" == *"agent-upgrade"* ]] || return 1
 }
 
 @test "an unrecognized --strategy value still falls back to interactive, not agent mode" {
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name "TestProject" --tracking repo --strategy bogus-value < /dev/null
-  [[ "$output" != *'"schema_version"'* ]]
+  [[ "$output" != *'"schema_version"'* ]] || return 1
 }
 
 # ── Issue #475: CHANGELOG BREAKING-bullet stdout leak ─────────────────────────
@@ -410,8 +410,8 @@ EOF
   local nonblank_lines
   nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
   [ "$nonblank_lines" -eq 1 ]
-  [[ "$output" != *"Some breaking change bullet"* ]]
-  [[ "$output" == \{* ]]
+  [[ "$output" != *"Some breaking change bullet"* ]] || return 1
+  [[ "$output" == \{* ]] || return 1
   [ "$(json_field "d['schema_version']")" = "1" ]
 }
 
@@ -429,7 +429,7 @@ EOF
   local nonblank_lines
   nonblank_lines="$(printf '%s\n' "$output" | /usr/bin/grep -c .)"
   [ "$nonblank_lines" -eq 1 ]
-  [[ "$output" != *"Some breaking change bullet"* ]]
-  [[ "$output" == \{* ]]
+  [[ "$output" != *"Some breaking change bullet"* ]] || return 1
+  [[ "$output" == \{* ]] || return 1
   [ "$(json_field "d['schema_version']")" = "1" ]
 }

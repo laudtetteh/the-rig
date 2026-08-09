@@ -31,7 +31,7 @@ recover() {
   [ "$status" -eq 0 ]
   grep -Fxq 'original user configuration' "$TEST_PROJECT/CLAUDE.md"
   [ ! -e "$TEST_PROJECT/.rig-backup/.in-progress" ]
-  [[ "$output" == *"Interrupted upgrade restored"* ]]
+  [[ "$output" == *"Interrupted upgrade restored"* ]] || return 1
 }
 
 @test "recover removes files recorded as created by an interrupted upgrade" {
@@ -65,7 +65,7 @@ recover() {
   [ "$status" -ne 0 ]
   grep -Fxq 'outside sentinel' "$TEMP_DIR/outside.txt"
   [ -f "$TEST_PROJECT/.rig-backup/.in-progress/.journal" ]
-  [[ "$output" == *"Unsafe path in interrupted upgrade journal"* ]]
+  [[ "$output" == *"Unsafe path in interrupted upgrade journal"* ]] || return 1
 }
 
 @test "recover rejects symlinked journal destinations without external writes" {
@@ -79,7 +79,7 @@ recover() {
   [ "$status" -ne 0 ]
   [ ! -e "$TEMP_DIR/outside-dir/created.txt" ]
   [ -f "$TEST_PROJECT/.rig-backup/.in-progress/.journal" ]
-  [[ "$output" == *"Unsafe path in interrupted upgrade journal"* ]]
+  [[ "$output" == *"Unsafe path in interrupted upgrade journal"* ]] || return 1
 }
 
 @test "recover processes both global and project layers before exiting" {
@@ -105,7 +105,7 @@ recover() {
   grep -Fxq 'project original' "$TEST_PROJECT/CLAUDE.md"
   [ ! -e "$GLOBAL_HOME/.claude/.rig-backup/.in-progress" ]
   [ ! -e "$TEST_PROJECT/.rig-backup/.in-progress" ]
-  [[ "$output" == *"Interrupted upgrade restored"* ]]
+  [[ "$output" == *"Interrupted upgrade restored"* ]] || return 1
 }
 
 @test "recover exits cleanly after a global-only transaction" {
@@ -122,7 +122,7 @@ recover() {
   [ "$status" -eq 0 ]
   grep -Fxq 'global original' "$GLOBAL_HOME/.claude/CLAUDE.md"
   [ ! -e "$GLOBAL_HOME/.claude/.rig-backup/.in-progress" ]
-  [[ "$output" == *"Recovery complete."* ]]
+  [[ "$output" == *"Recovery complete."* ]] || return 1
 }
 
 @test "a global-agent-codex upgrade never leaves an orphaned in-progress transaction (retro-audit finding, found by the whole-branch review before merge)" {

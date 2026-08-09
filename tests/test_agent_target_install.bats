@@ -48,7 +48,7 @@ teardown() { rm -rf "$TEST_ROOT"; }
   run env HOME="$TEST_HOME" _RIG_TEST_MISSING_COMMANDS=claude bash "$INSTALLER" --project-only --project-agent claude --target "$TEST_PROJECT" --strategy merge
   [ "$status" -eq 1 ]
   [ ! -e "$TEST_PROJECT/.rig" ]; [ ! -e "$TEST_PROJECT/.claude" ]
-  [[ "$output" == *"Required preflight checks failed before writes"* ]]
+  [[ "$output" == *"Required preflight checks failed before writes"* ]] || return 1
 }
 
 @test "preflight json without strategy is exactly one JSON document with public operation" {
@@ -111,8 +111,8 @@ teardown() { rm -rf "$TEST_ROOT"; }
 @test "JSON preflight is read-only and schema-versioned" {
   run env HOME="$TEST_HOME" bash "$INSTALLER" --project-only --project-agent none --target "$TEST_PROJECT" --strategy merge --preflight --json
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"schema_version":1'* ]]
-  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"schema_version":1'* ]] || return 1
+  [[ "$output" == *'"ok":true'* ]] || return 1
   [ ! -e "$TEST_PROJECT/.rig" ]
 }
 
@@ -207,14 +207,14 @@ teardown() { rm -rf "$TEST_ROOT"; }
   run env HOME="$TEST_HOME" _RIG_CAPABILITY_MANIFEST="$fixture" bash "$INSTALLER" --project-only --project-agent codex --target "$TEST_PROJECT" --tracking repo --strategy merge
   [ "$status" -eq 1 ]
   [ ! -e "$TEST_PROJECT/.rig/install-targets.json" ]
-  [[ "$output" == *"Postflight smoke failed"* ]]
+  [[ "$output" == *"Postflight smoke failed"* ]] || return 1
 }
 
 @test "final summary reports matrix degradation smoke and Codex next step" {
   run env HOME="$TEST_HOME" bash "$INSTALLER" --project-only --project-agent codex --target "$TEST_PROJECT" --tracking repo --strategy merge
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Target matrix:"* ]]
-  [[ "$output" == *"Degraded features:"* ]]
-  [[ "$output" == *"Postflight smoke results:"* ]]
-  [[ "$output" == *"Codex: launch 'codex'"* ]]
+  [[ "$output" == *"Target matrix:"* ]] || return 1
+  [[ "$output" == *"Degraded features:"* ]] || return 1
+  [[ "$output" == *"Postflight smoke results:"* ]] || return 1
+  [[ "$output" == *"Codex: launch 'codex'"* ]] || return 1
 }

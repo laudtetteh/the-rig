@@ -53,8 +53,8 @@ EOF
   run "$TEST_PROJECT/bin/rig" memory validate --json
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
-  [[ "$output" == *'"first_entry_line":9'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  [[ "$output" == *'"first_entry_line":9'* ]] || return 1
 }
 
 @test "memory validate reports ambiguous markers and never writes" {
@@ -65,7 +65,7 @@ EOF
   run "$TEST_PROJECT/bin/rig" memory validate
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *'WARN  PROGRESS.md: marker_duplicated'* ]]
+  [[ "$output" == *'WARN  PROGRESS.md: marker_duplicated'* ]] || return 1
   [ "$before" = "$(cksum "$TEST_PROJECT/.rig/memory/PROGRESS.md" "$TEST_PROJECT/.rig/memory/ERRORS.md")" ]
 }
 
@@ -76,7 +76,7 @@ EOF
   run "$TEST_PROJECT/bin/rig" memory validate --json
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *'entries_not_newest_first'* ]]
+  [[ "$output" == *'entries_not_newest_first'* ]] || return 1
 }
 
 @test "memory repair-markers repositions only unambiguous markers" {
@@ -98,7 +98,7 @@ EOF
 
   echo "$output"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"changed":["PROGRESS.md","ERRORS.md"]'* ]]
+  [[ "$output" == *'"changed":["PROGRESS.md","ERRORS.md"]'* ]] || return 1
   run "$TEST_PROJECT/bin/rig" memory validate
   [ "$status" -eq 0 ]
   [ "$(grep -nF "$progress_marker" "$progress" | cut -d: -f1)" -gt "$(grep -n '^## 2026-07-30' "$progress" | cut -d: -f1)" ]
@@ -118,7 +118,7 @@ EOF
   run "$TEST_PROJECT/bin/rig" memory repair-markers --json
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *'format_duplicated'* ]]
+  [[ "$output" == *'format_duplicated'* ]] || return 1
   [ "$before" = "$(cksum "$TEST_PROJECT/.rig/memory/PROGRESS.md" "$TEST_PROJECT/.rig/memory/ERRORS.md")" ]
 }
 

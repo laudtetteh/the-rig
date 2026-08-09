@@ -48,7 +48,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
   grep -q 'this-file-lives-outside-the-project' "$external_target"
   [ -L "$TEST_PROJECT/.rig/VERSION" ]
   readlink "$TEST_PROJECT/.rig/VERSION" | grep -qF "$external_target"
-  [[ "$output" == *"Skipped .rig/VERSION due to a conflicting destination"* ]]
+  [[ "$output" == *"Skipped .rig/VERSION due to a conflicting destination"* ]] || return 1
 }
 
 @test ".rig/VERSION: an existing regular file is backed up before being overwritten under --strategy merge" {
@@ -59,7 +59,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
     --project-name Test --tracking repo --strategy merge
   [ "$status" -eq 0 ]
 
-  ! grep -q 'hand-written version marker' "$TEST_PROJECT/.rig/VERSION"
+  if grep -q 'hand-written version marker' "$TEST_PROJECT/.rig/VERSION"; then return 1; fi
   run grep -rl 'hand-written version marker' "$TEST_PROJECT/.rig-backup"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
@@ -82,7 +82,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
   grep -q 'this-file-lives-outside-the-project' "$external_target"
   [ -L "$TEST_PROJECT/.rigpath" ]
   readlink "$TEST_PROJECT/.rigpath" | grep -qF "$external_target"
-  [[ "$output" == *"Skipped .rigpath due to a conflicting destination"* ]]
+  [[ "$output" == *"Skipped .rigpath due to a conflicting destination"* ]] || return 1
 }
 
 @test ".rigpath: an existing regular file is backed up before being overwritten under --strategy merge" {
@@ -95,7 +95,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
     --strategy merge
   [ "$status" -eq 0 ]
 
-  ! grep -q 'hand-written rigpath marker' "$TEST_PROJECT/.rigpath"
+  if grep -q 'hand-written rigpath marker' "$TEST_PROJECT/.rigpath"; then return 1; fi
   # Under external/stealth tracking, backups for the external .rig/ dir's own
   # writes land under $EXTERNAL_RIG_DIR/backups/, not $TARGET/.rig-backup/
   # (confirmed live: "Originals backed up to: <external_rig_dir>/backups/<ts>").
@@ -129,7 +129,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
     --global-only --global-agent claude --strategy merge
   [ "$status" -eq 0 ]
 
-  ! grep -q 'hand-written-global-state' "$FAKE_HOME/.rig/install-targets.json"
+  if grep -q 'hand-written-global-state' "$FAKE_HOME/.rig/install-targets.json"; then return 1; fi
   run grep -rl 'hand-written-global-state' "$FAKE_HOME/.rig-backup"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
@@ -160,7 +160,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
     --project-name Test --tracking repo --strategy merge
   [ "$status" -eq 0 ]
 
-  ! grep -q 'hand-written-project-state' "$TEST_PROJECT/.rig/install-targets.json"
+  if grep -q 'hand-written-project-state' "$TEST_PROJECT/.rig/install-targets.json"; then return 1; fi
   run grep -rl 'hand-written-project-state' "$TEST_PROJECT/.rig-backup"
   [ "$status" -eq 0 ]
   [ -n "$output" ]

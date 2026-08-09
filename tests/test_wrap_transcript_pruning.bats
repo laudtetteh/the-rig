@@ -40,7 +40,7 @@ age_files() {
   [ ! -e "$dir/old.jsonl" ]
   [ -e "$dir/recent.jsonl" ]
   [ -e "$dir/old.txt" ]
-  [[ "$output" == *"Pruned 1 JSONL transcript file(s)"* ]]
+  [[ "$output" == *"Pruned 1 JSONL transcript file(s)"* ]] || return 1
 }
 
 @test "Codex uses configured CODEX_HOME sessions and excludes archives by default" {
@@ -56,7 +56,7 @@ age_files() {
   [ "$status" -eq 0 ]
   [ ! -e "$codex_home/sessions/nested/old.jsonl" ]
   [ -e "$codex_home/archived_sessions/old.jsonl" ]
-  [[ "$output" == *"Pruned 1 JSONL transcript file(s)"* ]]
+  [[ "$output" == *"Pruned 1 JSONL transcript file(s)"* ]] || return 1
 }
 
 @test "Codex defaults to HOME dot-codex sessions" {
@@ -70,7 +70,7 @@ age_files() {
 
   [ "$status" -eq 0 ]
   [ ! -e "$dir/old.jsonl" ]
-  [[ "$output" == *"Pruned 1 JSONL transcript file(s)"* ]]
+  [[ "$output" == *"Pruned 1 JSONL transcript file(s)"* ]] || return 1
 }
 
 @test "Codex archives require an explicit retention opt-in" {
@@ -87,7 +87,7 @@ age_files() {
   [ "$status" -eq 0 ]
   [ ! -e "$codex_home/sessions/old.jsonl" ]
   [ ! -e "$codex_home/archived_sessions/old.jsonl" ]
-  [[ "$output" == *"Pruned 2 JSONL transcript file(s)"* ]]
+  [[ "$output" == *"Pruned 2 JSONL transcript file(s)"* ]] || return 1
 }
 
 @test "missing persistence path skips cleanly with an explicit note" {
@@ -96,7 +96,7 @@ age_files() {
   run_pruner codex "$TEST_ROOT/missing codex home"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Transcript pruning skipped missing path:"* ]]
+  [[ "$output" == *"Transcript pruning skipped missing path:"* ]] || return 1
 }
 
 @test "disabled persistence retention skips cleanly without touching transcripts" {
@@ -109,7 +109,7 @@ age_files() {
 
   [ "$status" -eq 0 ]
   [ -e "$dir/old.jsonl" ]
-  [[ "$output" == *"transcript persistence retention is disabled"* ]]
+  [[ "$output" == *"transcript persistence retention is disabled"* ]] || return 1
 }
 
 @test "Codex home shell metacharacters remain literal" {
@@ -130,7 +130,7 @@ age_files() {
   grep -Fq 'never read or parse their rollout contents' "$WRAP"
   grep -Fq 'shared #342/#343 behavior' "$WRAP"
   block="$(sed -n '/^# transcript-pruning:start$/,/^# transcript-pruning:end$/p' "$WRAP")"
-  [[ "$block" != *"python"* ]]
-  [[ "$block" != *"jq"* ]]
-  [[ "$block" != *"cat "* ]]
+  [[ "$block" != *"python"* ]] || return 1
+  [[ "$block" != *"jq"* ]] || return 1
+  [[ "$block" != *"cat "* ]] || return 1
 }
