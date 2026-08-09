@@ -95,7 +95,7 @@ The Rig wires up four mechanisms for controlling what Claude Code can do:
 | `settings.json` `allow`/`deny` | Persistent per-project rules loaded at every session; no prompt for matched patterns | Edit `.claude/settings.json` directly |
 | `/fewer-permission-prompts` | Rig skill — scans transcripts for frequent patterns and bulk-adds them to `settings.json` `allow` | Run `/fewer-permission-prompts` |
 
-**Baseline deny patterns** (shipped in `settings.json`): `rm -rf *`, `git push --force`, `DROP TABLE`, `TRUNCATE`. Add project-specific patterns to the `deny` array as needed.
+**Baseline deny patterns** (shipped in `settings.json`): `rm -rf *`, `git push --force*`, `git push -f*`. Add project-specific shell-command patterns to the `deny` array as needed.
 
 ---
 
