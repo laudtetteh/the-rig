@@ -500,6 +500,36 @@ _make_failing_sha_tools() {
   grep -q 'personal customization' "$skill"
 }
 
+@test "upgrade strategy: clean global Claude skills still auto-update with legacy user-owned metadata" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+
+  run env HOME="$fake_home" bash "$INSTALLER" --global-only \
+    --global-agent claude --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local skill="$fake_home/.claude/skills/code-review.md"
+  [ -f "$skill" ]
+  printf '# old global skill\n' > "$skill"
+  local old_hash
+  old_hash="$(_sha256 "$skill")"
+  awk -v hash="$old_hash" '
+    $2 == "skills/code-review.md" { print hash "  skills/code-review.md"; next }
+    { print }
+  ' "$fake_home/.claude/.rig-global-manifest" > "$TEMP_DIR/global-manifest"
+  mv "$TEMP_DIR/global-manifest" "$fake_home/.claude/.rig-global-manifest"
+  jq --arg hash "$old_hash" '.entries["skills/code-review.md"].sha256 = $hash | .entries["skills/code-review.md"].owner = "user"' \
+    "$fake_home/.claude/.rig-global-manifest.json" > "$TEMP_DIR/global-manifest.json"
+  mv "$TEMP_DIR/global-manifest.json" "$fake_home/.claude/.rig-global-manifest.json"
+
+  run env HOME="$fake_home" bash "$INSTALLER" --global-only \
+    --global-agent claude --strategy upgrade
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Updated: skills/code-review.md"* ]] || return 1
+  run grep -q '# old global skill' "$skill"
+  [ "$status" -ne 0 ]
+}
+
 @test "upgrade strategy: preserves a symlinked global Claude root" {
   local fake_home="$TEMP_DIR/fake-home"
   local outside_claude="$TEMP_DIR/outside-claude"
@@ -518,7 +548,7 @@ _make_failing_sha_tools() {
   [[ "$output" == *"Preserved conflicting upgrade destination: .claude (symlink)"* ]] || return 1
 }
 
-@test "upgrade strategy: global Rig-owned file updated when hash matches manifest" {
+@test "upgrade strategy: global CLAUDE.md is preserved when hash matches user-owned manifest" {
   local fake_home="$TEMP_DIR/fake-home"
   mkdir -p "$fake_home"
 
@@ -533,14 +563,13 @@ _make_failing_sha_tools() {
   old_hash=$(_sha256 "$fake_home/.claude/CLAUDE.md")
   printf '%s  CLAUDE.md\n' "$old_hash" > "$fake_home/.claude/.rig-global-manifest"
 
-  # Run upgrade — CLAUDE.md hash matches manifest → auto-update
+  # Run upgrade — CLAUDE.md hash matches a user-owned manifest entry, so it
+  # remains protected even though its hash matches the baseline.
   run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy upgrade"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Updated"* ]] || return 1
+  [[ "$output" == *"Skipped customized: 1"* ]] || return 1
 
-  # File should no longer contain the old content
-  run grep -c '# old version' "$fake_home/.claude/CLAUDE.md"
-  [ "$output" -eq 0 ]
+  grep -q '# old version' "$fake_home/.claude/CLAUDE.md"
 }
 
 @test "upgrade strategy: customized global file not overwritten in non-interactive" {
@@ -861,4 +890,3 @@ _wrap_release_lock() {
   _wrap_release_lock "$lock"
   [[ ! -f "$lock" ]] || return 1
 }
-
