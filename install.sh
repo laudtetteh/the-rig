@@ -715,7 +715,7 @@ for arg in "$@"; do
       echo "                        Useful for shared repos where teammates don't use The Rig."
       echo "  --feature-docs        Install feature-documentation commands (opt-in)."
       echo "                        Includes: /doc-feature, /doc-list, /feature-context,"
-      echo "                        /refresh-feature-doc, and docs/features/README.md."
+      echo "                        /refresh-feature-doc, docs/INDEX.md, and docs/features/README.md."
       echo "                        Skipped by default — add for projects that maintain"
       echo "                        end-to-end feature traces."
       echo "  --subagents           Install multi-agent hook (opt-in)."
@@ -1770,7 +1770,7 @@ preflight_snapshot_project() {
 
   local -a rel_paths=(
     "CLAUDE.md" "PROJECT_BRIEF.md" ".claude" ".agents" ".codex" ".mcp.json"
-    ".playwright-mcp" ".github" ".gitleaks.toml" "docs/features/README.md"
+    ".playwright-mcp" ".github" ".gitleaks.toml" "docs/INDEX.md" "docs/features/README.md"
     ".husky" ".rigpath" "bin/rig" ".git/hooks"
   )
   # Tracked .rig/ lives at $base/.rig for repo/exclude tracking, so it's just
@@ -3204,6 +3204,7 @@ if [[ "$DO_PROJECT" == true ]]; then
       .claude/commands/doc-list.md|\
       .claude/commands/feature-context.md|\
       .claude/commands/refresh-feature-doc.md|\
+      docs/INDEX.md|\
       docs/features/*)                     [[ "$INSTALL_FEATURE_DOCS" == true ]]   ;;
       .claude/commands/rig-gaps.md|\
       .claude/commands/rig-propose.md)     [[ "$INSTALL_CONTRIBUTE" == true ]]     ;;
@@ -3272,7 +3273,7 @@ if [[ "$DO_PROJECT" == true ]]; then
   # flag would skip, so the operator can rerun with the matching explicit flag.
   if [[ "$COLLISION_STRATEGY" == upgrade && -f "$TARGET/CLAUDE.md" ]]; then
     if [[ "$INSTALL_FEATURE_DOCS" != true ]] && \
-       grep -Eq 'doc-feature|doc-list|feature-context|refresh-feature-doc|docs/features' "$TARGET/CLAUDE.md"; then
+      grep -Eq 'doc-feature|doc-list|feature-context|refresh-feature-doc|docs/INDEX.md|docs/features' "$TARGET/CLAUDE.md"; then
       warn "CLAUDE.md references feature-docs files that Upgrade will skip; rerun with --feature-docs."
     fi
     if [[ "$INSTALL_CONTRIBUTE" != true ]] && \
@@ -3683,6 +3684,7 @@ PYEOF
       _stealth_exclude ".playwright-mcp/"
       _stealth_exclude ".github/"
       _stealth_exclude ".gitleaks.toml"
+      _stealth_exclude "docs/INDEX.md"
       _stealth_exclude "docs/features/README.md"
       _stealth_exclude ".rig-backup/"
       _stealth_exclude ".rig/"
@@ -3711,7 +3713,7 @@ PYEOF
       # .rigpath is already excluded by the external-mode block above
     else
       warn ".git/info/exclude not found — stealth exclusions could not be applied."
-      warn "Add manually: CLAUDE.md, PROJECT_BRIEF.md, .claude/, .agents/, .codex/, .mcp.json, .playwright-mcp/, .github/, .gitleaks.toml, docs/features/README.md, bin/rig*, .rigpath"
+      warn "Add manually: CLAUDE.md, PROJECT_BRIEF.md, .claude/, .agents/, .codex/, .mcp.json, .playwright-mcp/, .github/, .gitleaks.toml, docs/INDEX.md, docs/features/README.md, bin/rig*, .rigpath"
     fi
   fi
 

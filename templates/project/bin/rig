@@ -87,7 +87,7 @@ import pathlib, shutil, sys
 source, target = map(pathlib.Path, sys.argv[1:])
 paths = [".rigpath","CLAUDE.md","PROJECT_BRIEF.md",".gitleaks.toml","bin/rig",
          ".claude",".agents",".codex",".mcp.json",".playwright-mcp",".github",
-         "docs/features/README.md"]
+         "docs/INDEX.md","docs/features/README.md"]
 # Linked worktrees live under the primary's own .claude/worktrees/ (see the
 # stealth CLAUDE.md's off-limits note on that path), so copying ".claude"
 # whole would recurse into every sibling worktree checkout nested there --

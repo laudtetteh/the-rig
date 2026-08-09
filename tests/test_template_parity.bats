@@ -21,3 +21,14 @@ REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
   grep -Fq '| Processes (8) |' "$REPO_ROOT/README.md"
   grep -Fq '| Rules (7) |' "$REPO_ROOT/README.md"
 }
+
+@test "project template ships canonical docs index" {
+  [ -f "$REPO_ROOT/templates/project/docs/INDEX.md" ]
+  grep -Fq '[`features/README.md`](features/README.md)' "$REPO_ROOT/templates/project/docs/INDEX.md"
+}
+
+@test "README links canonical docs index instead of duplicating doc list" {
+  grep -Fq '[docs/INDEX.md](docs/INDEX.md)' "$REPO_ROOT/README.md"
+  run grep -F '[How it works](docs/how-it-works.md)' "$REPO_ROOT/README.md"
+  [ "$status" -ne 0 ]
+}

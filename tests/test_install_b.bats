@@ -353,6 +353,7 @@ assert 'old-session' not in ctx, 'Got stale checkpoint instead of latest: ' + ct
   bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
     --tracking repo 2>/dev/null
   [ ! -f "$tmpdir/.claude/commands/doc-feature.md" ]
+  [ ! -f "$tmpdir/docs/INDEX.md" ]
   rm -rf "$tmpdir"
 }
 
@@ -363,6 +364,8 @@ assert 'old-session' not in ctx, 'Got stale checkpoint instead of latest: ' + ct
   bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
     --tracking repo --feature-docs 2>/dev/null
   [ -f "$tmpdir/.claude/commands/doc-feature.md" ]
+  [ -f "$tmpdir/docs/INDEX.md" ]
+  grep -Fq '[`features/README.md`](features/README.md)' "$tmpdir/docs/INDEX.md"
   rm -rf "$tmpdir"
 }
 
@@ -683,4 +686,3 @@ _direct_push_type_check() {
   run _direct_push_type_check ""
   [ "$status" -eq 0 ]
 }
-
