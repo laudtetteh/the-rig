@@ -11,6 +11,51 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.27.0] — 2026-08-09
+
+### Added
+
+- `/handoff-checklist`: new consent-gated wrap-and-handoff command for large
+  or costly sessions. The prompt-submit hook only suggests handoff after the
+  session-size benchmark is crossed; the checklist itself still requires
+  explicit user agreement before any wrap/checklist work starts (#510).
+- `templates/project/docs/INDEX.md`: new canonical project docs index
+  convention. Feature-doc commands now maintain the index, `CLAUDE.md`
+  documents project doc categories, and `README.md` points to the canonical
+  index instead of duplicating a hand-written docs list (#512).
+
+### Changed
+
+- Contextual Rig tips are now relayed with an explicit "say exactly" hook
+  instruction, visually labeled as `Rig tip`, expanded with a project-specific
+  docs-index category, and made eligible again after an expiry window instead
+  of being once-per-project forever (#511).
+- CI Bats sharding now uses a weighted dynamic matrix planned from measured
+  per-file timings instead of static round-robin assignment (#507).
+- Two manually reviewed installer test clusters now share one bootstrap
+  fixture per file, avoiding redundant installer setup while preserving the
+  same behavior checks (#508).
+- Bats assertions now avoid bash 3.2 traps from bare `[[ ... ]]` and
+  single-line `! command` assertions; a scanner prevents regressions (#502).
+
+### Fixed
+
+- `copy_file()` now applies its symlink/conflict guard across strategies, not
+  only `--strategy upgrade`, covering the installer's highest-traffic write
+  path under fresh `merge` installs as well (#501).
+- Upgrade planning now heals pre-#498 raw-template manifest hashes for
+  `[BASE_BRANCH]`-substituted files when the on-disk content still matches the
+  rendered current template, avoiding permanent false "customized"
+  classifications (#514).
+- Project template parity coverage now audits the full installed template tree,
+  catching guarded-convergence artifact-list gaps such as missing
+  `subagent-start.sh` coverage (#515).
+- `/rig-help` now documents the actual shipped shell-command deny patterns and
+  no longer claims SQL statement patterns are present in `settings.json`
+  (#513).
+
+---
+
 ## [1.26.2] — 2026-08-09
 
 ### Fixed
