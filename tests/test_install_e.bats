@@ -26,6 +26,23 @@ INSTALLER="$REPO_ROOT/install.sh"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+setup_file() {
+  local shared_project="$BATS_FILE_TMPDIR/commit-msg-project"
+  mkdir -p "$shared_project"
+  git -C "$shared_project" init -q
+  git -C "$shared_project" config user.email "test@test.com"
+  git -C "$shared_project" config user.name "Test"
+  bash "$INSTALLER" --project-only \
+    --target "$shared_project" \
+    --project-name "TestProject" \
+    --tracking repo \
+    --strategy skip >/dev/null
+}
+
+teardown_file() {
+  rm -rf "$BATS_FILE_TMPDIR/commit-msg-project"
+}
+
 setup() {
   # Create an isolated temp dir and a bare git repo inside it for each test.
   TEMP_DIR="$(mktemp -d)"
@@ -49,6 +66,12 @@ run_installer() {
     --project-name "TestProject" \
     --tracking repo \
     "$@"
+}
+
+copy_shared_commit_msg_project() {
+  rm -rf "$TEST_PROJECT"
+  mkdir -p "$TEST_PROJECT"
+  cp -R "$BATS_FILE_TMPDIR/commit-msg-project/." "$TEST_PROJECT/"
 }
 
 
@@ -461,8 +484,7 @@ _install_protected_path_policy() {
 # ── Gap 5: commit-msg validates Conventional Commits format ───────────────────
 
 @test "commit-msg: rejects non-conventional commit message" {
-  run_installer --strategy skip
-  [ "$status" -eq 0 ]
+  copy_shared_commit_msg_project
 
   local hook="$TEST_PROJECT/.husky/commit-msg"
   local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
@@ -477,8 +499,7 @@ _install_protected_path_policy() {
 }
 
 @test "commit-msg: accepts valid conventional commit message" {
-  run_installer --strategy skip
-  [ "$status" -eq 0 ]
+  copy_shared_commit_msg_project
 
   local hook="$TEST_PROJECT/.husky/commit-msg"
   local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
@@ -491,8 +512,7 @@ _install_protected_path_policy() {
 }
 
 @test "commit-msg: rejects message missing issue ref when issue-tracking: github" {
-  run_installer --strategy skip
-  [ "$status" -eq 0 ]
+  copy_shared_commit_msg_project
 
   local hook="$TEST_PROJECT/.husky/commit-msg"
   local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
@@ -507,8 +527,7 @@ _install_protected_path_policy() {
 }
 
 @test "commit-msg: accepts message with [#N] issue ref when issue-tracking: github" {
-  run_installer --strategy skip
-  [ "$status" -eq 0 ]
+  copy_shared_commit_msg_project
 
   local hook="$TEST_PROJECT/.husky/commit-msg"
   local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
@@ -521,8 +540,7 @@ _install_protected_path_policy() {
 }
 
 @test "commit-msg: skips validation for merge commits" {
-  run_installer --strategy skip
-  [ "$status" -eq 0 ]
+  copy_shared_commit_msg_project
 
   local hook="$TEST_PROJECT/.husky/commit-msg"
   local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
@@ -535,8 +553,7 @@ _install_protected_path_policy() {
 }
 
 @test "commit-msg: bypass with SKIP_COMMIT_VALIDATION=1" {
-  run_installer --strategy skip
-  [ "$status" -eq 0 ]
+  copy_shared_commit_msg_project
 
   local hook="$TEST_PROJECT/.husky/commit-msg"
   local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
@@ -547,8 +564,7 @@ _install_protected_path_policy() {
 }
 
 @test "commit-msg: rejects message missing Linear ref when issue-tracking: linear" {
-  run_installer --strategy skip
-  [ "$status" -eq 0 ]
+  copy_shared_commit_msg_project
 
   local hook="$TEST_PROJECT/.husky/commit-msg"
   local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
@@ -562,8 +578,7 @@ _install_protected_path_policy() {
 }
 
 @test "commit-msg: accepts message with Linear ref when issue-tracking: linear" {
-  run_installer --strategy skip
-  [ "$status" -eq 0 ]
+  copy_shared_commit_msg_project
 
   local hook="$TEST_PROJECT/.husky/commit-msg"
   local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
@@ -576,8 +591,7 @@ _install_protected_path_policy() {
 }
 
 @test "commit-msg: rejects message missing Trello ref when issue-tracking: trello" {
-  run_installer --strategy skip
-  [ "$status" -eq 0 ]
+  copy_shared_commit_msg_project
 
   local hook="$TEST_PROJECT/.husky/commit-msg"
   local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
@@ -591,8 +605,7 @@ _install_protected_path_policy() {
 }
 
 @test "commit-msg: accepts message with Trello ref when issue-tracking: trello" {
-  run_installer --strategy skip
-  [ "$status" -eq 0 ]
+  copy_shared_commit_msg_project
 
   local hook="$TEST_PROJECT/.husky/commit-msg"
   local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
@@ -605,8 +618,7 @@ _install_protected_path_policy() {
 }
 
 @test "commit-msg: rejects message missing GUS ref when issue-tracking: gus" {
-  run_installer --strategy skip
-  [ "$status" -eq 0 ]
+  copy_shared_commit_msg_project
 
   local hook="$TEST_PROJECT/.husky/commit-msg"
   local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
@@ -620,8 +632,7 @@ _install_protected_path_policy() {
 }
 
 @test "commit-msg: accepts message with GUS ref when issue-tracking: gus" {
-  run_installer --strategy skip
-  [ "$status" -eq 0 ]
+  copy_shared_commit_msg_project
 
   local hook="$TEST_PROJECT/.husky/commit-msg"
   local msg_file="$TEMP_DIR/COMMIT_EDITMSG"
@@ -882,4 +893,3 @@ CLEOF
   [[ "$output" == *"files are stored in the external tracking dir by default"* ]]
   [[ "$output" == *"to the project repo."* ]]
 }
-
