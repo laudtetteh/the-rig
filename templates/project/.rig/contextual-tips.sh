@@ -15,6 +15,20 @@ tip_command_already_used() {
     "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md" 2>/dev/null
 }
 
+tip_sentinel_mtime() {
+  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '0'
+}
+
+tip_recently_shown() {
+  local sentinel="$1" window="${RIG_TIP_RESET_SECONDS:-2592000}" now mtime age
+  [[ -f "$sentinel" ]] || return 1
+  now="$(date +%s 2>/dev/null || printf '0')"
+  mtime="$(tip_sentinel_mtime "$sentinel")"
+  [[ "$now" =~ ^[0-9]+$ && "$mtime" =~ ^[0-9]+$ && "$window" =~ ^[0-9]+$ ]] || return 0
+  age=$((now - mtime))
+  [[ "$age" -lt "$window" ]]
+}
+
 evidence_errors_logged() {
   [[ -f "$RIG_DIR/memory/ERRORS.md" ]] &&
     grep -Eq '^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] — ' "$RIG_DIR/memory/ERRORS.md" 2>/dev/null
@@ -69,15 +83,21 @@ suppress_session_name() { ! tip_command_available session-name || tip_command_al
 evidence_fewer_prompts() { return 0; }
 suppress_fewer_prompts() { [[ -f "$RIG_DIR/memory/.fewer-prompts-enabled" ]]; }
 
+evidence_project_docs_without_index() {
+  [[ -d "$REPO/docs" ]] && [[ ! -f "$REPO/docs/INDEX.md" ]]
+}
+suppress_project_docs_without_index() { [[ -f "$REPO/docs/INDEX.md" ]]; }
+
 tip_catalog() {
   cat <<'CATALOG'
-100|debug-errors|evidence_errors_logged|suppress_debug|Tip: ERRORS.md contains a recorded failure. Run /debug to investigate the observed error with a saved hypothesis trail.
-90|rig-gaps|evidence_gaps_logged|suppress_rig_gaps|Tip: RIG_GAPS.md contains workflow friction. Run /rig-gaps to review and format the observed gaps for action.
-80|code-review|evidence_reviewable_branch|suppress_code_review|Tip: this feature branch is at least two commits ahead of its base. Run /code-review for a focused review before shipping.
-70|sprint|evidence_sprint|suppress_sprint|Tip: PROGRESS.md references at least three distinct issues. Run /sprint to plan and batch that multi-issue work.
-60|task-tracking|evidence_task_tracking|suppress_task_tracking|Tip: multiple sessions exist with no active task. Run /task to give multi-file work a recovery anchor.
-50|session-name|evidence_session_name|suppress_session_name|Tip: this repository has committed work. Run /session-name to anchor this session with a name that survives compaction.
-40|fewer-prompts|evidence_fewer_prompts|suppress_fewer_prompts|Tip: permission-pattern scanning is off. Touch $RIG_DIR/memory/.fewer-prompts-enabled to scan for fewer safe prompts at every /wrap.
+100|debug-errors|evidence_errors_logged|suppress_debug|Rig tip (workflow): ERRORS.md contains a recorded failure. Run /debug to investigate the observed error with a saved hypothesis trail.
+90|rig-gaps|evidence_gaps_logged|suppress_rig_gaps|Rig tip (workflow): RIG_GAPS.md contains workflow friction. Run /rig-gaps to review and format the observed gaps for action.
+80|code-review|evidence_reviewable_branch|suppress_code_review|Rig tip (workflow): this feature branch is at least two commits ahead of its base. Run /code-review for a focused review before shipping.
+70|sprint|evidence_sprint|suppress_sprint|Rig tip (workflow): PROGRESS.md references at least three distinct issues. Run /sprint to plan and batch that multi-issue work.
+60|task-tracking|evidence_task_tracking|suppress_task_tracking|Rig tip (workflow): multiple sessions exist with no active task. Run /task to give multi-file work a recovery anchor.
+50|session-name|evidence_session_name|suppress_session_name|Rig tip (workflow): this repository has committed work. Run /session-name to anchor this session with a name that survives compaction.
+45|project-docs-index|evidence_project_docs_without_index|suppress_project_docs_without_index|Rig tip (project): docs/ exists without docs/INDEX.md. Add a short docs/INDEX.md so project documentation has one discoverable entry point.
+40|fewer-prompts|evidence_fewer_prompts|suppress_fewer_prompts|Rig tip (workflow): permission-pattern scanning is off. Touch $RIG_DIR/memory/.fewer-prompts-enabled to scan for fewer safe prompts at every /wrap.
 CATALOG
 }
 
@@ -90,7 +110,7 @@ collect_contextual_tip() {
   while IFS='|' read -r priority id evidence suppression copy; do
     [[ "$priority" =~ ^[0-9]+$ && -n "$id" && "$evidence" =~ ^[a-z_]+$ && "$suppression" =~ ^[a-z_]+$ ]] || continue
     sentinel="$RIG_DIR/memory/tips/.tip-${id}-shown"
-    [[ -f "$sentinel" ]] && continue
+    tip_recently_shown "$sentinel" && continue
     "$evidence" 2>/dev/null || continue
     "$suppression" 2>/dev/null && continue
     if [[ "$priority" -gt "$best_priority" ]]; then
