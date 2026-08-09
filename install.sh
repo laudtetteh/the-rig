@@ -1020,7 +1020,11 @@ PYEOF
 
 record_upgrade_destination_conflict() {
   local rel="$1" state="$2"
-  warn "Preserved conflicting upgrade destination: ${rel:-unknown} (${state})"
+  if [[ "$state" == "symlink" && ( "$rel" == .claude/* || "$rel" == .codex/* || "$rel" == .agents/skills/* ) ]]; then
+    warn "Customized symlink detected: ${rel:-unknown}"
+  else
+    warn "Preserved conflicting upgrade destination: ${rel:-unknown} (${state})"
+  fi
   record_upgrade_result skipped-conflict "$rel"
 }
 

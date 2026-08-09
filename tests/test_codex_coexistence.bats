@@ -272,8 +272,9 @@ PY
   [ -x "$TEST_PROJECT/.codex/hooks/rig-adapter.sh" ]
   [ -x "$TEST_PROJECT/.claude/hooks/pre-tool.sh" ]
   [ ! -f "$TEST_PROJECT/.claude/settings.json" ]
-  if grep -Fq '.codex/' "$TEST_PROJECT/.rig/memory/.rig-manifest"; then return 1; fi
-  if grep -Fq '.agents/skills/' "$TEST_PROJECT/.rig/memory/.rig-manifest"; then return 1; fi
+  grep -Fq '  .codex/hooks.json' "$TEST_PROJECT/.rig/memory/.rig-manifest"
+  grep -Fq '  .codex/hooks/rig-adapter.sh' "$TEST_PROJECT/.rig/memory/.rig-manifest"
+  grep -Fq '  .agents/skills/' "$TEST_PROJECT/.rig/memory/.rig-manifest"
   [[ "$output" == *"open /hooks"* ]] || return 1
 
   payload='{"session_id":"test","cwd":"'$TEST_PROJECT'","hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_use_id":"call-1","tool_input":{"command":"*** Begin Patch\n*** Update File: CLAUDE.md\n*** End Patch"}}'

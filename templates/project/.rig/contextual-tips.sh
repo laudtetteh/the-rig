@@ -16,7 +16,7 @@ tip_command_already_used() {
 }
 
 tip_sentinel_mtime() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '0'
+  stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || printf '0'
 }
 
 tip_recently_shown() {

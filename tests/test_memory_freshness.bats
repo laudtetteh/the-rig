@@ -114,7 +114,7 @@ EOF
     'cd "$1" && exec "$2/session-start.sh"' _ "$CASE_DIR" "$HOOK_DIR" \
     <<<'{"source":"startup"}'
   [ "$status" -eq 0 ]
-  OUTPUT="$output" python3 -c 'import json,os; text=json.loads(os.environ["OUTPUT"])["hookSpecificOutput"]["additionalContext"]; assert "Merge: abc123 at 2026-07-31T10:20:30-07:00." in text; assert "skip for current task" in text; assert "without clearing the reminder" in text; assert "Tip:" in text'
+  OUTPUT="$output" python3 -c 'import json,os; text=json.loads(os.environ["OUTPUT"])["hookSpecificOutput"]["additionalContext"]; assert "Merge: abc123 at 2026-07-31T10:20:30-07:00." in text; assert "skip for current task" in text; assert "without clearing the reminder" in text; assert "Rig tip relay:" in text'
   [ -f "$RIG_DIR/memory/.post-merge-pending" ]
 }
 
