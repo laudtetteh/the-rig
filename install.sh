@@ -3497,6 +3497,15 @@ PYEOF
     # agent-plan: classification only, never substitute placeholders.
     [[ "$AGENT_DRY_RUN" == true ]] && return 0
     sed_inplace "s/\\[BASE_BRANCH\\]/${_BASE_ESC}/g" "$f"
+    # Refresh the manifest hash for whatever this substitution just changed.
+    # A manifest entry recorded earlier in this same run (by copy_file()'s
+    # write_manifest_entry() call, before this substitution ever ran) goes
+    # stale against the content this run itself just wrote -- confirmed
+    # live under --strategy agent-upgrade: 4 of 5 updated files (every one
+    # containing [BASE_BRANCH]) kept their pre-substitution hash in both
+    # manifest files despite fresh on-disk content, misclassifying an
+    # untouched file as "customized" on the very next upgrade. Issue #498.
+    write_manifest_entry "$(sha256_file "$f")" "$rel" "$MANIFEST_FILE" "$f"
   }
   _subst_base_branch "$TARGET/CLAUDE.md"
   _subst_base_branch "$TARGET/.claude/commands/ship.md"
