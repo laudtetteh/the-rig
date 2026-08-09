@@ -1054,6 +1054,40 @@ upgrade_set_executable_bits() {
 # with .git/hooks/pre-commit symlinked outside the project silently
 # overwrote the symlink's target in place, printing "A backup will be
 # saved..." while creating zero backup.)
+# Run-scoped record of destinations this run has already written content to,
+# via ANY code path (copy_file()'s create branch, _upgrade_write(),
+# copy_codex_owned_initial(), etc.) -- not just this function's own callers.
+# Strategy-agnostic and independent of UPGRADE_JOURNAL/record_created(),
+# which are gated on COLLISION_STRATEGY==upgrade and no-op for every other
+# strategy. guard_destination_before_write()'s regular-file classification
+# cannot otherwise distinguish "this destination existed before this run
+# started" from "this destination was written moments ago by an earlier step
+# in this same run" -- both look identical: an existing regular file. A
+# later guard call reaching a same-run creation must never take a second,
+# spurious backup of it (there is no meaningful prior state to preserve);
+# only a destination NOT in this list is genuinely pre-existing. Plain
+# indexed array, not an associative one -- this script must run under
+# bash 3.2 (macOS's stock, pre-GPLv3 bash), which has no `declare -A`.
+# Issue #493 (found via #482's settings.json call-site migration: routing
+# the SubagentStart-injection and [REPO_ROOT]-substitution steps through
+# guard_destination_before_write() took a second, spurious backup of the
+# same-run smart-merged settings.json, clobbering the smart-merge's own
+# correct backup and breaking issue #470's regression test).
+_RUN_WRITTEN_DESTINATIONS=()
+
+mark_written_this_run() {
+  local destination="$1"
+  _RUN_WRITTEN_DESTINATIONS[${#_RUN_WRITTEN_DESTINATIONS[@]}]="$destination"
+}
+
+was_written_this_run() {
+  local destination="$1" seen
+  for seen in "${_RUN_WRITTEN_DESTINATIONS[@]:-}"; do
+    [[ "$seen" == "$destination" ]] && return 0
+  done
+  return 1
+}
+
 guard_destination_before_write() {
   local base="$1" destination="$2" rel="$3" state
   state="$(upgrade_destination_state "$base" "$destination")"
@@ -1065,11 +1099,16 @@ guard_destination_before_write() {
       # than leaving a half-written file with no recovery record.
       ensure_upgrade_transaction "$base"
       record_created "$base" "$destination"
+      mark_written_this_run "$destination"
       return 0
       ;;
     regular-file)
+      if was_written_this_run "$destination"; then
+        return 0
+      fi
       ensure_upgrade_transaction "$base"
       backup_file "$destination" "$base"
+      mark_written_this_run "$destination"
       return 0
       ;;
     *)
@@ -1596,6 +1635,10 @@ _upgrade_write() {
     backup_file "$dest" "$base"
   fi
   cp "$src" "$dest"
+  # See _RUN_WRITTEN_DESTINATIONS above guard_destination_before_write():
+  # a later guard call reaching this same destination this run must know
+  # it was just written, not genuinely pre-existing (issue #493).
+  mark_written_this_run "$dest"
 }
 
 record_created() {
@@ -1932,7 +1975,13 @@ copy_file() {
       record_created "$base" "$dest"
     fi
     # No collision — always install (agent-plan: classification only, no write)
-    [[ "$AGENT_DRY_RUN" == true ]] || cp "$src" "$dest"
+    if [[ "$AGENT_DRY_RUN" != true ]]; then
+      cp "$src" "$dest"
+      # See _RUN_WRITTEN_DESTINATIONS above guard_destination_before_write()
+      # (issue #493): a later guard call reaching this same destination this
+      # run must know it was just created, not genuinely pre-existing.
+      mark_written_this_run "$dest"
+    fi
     success "Created ${dest#${base}/}"
     record_upgrade_result updated "${rel:-${dest#${base}/}}"
     # Record ALL files in the manifest (not just Rig-owned) so the Upgrade
@@ -2046,6 +2095,10 @@ copy_codex_owned_initial() {
     return
   fi
   cp "$src" "$dest"
+  # See _RUN_WRITTEN_DESTINATIONS above guard_destination_before_write()
+  # (issue #493): a later guard call reaching this same destination this run
+  # must know it was just created, not genuinely pre-existing.
+  mark_written_this_run "$dest"
   success "Created ${dest#${base}/}"
   write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file" "$dest"
 }
@@ -3369,25 +3422,25 @@ if [[ "$DO_PROJECT" == true ]]; then
   # When INSTALL_SUBAGENTS=true (via --subagents or auto-detect), inject the
   # SubagentStart entry with [REPO_ROOT] placeholder; it is substituted below.
   #
-  # Reverted from guard_destination_before_write() back to
-  # upgrade_prepare_mutation() (issue #482 follow-up): this step and the
-  # [REPO_ROOT] substitution step right below it both run immediately after
-  # the SAME settings.json was just created or smart-merged earlier in this
-  # SAME run (see the "settings.json: always smart-merge" branch in
-  # copy_file(), whose own _upgrade_write() call already correctly backs up
-  # a genuinely pre-existing settings.json before overwriting it).
-  # guard_destination_before_write()'s regular-file classification cannot
-  # distinguish "this file existed before this run started" from "this file
-  # was written moments ago by an earlier step in this same run" -- so
-  # migrating this call site took a second, spurious backup of the
-  # just-created/just-merged file, silently clobbering the smart-merge's
-  # own correct backup with this run's own intermediate content. Broke a
-  # previously-passing regression test (issue #470) on a fresh CI run.
-  # Filed as a follow-up (#493) to fix properly with same-run-creation
-  # tracking; reverted here to unblock, matching the precedent already set
-  # for the moved-project settings.json rewrite a few hundred lines up.
+  # Migrated (back) to guard_destination_before_write() -- issue #493. This
+  # step and the [REPO_ROOT] substitution step right below it both run
+  # immediately after the SAME settings.json was just created or smart-merged
+  # earlier in this SAME run (see the "settings.json: always smart-merge"
+  # branch in copy_file(), whose own _upgrade_write() call already correctly
+  # backs up a genuinely pre-existing settings.json before overwriting it).
+  # guard_destination_before_write() previously couldn't distinguish "this
+  # file existed before this run started" from "this file was written
+  # moments ago by an earlier step in this same run" -- migrating this call
+  # site took a second, spurious backup of the just-created/just-merged
+  # file, silently clobbering the smart-merge's own correct backup (broke
+  # issue #470's regression test) -- reverted to upgrade_prepare_mutation()
+  # to unblock at the time. #493 fixed the root cause: every write path that
+  # can reach settings.json earlier in the same run (copy_file()'s create
+  # branch, _upgrade_write()) now calls mark_written_this_run(), and
+  # guard_destination_before_write() skips the backup entirely for a
+  # same-run creation via was_written_this_run() -- safe to migrate back.
   if [[ "$INSTALL_SUBAGENTS" == true && "$AGENT_DRY_RUN" != true && -f "$TARGET/.claude/settings.json" ]] && \
-     upgrade_prepare_mutation "$TARGET" "$TARGET/.claude/settings.json" ".claude/settings.json"; then
+     guard_destination_before_write "$TARGET" "$TARGET/.claude/settings.json" ".claude/settings.json"; then
     if command -v python3 >/dev/null 2>&1; then
       python3 - "$TARGET/.claude/settings.json" <<'PYEOF' 2>/dev/null || true
 import json, sys
@@ -3408,12 +3461,11 @@ PYEOF
 
   # Substitute [REPO_ROOT] in settings.json with the absolute project path.
   # This step runs after copy/merge to ensure the final file has the real
-  # path. Reverted from guard_destination_before_write() back to
-  # upgrade_prepare_mutation() -- see the SubagentStart injection comment
-  # immediately above for why (issue #482 follow-up, #493).
+  # path. Migrated (back) to guard_destination_before_write() -- see the
+  # SubagentStart injection comment immediately above for why (issue #493).
   TARGET_SETTINGS="$TARGET/.claude/settings.json"
   if [[ -f "$TARGET_SETTINGS" ]] && \
-     upgrade_prepare_mutation "$TARGET" "$TARGET_SETTINGS" ".claude/settings.json"; then
+     guard_destination_before_write "$TARGET" "$TARGET_SETTINGS" ".claude/settings.json"; then
     # agent-plan: classification only, never substitute placeholders.
     if [[ "$AGENT_DRY_RUN" != true ]]; then
       ESCAPED_PATH="${TARGET_ABS//\//\\/}"
