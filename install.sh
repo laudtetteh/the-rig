@@ -1199,9 +1199,8 @@ upgrade_manifest_base() {
 # still destroys it with zero protection). Issue #490; out of #482's scope,
 # which covered upgrade_prepare_mutation() call sites specifically.
 upgrade_manifest_mutation_allowed() {
-  local manifest_file="$1" rel="$2" base state destination manifest_rel
+  local manifest_file="$1" rel="$2" base state destination destination_rel
   base="$(upgrade_manifest_base "$manifest_file")"
-  manifest_rel="${manifest_file#"$base"/}"
   for destination in "$manifest_file" "${manifest_file}.json"; do
     state="$(upgrade_destination_state "$base" "$destination")"
     case "$state" in
@@ -1220,10 +1219,19 @@ upgrade_manifest_mutation_allowed() {
         # per-file bookkeeping under the caller's own $rel, unchanged --
         # that's genuinely about which files' manifest entries were
         # skipped, not about the conflict's location. Issue #503.
+        #
+        # destination_rel is computed per-iteration, inside the loop, NOT
+        # once from $manifest_file before it -- the loop checks two
+        # distinct destinations ($manifest_file and its .json sidecar),
+        # and either one alone can be the actual conflict while the other
+        # is genuinely missing/fine. Computing it once outside the loop
+        # would misattribute a .json-sidecar-only conflict to the base
+        # manifest path instead -- confirmed live during review.
         case "${_WARNED_MANIFEST_CONFLICTS:-}" in
           *"|${manifest_file}|"*) ;;
           *)
-            warn "Preserved conflicting upgrade destination: ${manifest_rel} (${state}) — manifest bookkeeping skipped for every file this run until this is resolved"
+            destination_rel="${destination#"$base"/}"
+            warn "Preserved conflicting upgrade destination: ${destination_rel} (${state}) — manifest bookkeeping skipped for every file this run until this is resolved"
             _WARNED_MANIFEST_CONFLICTS="${_WARNED_MANIFEST_CONFLICTS:-}|${manifest_file}|"
             ;;
         esac

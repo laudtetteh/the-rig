@@ -104,3 +104,27 @@ teardown() { rm -rf "$TEMP_DIR"; }
   run grep -qF "Preserved conflicting upgrade destination: CLAUDE.md" <<< "$install_output"
   [ "$status" -ne 0 ]
 }
+
+@test ".rig-manifest.json: a symlinked sidecar alone is attributed to itself, not the (missing, fine) base manifest" {
+  # Found during #503's own review: destination_rel was originally computed
+  # ONCE from $manifest_file before the loop, but the loop checks TWO
+  # distinct destinations ($manifest_file and its .json sidecar) -- if only
+  # the .json sidecar is the actual conflict while the base path is
+  # genuinely missing (a normal, benign state), the warning still named the
+  # base path as "(symlink)", reintroducing a smaller-scoped version of the
+  # exact bug #503 set out to fix. Confirmed live before this fix.
+  mkdir -p "$TEST_PROJECT/.rig/memory"
+  local external_target="$TEMP_DIR/external-manifest-json.txt"
+  printf 'attacker-controlled\n' > "$external_target"
+  ln -s "$external_target" "$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  [ ! -e "$TEST_PROJECT/.rig/memory/.rig-manifest" ]
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking repo --strategy merge
+  [ "$status" -eq 0 ]
+
+  run grep -qF "Preserved conflicting upgrade destination: memory/.rig-manifest.json (symlink)" <<< "$output"
+  [ "$status" -eq 0 ]
+  run grep -qF "Preserved conflicting upgrade destination: memory/.rig-manifest (symlink)" <<< "$output"
+  [ "$status" -ne 0 ]
+}
