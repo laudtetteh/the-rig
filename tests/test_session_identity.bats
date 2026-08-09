@@ -215,7 +215,7 @@ with open('$TEST_SESSION_FILE', 'w') as f:
   run_hook_exec "stop.sh" '{}'
 
   grep -q "<!-- session-end" "$RIG_DIR/memory/PROGRESS.md"
-  ! grep -q "sid:" "$RIG_DIR/memory/PROGRESS.md"
+  if grep -q "sid:" "$RIG_DIR/memory/PROGRESS.md"; then return 1; fi
 }
 
 @test "stop: idempotent — does not double-append marker" {
@@ -266,7 +266,9 @@ with open('$TEST_SESSION_FILE', 'w') as f:
   run_hook_exec "stop.sh" '{"source":"logout"}'
 
   grep -q "\*\*Session anchor:\*\*" "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
-  ! grep -q "\*\*Session name:\*\*" "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
+  if grep -q "\*\*Session name:\*\*" "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"; then
+    return 1
+  fi
 }
 
 @test "session-end: clear does not set .wrap-needed" {
@@ -293,7 +295,9 @@ with open('$TEST_SESSION_FILE', 'w') as f:
   [ -f "$CKPT" ]
   grep -q "\*\*Session anchor:\*\* compuuid" "$CKPT"
   grep -q "\*\*Session tentative name:\*\* feat phase2" "$CKPT"
-  ! grep -q "\*\*Session name:\*\*" "$CKPT"
+  if grep -q "\*\*Session name:\*\*" "$CKPT"; then
+    return 1
+  fi
 }
 
 @test "pre-compact: uses none for anchor when no session file exists" {

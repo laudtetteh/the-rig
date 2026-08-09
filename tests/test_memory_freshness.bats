@@ -90,7 +90,9 @@ EOF
   head_sha=$(git -C "$CASE_DIR" rev-parse HEAD)
   grep -Fxq "merge_sha=$head_sha" "$pending"
   grep -Eq '^merged_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$pending"
-  ! find "$RIG_DIR/memory" -name '.post-merge-pending.tmp.*' | grep -q .
+  if find "$RIG_DIR/memory" -name '.post-merge-pending.tmp.*' | grep -q .; then
+    return 1
+  fi
 }
 
 @test "prompt warning reports merge metadata and preserves consistent skip wording" {
@@ -123,12 +125,12 @@ EOF
   run bash -c 'cd "$1" && exec "$2/prompt-submit.sh"' _ "$CASE_DIR" "$HOOK_DIR"
   [ "$status" -eq 0 ]
   [ ! -e /tmp/rig-352-injected ]
-  [[ "$output" == *'$(touch /tmp/rig-352-injected)'* ]]
+  [[ "$output" == *'$(touch /tmp/rig-352-injected)'* ]] || return 1
 
   : > "$RIG_DIR/memory/.post-merge-pending"
   run bash -c 'cd "$1" && exec "$2/prompt-submit.sh"' _ "$CASE_DIR" "$HOOK_DIR"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"skip for current task"* ]]
+  [[ "$output" == *"skip for current task"* ]] || return 1
 }
 
 @test "post-merge command documents metadata-preserving task skip" {

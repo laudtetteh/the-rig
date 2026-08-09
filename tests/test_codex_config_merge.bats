@@ -93,7 +93,7 @@ EOF
   run_no_tomllib_merge "$config"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"must be a top-level setting"* ]]
+  [[ "$output" == *"must be a top-level setting"* ]] || return 1
   [ "$before" = "$(cksum "$config")" ]
 }
 

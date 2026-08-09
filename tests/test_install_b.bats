@@ -433,7 +433,7 @@ assert 'old-session' not in ctx, 'Got stale checkpoint instead of latest: ' + ct
   git -C "$tmpdir" init -q
   bash "$REPO_ROOT/install.sh" --project-only --target "$tmpdir" --strategy merge \
     --tracking repo 2>/dev/null
-  ! grep -q '"SubagentStart"' "$tmpdir/.claude/settings.json"
+  if grep -q '"SubagentStart"' "$tmpdir/.claude/settings.json"; then return 1; fi
   rm -rf "$tmpdir"
 }
 

@@ -97,10 +97,10 @@ tree_snapshot() {
 
   install_stealth
   [ "$status" -eq 0 ]
-  [[ "$output" == *"customized or unrecognized git hook detected: .git/hooks/pre-commit"* ]]
+  [[ "$output" == *"customized or unrecognized git hook detected: .git/hooks/pre-commit"* ]] || return 1
 
   # Ordinary mode keeps its existing overwrite behavior — the Rig hook wins...
-  ! grep -q 'hand-written-hook-marker' "$TEST_PROJECT/.git/hooks/pre-commit"
+  if grep -q 'hand-written-hook-marker' "$TEST_PROJECT/.git/hooks/pre-commit"; then return 1; fi
   # ...but the replaced content is now recoverable from a backup.
   run grep -rl 'hand-written-hook-marker' "$TEST_PROJECT/.rig-backup"
   [ "$status" -eq 0 ]
@@ -129,7 +129,7 @@ tree_snapshot() {
   # The symlink itself must still point at it (never replaced with a
   # regular file copy of the Rig hook).
   [ -L "$TEST_PROJECT/.git/hooks/pre-commit" ]
-  [[ "$(readlink "$TEST_PROJECT/.git/hooks/pre-commit")" == "$external_target" ]]
+  [[ "$(readlink "$TEST_PROJECT/.git/hooks/pre-commit")" == "$external_target" ]] || return 1
 }
 
 @test "a symlinked git hook is refused under --strategy merge too, not just upgrade (retro-audit finding, /rig-surface-review's first real run)" {
@@ -368,7 +368,7 @@ assert '.git/hooks/pre-commit' not in conflict_paths, conflict_paths
   # on disk, but no baseline entry recorded.
   grep -vF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest" > "$TEMP_DIR/manifest.tmp"
   mv "$TEMP_DIR/manifest.tmp" "$RIG_EXT/memory/.rig-manifest"
-  ! grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"
+  if grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"; then return 1; fi
 
   local before_hash
   before_hash="$(_sha256 "$TEST_PROJECT/.git/hooks/pre-commit")"
@@ -395,7 +395,7 @@ assert '.git/hooks/pre-commit' not in conflict_paths, conflict_paths
   local after_hash
   after_hash="$(_sha256 "$TEST_PROJECT/.git/hooks/pre-commit")"
   [ "$before_hash" = "$after_hash" ]
-  ! grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"
+  if grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"; then return 1; fi
 }
 
 # Companion to the agent-plan test above: agent-upgrade (the real apply
@@ -408,7 +408,7 @@ assert '.git/hooks/pre-commit' not in conflict_paths, conflict_paths
 
   grep -vF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest" > "$TEMP_DIR/manifest.tmp"
   mv "$TEMP_DIR/manifest.tmp" "$RIG_EXT/memory/.rig-manifest"
-  ! grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"
+  if grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"; then return 1; fi
 
   local before_hash
   before_hash="$(_sha256 "$TEST_PROJECT/.git/hooks/pre-commit")"
@@ -450,7 +450,7 @@ assert '.git/hooks/pre-commit' not in conflict_paths, conflict_paths
 
   grep -vF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest" > "$TEMP_DIR/manifest.tmp"
   mv "$TEMP_DIR/manifest.tmp" "$RIG_EXT/memory/.rig-manifest"
-  ! grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"
+  if grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"; then return 1; fi
 
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking stealth --rig-dir "$RIG_EXT" \
@@ -471,5 +471,5 @@ assert '.git/hooks/pre-commit' in paths, paths
   grep -q 'hand-written-hook-marker' "$TEST_PROJECT/.git/hooks/pre-commit"
   # And still no manifest entry -- agent-upgrade never writes one for a
   # refused/customized hook.
-  ! grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"
+  if grep -qF '.git/hooks/pre-commit' "$RIG_EXT/memory/.rig-manifest"; then return 1; fi
 }

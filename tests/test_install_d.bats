@@ -196,7 +196,7 @@ _main_branch_check() {
 @test "--tracking: invalid value exits non-zero with error message" {
   run_installer --strategy skip --tracking bogus
   [ "$status" -ne 0 ]
-  [[ "$output" == *"Invalid --tracking"* ]]
+  [[ "$output" == *"Invalid --tracking"* ]] || return 1
 }
 
 @test "--target without --tracking defaults to stealth tracking" {
@@ -256,7 +256,7 @@ _main_branch_check() {
     --strategy merge
   [ "$status" -eq 0 ]
   # Warning must mention the stale .rig/
-  [[ "$output" == *"In-repo .rig/ found"* ]] || [[ "$output" == *"superseded"* ]]
+  [[ "$output" == *"In-repo .rig/ found"* ]] || [[ "$output" == *"superseded"* ]] || return 1
   # Non-interactive default is "y" — .rig/ is auto-removed
   [ ! -d "$TEST_PROJECT/.rig" ]
 }
@@ -276,7 +276,7 @@ _main_branch_check() {
   # Must stay in repo mode: no .rigpath, .rig/VERSION still in project dir
   [ ! -f "$TEST_PROJECT/.rigpath" ]
   [ -f "$TEST_PROJECT/.rig/VERSION" ]
-  [[ "$output" == *"Auto-detected existing tracking mode: repo"* ]]
+  [[ "$output" == *"Auto-detected existing tracking mode: repo"* ]] || return 1
 }
 
 @test "upgrade auto-detects local mode when .rig/ is in .git/info/exclude" {
@@ -294,7 +294,7 @@ _main_branch_check() {
   # Must stay in local mode: no .rigpath, .rig/ still in project dir
   [ ! -f "$TEST_PROJECT/.rigpath" ]
   [ -f "$TEST_PROJECT/.rig/VERSION" ]
-  [[ "$output" == *"Auto-detected existing tracking mode: local"* ]]
+  [[ "$output" == *"Auto-detected existing tracking mode: local"* ]] || return 1
 }
 
 @test "upgrade auto-detects local mode when .rig/ is in .gitignore" {
@@ -309,7 +309,7 @@ _main_branch_check() {
     --strategy upgrade
   [ "$status" -eq 0 ]
   [ ! -f "$TEST_PROJECT/.rigpath" ]
-  [[ "$output" == *"Auto-detected existing tracking mode: local"* ]]
+  [[ "$output" == *"Auto-detected existing tracking mode: local"* ]] || return 1
 }
 
 @test "fresh install: .rig/VERSION matches installer VERSION" {
@@ -449,8 +449,8 @@ _main_branch_check() {
   [ "$status" -eq 0 ]
 
   [ ! -e "$legacy" ]
-  [[ "$output" == *"Removed obsolete legacy hook: .claude/hooks/session-end.sh"* ]]
-  [[ "$output" == *"Removed obsolete: 1"* ]]
+  [[ "$output" == *"Removed obsolete legacy hook: .claude/hooks/session-end.sh"* ]] || return 1
+  [[ "$output" == *"Removed obsolete: 1"* ]] || return 1
   [ "$(find "$TEST_PROJECT/.rig-backup" -name session-end.sh -type f | wc -l | tr -d ' ')" -ge 1 ]
 }
 
@@ -468,9 +468,9 @@ _main_branch_check() {
   [ "$status" -eq 0 ]
   [ -f "$legacy" ]
   grep -q '# user customization' "$legacy"
-  [[ "$output" == *"Skipped conflicts: 1"* ]]
-  [[ "$output" == *"Conflicting legacy artifacts requiring explicit repair:"* ]]
-  [[ "$output" == *"RIG_UPGRADE_REVIEW_REQUIRED=1"* ]]
+  [[ "$output" == *"Skipped conflicts: 1"* ]] || return 1
+  [[ "$output" == *"Conflicting legacy artifacts requiring explicit repair:"* ]] || return 1
+  [[ "$output" == *"RIG_UPGRADE_REVIEW_REQUIRED=1"* ]] || return 1
 }
 
 @test "upgrade: preserves a symlinked session-end hook without touching its target" {
@@ -486,8 +486,8 @@ _main_branch_check() {
   [ "$status" -eq 0 ]
   [ -L "$legacy" ]
   grep -q '# outside sentinel' "$outside"
-  [[ "$output" == *"Skipped conflicts: 1"* ]]
-  [[ "$output" == *"Preserved legacy hook symlink"* ]]
+  [[ "$output" == *"Skipped conflicts: 1"* ]] || return 1
+  [[ "$output" == *"Preserved legacy hook symlink"* ]] || return 1
 }
 
 @test "upgrade: preserves a dangling session-end hook" {
@@ -500,7 +500,7 @@ _main_branch_check() {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
   [ -L "$legacy" ]
-  [[ "$output" == *"Skipped conflicts: 1"* ]]
+  [[ "$output" == *"Skipped conflicts: 1"* ]] || return 1
 }
 
 @test "upgrade: preserves an untracked session-end hook" {
@@ -513,7 +513,7 @@ _main_branch_check() {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
   [ -f "$legacy" ]
-  [[ "$output" == *"Skipped conflicts: 1"* ]]
+  [[ "$output" == *"Skipped conflicts: 1"* ]] || return 1
 }
 
 @test "upgrade: preserves a wrong-type session-end path" {
@@ -526,8 +526,8 @@ _main_branch_check() {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
   [ -d "$legacy" ]
-  [[ "$output" == *"Skipped conflicts: 1"* ]]
-  [[ "$output" == *"unsupported file type"* ]]
+  [[ "$output" == *"Skipped conflicts: 1"* ]] || return 1
+  [[ "$output" == *"unsupported file type"* ]] || return 1
 }
 
 @test "upgrade: settings.json SessionEnd hook updated from session-end.sh to stop.sh" {
@@ -585,9 +585,9 @@ sys.exit(1)
 
   run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy skip"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"The Rig is installed. Next steps:"* ]]
-  [[ "$output" != *"── Upgrade summary ──"* ]]
-  [[ "$output" != *"RIG_UPGRADE_REVIEW_REQUIRED="* ]]
+  [[ "$output" == *"The Rig is installed. Next steps:"* ]] || return 1
+  [[ "$output" != *"── Upgrade summary ──"* ]] || return 1
+  [[ "$output" != *"RIG_UPGRADE_REVIEW_REQUIRED="* ]] || return 1
 }
 
 @test "upgrade summary counts an untracked user-owned file separately" {
@@ -599,7 +599,7 @@ sys.exit(1)
 
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Skipped untracked user-owned: 1"* ]]
+  [[ "$output" == *"Skipped untracked user-owned: 1"* ]] || return 1
   grep -q 'MY UNTRACKED PROJECT CONTEXT' "$TEST_PROJECT/CLAUDE.md"
 }
 
@@ -611,15 +611,15 @@ sys.exit(1)
 
   run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy upgrade"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"── Upgrade summary ──"* ]]
-  [[ "$output" == *"Skipped customized: 0"* ]]
-  [[ "$output" == *"Selected agents: global=claude project=claude"* ]]
-  [[ "$output" == *"Missing prerequisites: none"* ]]
-  [[ "$output" == *"Degraded/skipped capabilities:"* ]]
-  [[ "$output" == *"Exact next steps:"* ]]
-  [[ "$output" == *"Global smoke tests (expected signal: passed):"* ]]
-  [[ "$output" == *"The Rig upgrade is complete. Next steps:"* ]]
-  [[ "${lines[$((${#lines[@]} - 1))]}" == "RIG_UPGRADE_REVIEW_REQUIRED=0" ]]
+  [[ "$output" == *"── Upgrade summary ──"* ]] || return 1
+  [[ "$output" == *"Skipped customized: 0"* ]] || return 1
+  [[ "$output" == *"Selected agents: global=claude project=claude"* ]] || return 1
+  [[ "$output" == *"Missing prerequisites: none"* ]] || return 1
+  [[ "$output" == *"Degraded/skipped capabilities:"* ]] || return 1
+  [[ "$output" == *"Exact next steps:"* ]] || return 1
+  [[ "$output" == *"Global smoke tests (expected signal: passed):"* ]] || return 1
+  [[ "$output" == *"The Rig upgrade is complete. Next steps:"* ]] || return 1
+  [[ "${lines[$((${#lines[@]} - 1))]}" == "RIG_UPGRADE_REVIEW_REQUIRED=0" ]] || return 1
 }
 
 @test "upgrade summary lists customized skips and sets manual-review signal" {
@@ -631,11 +631,11 @@ sys.exit(1)
 
   run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy upgrade"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Skipped customized: 1"* ]]
-  [[ "$output" == *"Customized files requiring manual review:"* ]]
-  [[ "$output" == *"  - CLAUDE.md"* ]]
+  [[ "$output" == *"Skipped customized: 1"* ]] || return 1
+  [[ "$output" == *"Customized files requiring manual review:"* ]] || return 1
+  [[ "$output" == *"  - CLAUDE.md"* ]] || return 1
   grep -q '# retained customization' "$fake_home/.claude/CLAUDE.md"
-  [[ "${lines[$((${#lines[@]} - 1))]}" == "RIG_UPGRADE_REVIEW_REQUIRED=1" ]]
+  [[ "${lines[$((${#lines[@]} - 1))]}" == "RIG_UPGRADE_REVIEW_REQUIRED=1" ]] || return 1
 }
 
 @test "commit-msg: # no-issue trailer skips issue ref check for github tracker" {
@@ -681,7 +681,7 @@ sys.exit(1)
   printf 'chore(deps): bump library version\n\nSome body text.\n' > "$msg_file"
   run bash -c "cd '$TEST_PROJECT' && sh '$hook' '$msg_file'"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"issue reference"* ]]
+  [[ "$output" == *"issue reference"* ]] || return 1
 }
 
 # ── permission-request.sh: RIG_DIR write auto-approval ───────────────────────
@@ -709,37 +709,37 @@ _perm_bash_invoke() {
 RIG_DIR="$REPO/.rig";
 cat "$RIG_DIR/memory/PROGRESS.md"'
   result=$(_perm_bash_invoke "$command")
-  [[ "$result" == *'"behavior": "allow"'* ]] || [[ "$result" == *'"behavior":"allow"'* ]]
+  [[ "$result" == *'"behavior": "allow"'* ]] || [[ "$result" == *'"behavior":"allow"'* ]] || return 1
 }
 
 @test "permission-request: every command in a read-only chain is validated" {
   local result
   result=$(_perm_bash_invoke 'git status; grep -n TODO README.md; wc -l README.md')
-  [[ "$result" == *'"behavior": "allow"'* ]] || [[ "$result" == *'"behavior":"allow"'* ]]
+  [[ "$result" == *'"behavior": "allow"'* ]] || [[ "$result" == *'"behavior":"allow"'* ]] || return 1
 }
 
 @test "permission-request: unsafe suffix after safe prefix is not auto-approved" {
   local result
   result=$(_perm_bash_invoke 'git status; touch /tmp/x')
-  [[ -z "$result" ]]
+  [[ -z "$result" ]] || return 1
 }
 
 @test "permission-request: ambiguous shell syntax is not auto-approved" {
   local result
   result=$(_perm_bash_invoke 'git status && cat README.md')
-  [[ -z "$result" ]]
+  [[ -z "$result" ]] || return 1
 }
 
 @test "permission-request: mutating forms of read commands are not auto-approved" {
   local result
   result=$(_perm_bash_invoke 'find . -delete')
-  [[ -z "$result" ]]
+  [[ -z "$result" ]] || return 1
 
   result=$(_perm_bash_invoke 'git branch -D feature')
-  [[ -z "$result" ]]
+  [[ -z "$result" ]] || return 1
 
   result=$(_perm_bash_invoke 'git branch feature')
-  [[ -z "$result" ]]
+  [[ -z "$result" ]] || return 1
 }
 
 @test "permission-request: Edit to \$RIG_DIR is auto-approved" {
@@ -748,7 +748,7 @@ cat "$RIG_DIR/memory/PROGRESS.md"'
   mkdir -p "$rig_dir/memory"
   local result
   result=$(_perm_invoke "Edit" "$rig_dir/memory/PROGRESS.md" "$rig_dir")
-  [[ "$result" == *'"behavior": "allow"'* ]] || [[ "$result" == *'"behavior":"allow"'* ]]
+  [[ "$result" == *'"behavior": "allow"'* ]] || [[ "$result" == *'"behavior":"allow"'* ]] || return 1
 }
 
 @test "permission-request: Write to \$RIG_DIR is auto-approved" {
@@ -757,7 +757,7 @@ cat "$RIG_DIR/memory/PROGRESS.md"'
   mkdir -p "$rig_dir/memory"
   local result
   result=$(_perm_invoke "Write" "$rig_dir/memory/CONTEXT_SNAPSHOT.md" "$rig_dir")
-  [[ "$result" == *'"behavior": "allow"'* ]] || [[ "$result" == *'"behavior":"allow"'* ]]
+  [[ "$result" == *'"behavior": "allow"'* ]] || [[ "$result" == *'"behavior":"allow"'* ]] || return 1
 }
 
 @test "permission-request: Edit outside \$RIG_DIR is not auto-approved" {
@@ -766,7 +766,7 @@ cat "$RIG_DIR/memory/PROGRESS.md"'
   mkdir -p "$rig_dir/memory"
   local result
   result=$(_perm_invoke "Edit" "/some/other/project/src/main.py" "$rig_dir")
-  [[ -z "$result" ]]
+  [[ -z "$result" ]] || return 1
 }
 
 @test "permission-request: .rig-strict-permissions sentinel disables RIG_DIR approval" {
@@ -776,7 +776,7 @@ cat "$RIG_DIR/memory/PROGRESS.md"'
   touch "$rig_dir/memory/.rig-strict-permissions"
   local result
   result=$(_perm_invoke "Edit" "$rig_dir/memory/PROGRESS.md" "$rig_dir")
-  [[ -z "$result" ]]
+  [[ -z "$result" ]] || return 1
 }
 
 @test "fresh install: settings.json includes /tmp/ Edit patterns only" {
@@ -875,6 +875,6 @@ PYEOF
 
   run_installer --strategy merge
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Skipped settings.json (merge failed"* ]]
+  [[ "$output" == *"Skipped settings.json (merge failed"* ]] || return 1
   [ "$(cat "$TEST_PROJECT/.claude/settings.json")" = "{ not valid json" ]
 }

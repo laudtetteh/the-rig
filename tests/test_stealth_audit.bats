@@ -220,5 +220,5 @@ make_leaky_stealth_fixture() {
 
   run git -C "$project" status --porcelain --untracked-files=all
   [ "$status" -eq 0 ]
-  [[ "$output" != *"bin/rig"* ]]
+  [[ "$output" != *"bin/rig"* ]] || return 1
 }

@@ -78,7 +78,7 @@ run_installer() {
 }
 
 @test "project conventions remain writable while governance stays protected" {
-  ! grep -Fq "[RIG_DIR]/memory/PROJECT_CONVENTIONS.md" "$POLICY"
+  if grep -Fq "[RIG_DIR]/memory/PROJECT_CONVENTIONS.md" "$POLICY"; then return 1; fi
   grep -Fxq "[RIG_DIR]/processes/" "$POLICY"
   grep -Fxq "[RIG_DIR]/rules/" "$POLICY"
   grep -Fxq "[REPO]/.husky/" "$POLICY"

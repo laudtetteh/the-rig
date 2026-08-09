@@ -88,12 +88,12 @@ _fail_with_list() {
 
 @test "wrap.md: PROGRESS.md trim executes automatically — no confirmation gate" {
   # Must NOT contain the old 'Trim now?' prompt
-  ! grep -q "Trim now?" "$COMMAND_DIR/wrap.md"
+  if grep -q "Trim now?" "$COMMAND_DIR/wrap.md"; then return 1; fi
 }
 
 @test "wrap.md: ERRORS.md logging infers from context — no 'ask' prompt" {
   # Must NOT ask the user whether anything unexpected happened
-  ! grep -q "Did anything unexpected" "$COMMAND_DIR/wrap.md"
+  if grep -q "Did anything unexpected" "$COMMAND_DIR/wrap.md"; then return 1; fi
 }
 
 @test "wrap.md: trim steps reference Wrap report — not standalone confirmations" {

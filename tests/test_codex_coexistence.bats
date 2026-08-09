@@ -49,7 +49,7 @@ run_install() {
   [ -f "$TEST_PROJECT/.agents/skills/connector-preflight/references/command.md" ]
   grep -Fq 'CONNECTOR_PREFLIGHT.md' "$TEST_PROJECT/.agents/skills/connector-preflight/references/command.md"
   grep -Fq 'exact #409 root session' "$TEST_PROJECT/.agents/skills/connector-preflight/references/command.md"
-  ! grep -Fq 'SQLite' "$TEST_PROJECT/.agents/skills/connector-preflight/references/command.md"
+  if grep -Fq 'SQLite' "$TEST_PROJECT/.agents/skills/connector-preflight/references/command.md"; then return 1; fi
 }
 
 @test "optional command selection is reflected in Codex skills" {
@@ -94,7 +94,7 @@ run_install() {
 @test "generated references receive the selected base branch" {
   run_install codex merge --base-branch trunk
   [ "$status" -eq 0 ]
-  ! grep -R -Fq '[BASE_BRANCH]' "$TEST_PROJECT/.agents/skills"
+  if grep -R -Fq '[BASE_BRANCH]' "$TEST_PROJECT/.agents/skills"; then return 1; fi
   grep -Fq 'trunk' "$TEST_PROJECT/.agents/skills/ship/references/command.md"
 }
 
@@ -117,8 +117,8 @@ run_install() {
   [ "$status" -eq 0 ]
   [ "$(python3 -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$hook")" = "$before_mode" ]
   [ "$(cksum "$hook")" = "$before_sum" ]
-  [[ "$output" != *"Codex hook"* ]]
-  [[ "$output" != *"open /hooks"* ]]
+  [[ "$output" != *"Codex hook"* ]] || return 1
+  [[ "$output" != *"open /hooks"* ]] || return 1
 }
 
 @test "Codex skill upgrade preserves a customized generated reference" {
@@ -130,7 +130,7 @@ run_install() {
   [ "$status" -eq 0 ]
   grep -Fq 'user customization' "$TEST_PROJECT/.agents/skills/status/references/command.md"
   grep -Fq '.agents/skills/status/references/command.md' "$TEST_PROJECT/.rig/memory/.rig-manifest"
-  [[ "$output" == *'Non-interactive mode — skipping customized file: .agents/skills/status/references/command.md'* ]]
+  [[ "$output" == *'Non-interactive mode — skipping customized file: .agents/skills/status/references/command.md'* ]] || return 1
 }
 
 @test "global Codex target installs valid personal skills without Claude assets" {
@@ -140,7 +140,7 @@ run_install() {
   [ -f "$TEST_HOME/.agents/skills/code-review/SKILL.md" ]
   grep -Fq 'name: code-review' "$TEST_HOME/.agents/skills/code-review/SKILL.md"
   grep -Fq '~/.agents/skills/code-review/SKILL.md' "$TEST_HOME/.agents/skills/code-review/SKILL.md"
-  ! grep -Fq '~/.claude/skills/code-review.md' "$TEST_HOME/.agents/skills/code-review/SKILL.md"
+  if grep -Fq '~/.claude/skills/code-review.md' "$TEST_HOME/.agents/skills/code-review/SKILL.md"; then return 1; fi
   [ ! -e "$TEST_HOME/.claude" ]
 }
 
@@ -195,7 +195,7 @@ PY
   payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"command":sys.argv[1]}}))' "$patch")"
   run_adapter "$payload"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"governance file"* ]]
+  [[ "$output" == *"governance file"* ]] || return 1
 
   patch='*** Begin Patch
 *** Update File: src/../CLAUDE.md
@@ -217,27 +217,27 @@ PY
   payload='{"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Update File: src/app.sh\n*** Move to: .husky/pre-commit\n*** End Patch"}}'
   run_adapter "$payload"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"governance file"* ]]
+  [[ "$output" == *"governance file"* ]] || return 1
 }
 
 @test "Codex apply_patch fails closed for missing empty and malformed policy" {
   install_adapter_fixture
   payload='{"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Update File: src/app.sh\n*** End Patch"}}'
   rm "$TEST_PROJECT/.rig/rules/protected-paths.txt"
-  run_adapter "$payload"; [ "$status" -eq 2 ]; [[ "$output" == *"missing or unreadable"* ]]
+  run_adapter "$payload"; [ "$status" -eq 2 ]; [[ "$output" == *"missing or unreadable"* ]] || return 1
   : > "$TEST_PROJECT/.rig/rules/protected-paths.txt"
-  run_adapter "$payload"; [ "$status" -eq 2 ]; [[ "$output" == *"contains no paths"* ]]
+  run_adapter "$payload"; [ "$status" -eq 2 ]; [[ "$output" == *"contains no paths"* ]] || return 1
   printf 'relative/path\n' > "$TEST_PROJECT/.rig/rules/protected-paths.txt"
-  run_adapter "$payload"; [ "$status" -eq 2 ]; [[ "$output" == *"malformed"* ]]
+  run_adapter "$payload"; [ "$status" -eq 2 ]; [[ "$output" == *"malformed"* ]] || return 1
 }
 
 @test "Codex adapter fails closed when project identity is absent or mismatched" {
   install_adapter_fixture
   payload='{"hook_event_name":"SubagentStop","agent_type":"reviewer"}'
   rm "$TEST_PROJECT/.rig/memory/.rig-manifest"
-  run_adapter "$payload"; [ "$status" -eq 2 ]; [[ "$output" == *"identity manifest"* ]]
+  run_adapter "$payload"; [ "$status" -eq 2 ]; [[ "$output" == *"identity manifest"* ]] || return 1
   printf 'abc123  .rig/rules/other.txt\n' > "$TEST_PROJECT/.rig/memory/.rig-manifest"
-  run_adapter "$payload"; [ "$status" -eq 2 ]; [[ "$output" == *"does not own"* ]]
+  run_adapter "$payload"; [ "$status" -eq 2 ]; [[ "$output" == *"does not own"* ]] || return 1
 }
 
 @test "Codex adapter resolves an external rig directory containing spaces" {
@@ -272,9 +272,9 @@ PY
   [ -x "$TEST_PROJECT/.codex/hooks/rig-adapter.sh" ]
   [ -x "$TEST_PROJECT/.claude/hooks/pre-tool.sh" ]
   [ ! -f "$TEST_PROJECT/.claude/settings.json" ]
-  ! grep -Fq '.codex/' "$TEST_PROJECT/.rig/memory/.rig-manifest"
-  ! grep -Fq '.agents/skills/' "$TEST_PROJECT/.rig/memory/.rig-manifest"
-  [[ "$output" == *"open /hooks"* ]]
+  if grep -Fq '.codex/' "$TEST_PROJECT/.rig/memory/.rig-manifest"; then return 1; fi
+  if grep -Fq '.agents/skills/' "$TEST_PROJECT/.rig/memory/.rig-manifest"; then return 1; fi
+  [[ "$output" == *"open /hooks"* ]] || return 1
 
   payload='{"session_id":"test","cwd":"'$TEST_PROJECT'","hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_use_id":"call-1","tool_input":{"command":"*** Begin Patch\n*** Update File: CLAUDE.md\n*** End Patch"}}'
   run_adapter "$payload"
