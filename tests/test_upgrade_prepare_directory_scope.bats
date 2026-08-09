@@ -100,11 +100,11 @@ teardown() { rm -rf "$TEMP_DIR"; }
   printf '{"outside":true}\n' > "$external_target"
   ln -s "$external_target" "$project/.claude/settings.json"
 
-  run bash "$INSTALLER" --project-only --target "$project" \
+  run env HOME="$FAKE_HOME" bash "$INSTALLER" --project-only --target "$project" \
     --project-name Test --strategy merge
   [ "$status" -eq 0 ]
 
-  run grep -qF "Preserved conflicting upgrade destination: .claude/settings.json (symlink)" <<< "$output"
+  run grep -qF "Customized symlink detected: .claude/settings.json" <<< "$output"
   [ "$status" -eq 0 ]
 
   [ -L "$project/.claude/settings.json" ]
