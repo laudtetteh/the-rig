@@ -121,6 +121,13 @@ _fail_with_list() {
   done
 }
 
+@test "rig-help baseline deny patterns match shipped settings.json" {
+  grep -Fq '`rm -rf *`, `git push --force*`, `git push -f*`' "$COMMAND_DIR/rig-help.md"
+
+  run grep -Eq 'DROP TABLE|TRUNCATE' "$COMMAND_DIR/rig-help.md"
+  [ "$status" -ne 0 ]
+}
+
 # ── PR description freshness ───────────────────────────────────────────────────
 
 @test "wrap.md: contains PR description freshness step" {
