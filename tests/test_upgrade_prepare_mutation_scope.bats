@@ -186,16 +186,25 @@ teardown() { rm -rf "$TEMP_DIR"; }
 }
 
 @test "CLAUDE.md: an existing regular file's content is backed up before placeholder substitution overwrites it in place" {
-  # Known limitation, not covered by this test (filed as issue #491): CLAUDE.md
-  # can be touched by up to three separate guard_destination_before_write()
-  # calls in one run ([Project Name], [BASE_BRANCH] via _subst_base_branch(),
-  # and the external/stealth @.rig/ rewrite), each backing up to the same
-  # fixed path -- a later call's backup silently overwrites an earlier one's,
-  # so the surviving backup can be an intermediate substituted state rather
-  # than the true pre-run original. This test only proves *a* backup happens
-  # at all (the #482 behavior in scope here), via marker text untouched by
-  # either sed call, which can't distinguish a pristine backup from a
-  # clobbered intermediate one. See #491 for the backup-collision fix.
+  # Previously a known limitation (filed as issue #491): CLAUDE.md can be
+  # touched by up to three separate guard_destination_before_write() calls
+  # in one run ([Project Name], [BASE_BRANCH] via _subst_base_branch(), and
+  # the external/stealth @.rig/ rewrite), each backing up to the same fixed
+  # path -- a later call's backup could silently overwrite an earlier one's,
+  # so the surviving backup could be an intermediate substituted state
+  # rather than the true pre-run original. Already fixed as a side effect of
+  # this same #482 sweep's own backup_file() dedup (`[[ -e "$dest" ]] &&
+  # return 0` when the fixed-path backup destination already exists this
+  # run -- see backup_file()'s own comment) -- confirmed via live repro
+  # against current main before this test was strengthened. This test
+  # previously only proved *a* backup happens at all, via marker text
+  # untouched by either sed call, which could not distinguish a pristine
+  # backup from a clobbered intermediate one (a clobbered backup missing
+  # only the [BASE_BRANCH] substitution, for example, would still contain
+  # the marker and pass the old assertion). Strengthened to assert BOTH
+  # placeholders remain fully literal in the backup -- the only content
+  # that can prove it's the true pre-run original, not an intermediate
+  # state from partway through this run's own substitution pipeline.
   printf '# [Project Name]\n\nBase branch: [BASE_BRANCH]\n\nhand-written CLAUDE.md marker\n' \
     > "$TEST_PROJECT/CLAUDE.md"
 
@@ -203,11 +212,19 @@ teardown() { rm -rf "$TEMP_DIR"; }
     --project-name Test --tracking repo --strategy merge
   [ "$status" -eq 0 ]
 
-  # The live file was substituted in place (marker content untouched by sed,
-  # but the file itself is the same pre-existing regular file, now with a
-  # backup taken before this run's mutation touched it).
+  # The live file was substituted in place (both placeholders replaced).
   grep -q 'hand-written CLAUDE.md marker' "$TEST_PROJECT/CLAUDE.md"
+  run grep -q '\[Project Name\]' "$TEST_PROJECT/CLAUDE.md"
+  [ "$status" -ne 0 ]
+  run grep -q '\[BASE_BRANCH\]' "$TEST_PROJECT/CLAUDE.md"
+  [ "$status" -ne 0 ]
+
   run grep -rl 'hand-written CLAUDE.md marker' "$TEST_PROJECT/.rig-backup"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
+
+  # The backup must be the true pre-run original: both placeholders still
+  # fully literal, neither substitution having reached it yet.
+  grep -q '\[Project Name\]' "$output"
+  grep -q '\[BASE_BRANCH\]' "$output"
 }
