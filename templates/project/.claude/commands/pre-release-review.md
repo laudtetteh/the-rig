@@ -35,6 +35,20 @@ review.
 Read any files named in `CLAUDE.md`'s "Key services/modules" or "Common
 gotchas" sections before proceeding. Do not summarise any of this back.
 
+**Check for prior review already on record.** For each commit/PR in scope,
+check whether it already went through this project's own mandated review
+process before merging (e.g. independent reviewer passes, a project-specific
+holistic-diff command, full CI) — look at merge-commit bodies and, if `gh`
+is available, `gh pr view <N> --json body` for a "reviewed by" / "review
+passes" / test-plan section. If a project convention document (e.g.
+`CLAUDE.md` "Key conventions") describes a standard per-PR review gate,
+treat commits that visibly went through it as already reviewed at the
+line level. Steps 1, 3, 5, and 6 below should then focus on what that prior
+review structurally could not have caught — cross-cutting interaction
+between separately-reviewed changes, and the release as a whole — rather
+than re-deriving findings a fresh line-by-line pass would only duplicate.
+If no such prior review is evident for a commit, review it at full depth.
+
 ---
 
 ## Step 1 — Regression check
@@ -110,6 +124,12 @@ before.
 - Does the changelog cover all meaningful changes since the last release?
   List any merged PRs or notable commits that are missing.
 - Are there any docs that still reference the old version number?
+- Do any docs state a specific test count, file count, or CI timing figure
+  (e.g. "651 tests across 42 files", "~10 seconds", "runs in N minutes")?
+  These drift silently whenever tests are added/split/re-timed and are easy
+  to miss because they're prose, not a version string. Check `CLAUDE.md` and
+  any imported rule files (not just `README.md`) — re-run the actual count/
+  timing command and compare.
 
 ---
 
@@ -144,11 +164,20 @@ before.
 - What is the current version string, and where does it live?
 - If there's a `--version` flag or `/version` endpoint: does it return the
   current version?
-- Does the changelog have a section ready for the new version (or an
-  `[Unreleased]` block)?
-- Are all changes since the last tag represented in the changelog?
+- Is there an `[Unreleased]` changelog section, and is it actually populated
+  — not just present as an empty heading? An empty `[Unreleased]` section
+  while commits sit merged-but-untagged since the last release is the most
+  common gap this step finds; check it explicitly, don't just confirm the
+  heading exists.
+- Are all changes since the last tag represented in the changelog, correctly
+  attributed to their issue/PR numbers?
+- Given the nature of the changes (fixes only vs. new capability vs. breaking
+  change), what semver bump does this project's own convention call for —
+  and does the proposed new version number match it?
 - Are there any open issues or known blockers that must be resolved before
-  this release, not after?
+  this release, not after? Distinguish real blockers from deliberately
+  deferred follow-up work that was already scoped and filed as its own
+  issue during development — the latter is not automatically a blocker.
 
 ---
 

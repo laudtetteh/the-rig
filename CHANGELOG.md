@@ -11,6 +11,50 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.26.2] — 2026-08-09
+
+### Fixed
+
+- `upgrade_prepare_directory()` (guards the global `~/.claude` root against a
+  symlinked destination) was gated to `--strategy upgrade` only, silently
+  no-oping under `merge` (the fresh-install default) — a symlinked
+  `~/.claude` was followed with no refusal (#489).
+- `upgrade_manifest_mutation_allowed()`, called on nearly every file write,
+  had the same strategy-gating bug — a symlinked `.rig-manifest` was silently
+  replaced under `merge` with no refusal (#490).
+- The `CLAUDE.md` backup regression test asserted a marker string that
+  couldn't distinguish a pristine backup from a clobbered intermediate one;
+  strengthened to assert placeholder preservation directly (#491).
+- `guard_destination_before_write()` couldn't distinguish a same-run creation
+  from genuine pre-existing state, causing a spurious backup when
+  re-migrating two `.claude/settings.json` call sites. Added a run-scoped
+  `_RUN_WRITTEN_DESTINATIONS` tracker (#493).
+- `_subst_base_branch()` ran after the manifest hash was already recorded, so
+  every `[BASE_BRANCH]`-substituted file (`ship.md`, `post-merge.md`,
+  `SHIP_WORKFLOW.md`, `POST_MERGE_WORKFLOW.md`, `CLAUDE.md`) had a stale
+  manifest hash immediately after install — including a third `CLAUDE.md`
+  mutation site (the external/stealth `@.rig/` import-path rewrite) found by
+  a follow-up `/rig-surface-review` (#498).
+- `upgrade_manifest_mutation_allowed()`'s conflict warning named whichever
+  file happened to trigger a manifest write, not the actual conflicting
+  destination — a single symlinked `.rig-manifest` produced misleading
+  warnings blaming unrelated files each run (#503).
+- `bin/rig worktree bootstrap` recursed into its own output when a linked
+  worktree lived under `.claude/worktrees/` (this repo's own convention),
+  consuming up to ~1.2GB before a filesystem path-length limit aborted it.
+  Excluded `worktrees` from every directory copy in `worktree_bootstrap()`
+  (#500).
+
+### Changed
+
+- CI's bats suite now runs sharded across an 8-job dynamic matrix
+  (round-robin over `tests/*.bats`), cutting wall-clock from 45-48 minutes to
+  ~8 minutes. `test_install.bats` (259 tests) was split into 5 files along
+  its own existing section boundaries; a new `test-shard-coverage` job
+  guards against shard/matrix drift (#505).
+
+---
+
 ## [1.26.1] — 2026-08-08
 
 ### Fixed
