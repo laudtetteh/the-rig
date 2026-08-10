@@ -859,6 +859,32 @@ matrix_upgrade_case() {
   grep -q "MY BESPOKE PROJECT CONFIG" "$TEST_PROJECT/CLAUDE.md"
 }
 
+@test "upgrade strategy: preserves user-owned file even when it matches manifest baseline" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  printf 'MY FILLED PROJECT BRAIN\nproject: [Project Name]\nbase-branch: main\n' > "$TEST_PROJECT/CLAUDE.md"
+  printf 'MY FILLED PROJECT BRAIN\nproject: [Project Name]\nbase-branch: [BASE_BRANCH]\n' > "$TEMP_DIR/raw-claude.md"
+  local raw_hash
+  raw_hash="$(_sha256 "$TEMP_DIR/raw-claude.md")"
+  awk -v hash="$raw_hash" '
+    $2 == "CLAUDE.md" { print hash "  CLAUDE.md"; next }
+    { print }
+  ' "$TEST_PROJECT/.rig/memory/.rig-manifest" > "$TEMP_DIR/manifest"
+  mv "$TEMP_DIR/manifest" "$TEST_PROJECT/.rig/memory/.rig-manifest"
+  jq --arg hash "$raw_hash" '.entries["CLAUDE.md"].sha256 = $hash | .entries["CLAUDE.md"].owner = "user"' \
+    "$TEST_PROJECT/.rig/memory/.rig-manifest.json" > "$TEMP_DIR/manifest.json"
+  mv "$TEMP_DIR/manifest.json" "$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Skipped customized: 1"* ]] || return 1
+  grep -q "MY FILLED PROJECT BRAIN" "$TEST_PROJECT/CLAUDE.md"
+  grep -q "project: \\[Project Name\\]" "$TEST_PROJECT/CLAUDE.md"
+  run grep -q "\\[One paragraph:" "$TEST_PROJECT/CLAUDE.md"
+  [ "$status" -ne 0 ]
+}
+
 @test "upgrade strategy: warns when CLAUDE.md references unset opt-in components" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]

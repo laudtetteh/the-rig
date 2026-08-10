@@ -483,6 +483,29 @@ read_manifest_hash() {
   grep "  ${rel}$" "$manifest_file" 2>/dev/null | awk '{print $1}' | head -1 || true
 }
 
+read_manifest_owner() {
+  # Returns the recorded owner for a given rel path from the JSON metadata
+  # companion, or empty string for legacy/plain manifests.
+  local rel="$1"
+  local manifest_file="${2:-$MANIFEST_FILE}"
+  local metadata_file="${manifest_file}.json"
+  [[ -f "$metadata_file" ]] || { echo ""; return 0; }
+  python3 - "$metadata_file" "$rel" <<'PYEOF' || true
+import json
+import sys
+
+path, rel = sys.argv[1:]
+try:
+    data = json.load(open(path))
+except (OSError, ValueError):
+    raise SystemExit(0)
+entry = (data.get("entries") or {}).get(rel) or {}
+owner = entry.get("owner")
+if isinstance(owner, str):
+    print(owner)
+PYEOF
+}
+
 write_manifest_entry() {
   # Upsert: remove any existing entry for $rel, then append the new hash.
   local hash="$1"
@@ -935,6 +958,7 @@ UPGRADE_STALE_FILES=()
 # same way UPGRADE_STALE_UNREPAIRED_COUNT does.
 UPGRADE_FUTURE_REVISION_COUNT=0
 UPGRADE_FUTURE_REVISION_FILES=()
+PROJECT_CLAUDE_PRESERVED_USER=false
 # Full per-artifact log, one entry per record_upgrade_result() call, encoded as
 # "<rel>\x1e<result>\x1e<detail>" (US = 0x1E, never legal in a path or in the
 # JSON-encoded detail payload). Consumed only by the agent-plan/agent-upgrade
@@ -2277,6 +2301,9 @@ _copy_upgrade_existing() {
   local new_hash dest_hash manifest_hash
   new_hash="$(sha256_file "$src")"
   dest_hash="$(sha256_file "$dest")"
+  manifest_hash="$(read_manifest_hash "$rel" "$manifest_file")"
+  local manifest_owner
+  manifest_owner="$(read_manifest_owner "$rel" "$manifest_file")"
 
   # Handle SHA256 unavailable: fall back to byte-level comparison
   if [[ -z "$new_hash" ]]; then
@@ -2297,14 +2324,27 @@ _copy_upgrade_existing() {
     return
   fi
 
-  # Already at the new version — nothing to do
+  # Already at the new version — nothing to do. Keep this before the
+  # user-owned CLAUDE.md preservation gate: an identical incoming template
+  # needs no write and should not make a clean upgrade require review.
   if [[ "$dest_hash" == "$new_hash" ]]; then
     info "Up to date: ${rel}"
     record_upgrade_result up-to-date "$rel"
     return
   fi
 
-  manifest_hash="$(read_manifest_hash "$rel" "$manifest_file")"
+  if [[ -n "$manifest_hash" && "$manifest_owner" == user && "$rel" == "CLAUDE.md" ]]; then
+    info "Skipped (user-owned): ${rel}"
+    if [[ -n "${TARGET:-}" && "${base:-}" == "$TARGET" ]]; then
+      PROJECT_CLAUDE_PRESERVED_USER=true
+    fi
+    if [[ -n "$AGENT_MODE" ]]; then
+      record_upgrade_result preserved-user "$rel"
+    else
+      record_upgrade_result skipped-customized "$rel"
+    fi
+    return
+  fi
 
   if [[ -n "$manifest_hash" && "$dest_hash" != "$manifest_hash" ]] &&
      grep -q '\[BASE_BRANCH\]' "$src" 2>/dev/null; then
@@ -3490,7 +3530,7 @@ if [[ "$DO_PROJECT" == true ]]; then
   fi
 
   TARGET_CLAUDE="$TARGET/CLAUDE.md"
-  if [[ -f "$TARGET_CLAUDE" ]] && \
+  if [[ "$PROJECT_CLAUDE_PRESERVED_USER" != true && -f "$TARGET_CLAUDE" ]] && \
      guard_destination_before_write "$TARGET" "$TARGET_CLAUDE" "CLAUDE.md"; then
     # agent-plan: classification only, never substitute placeholders.
     if [[ "$AGENT_DRY_RUN" != true ]]; then
@@ -3566,6 +3606,9 @@ PYEOF
     if [[ -n "$target_rig_dir" && "$f" == "$target_rig_dir/"* ]]; then
       base="$target_rig_dir"
       rel=".rig/${f#"$target_rig_dir"/}"
+    fi
+    if [[ "$rel" == "CLAUDE.md" && "$PROJECT_CLAUDE_PRESERVED_USER" == true ]]; then
+      return 0
     fi
     guard_destination_before_write "$base" "$f" "$rel" || return 0
     # agent-plan: classification only, never substitute placeholders.
@@ -3652,7 +3695,7 @@ PYEOF
 
     # Update CLAUDE.md @imports to use absolute paths for the external .rig/ dir
     TARGET_CLAUDE="$TARGET/CLAUDE.md"
-    if [[ -f "$TARGET_CLAUDE" ]] && \
+    if [[ "$PROJECT_CLAUDE_PRESERVED_USER" != true && -f "$TARGET_CLAUDE" ]] && \
        guard_destination_before_write "$TARGET" "$TARGET_CLAUDE" "CLAUDE.md"; then
       ESCAPED_EXT="${EXTERNAL_RIG_DIR//\//\\/}"
       sed_inplace "s|@\\.rig/|@${ESCAPED_EXT}/|g" "$TARGET_CLAUDE"
@@ -4091,6 +4134,7 @@ CLASSIFICATION = {
     "removed": "obsolete",
     "migrated": "moved-project-reference",
     "up-to-date": "up-to-date",
+    "preserved-user": "user-owned-preserved",
     "skipped-untracked": "user-owned-untracked",
     "skipped-customized": "customized",
     "skipped-conflict": "conflict",
@@ -4102,6 +4146,7 @@ ACTION = {
     "removed": "remove",
     "migrated": "rewrite",
     "up-to-date": "none",
+    "preserved-user": "skip",
     "skipped-untracked": "skip",
     "skipped-customized": "skip",
     "skipped-conflict": "skip",
@@ -4116,6 +4161,7 @@ REASON = {
     "removed": "obsolete Rig-owned artifact retired",
     "migrated": "path references rewritten for a moved project root",
     "up-to-date": "already matches the incoming Rig version; no action needed",
+    "preserved-user": "user-owned file intentionally preserved untouched",
     "skipped-untracked": "user-owned file with no prior manifest baseline; preserved untouched",
     "skipped-customized": "local content differs from the recorded Rig baseline (customized)",
     "skipped-conflict": "destination path has an unsupported type/symlink/location conflict",

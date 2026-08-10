@@ -11,6 +11,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.27.1] — 2026-08-09
+
+### Fixed
+
+- Upgrade now preserves user-owned manifest entries such as `CLAUDE.md` even
+  when the current file hash matches the manifest baseline. This prevents a
+  personalized project brain from being auto-overwritten by a newer generic
+  template during non-interactive rollout (#517).
+
+---
+
 ## [1.27.0] — 2026-08-09
 
 ### Added
