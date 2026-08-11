@@ -5,6 +5,15 @@
 <!-- Bullet list of what changed. -->
 -
 
+## Dependency impact
+<!-- What upstream/downstream surfaces were checked? Mark N/A with a concrete reason. -->
+- Generated artifacts:
+- Downstream install/upgrade:
+- Cross-agent/runtime parity:
+- Docs/examples:
+- Persistent state:
+- Runtime/config dependencies:
+
 ## Closes
 Closes #
 

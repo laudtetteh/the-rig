@@ -89,15 +89,52 @@ For each changed file, produce a one-line summary of what changed and why (infer
 
 ---
 
+## Step 4.5 — Dependency impact analysis
+
+Before writing findings, trace changed paths to adjacent Rig or product surfaces
+that may depend on them. This is required even when the direct diff looks small.
+
+Build a dependency-impact checklist from the changed files:
+
+- Canonical sources and generated artifacts — command templates, generated
+  Codex skills, hook adapters, manifest metadata, built assets, or copied files
+- Upstream/downstream install and upgrade paths — installer source, template
+  copy logic, prior-version upgrades, generated manifests, release checklists
+- Cross-agent or cross-runtime parity — Claude commands, Codex skills, hooks,
+  CLI entry points, CI, containers, browser/runtime behavior
+- Documentation and executable examples — README/docs snippets, command
+  examples, help text, release notes, PR/issue templates
+- Persistent state contracts — memory files, task lifecycle, session identity,
+  `.rigpath`/external Rig directories, backup/recovery paths
+- Configuration and dependency files — package/dependency manifests,
+  Dockerfiles, CI workflows, permissions, settings, protected-path rules
+
+For each applicable surface, verify that either:
+
+- the dependent artifact or workflow was updated;
+- an executable or structural test covers the dependency;
+- or the surface is explicitly not affected, with the reason.
+
+Treat missing dependency coverage as a test coverage gap. Treat a changed
+contract with a stale dependent artifact as a logic error. If a doc or command
+contains a runnable snippet, prefer executing that snippet shape or validating
+its real CLI flags over grepping for a keyword.
+
+---
+
 ## Step 5 — Structured findings
 
-Analyse the diff and classify findings into four categories. Only surface real issues — do not pad with non-issues. Write "None" for a category with nothing to flag.
+Analyse the diff and classify findings into five categories. Only surface real issues — do not pad with non-issues. Write "None" for a category with nothing to flag.
 
 **Logic errors** — correctness bugs, off-by-one, wrong conditions, missing null checks, incorrect data flow.
 
 **Security** — exposed secrets, injection risks, unvalidated inputs, unsafe operations, use of `eval` or unsafe shell patterns.
 
 **Test coverage gaps** — new logic branches with no corresponding test; changed behaviour not covered by existing tests.
+
+**Dependency impact gaps** — upstream/downstream surfaces, generated artifacts,
+docs/examples, or runtime contracts that are affected by the change but were not
+updated or validated.
 
 **Style and conventions** — deviations from `.rig/rules/coding-standards.md`; naming inconsistencies; dead code; commented-out code in committed changes.
 
@@ -126,6 +163,11 @@ Output in this format:
 - `path/to/file` — [one-line summary]
 - ...
 
+### Dependency impact
+
+- `surface or artifact` — [validated by command/test | updated | N/A: reason]
+- ...
+
 ### Findings
 
 **Logic errors**
@@ -135,6 +177,9 @@ Output in this format:
 - [finding] or None
 
 **Test coverage gaps**
+- [finding] or None
+
+**Dependency impact gaps**
 - [finding] or None
 
 **Style**

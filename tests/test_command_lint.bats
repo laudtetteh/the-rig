@@ -166,6 +166,35 @@ _fail_with_list() {
   grep -qE "chore\(memory\)" "$COMMAND_DIR/ship.md"
 }
 
+@test "code-review.md: requires dependency impact analysis before findings" {
+  grep -Fq "## Step 4.5 — Dependency impact analysis" "$COMMAND_DIR/code-review.md"
+  grep -Fq "Canonical sources and generated artifacts" "$COMMAND_DIR/code-review.md"
+  grep -Fq "Upstream/downstream install and upgrade paths" "$COMMAND_DIR/code-review.md"
+  grep -Fq "Dependency impact gaps" "$COMMAND_DIR/code-review.md"
+}
+
+@test "ship.md: dependency impact gate is blocking and feeds PR evidence" {
+  grep -Fq "## Step 4.6 — Dependency impact gate" "$COMMAND_DIR/ship.md"
+  grep -Fq "This is a blocking gate" "$COMMAND_DIR/ship.md"
+  grep -Fq "Generated artifacts: PASS / N/A / HOLD" "$COMMAND_DIR/ship.md"
+  grep -Fq "Retain this matrix and reuse it in the pull request **Dependency impact** section" "$COMMAND_DIR/ship.md"
+  grep -Fq "## Dependency impact" "$COMMAND_DIR/ship.md"
+}
+
+@test "PR template captures dependency impact evidence" {
+  local template="$REPO_ROOT/templates/project/.github/PULL_REQUEST_TEMPLATE.md"
+  grep -Fq "## Dependency impact" "$template"
+  grep -Fq "Generated artifacts:" "$template"
+  grep -Fq "Downstream install/upgrade:" "$template"
+  grep -Fq "Cross-agent/runtime parity:" "$template"
+  grep -Fq "Runtime/config dependencies:" "$template"
+}
+
+@test "rig-help advertises dependency impact review gates" {
+  grep -Fq "dependency impact" "$COMMAND_DIR/rig-help.md"
+  grep -Fq "coverage, dependency impact, style" "$COMMAND_DIR/rig-help.md"
+}
+
 @test "wrap.md: transcript pruning uses agent-aware documented locations" {
   grep -q "transcript-retention-days" "$COMMAND_DIR/wrap.md"
   grep -Fq '$HOME/.claude/projects' "$COMMAND_DIR/wrap.md"

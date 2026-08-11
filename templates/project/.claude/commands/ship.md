@@ -240,6 +240,9 @@ Work through the following. Report the result of each check:
 - [ ] No commented-out code
 - [ ] No hardcoded secrets, tokens, or credentials
 - [ ] Error cases handled — not just the happy path
+- [ ] Dependency impact checked — generated artifacts, downstream install/upgrade
+      paths, docs/examples, runtime surfaces, and persistent state contracts are
+      updated or explicitly N/A
 - [ ] If `Dockerfile`, `requirements.txt`, `package.json`, or service layer was
       touched: in-container verification has been run per `.rig/rules/verification.md`
 - [ ] `git status --short` checked for untracked files from Docker volume mounts
@@ -258,6 +261,55 @@ If they say yes (or "y"): invoke the `code-reviewer` agent with the staged diff
 until they are resolved. **Advisory** findings are reported but do not block.
 
 If they say skip: proceed to Step 4.8.
+
+---
+
+## Step 4.6 — Dependency impact gate
+
+This is a blocking gate. A focused test pass is not enough if the change affects
+other Rig or product surfaces.
+
+Build a dependency-impact matrix from the changed paths:
+
+```bash
+git diff --name-only HEAD~1..HEAD 2>/dev/null || git diff --cached --name-only
+```
+
+Check every applicable surface:
+
+- **Generated artifacts:** If canonical sources changed, verify generated
+  outputs or mirrors are updated or regenerated. Examples: `.claude/commands/*`
+  -> `.agents/skills/*`, templates -> installed files, manifest metadata.
+- **Downstream install/upgrade:** If `install.sh`, `templates/`, manifest logic,
+  hooks, or command sources changed, validate the install/upgrade path that will
+  ship the change to an existing project.
+- **Cross-agent parity:** If a workflow is shared by Claude, Codex, hooks, or
+  `bin/rig`, verify the corresponding surface still preserves the same contract.
+- **Docs and examples:** If docs, command text, or README snippets changed, make
+  runnable snippets match the actual CLI/API shape; execute safe snippets when
+  practical.
+- **Persistent state:** If memory, task, session, `.rigpath`, backup, or recovery
+  behavior changed, validate the state transition and the failure/permission path.
+- **Runtime/config dependencies:** If dependency manifests, Dockerfiles, CI,
+  settings, or permissions changed, run the relevant runtime/config validation or
+  record why it is unavailable.
+
+Report the matrix before continuing:
+
+```text
+Dependency impact:
+- Generated artifacts: PASS / N/A / HOLD — evidence
+- Downstream install/upgrade: PASS / N/A / HOLD — evidence
+- Cross-agent/runtime parity: PASS / N/A / HOLD — evidence
+- Docs/examples: PASS / N/A / HOLD — evidence
+- Persistent state: PASS / N/A / HOLD — evidence
+- Runtime/config dependencies: PASS / N/A / HOLD — evidence
+```
+
+If any row is `HOLD`, stop and fix or validate it before continuing. Use `N/A`
+only with a concrete reason tied to the changed paths.
+
+Retain this matrix and reuse it in the pull request **Dependency impact** section.
 
 ---
 
@@ -502,6 +554,14 @@ If no template exists, use this fallback:
 
 ## Changes
 -
+
+## Dependency impact
+- Generated artifacts:
+- Downstream install/upgrade:
+- Cross-agent/runtime parity:
+- Docs/examples:
+- Persistent state:
+- Runtime/config dependencies:
 
 ## Closes
 Closes #N
