@@ -41,7 +41,7 @@ EOF
   cat > "$RIG_DIR/memory/sessions/session-new.json" <<EOF
 {
   "anchor": "new",
-  "started_at": "$(date -u +%Y-%m-%dT%H:%M:%S+00:00)",
+  "started_at": "2999-01-01T00:00:00+00:00",
   "status": "active"
 }
 EOF

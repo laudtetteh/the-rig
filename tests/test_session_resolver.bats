@@ -87,13 +87,13 @@ write_native_session() {
   # Writes a v1-schema record, matching the exact shape session_bind produces,
   # so it is eligible for native-id matching (unlike write_session's legacy
   # shape, which has no schema_version/native/project fields at all).
-  local path="$1" anchor="$2" native_id="$3" state="${4:-active}" project_identity
+  local path="$1" anchor="$2" native_id="$3" state="${4:-active}" agent="${5:-claude}" project_identity
   project_identity=$(git -C "$CASE_DIR" rev-parse --git-common-dir 2>/dev/null)
   project_identity=$(SHA_INPUT="$(cd "$CASE_DIR" && cd "$project_identity" && pwd -P)" python3 -c 'import hashlib,os; print(hashlib.sha256(os.environ["SHA_INPUT"].encode()).hexdigest())')
-  PATH_F="$path" ANCHOR="$anchor" NATIVE="$native_id" STATE="$state" PROJECT_ID="$project_identity" python3 -c '
+  PATH_F="$path" ANCHOR="$anchor" NATIVE="$native_id" STATE="$state" PROJECT_ID="$project_identity" AGENT="$agent" python3 -c '
 import json, os
 json.dump({
-    "schema_version": 1, "anchor": os.environ["ANCHOR"], "agent": "claude",
+    "schema_version": 1, "anchor": os.environ["ANCHOR"], "agent": os.environ["AGENT"],
     "native": {"session_id": os.environ["NATIVE"]},
     "project": {"identity": os.environ["PROJECT_ID"]},
     "lifecycle": {"state": os.environ["STATE"]}, "revision": 1
@@ -105,6 +105,21 @@ json.dump({
   run env CLAUDE_CODE_SESSION_ID=ambient-native-id RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 0 ]
   [[ "$output" == *'"anchor": "native-anchor"'* && "$output" == *'"confidence": "exact"'* && "$output" == *'"reason": "native_id"'* ]] || return 1
+}
+
+@test "resolver binds an ambient Codex thread id with no launcher file or PID sentinel" {
+  write_native_session "$CASE_DIR/.rig/memory/sessions/session-codex-native.json" codex-anchor codex-thread-id active codex
+  run env CODEX_THREAD_ID=codex-thread-id RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"anchor": "codex-anchor"'* && "$output" == *'"agent": "codex"'* && "$output" == *'"reason": "native_id"'* ]] || return 1
+}
+
+@test "resolver prefers Codex thread id when both native host env vars are present" {
+  write_native_session "$CASE_DIR/.rig/memory/sessions/session-claude-native.json" claude-anchor claude-native-id active claude
+  write_native_session "$CASE_DIR/.rig/memory/sessions/session-codex-native.json" codex-anchor codex-thread-id active codex
+  run env CLAUDE_CODE_SESSION_ID=claude-native-id CODEX_THREAD_ID=codex-thread-id RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"anchor": "codex-anchor"'* && "$output" == *'"agent": "codex"'* && "$output" == *'"reason": "native_id"'* ]] || return 1
 }
 
 @test "ambient native session id fails closed on a duplicate binding instead of guessing" {
