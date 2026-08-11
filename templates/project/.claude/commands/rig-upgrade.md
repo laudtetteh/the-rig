@@ -90,11 +90,17 @@ After printing all three lines, apply these checks in order:
 1. If project and global versions differ:
    > "⚠️ Project is at `$PROJECT_VERSION` but global installer is at `$GLOBAL_VERSION`. Run `/rig-upgrade` to sync."
 
-2. If a GitHub version was retrieved and it differs from `$PROJECT_VERSION`
+2. If a GitHub version was retrieved and it differs from `$GLOBAL_VERSION`
+   (compare after stripping a leading `v` from `$GITHUB_VERSION`):
+   > "⚠️ Stable installer source is at `$GLOBAL_VERSION` but latest release is `$GITHUB_VERSION`.
+   > Update it with: `git -C ~/tools/the-rig checkout main && git -C ~/tools/the-rig pull --ff-only origin main`
+   > Then re-run `/rig-upgrade --version`."
+
+3. If a GitHub version was retrieved and it differs from `$PROJECT_VERSION`
    (compare after stripping a leading `v` from `$GITHUB_VERSION`):
    > "⚠️ A newer release is available: `$GITHUB_VERSION`. Pull `~/tools/the-rig` and run `/rig-upgrade`."
 
-3. If all three are in sync: say nothing extra.
+4. If all three are in sync: say nothing extra.
 
 Then stop — do not proceed to Phase 0.
 

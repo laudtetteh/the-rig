@@ -117,6 +117,12 @@ _fail_with_list() {
   grep -q "execute POST_MERGE_WORKFLOW steps" "$COMMAND_DIR/post-merge.md"
 }
 
+@test "rig-upgrade.md: --version detects stale stable installer source" {
+  grep -Fq 'Stable installer source is at `$GLOBAL_VERSION` but latest release is `$GITHUB_VERSION`' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'git -C ~/tools/the-rig pull --ff-only origin main' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 're-run `/rig-upgrade --version`' "$COMMAND_DIR/rig-upgrade.md"
+}
+
 @test "task and run use the fixed PROGRESS top-insertion anchor" {
   for command in task run; do
     grep -q 'immediately after the `## Format`' "$COMMAND_DIR/$command.md"

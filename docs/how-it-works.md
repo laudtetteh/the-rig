@@ -46,7 +46,7 @@ Three locations work together. The installer repo produces the other two:
 │            agent-upgrade (applies + JSON result; exit 3 if      │
 │            anything needs manual review — see UPGRADE_WORKFLOW) │
 │                                                                 │
-│  To upgrade: cd ~/tools/the-rig && git pull                     │
+│  To upgrade: git -C ~/tools/the-rig pull --ff-only origin main  │
 │  Then re-run install.sh with --strategy upgrade                 │
 └───────────────┬─────────────────────────┬───────────────────────┘
                 │ installs global layer    │ installs project layer
