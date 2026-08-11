@@ -74,7 +74,7 @@ fi
 if ! touch "$SNAP_LOCK"; then
   echo "Unable to write Rig memory lock: $SNAP_LOCK"
   echo "For Codex with an external .rigpath, request scoped write approval for $RIG_DIR and retry /post-merge."
-  echo "No memory files were changed."
+  echo "No further memory writes were attempted."
   exit 1
 fi
 ```

@@ -1067,9 +1067,13 @@ If any check fails, regenerate the mirrors from the canonical Claude command
 sources with the installer generator, then re-run the checks:
 
 ```bash
+mapfile -d '' CODEX_COMMAND_SOURCES < <(find "$INSTALLER_SRC/templates/project/.claude/commands" \
+  -maxdepth 1 -type f -name '*.md' -print0)
 python3 "$INSTALLER_SRC/installer/generate-codex-skills.py" \
-  "$INSTALLER_SRC/templates/project/.claude/commands" \
-  "$REPO/.agents/skills"
+  --output "$REPO/.agents/skills" \
+  --base-branch "$BASE_BRANCH" \
+  --skills-source "$INSTALLER_SRC/templates/project/.claude/skills" \
+  "${CODEX_COMMAND_SOURCES[@]}"
 ```
 
 Do not patch generated `.agents/skills/*/references/command.md` files by hand

@@ -128,7 +128,7 @@ _fail_with_list() {
     grep -Fq 'Unable to write Rig memory lock' "$COMMAND_DIR/$command.md"
     grep -Fq 'Operation not permitted' "$COMMAND_DIR/$command.md"
     grep -Fq 'request scoped write approval for $RIG_DIR' "$COMMAND_DIR/$command.md"
-    grep -Fq 'No memory files were changed.' "$COMMAND_DIR/$command.md"
+    grep -Fq 'No further memory writes were attempted.' "$COMMAND_DIR/$command.md"
   done
 }
 
@@ -166,6 +166,10 @@ _fail_with_list() {
 @test "rig-upgrade.md: verifies Codex mirrors after command updates" {
   grep -Fq '.agents/skills/wrap/SKILL.md' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 'installer/generate-codex-skills.py' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq -- '--output "$REPO/.agents/skills"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq -- '--base-branch "$BASE_BRANCH"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq -- '--skills-source "$INSTALLER_SRC/templates/project/.claude/skills"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq '"${CODEX_COMMAND_SOURCES[@]}"' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 'Do not patch generated `.agents/skills/*/references/command.md` files by hand' "$COMMAND_DIR/rig-upgrade.md"
 }
 
