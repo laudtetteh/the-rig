@@ -104,6 +104,11 @@ Run this:
 ## Wrap report step
 
 **Run this after the git state check and any uncommitted-changes gate, before writing anything.**
+This report-first requirement applies equally to Claude `/wrap` and the generated
+Codex `$wrap` skill. If you are adapting the workflow manually in Codex, print
+the report before any memory writes; if session identity is unresolved, include
+`Session: unresolved — no final session-file write performed` in the report and
+do not silently perform a partial wrap.
 
 ### Collection phase
 
@@ -118,6 +123,8 @@ Gather all findings silently — no output yet:
 7. **Active tasks** — read `.rig/tasks/active/`
 8. **Session identity** — run `bin/rig session resolve --json`; extract its session file,
    `anchor`, and `tentative_name`. Stop on ambiguous identity.
+9. **Skipped post-merge status** — if `/post-merge` was requested in the same turn but
+   no merge is applicable, record the skip reason and next action.
 
 ### Report
 
@@ -137,6 +144,7 @@ Print a single structured report before executing anything:
 **DECISIONS.md:** [N new entries: short-title-1, short-title-2 | no new entries]
 **Feature docs:** [⚠ overlap detected — run /refresh-feature-doc X | no overlaps]
 **Active tasks:** [task-slug | none]
+**Post-merge:** [skipped — reason and next action | not requested]
 
 **Session:** [anchor: UUID | tentative: "..." | suggested final: "type desc #N | type desc #N" | nothing meaningful shipped, skipped]
 ```

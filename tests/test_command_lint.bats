@@ -84,6 +84,8 @@ _fail_with_list() {
   grep -q "Collection phase" "$COMMAND_DIR/wrap.md"
   grep -q "This session" "$COMMAND_DIR/wrap.md"
   grep -q "Wrap report —" "$COMMAND_DIR/wrap.md"
+  grep -Fq 'Codex `$wrap` skill' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'Session: unresolved — no final session-file write performed' "$COMMAND_DIR/wrap.md"
 }
 
 @test "wrap.md: PROGRESS.md trim executes automatically — no confirmation gate" {
@@ -107,6 +109,8 @@ _fail_with_list() {
 @test "post-merge.md: Post-merge report step defines collection and report format" {
   grep -q "Collection phase" "$COMMAND_DIR/post-merge.md"
   grep -q "Post-merge report —" "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'Codex `$post-merge` skill' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'Post-merge report — skipped' "$COMMAND_DIR/post-merge.md"
 }
 
 @test "post-merge.md: executes POST_MERGE_WORKFLOW automatically after report" {
@@ -142,6 +146,12 @@ _fail_with_list() {
   grep -Fq 'explicitly agreed' "$COMMAND_DIR/handoff-checklist.md"
   grep -Fq 'Silence, hesitation, or an ambiguous answer is not consent' "$COMMAND_DIR/handoff-checklist.md"
   grep -Fq 'Do not run `/post-merge`, `/wrap`, or any checklist step' "$COMMAND_DIR/handoff-checklist.md"
+}
+
+@test "rig-upgrade.md: verifies Codex mirrors after command updates" {
+  grep -Fq '.agents/skills/wrap/SKILL.md' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'installer/generate-codex-skills.py' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'Do not patch generated `.agents/skills/*/references/command.md` files by hand' "$COMMAND_DIR/rig-upgrade.md"
 }
 
 # ── PR description freshness ───────────────────────────────────────────────────

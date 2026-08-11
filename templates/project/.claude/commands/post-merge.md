@@ -104,6 +104,10 @@ will `git checkout [BASE_BRANCH] && git pull`, but flag it now so the user is aw
 ## Post-merge report step
 
 **Run this after the git state check, before executing POST_MERGE_WORKFLOW steps.**
+This report-first requirement applies equally to Claude `/post-merge` and the
+generated Codex `$post-merge` skill. If no merge is applicable, print a
+structured skipped report with the reason and next action, then stop before
+writing memory.
 
 ### Collection phase
 
@@ -135,6 +139,15 @@ Print a single structured report before executing POST_MERGE_WORKFLOW:
 **Task file:** [TASK_N_slug.md → moving to done/ | no active task found]
 
 **Session name:** [suggested: "type desc #N | type desc #N" | already set — appending: "..." | nothing meaningful shipped, skipped]
+```
+
+If `/post-merge` is skipped, print instead:
+
+```
+## Post-merge report — skipped — [date]
+
+**Reason:** [no merged PR | not on merge commit | working tree dirty | other concrete reason]
+**Next action:** [merge a PR first | commit/stash changes | run /wrap only | other concrete action]
 ```
 
 ### Execution

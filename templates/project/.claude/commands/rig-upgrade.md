@@ -1045,6 +1045,30 @@ If `DOCTOR_FAILURES` is non-empty, repeat the warning before moving on:
 > "⚠️ `bin/rig doctor` reported gate failures above — resolve them before
 > considering this upgrade fully verified."
 
+If the project target includes Codex and any `.claude/commands/*.md` file was
+updated, verify the generated skill mirror before considering the upgrade
+complete:
+
+```bash
+test -d "$REPO/.agents/skills"
+test -f "$REPO/.agents/skills/wrap/SKILL.md"
+test -f "$REPO/.agents/skills/wrap/references/command.md"
+test -f "$REPO/.agents/skills/post-merge/SKILL.md"
+test -f "$REPO/.agents/skills/post-merge/references/command.md"
+```
+
+If any check fails, regenerate the mirrors from the canonical Claude command
+sources with the installer generator, then re-run the checks:
+
+```bash
+python3 "$INSTALLER_SRC/installer/generate-codex-skills.py" \
+  "$INSTALLER_SRC/templates/project/.claude/commands" \
+  "$REPO/.agents/skills"
+```
+
+Do not patch generated `.agents/skills/*/references/command.md` files by hand
+without making the matching canonical `.claude/commands/*.md` change first.
+
 ### 5a — Commit strategy recommendation
 
 Count the total modified files:
