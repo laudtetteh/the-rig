@@ -59,13 +59,23 @@ if [[ -f "$SNAP_LOCK" ]]; then
     exit 1
   fi
 fi
-touch "$SNAP_LOCK"
+if ! touch "$SNAP_LOCK"; then
+  echo "Unable to write Rig memory lock: $SNAP_LOCK"
+  echo "For Codex with an external .rigpath, request scoped write approval for $RIG_DIR and retry /wrap."
+  echo "No memory files were changed."
+  exit 1
+fi
 ```
 
 Create the sentinel immediately. Delete it at the very end of `/wrap` (step 12,
 after flag cleanup). Locks older than 30 minutes are automatically expired on the
 next run — they are from crashed sessions. Locks under 30 minutes block and require
 the other session to finish (or the lock deleted manually if that session is gone).
+
+If creating the sentinel fails with `Operation not permitted`, stop immediately.
+This commonly means Codex is running in a project whose `.rigpath` points outside
+the workspace writable roots. Request one scoped approval for the resolved
+`$RIG_DIR` before retrying; do not continue with partial memory writes.
 
 The sentinel file is gitignored alongside other `.rig/memory/` runtime files.
 

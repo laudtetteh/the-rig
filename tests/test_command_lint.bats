@@ -123,6 +123,15 @@ _fail_with_list() {
   grep -Fq 're-run `/rig-upgrade --version`' "$COMMAND_DIR/rig-upgrade.md"
 }
 
+@test "wrap and post-merge stop on external Rig memory permission failure" {
+  for command in wrap post-merge; do
+    grep -Fq 'Unable to write Rig memory lock' "$COMMAND_DIR/$command.md"
+    grep -Fq 'Operation not permitted' "$COMMAND_DIR/$command.md"
+    grep -Fq 'request scoped write approval for $RIG_DIR' "$COMMAND_DIR/$command.md"
+    grep -Fq 'No memory files were changed.' "$COMMAND_DIR/$command.md"
+  done
+}
+
 @test "task and run use the fixed PROGRESS top-insertion anchor" {
   for command in task run; do
     grep -q 'immediately after the `## Format`' "$COMMAND_DIR/$command.md"
