@@ -134,8 +134,14 @@ _fail_with_list() {
   grep -q "execute POST_MERGE_WORKFLOW steps" "$COMMAND_DIR/post-merge.md"
 }
 
-@test "rig-upgrade.md: --version detects stale stable installer source" {
-  grep -Fq 'Stable installer source is at `$GLOBAL_VERSION` but latest release is `$GITHUB_VERSION`' "$COMMAND_DIR/rig-upgrade.md"
+@test "rig-upgrade.md: --version separates installed layers from installer checkout" {
+  grep -Fq 'GLOBAL_MANIFEST="$HOME/.claude/.rig-global-manifest.json"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'GLOBAL_LAYER_VERSION' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'INSTALLER_CHECKOUT=~/tools/the-rig' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'Global installed layer:' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'Preferred installer checkout:' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'global installed layer is at `$GLOBAL_LAYER_VERSION`' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'Preferred installer checkout is at `$INSTALLER_VERSION` but latest release is `$GITHUB_VERSION`' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 'git -C ~/tools/the-rig pull --ff-only origin main' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 're-run `/rig-upgrade --version`' "$COMMAND_DIR/rig-upgrade.md"
 }
