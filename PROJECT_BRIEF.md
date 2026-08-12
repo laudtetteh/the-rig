@@ -75,8 +75,9 @@ tag. These are the shipped components:
   `.claude/settings.json` merges) are now journaled and recoverable
 - **Safe stealth `.git/hooks/` lifecycle**: hooks are manifest-tracked, backed
   up before overwrite, and agent-upgrade refuses on customization
-- **`bin/rig doctor`**: 5 postflight gates (`manifest_provenance`,
-  `stealth_status`, `manifest_mode_hash`, `stale_manifest_entries`, `idempotence`)
+- **`bin/rig doctor`**: postflight gates documented in `docs/customizing.md`,
+  including manifest provenance, stealth status, Codex parity/runtime, tracker,
+  and upgrade-pattern checks
 
 ---
 
