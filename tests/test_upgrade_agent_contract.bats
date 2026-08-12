@@ -262,6 +262,50 @@ print($1)
   /usr/bin/grep -q '"agents":\["claude"\]' "$TEST_PROJECT/.rig/install-targets.json"
 }
 
+@test "agent-upgrade preserves user-owned PROJECT_BRIEF.md after accepted baseline" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  local brief="$TEST_PROJECT/PROJECT_BRIEF.md"
+  printf '# Project Brief: Real Product\n\nReal user-owned project details.\n' > "$brief"
+  local brief_hash
+  brief_hash="$(_sha256 "$brief")"
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+  /usr/bin/grep -v '  PROJECT_BRIEF.md$' "$manifest" > "$manifest.tmp"
+  printf '%s  PROJECT_BRIEF.md\n' "$brief_hash" >> "$manifest.tmp"
+  mv "$manifest.tmp" "$manifest"
+  python3 - "$TEST_PROJECT/.rig/memory/.rig-manifest.json" "$brief_hash" <<'PY'
+import json, sys
+path, digest = sys.argv[1:]
+with open(path) as fh:
+    data = json.load(fh)
+entry = data.setdefault("entries", {}).setdefault("PROJECT_BRIEF.md", {})
+entry.update({
+    "sha256": digest,
+    "owner": "user",
+    "source": "project-user",
+    "type": "file",
+    "mode": "644",
+    "base_revision": data.get("installer_version", "0.0.0"),
+    "installer_version": data.get("installer_version", "0.0.0"),
+    "generator": "install.sh",
+    "provider": "claude",
+})
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2, sort_keys=True)
+    fh.write("\n")
+PY
+
+  run_installer --strategy agent-upgrade
+  [ "$status" -eq 0 ]
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "any(a['path'] == 'PROJECT_BRIEF.md' and a['classification'] == 'user-owned-preserved' for a in d['artifacts'])")" = "True" ]
+  grep -q 'Real user-owned project details.' "$brief"
+  run grep -q '\[What does this product do' "$brief"
+  [ "$status" -ne 0 ]
+}
+
 @test "agent-upgrade on a clean target applies updates and exits 0" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]

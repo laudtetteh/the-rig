@@ -11,6 +11,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.28.2] — 2026-08-12
+
+### Fixed
+
+- Upgrade-family runs now preserve all manifest-marked user-owned files, not
+  only `CLAUDE.md`. Accepted baselines for `PROJECT_BRIEF.md`, memory, rules,
+  tasks, and other user-owned files no longer cause `agent-upgrade` to
+  overwrite them with incoming templates (#550).
+
+---
+
 ## [1.28.1] — 2026-08-12
 
 ### Fixed

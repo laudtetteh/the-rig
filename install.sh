@@ -125,9 +125,9 @@ is_rig_owned() {
 # A versioned JSON companion records ownership/source/type/mode metadata while
 # the text format remains readable by older installers.
 #
-# This allows the Upgrade strategy to distinguish:
-#   dest hash == manifest hash  → file unmodified since install → safe to overwrite
-#   dest hash != manifest hash  → user has customized the file  → prompt before overwriting
+# This allows the Upgrade strategy to distinguish Rig-owned artifacts that are
+# safe to refresh from artifacts that need review. For owner=user entries, the
+# manifest records provenance without granting overwrite permission.
 #
 # The manifest is committed to the repo (not gitignored) so the baseline travels
 # with the project and any team member can run an Upgrade.
@@ -2274,15 +2274,17 @@ print(json.dumps(conflicts, separators=(",", ":")))
 # Decision tree for a file that already exists at $dest:
 #
 #   settings.json       → always smart-merge (same as "merge" strategy)
-#   All other files (both Rig-owned and user-owned):
+#   Rig-owned files:
 #     dest == src       → already up to date, skip
 #     dest == manifest  → unmodified since install → overwrite silently (with backup)
 #     dest != manifest  → user has customized it  → show diff, prompt o/s/d
 #     no manifest entry → first upgrade run → overwrite silently (with backup)
 #
-# The manifest now tracks all files (not just Rig-owned), so a user-owned file
-# like CLAUDE.md that was never customized will be updated automatically, while
-# one the user has edited will prompt for review — the same logic for both.
+#   User-owned files:
+#     preserve untouched when manifest metadata marks owner=user. The manifest
+#     baseline lets future runs distinguish accepted local content from unknown
+#     drift; it must never turn project memory/briefs/brains into auto-update
+#     candidates.
 #
 # SHA256 unavailable: falls back to byte-level cmp(1). If files differ and
 # sha256 is absent, prompts without a diff (can't reliably detect customization).
@@ -2357,25 +2359,19 @@ _copy_upgrade_existing() {
     return
   fi
 
-  # Already at the new version — nothing to do. Keep this before the
-  # user-owned CLAUDE.md preservation gate: an identical incoming template
-  # needs no write and should not make a clean upgrade require review.
-  if [[ "$dest_hash" == "$new_hash" ]]; then
-    info "Up to date: ${rel}"
-    record_upgrade_result up-to-date "$rel"
+  if [[ -n "$manifest_hash" && "$manifest_owner" == user ]] &&
+     [[ "$rig_owned_default" != true ]] && ! is_rig_owned "$rel"; then
+    info "Skipped (user-owned): ${rel}"
+    if [[ "$rel" == "CLAUDE.md" && -n "${TARGET:-}" && "${base:-}" == "$TARGET" ]]; then
+      PROJECT_CLAUDE_PRESERVED_USER=true
+    fi
+    record_upgrade_result preserved-user "$rel"
     return
   fi
 
-  if [[ -n "$manifest_hash" && "$manifest_owner" == user && "$rel" == "CLAUDE.md" ]]; then
-    info "Skipped (user-owned): ${rel}"
-    if [[ -n "${TARGET:-}" && "${base:-}" == "$TARGET" ]]; then
-      PROJECT_CLAUDE_PRESERVED_USER=true
-    fi
-    if [[ -n "$AGENT_MODE" ]]; then
-      record_upgrade_result preserved-user "$rel"
-    else
-      record_upgrade_result skipped-customized "$rel"
-    fi
+  if [[ "$dest_hash" == "$new_hash" ]]; then
+    info "Up to date: ${rel}"
+    record_upgrade_result up-to-date "$rel"
     return
   fi
 

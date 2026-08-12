@@ -54,7 +54,7 @@ file_sha256() {
   assert_marker_contract "$TEST_PROJECT/.rig/memory/ERRORS.md"
 }
 
-@test "upgrade replaces an unmodified manifest-tracked legacy ERRORS template" {
+@test "upgrade preserves a manifest-tracked user-owned legacy ERRORS file" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
@@ -74,5 +74,8 @@ file_sha256() {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
 
-  assert_marker_contract "$errors_file"
+  [[ "$output" == *"Skipped (user-owned): .rig/memory/ERRORS.md"* ]] || return 1
+  /usr/bin/grep -Fq '<!-- Add new entries above this line, newest first -->' "$errors_file"
+  run /usr/bin/grep -Fq '<!-- Add new entries below this line, newest first -->' "$errors_file"
+  [ "$status" -ne 0 ]
 }
