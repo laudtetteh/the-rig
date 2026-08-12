@@ -9,6 +9,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `bin/rig session retrofit` safely binds an already-running Codex thread from
+  `CODEX_THREAD_ID`, redacting the native ID in public output and avoiding
+  transcript/content matching (#529).
+
+### Fixed
+
+- Project upgrades launched from Codex now retrofit existing Claude-only Rig
+  projects to the `both` project agent target when no explicit selector is
+  supplied, installing missing Codex hooks, config, and mirrored skills (#530).
+- `bin/rig doctor` now reports missing Codex project infrastructure and missing
+  current-thread session bindings when `CODEX_THREAD_ID` is present (#529,
+  #530).
+- Executable Codex hook adapters now refresh manifest mode/hash metadata after
+  chmod so doctor no longer reports false drift immediately after install or
+  upgrade (#531).
+
 ---
 
 ## [1.27.1] — 2026-08-09

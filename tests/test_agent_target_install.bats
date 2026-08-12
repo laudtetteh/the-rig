@@ -97,6 +97,39 @@ teardown() { rm -rf "$TEST_ROOT"; }
   [ ! -e "$TEST_PROJECT/.claude/settings.json" ]
 }
 
+@test "Codex runtime retrofits an existing Claude-only project when selector is omitted" {
+  run env HOME="$TEST_HOME" bash "$INSTALLER" --project-only --project-agent claude --target "$TEST_PROJECT" --strategy merge --tracking repo
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_PROJECT/.codex" ]
+
+  run env HOME="$TEST_HOME" CODEX_THREAD_ID=codex-runtime bash "$INSTALLER" --project-only --target "$TEST_PROJECT" --strategy merge --tracking repo
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_PROJECT/.codex/hooks.json" ]
+  [ -x "$TEST_PROJECT/.codex/hooks/rig-adapter.sh" ]
+  [ -f "$TEST_PROJECT/.codex/config.toml" ]
+  [ -f "$TEST_PROJECT/.agents/skills/wrap/SKILL.md" ]
+  /usr/bin/grep -q '"agents":\["claude","codex"\]' "$TEST_PROJECT/.rig/install-targets.json"
+}
+
+@test "explicit Claude selector is not overridden by a Codex runtime" {
+  run env HOME="$TEST_HOME" bash "$INSTALLER" --project-only --project-agent claude --target "$TEST_PROJECT" --strategy merge --tracking repo
+  [ "$status" -eq 0 ]
+  run env HOME="$TEST_HOME" CODEX_THREAD_ID=codex-runtime bash "$INSTALLER" --project-only --project-agent claude --target "$TEST_PROJECT" --strategy merge --tracking repo
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_PROJECT/.codex" ]
+  /usr/bin/grep -q '"agents":\["claude"\]' "$TEST_PROJECT/.rig/install-targets.json"
+}
+
+@test "unrelated bin/rig does not make a fresh project auto-select Codex under a Codex runtime" {
+  mkdir -p "$TEST_PROJECT/bin"
+  printf '#!/usr/bin/env bash\nprintf project-tool\n' > "$TEST_PROJECT/bin/rig"
+
+  run env HOME="$TEST_HOME" CODEX_THREAD_ID=codex-runtime bash "$INSTALLER" --project-only --target "$TEST_PROJECT" --strategy merge --tracking repo
+  [ "$status" -eq 0 ]
+  /usr/bin/grep -q '"agents":\["claude"\]' "$TEST_PROJECT/.rig/install-targets.json"
+  [ ! -e "$TEST_PROJECT/.codex" ]
+}
+
 @test "invalid selector exits 2 without writes" {
   run env HOME="$TEST_HOME" bash "$INSTALLER" --project-only --project-agent other --target "$TEST_PROJECT" --strategy merge
   [ "$status" -eq 2 ]

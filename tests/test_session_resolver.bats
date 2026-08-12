@@ -8,7 +8,7 @@ setup() {
   chmod +x "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-tab-title-watch"
   git -C "$CASE_DIR" init -q
   git -C "$CASE_DIR" checkout -q -b feat/current
-  unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID RIG_SESSION_BRANCH
+  unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID RIG_SESSION_BRANCH CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID
 }
 
 write_session() {
@@ -233,6 +233,30 @@ json.dump({
   run "$CASE_DIR/bin/rig" session resolve --agent codex --native-session-id thread-secret --json
   [ "$status" -eq 0 ]; [[ "$output" == *'"reason": "native_id"'* && "$output" != *'thread-secret'* ]] || return 1
   after=$(cksum "$file"); [ "$before" = "$after" ]
+}
+
+@test "current Codex retrofit binds from CODEX_THREAD_ID without leaking the native id" {
+  run env CODEX_THREAD_ID=current-thread "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --source resume --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"retrofitted": true'* && "$output" != *'current-thread'* ]] || return 1
+  local file
+  file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  SESSION_F="$file" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["agent"]=="codex" and d["native"]["session_id"]=="current-thread" and d["native"]["source"]=="resume"'
+
+  run env CODEX_THREAD_ID=current-thread RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"reason": "native_id"'* && "$output" != *'current-thread'* ]] || return 1
+
+  run env CODEX_THREAD_ID=current-thread "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --source resume --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"retrofitted": false'* && "$output" != *'current-thread'* ]] || return 1
+}
+
+@test "current Codex retrofit fails safely when CODEX_THREAD_ID is missing" {
+  run env -u CODEX_THREAD_ID "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason":"missing_native_env"'* && "$output" == *'"no_write":true'* ]] || return 1
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -type f -name 'session-*.json' | wc -l | tr -d ' ')" -eq 0 ]
 }
 
 @test "native resolver fails closed on wrong project and duplicate bindings" {

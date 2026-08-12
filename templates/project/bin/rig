@@ -16,6 +16,7 @@ Commands:
   rig session list          List redacted public session summaries
   rig session doctor        Check session-record integrity and privacy
   rig session repair        Preview or confirm explicit orphan repair
+  rig session retrofit      Bind this process' native session ID safely
   rig session obligation    Mark or clear an exact session obligation
   rig sprint                Audit, plan, or inspect a durable sprint
   rig session-name set      Set the current session name atomically
@@ -60,10 +61,11 @@ command_help() {
     connector) printf 'Usage: rig connector preflight --skill ID [--evidence FILE|-] [--refresh] [--json]\n';;
     worktree) printf 'Usage: rig worktree bootstrap\n';;
     session) cat <<'EOF'
-Usage: rig session <resolve|current|list|doctor|repair|obligation> [options]
+Usage: rig session <resolve|current|list|doctor|repair|retrofit|obligation> [options]
 
 Native IDs are redacted unless --verbose is explicitly supplied.
 Repair is preview-only unless --confirm TOKEN and --reason REASON are supplied.
+Retrofit binds the current native host ID from env with no transcript matching.
 Content matching is never part of normal resolution.
 EOF
       ;;
@@ -384,6 +386,14 @@ def run(command):
     except (OSError, subprocess.SubprocessError) as exc:
         return None
 
+def project_identity():
+    try:
+        common = subprocess.check_output(["git", "-C", str(root), "rev-parse", "--git-common-dir"], text=True, stderr=subprocess.DEVNULL).strip()
+        common = pathlib.Path(common if os.path.isabs(common) else root / common).resolve()
+        return hashlib.sha256(str(common).encode()).hexdigest()
+    except (OSError, subprocess.SubprocessError):
+        return hashlib.sha256(str(root.resolve()).encode()).hexdigest()
+
 common = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"])
 if common is not None and common.returncode == 0:
     primary = pathlib.Path(common.stdout.strip()).parent
@@ -506,6 +516,73 @@ if "codex" in target_agents:
     check("codex_project_instructions", effective, detail)
 else:
     check("codex_project_instructions", True, "Codex project target not enabled")
+
+codex_runtime_id = os.environ.get("CODEX_THREAD_ID", "")
+if codex_runtime_id:
+    required_codex = []
+    if "codex" not in target_agents:
+        required_codex.append("install-targets.json lacks codex")
+    if not (root / ".codex" / "hooks.json").is_file():
+        required_codex.append(".codex/hooks.json missing")
+    adapter_path = root / ".codex" / "hooks" / "rig-adapter.sh"
+    if not adapter_path.is_file():
+        required_codex.append(".codex/hooks/rig-adapter.sh missing")
+    elif not os.access(adapter_path, os.X_OK):
+        required_codex.append(".codex/hooks/rig-adapter.sh not executable")
+    if not (root / ".codex" / "config.toml").is_file():
+        required_codex.append(".codex/config.toml missing")
+    if not skills.is_dir():
+        required_codex.append(".agents/skills missing")
+    target_detail = ("Codex project runtime support present" if not required_codex else
+                     "missing: " + ", ".join(required_codex) +
+                     "; converge with /rig-upgrade --scope=project --mode=agent or install.sh --project-only --project-agent both --strategy merge")
+    check("codex_project_target_runtime", not required_codex, target_detail)
+
+    session_root = rig / "memory" / "sessions"
+    records = []
+    session_errors = []
+    for base in (session_root, session_root / "done"):
+        if not base.is_dir():
+            continue
+        for path in base.glob("session-*.json"):
+            try:
+                data = json.loads(read(path))
+                if isinstance(data, dict):
+                    records.append((path, data))
+                else:
+                    session_errors.append(path.name)
+            except (ValueError, TypeError):
+                session_errors.append(path.name)
+    current_project_id = project_identity()
+    same = [(p, d) for p, d in records
+            if d.get("schema_version") == 1
+            and d.get("project", {}).get("identity") == current_project_id
+            and d.get("agent") == "codex"
+            and d.get("native", {}).get("session_id") == codex_runtime_id]
+    cross = [(p, d) for p, d in records
+             if d.get("schema_version") == 1
+             and d.get("project", {}).get("identity") != current_project_id
+             and d.get("agent") == "codex"
+             and d.get("native", {}).get("session_id") == codex_runtime_id]
+    if session_errors:
+        session_ok, session_detail = False, "session records malformed: " + ", ".join(session_errors[:5])
+    elif len(same) > 1:
+        session_ok, session_detail = False, "duplicate Codex native bindings"
+    elif same:
+        path, data = same[0]
+        if "done" in path.parts or data.get("lifecycle", {}).get("state") == "complete":
+            session_ok, session_detail = False, "current Codex thread is bound only to a completed record"
+        else:
+            session_ok, session_detail = True, "current Codex thread has an active Rig session binding"
+    elif cross:
+        session_ok, session_detail = False, "current Codex thread is bound to another project"
+    else:
+        session_ok = False
+        session_detail = "current Codex thread is not bound; run: bin/rig session retrofit --agent codex --from-env --source resume --json"
+    check("codex_session_runtime", session_ok, session_detail)
+else:
+    check("codex_project_target_runtime", True, "Codex runtime not detected")
+    check("codex_session_runtime", True, "Codex runtime not detected")
 
 claude_md = read(root / "CLAUDE.md")
 matches = re.findall(r"(?m)^issue-tracking:\s*([^\s#]+)", claude_md)
@@ -1189,7 +1266,7 @@ else:
         print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
     parent_anchor=parent_matches[0].get("anchor") if len(parent_matches)==1 else None
     d={"schema_version":1,"anchor":anchor,"agent":agent,
-       "native":{"session_id":native_id,"root_session_id":root_native,"bound_at":now,"source":"launcher_hint" if hint else "hook"},
+       "native":{"session_id":native_id,"root_session_id":root_native,"bound_at":now,"source":"launcher_hint" if hint else source},
        "project":{"root_realpath":str(root),"identity":project_id,"worktree_realpath":str(root)},
        "created_at":created,"updated_at":now,
        "runtime":{"pid":int(os.environ.get("RIG_SESSION_PID",os.getppid())),"launcher":"rig" if hint else "raw","cwd":os.getcwd(),"branch":"unknown","head":None},
@@ -1219,6 +1296,52 @@ try: sentinel.write_text(d["anchor"])
 except OSError: pass
 print(json.dumps({"ok":True,"schema_version":1,"session_file":str(p),"anchor":d["anchor"],"agent":agent,"state":"active","confidence":"exact","reason":"native_id","native_session_id":None,"revision":d["revision"],"warnings":[]}))
 PY
+}
+
+session_retrofit() {
+  local agent="" from_env=false source="resume" json=false arg native_id env_name resolved status
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --agent) [[ "$#" -ge 2 ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }; agent="$2"; shift 2;;
+      --from-env) from_env=true; shift;;
+      --source) [[ "$#" -ge 2 ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }; source="$2"; shift 2;;
+      --json) json=true; shift;;
+      *) printf '{"ok":false,"reason":"invalid_input"}\n'; return 3;;
+    esac
+  done
+  [[ "$agent" == codex || "$agent" == claude ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }
+  [[ "$from_env" == true ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }
+  case "$agent" in
+    codex) env_name=CODEX_THREAD_ID; native_id="${CODEX_THREAD_ID:-}" ;;
+    claude) env_name=CLAUDE_CODE_SESSION_ID; native_id="${CLAUDE_CODE_SESSION_ID:-}" ;;
+  esac
+  if [[ -z "$native_id" ]]; then
+    printf '{"ok":false,"reason":"missing_native_env","agent":"%s","env":"%s","no_write":true}\n' "$agent" "$env_name"
+    return 3
+  fi
+  resolved="$(session_resolve --json --agent "$agent" --native-session-id "$native_id")" && {
+    if [[ "$json" == true ]]; then
+      printf '%s\n' "$resolved" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["retrofitted"]=False; print(json.dumps(d))'
+    else
+      printf 'Already bound current %s session.\n' "$agent"
+    fi
+    return 0
+  }
+  status=$?
+  if [[ "$status" -ne 1 ]]; then
+    if [[ "$json" == true ]]; then printf '%s\n' "$resolved"; else printf 'Unable to retrofit current %s session.\n' "$agent" >&2; fi
+    return "$status"
+  fi
+  resolved="$(session_bind --agent "$agent" --native-session-id "$native_id" --source "$source")"
+  status=$?
+  if [[ "$status" -eq 0 && "$json" == true ]]; then
+    printf '%s\n' "$resolved" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["retrofitted"]=True; print(json.dumps(d))'
+  elif [[ "$status" -eq 0 ]]; then
+    printf 'Bound current %s session.\n' "$agent"
+  else
+    printf '%s\n' "$resolved"
+  fi
+  return "$status"
 }
 
 session_current() {
@@ -1513,7 +1636,7 @@ main() {
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help "$command"; return; fi
       subcommand="${1:-}"; shift || true
-      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
+      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
     *) shift; usage_error "unknown command: $command" "$@";;
   esac
 }
