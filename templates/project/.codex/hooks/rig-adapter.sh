@@ -31,7 +31,7 @@ ACTUAL_ADAPTER=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))
 [[ "$ACTUAL_ADAPTER" == "$EXPECTED_ADAPTER" ]] || fail_closed "Codex adapter path does not match this project."
 
 EVENT=$(printf '%s' "$INPUT" | python3 -c '
-import json, sys
+import json, os, sys
 try:
     data = json.load(sys.stdin)
     event = data.get("hook_event_name", data.get("hookEventName", ""))
@@ -43,7 +43,7 @@ except Exception:
 
 normalize_payload() {
   printf '%s' "$INPUT" | python3 -c '
-import json, sys
+import json, os, sys
 d = json.load(sys.stdin)
 aliases = {
     "hookEventName": "hook_event_name", "toolName": "tool_name",
@@ -55,6 +55,14 @@ aliases = {
 for old, new in aliases.items():
     if new not in d and old in d: d[new] = d[old]
 event = d.get("hook_event_name", "")
+if event in ("SessionStart", "PreCompact", "PostCompact", "SessionEnd", "Stop", "UserPromptSubmit") and not d.get("session_id"):
+    native_id = os.environ.get("CODEX_THREAD_ID", "")
+    if native_id:
+        d["session_id"] = native_id
+if event in ("SessionStart", "PreCompact", "PostCompact") and not d.get("root_session_id"):
+    root_id = os.environ.get("CODEX_ROOT_THREAD_ID", "")
+    if root_id:
+        d["root_session_id"] = root_id
 if event == "SessionEnd": d["source"] = "logout"
 if event in ("PreCompact", "PostCompact") and "trigger" in d:
     d["source"] = "compact"

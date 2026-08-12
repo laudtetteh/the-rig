@@ -1040,23 +1040,27 @@ if "RIG_SESSION_FILE" in os.environ:
     state = d.get("lifecycle", {}).get("state", d.get("status")) if d else None
     if p and d and state == "active" and "done" not in p.parts: emit(p, d, "exact", "launcher_file"); raise SystemExit(0)
     emit(None, None, "none", "invalid_launcher_file"); raise SystemExit(3)
-# The Claude Code host injects its own session id into its process environment,
-# and every subprocess it spawns (hooks, and every ad-hoc tool-call shell)
-# inherits that env var via normal fork/exec — unlike RIG_SESSION_FILE/ANCHOR,
-# which a hook script can only export into its own short-lived process, or the
-# PID-sentinel scheme below, which breaks once a caller is more than one
-# process hop from the PID that wrote it (e.g. a tool-call shell nested inside
-# the `bin/rig` interpreter and an embedded python3). This is a genuine native
-# identity signal, not an inferred one, so it is tried before the legacy
-# anchor/PID fallbacks. A record naming a different project is a definitive
-# cross_project answer, not a reason to keep guessing via PID. No matching v1
-# record at all is not a contradiction (older-schema records or a
-# not-yet-native-bound project are still valid) so that case falls through
-# unchanged to the legacy fallbacks below.
-native_env_id = os.environ.get("CLAUDE_CODE_SESSION_ID")
-if native_env_id:
+# Claude Code and Codex both expose native session identity through process
+# environment variables, and every subprocess they spawn (hooks, and every
+# ad-hoc tool-call shell) inherits those values via normal fork/exec — unlike
+# RIG_SESSION_FILE/ANCHOR, which a hook script can only export into its own
+# short-lived process, or the PID-sentinel scheme below, which breaks once a
+# caller is more than one process hop from the PID that wrote it (e.g. a
+# tool-call shell nested inside the `bin/rig` interpreter and an embedded
+# python3). This is a genuine native identity signal, not an inferred one, so
+# it is tried before the legacy anchor/PID fallbacks. A record naming a
+# different project is a definitive cross_project answer, not a reason to keep
+# guessing via PID. No matching v1 record at all is not a contradiction
+# (older-schema records or a not-yet-native-bound project are still valid) so
+# that case falls through unchanged to the legacy fallbacks below.
+native_env_signals = []
+if os.environ.get("CODEX_THREAD_ID"):
+    native_env_signals.append(("codex", os.environ.get("CODEX_THREAD_ID")))
+if os.environ.get("CLAUDE_CODE_SESSION_ID"):
+    native_env_signals.append(("claude", os.environ.get("CLAUDE_CODE_SESSION_ID")))
+for native_env_agent, native_env_id in native_env_signals:
     matches = [(p, d) for p, d in records if d.get("schema_version") == 1 and
-               d.get("project", {}).get("identity") == project_id and d.get("agent") == "claude" and
+               d.get("project", {}).get("identity") == project_id and d.get("agent") == native_env_agent and
                d.get("native", {}).get("session_id") == native_env_id]
     if len(matches) > 1: emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
     if len(matches) == 1:
@@ -1064,7 +1068,7 @@ if native_env_id:
         if "done" in p.parts or d.get("lifecycle", {}).get("state") == "complete":
             emit(None, None, "none", "ended_record"); raise SystemExit(3)
         emit(p, d, "exact", "native_id"); raise SystemExit(0)
-    cross = [(p, d) for p, d in records if d.get("schema_version") == 1 and d.get("agent") == "claude" and d.get("native", {}).get("session_id") == native_env_id]
+    cross = [(p, d) for p, d in records if d.get("schema_version") == 1 and d.get("agent") == native_env_agent and d.get("native", {}).get("session_id") == native_env_id]
     if cross: emit(None, None, "none", "cross_project"); raise SystemExit(3)
 files = [(p,d) for p,d in records if "done" not in p.parts and d.get("lifecycle", {}).get("state", d.get("status")) == "active"]
 explicit_anchor = "RIG_SESSION_ANCHOR" in os.environ

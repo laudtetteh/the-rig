@@ -16,6 +16,9 @@ setup() {
     "$TEST_PROJECT/.claude/hooks/session-start.sh"
   cp "$REPO_ROOT/templates/project/.codex/hooks/rig-adapter.sh" \
     "$TEST_PROJECT/.codex/hooks/rig-adapter.sh"
+  mkdir -p "$TEST_PROJECT/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig" "$TEST_PROJECT/bin/rig"
+  chmod +x "$TEST_PROJECT/bin/rig"
   cp "$REPO_ROOT/templates/project/.rig/rules/protected-paths.txt" \
     "$TEST_PROJECT/.rig/rules/protected-paths.txt"
   printf 'abc123  .rig/rules/protected-paths.txt\n' \
@@ -101,4 +104,13 @@ assert direct == codex
 assert direct["hookSpecificOutput"]["hookEventName"] == "SessionStart"
 PY
   [ "$status" -eq 0 ]
+}
+
+@test "Codex SessionStart binds CODEX_THREAD_ID as native session identity" {
+  run env CODEX_THREAD_ID=codex-thread-123 bash -c 'cd "$1" && printf "%s" "$2" | bash .codex/hooks/rig-adapter.sh' \
+    _ "$TEST_PROJECT" '{"hookEventName":"SessionStart","source":"startup"}'
+  [ "$status" -eq 0 ]
+  run "$TEST_PROJECT/bin/rig" session resolve --agent codex --native-session-id codex-thread-123 --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"agent": "codex"'* && "$output" == *'"reason": "native_id"'* ]] || return 1
 }
