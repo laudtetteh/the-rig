@@ -12,12 +12,14 @@ The Rig itself — for review and optional submission.
 3. Formats a consolidated report with copy-paste instructions
 4. Offers to mark entries as submitted (adds `[submitted]` tag to entry headers)
 5. With `--collect`, scans every Rig project and produces a deduplicated triage report
+6. With `--add`, appends one structured gap without running the full report flow
 
 ## Usage
 
 ```
 /rig-gaps
 /rig-gaps --collect
+/rig-gaps --add "short title"
 ```
 
 Use `/rig-gaps --collect` from any project to review unsubmitted gaps across all
@@ -52,6 +54,35 @@ Existing entries without `Scope` remain valid historical data. Normal mode shoul
 add `**Scope**: project` when it synthesizes an entry from `ERRORS.md`. Collector
 mode must retain an entry with a missing or invalid scope, label it `needs-review`,
 and never silently guess that it is a Rig-core issue.
+
+## Quick-add mode (`--add`)
+
+If the user says **"add"**, **"--add"**, or provides `/rig-gaps --add "title"`,
+run this flow instead of collection, push, submit, or report mode.
+
+1. Resolve `$RIG_DIR` using the standard stealth-mode block above.
+2. Collect these fields from the user or from the current conversation:
+   `title`, `scope` (`project` or `rig-core`), `category`, `severity`,
+   `workflow`, `observation`, and `suggested fix`.
+3. If `scope` is missing, ask one concise question before writing. Use
+   `project` for current-project setup or decision friction, and `rig-core` only
+   for commands, hooks, installer, templates, or workflow behavior that could
+   affect other Rig projects.
+4. Append through the shipped helper so `.rigpath` and atomic write behavior are
+   consistent:
+   ```bash
+   "$REPO/bin/rig" memory append-gap \
+     --title "$TITLE" \
+     --scope "$SCOPE" \
+     --category "$CATEGORY" \
+     --severity "$SEVERITY" \
+     --workflow "$WORKFLOW" \
+     --observation "$OBSERVATION" \
+     --suggested-fix "$SUGGESTED_FIX" \
+     --json
+   ```
+5. Confirm the file path and scope from the JSON response. Do not mark the entry
+   submitted in quick-add mode.
 
 ---
 
