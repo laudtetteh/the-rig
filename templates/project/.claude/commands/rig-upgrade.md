@@ -51,11 +51,28 @@ PROJECT_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$RIG_DIR/VERSION" 2>/dev/null \
   || stat -c "%y" "$RIG_DIR/VERSION" 2>/dev/null | cut -d' ' -f1-2 | cut -c1-16 \
   || echo "unknown")
 
-# Global installer version
-GLOBAL_INSTALLER=~/tools/the-rig
-GLOBAL_VERSION=$(cat "$GLOBAL_INSTALLER/VERSION" 2>/dev/null || echo "not found")
-GLOBAL_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$GLOBAL_INSTALLER/VERSION" 2>/dev/null \
-  || stat -c "%y" "$GLOBAL_INSTALLER/VERSION" 2>/dev/null | cut -d' ' -f1-2 | cut -c1-16 \
+# Global installed layer version from manifest metadata. The global layer does
+# not install a VERSION file; ~/.claude/.rig-global-manifest.json is the
+# installed-artifact provenance source.
+GLOBAL_MANIFEST="$HOME/.claude/.rig-global-manifest.json"
+GLOBAL_LAYER_VERSION=$(python3 - "$GLOBAL_MANIFEST" <<'PY' 2>/dev/null || echo "not installed"
+import json, sys
+with open(sys.argv[1]) as fh:
+    entries = json.load(fh).get("entries", {})
+versions = sorted({entry.get("base_revision") or entry.get("installer_version") for entry in entries.values() if isinstance(entry, dict) and (entry.get("base_revision") or entry.get("installer_version"))})
+print(versions[-1] if versions else "unknown")
+PY
+)
+GLOBAL_LAYER_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$GLOBAL_MANIFEST" 2>/dev/null \
+  || stat -c "%y" "$GLOBAL_MANIFEST" 2>/dev/null | cut -d' ' -f1-2 | cut -c1-16 \
+  || echo "unknown")
+
+# Preferred installer checkout version. This is the source used for future
+# upgrades, not proof of what the global layer has already installed.
+INSTALLER_CHECKOUT=~/tools/the-rig
+INSTALLER_VERSION=$(cat "$INSTALLER_CHECKOUT/VERSION" 2>/dev/null || echo "not found")
+INSTALLER_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$INSTALLER_CHECKOUT/VERSION" 2>/dev/null \
+  || stat -c "%y" "$INSTALLER_CHECKOUT/VERSION" 2>/dev/null | cut -d' ' -f1-2 | cut -c1-16 \
   || echo "unknown")
 
 # Latest GitHub release (requires gh CLI; graceful fallback if unavailable)
@@ -106,7 +123,8 @@ Output:
 > Rig version info
 > ─────────────────────────────────────────
 > Project (.rig/VERSION):         1.16.0   (last modified: 2026-05-18 11:41)
-> Global installer (~/tools/):    1.16.0   (last modified: 2026-05-18 10:52)
+> Global installed layer:         1.16.0   (manifest: 2026-05-18 10:50)
+> Preferred installer checkout:   1.16.0   (~/tools/the-rig, last modified: 2026-05-18 10:52)
 > Latest GitHub release:          v1.16.0  (published: 2026-05-18)
 > Project agent targets:          claude,codex
 > Global agent targets:           claude
@@ -120,12 +138,12 @@ If `GITHUB_VERSION` is empty (gh not available or network failed), print instead
 
 After printing the version and target lines, apply these checks in order:
 
-1. If project and global versions differ:
-   > "⚠️ Project is at `$PROJECT_VERSION` but global installer is at `$GLOBAL_VERSION`. Run `/rig-upgrade` to sync."
+1. If project and global installed-layer versions differ:
+   > "⚠️ Project is at `$PROJECT_VERSION` but global installed layer is at `$GLOBAL_LAYER_VERSION`. Run `/rig-upgrade` to sync."
 
-2. If a GitHub version was retrieved and it differs from `$GLOBAL_VERSION`
+2. If a GitHub version was retrieved and it differs from `$INSTALLER_VERSION`
    (compare after stripping a leading `v` from `$GITHUB_VERSION`):
-   > "⚠️ Stable installer source is at `$GLOBAL_VERSION` but latest release is `$GITHUB_VERSION`.
+   > "⚠️ Preferred installer checkout is at `$INSTALLER_VERSION` but latest release is `$GITHUB_VERSION`.
    > Update it with: `git -C ~/tools/the-rig checkout main && git -C ~/tools/the-rig pull --ff-only origin main`
    > Then re-run `/rig-upgrade --version`."
 
