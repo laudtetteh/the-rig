@@ -68,6 +68,36 @@ if command -v gh >/dev/null 2>&1; then
     GITHUB_DATE=$(echo "$_gh_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['publishedAt'][:10])" 2>/dev/null || true)
   fi
 fi
+
+# Installed agent target metadata (agent support, not just VERSION files)
+PROJECT_TARGETS_FILE="$RIG_DIR/install-targets.json"
+PROJECT_AGENTS=$(python3 - "$PROJECT_TARGETS_FILE" <<'PY' 2>/dev/null || echo "unknown"
+import json, sys
+with open(sys.argv[1]) as fh:
+    print(",".join(json.load(fh).get("agents", [])) or "none")
+PY
+)
+GLOBAL_TARGETS_FILE="$HOME/.rig/install-targets.json"
+GLOBAL_AGENTS=$(python3 - "$GLOBAL_TARGETS_FILE" <<'PY' 2>/dev/null || echo "unknown"
+import json, sys
+with open(sys.argv[1]) as fh:
+    print(",".join(json.load(fh).get("agents", [])) or "none")
+PY
+)
+
+CODEX_INFRA_STATUS="not selected"
+if [[ ",$PROJECT_AGENTS," == *",codex,"* ]]; then
+  missing_codex=()
+  [[ -f "$REPO/.codex/hooks.json" ]] || missing_codex+=(".codex/hooks.json")
+  [[ -x "$REPO/.codex/hooks/rig-adapter.sh" ]] || missing_codex+=(".codex/hooks/rig-adapter.sh executable")
+  [[ -f "$REPO/.codex/config.toml" ]] || missing_codex+=(".codex/config.toml")
+  [[ -d "$REPO/.agents/skills" ]] || missing_codex+=(".agents/skills")
+  if [[ "${#missing_codex[@]}" -eq 0 ]]; then
+    CODEX_INFRA_STATUS="complete"
+  else
+    CODEX_INFRA_STATUS="missing: ${missing_codex[*]}"
+  fi
+fi
 ```
 
 Output:
@@ -78,6 +108,9 @@ Output:
 > Project (.rig/VERSION):         1.16.0   (last modified: 2026-05-18 11:41)
 > Global installer (~/tools/):    1.16.0   (last modified: 2026-05-18 10:52)
 > Latest GitHub release:          v1.16.0  (published: 2026-05-18)
+> Project agent targets:          claude,codex
+> Global agent targets:           claude
+> Codex project infrastructure:   complete
 > ```
 
 If `GITHUB_VERSION` is empty (gh not available or network failed), print instead:
@@ -85,7 +118,7 @@ If `GITHUB_VERSION` is empty (gh not available or network failed), print instead
 > Latest GitHub release:          (unavailable — gh not found or no network)
 > ```
 
-After printing all three lines, apply these checks in order:
+After printing the version and target lines, apply these checks in order:
 
 1. If project and global versions differ:
    > "⚠️ Project is at `$PROJECT_VERSION` but global installer is at `$GLOBAL_VERSION`. Run `/rig-upgrade` to sync."
@@ -100,7 +133,19 @@ After printing all three lines, apply these checks in order:
    (compare after stripping a leading `v` from `$GITHUB_VERSION`):
    > "⚠️ A newer release is available: `$GITHUB_VERSION`. Pull `~/tools/the-rig` and run `/rig-upgrade`."
 
-4. If all three are in sync: say nothing extra.
+4. If `CODEX_THREAD_ID` is set and `$PROJECT_AGENTS` does not include `codex`:
+   > "⚠️ This is a Codex session, but the project target metadata is `$PROJECT_AGENTS`.
+   > Run `/rig-upgrade --scope=project --mode=agent` or install with `--project-agent both` to retrofit Codex project support."
+
+5. If `CODEX_THREAD_ID` is set and `$CODEX_INFRA_STATUS` is not `complete`:
+   > "⚠️ Codex project support is incomplete: `$CODEX_INFRA_STATUS`.
+   > Run `/rig-upgrade --scope=project --mode=agent`, then verify with `bin/rig doctor --json`."
+
+6. If `CODEX_THREAD_ID` is set and `bin/rig session resolve --json` reports `reason: not_found`:
+   > "⚠️ Current Codex thread is not bound to Rig session memory.
+   > After the project target is converged, run: `bin/rig session retrofit --agent codex --from-env --source resume --json`."
+
+7. If all versions and target surfaces are in sync: say nothing extra.
 
 Then stop — do not proceed to Phase 0.
 

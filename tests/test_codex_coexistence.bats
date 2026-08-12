@@ -275,6 +275,7 @@ PY
   grep -Fq '  .codex/hooks.json' "$TEST_PROJECT/.rig/memory/.rig-manifest"
   grep -Fq '  .codex/hooks/rig-adapter.sh' "$TEST_PROJECT/.rig/memory/.rig-manifest"
   grep -Fq '  .agents/skills/' "$TEST_PROJECT/.rig/memory/.rig-manifest"
+  jq -e '.entries[".codex/hooks/rig-adapter.sh"].mode == "755" and .entries[".codex/hooks/rig-adapter.sh"].sha256' "$TEST_PROJECT/.rig/memory/.rig-manifest.json" >/dev/null
   [[ "$output" == *"open /hooks"* ]] || return 1
 
   payload='{"session_id":"test","cwd":"'$TEST_PROJECT'","hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_use_id":"call-1","tool_input":{"command":"*** Begin Patch\n*** Update File: CLAUDE.md\n*** End Patch"}}'

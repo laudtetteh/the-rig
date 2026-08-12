@@ -171,6 +171,9 @@ _fail_with_list() {
   grep -Fq -- '--skills-source "$INSTALLER_SRC/templates/project/.claude/skills"' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq '"${CODEX_COMMAND_SOURCES[@]}"' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 'Do not patch generated `.agents/skills/*/references/command.md` files by hand' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'PROJECT_TARGETS_FILE="$RIG_DIR/install-targets.json"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'CODEX_INFRA_STATUS' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'bin/rig session retrofit --agent codex --from-env --source resume --json' "$COMMAND_DIR/rig-upgrade.md"
 }
 
 # ── PR description freshness ───────────────────────────────────────────────────

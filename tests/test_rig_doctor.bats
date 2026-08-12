@@ -12,6 +12,7 @@ setup() {
   cp "$CASE_DIR/.claude/commands/task.md" "$CASE_DIR/.claude/commands/ship.md"
   printf 'hash .claude/commands/task.md\nhash .claude/commands/ship.md\n' > "$CASE_DIR/.rig/memory/.rig-manifest"
   git -C "$CASE_DIR" init -q
+  unset CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID
 }
 
 json_assert() {
@@ -153,6 +154,29 @@ json_assert() {
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_project_instructions"); assert c["ok"] and "CLAUDE.md" in c["detail"]'
+}
+
+@test "Codex runtime doctor reports missing project target infrastructure and retrofit command" {
+  run env CODEX_THREAD_ID=doctor-thread "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert not c["codex_project_target_runtime"]["ok"] and ".codex/hooks.json" in c["codex_project_target_runtime"]["detail"] and "--project-agent both" in c["codex_project_target_runtime"]["detail"]; assert not c["codex_session_runtime"]["ok"] and "session retrofit" in c["codex_session_runtime"]["detail"]'
+}
+
+@test "Codex runtime doctor passes after target infrastructure and current-thread binding exist" {
+  printf '{"schema_version":1,"agents":["claude","codex"]}\n' > "$CASE_DIR/.rig/install-targets.json"
+  mkdir -p "$CASE_DIR/.codex/hooks" "$CASE_DIR/.agents/skills/task" "$CASE_DIR/.agents/skills/ship"
+  printf '{"hooks":{}}\n' > "$CASE_DIR/.codex/hooks.json"
+  printf 'project_doc_fallback_filenames = ["CLAUDE.md"]\n' > "$CASE_DIR/.codex/config.toml"
+  printf '#!/usr/bin/env bash\n' > "$CASE_DIR/.codex/hooks/rig-adapter.sh"
+  chmod +x "$CASE_DIR/.codex/hooks/rig-adapter.sh"
+  printf '%s\n' '---' 'name: task' '---' > "$CASE_DIR/.agents/skills/task/SKILL.md"
+  printf '%s\n' '---' 'name: ship' '---' > "$CASE_DIR/.agents/skills/ship/SKILL.md"
+
+  run env CODEX_THREAD_ID=doctor-thread "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --source resume --json
+  [ "$status" -eq 0 ]
+  run env CODEX_THREAD_ID=doctor-thread "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["codex_project_target_runtime"]["ok"] and c["codex_session_runtime"]["ok"]'
 }
 
 @test "native AGENTS files take precedence for Codex without being modified" {

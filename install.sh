@@ -844,6 +844,24 @@ agent_json() {
 }
 has_agent() { [[ "$1" == "$2" || "$1" == both ]]; }
 
+project_has_existing_rig_install() {
+  local target="$1" state_file="${2:-}"
+  [[ -f "$target/.rigpath" || -f "$target/.rig/VERSION" ]] && return 0
+  [[ -n "$state_file" && -f "$state_file" ]] && return 0
+  return 1
+}
+
+maybe_enable_codex_runtime_project_target() {
+  local target="$1" state_file="${2:-}"
+  [[ "$DO_PROJECT" == true ]] || return 0
+  [[ -z "$_FLAG_PROJECT_AGENT" && "$_INTERACTIVE_AGENT_CHOICE" != true ]] || return 0
+  [[ -n "${CODEX_THREAD_ID:-}" ]] || return 0
+  has_agent "$PROJECT_AGENT" codex && return 0
+  [[ "$PROJECT_AGENT" == claude ]] || return 0
+  project_has_existing_rig_install "$target" "$state_file" || return 0
+  PROJECT_AGENT=both
+}
+
 read_agent_state() {
   local state_file="$1"
   [[ -f "$state_file" ]] || return 1
@@ -1062,7 +1080,16 @@ upgrade_set_executable_bits() {
   [[ "$AGENT_DRY_RUN" == true ]] && return 0
   while IFS= read -r -d '' path; do
     chmod +x "$path"
+    refresh_executable_manifest_entry "$path" "${rel}$(basename "$path")"
   done < <(find -P "$directory" -maxdepth 1 -type f -name "$pattern" -print0)
+}
+
+refresh_executable_manifest_entry() {
+  local path="$1" rel="$2"
+  [[ "$AGENT_DRY_RUN" == true ]] && return 0
+  [[ -f "$path" && ! -L "$path" ]] || return 0
+  [[ -n "$(read_manifest_hash "$rel")" ]] || return 0
+  write_manifest_entry "$(sha256_file "$path")" "$rel" "$MANIFEST_FILE" "$path"
 }
 
 # Shared no-follow safety check for any direct-writer mutation: only a
@@ -1505,6 +1532,7 @@ fi
     elif [[ -z "$_FLAG_PROJECT_AGENT" ]]; then PROJECT_AGENT="$_saved_project"
     fi
   fi
+  maybe_enable_codex_runtime_project_target "$_preflight_target" "$_preflight_project_state"
   _render_args=(--manifest "$CAPABILITY_MANIFEST" --version "$INSTALLER_VERSION" --operation "$COLLISION_STRATEGY" --global-agent "$GLOBAL_AGENT" --project-agent "$PROJECT_AGENT" --global-destination "$HOME/.claude" --project-destination "$_preflight_target")
   [[ "$DO_GLOBAL" == true ]] && _render_args+=(--global-enabled)
   [[ "$DO_PROJECT" == true ]] && _render_args+=(--project-enabled)
@@ -3186,6 +3214,7 @@ if [[ "$DO_PROJECT" == true ]]; then
     elif [[ -z "$_FLAG_PROJECT_AGENT" && "$_INTERACTIVE_AGENT_CHOICE" != true ]]; then PROJECT_AGENT="$_saved_project"
     fi
   fi
+  maybe_enable_codex_runtime_project_target "$TARGET" "$PROJECT_TARGET_STATE"
 
   # ── BREAKING CHANGE GATE (upgrade only) ───────────────────────────────────
   # Read the project's installed Rig version and surface any breaking changes
@@ -3872,26 +3901,31 @@ PYEOF
     elif [[ -f "$RIG_DISPATCHER" ]]; then
       # agent-plan: classification only, never change file modes.
       [[ "$AGENT_DRY_RUN" == true ]] || chmod +x "$RIG_DISPATCHER"
+      refresh_executable_manifest_entry "$RIG_DISPATCHER" "bin/rig"
       success "Set executable bit on bin/rig"
     fi
   else
     if [[ -d "$HUSKY_DIR" ]]; then
       chmod +x "$HUSKY_DIR/"* 2>/dev/null || true
+      while IFS= read -r -d '' _hook_path; do refresh_executable_manifest_entry "$_hook_path" ".husky/$(basename "$_hook_path")"; done < <(find -P "$HUSKY_DIR" -maxdepth 1 -type f -print0)
       success "Set executable bits on .husky/ hooks"
     fi
 
     if [[ -d "$CLAUDE_HOOKS_DIR" ]]; then
       chmod +x "$CLAUDE_HOOKS_DIR/"*.sh 2>/dev/null || true
+      while IFS= read -r -d '' _hook_path; do refresh_executable_manifest_entry "$_hook_path" ".claude/hooks/$(basename "$_hook_path")"; done < <(find -P "$CLAUDE_HOOKS_DIR" -maxdepth 1 -type f -name '*.sh' -print0)
       success "Set executable bits on .claude/hooks/ scripts"
     fi
 
     if has_agent "$PROJECT_AGENT" codex && [[ -d "$CODEX_HOOKS_DIR" ]]; then
       chmod +x "$CODEX_HOOKS_DIR/"*.sh 2>/dev/null || true
+      while IFS= read -r -d '' _hook_path; do refresh_executable_manifest_entry "$_hook_path" ".codex/hooks/$(basename "$_hook_path")"; done < <(find -P "$CODEX_HOOKS_DIR" -maxdepth 1 -type f -name '*.sh' -print0)
       success "Set executable bits on Codex hook adapters"
     fi
 
     if [[ -f "$RIG_DISPATCHER" ]]; then
       chmod +x "$RIG_DISPATCHER"
+      refresh_executable_manifest_entry "$RIG_DISPATCHER" "bin/rig"
       success "Set executable bit on bin/rig"
     fi
   fi
