@@ -11,6 +11,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.28.1] — 2026-08-12
+
+### Fixed
+
+- Upgrade planning now honors persisted project agent metadata during
+  `upgrade`, `agent-plan`, and `agent-upgrade` unless `--project-agent` is
+  explicit. A Codex coordinator no longer implicitly retrofits Codex surfaces
+  into an existing Claude-only project during a release pilot (#548).
+- `bin/rig doctor` now treats Codex runtime infrastructure and session-binding
+  checks as required only when Codex is an installed project target. Claude-only
+  projects no longer fail those checks merely because the coordinator is a
+  Codex session (#548).
+
+---
+
 ## [1.28.0] — 2026-08-12
 
 ### Added

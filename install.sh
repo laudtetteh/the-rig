@@ -854,6 +854,11 @@ project_has_existing_rig_install() {
 maybe_enable_codex_runtime_project_target() {
   local target="$1" state_file="${2:-}"
   [[ "$DO_PROJECT" == true ]] || return 0
+  # Upgrade and agent-plan/agent-upgrade must honor persisted target metadata
+  # unless the operator explicitly asks to change it. Otherwise a Codex session
+  # can turn a Claude-only project into "both" during a read-only release pilot
+  # and fail smoke checks on Codex files the project never selected.
+  [[ "$COLLISION_STRATEGY" != upgrade ]] || return 0
   [[ -z "$_FLAG_PROJECT_AGENT" && "$_INTERACTIVE_AGENT_CHOICE" != true ]] || return 0
   [[ -n "${CODEX_THREAD_ID:-}" ]] || return 0
   has_agent "$PROJECT_AGENT" codex && return 0

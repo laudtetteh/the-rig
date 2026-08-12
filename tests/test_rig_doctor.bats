@@ -156,7 +156,14 @@ json_assert() {
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_project_instructions"); assert c["ok"] and "CLAUDE.md" in c["detail"]'
 }
 
-@test "Codex runtime doctor reports missing project target infrastructure and retrofit command" {
+@test "Codex runtime doctor skips Codex runtime gates when project target is Claude-only" {
+  run env CODEX_THREAD_ID=doctor-thread "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["codex_project_target_runtime"]["ok"] and "not an installed project target" in c["codex_project_target_runtime"]["detail"]; assert c["codex_session_runtime"]["ok"] and "not required" in c["codex_session_runtime"]["detail"]'
+}
+
+@test "Codex-selected runtime doctor reports missing project target infrastructure and retrofit command" {
+  printf '{"schema_version":1,"agents":["claude","codex"]}\n' > "$CASE_DIR/.rig/install-targets.json"
   run env CODEX_THREAD_ID=doctor-thread "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert not c["codex_project_target_runtime"]["ok"] and ".codex/hooks.json" in c["codex_project_target_runtime"]["detail"] and "--project-agent both" in c["codex_project_target_runtime"]["detail"]; assert not c["codex_session_runtime"]["ok"] and "session retrofit" in c["codex_session_runtime"]["detail"]'

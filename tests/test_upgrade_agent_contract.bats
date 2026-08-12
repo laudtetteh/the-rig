@@ -234,6 +234,34 @@ print($1)
   if grep -q 'project_doc_fallback_filenames' "$TEST_PROJECT/.codex/config.toml"; then return 1; fi
 }
 
+@test "agent-plan preserves Claude-only project metadata under a Codex runtime when selector is omitted" {
+  # A release-pilot run from Codex should not implicitly retrofit Codex project
+  # surfaces on a downstream project whose install-target metadata says Claude
+  # only. Agent upgrade planning must classify the selected target, not the
+  # coordinator's runtime.
+  run_installer --strategy upgrade --project-agent claude
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+  [ ! -e "$TEST_PROJECT/.codex" ]
+  /usr/bin/grep -q '"agents":\["claude"\]' "$TEST_PROJECT/.rig/install-targets.json"
+
+  local before after
+  before="$(tree_snapshot)"
+
+  run env CODEX_THREAD_ID=codex-runtime bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking repo \
+    --strategy agent-plan
+  [ "$status" -eq 0 ]
+
+  after="$(tree_snapshot)"
+  [ "$before" = "$after" ]
+  [ "$(json_field "d['status']")" = "success" ]
+  [ ! -e "$TEST_PROJECT/.codex" ]
+  /usr/bin/grep -q '"agents":\["claude"\]' "$TEST_PROJECT/.rig/install-targets.json"
+}
+
 @test "agent-upgrade on a clean target applies updates and exits 0" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]

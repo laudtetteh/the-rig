@@ -726,67 +726,72 @@ else:
 
 codex_runtime_id = os.environ.get("CODEX_THREAD_ID", "")
 if codex_runtime_id:
-    required_codex = []
     if "codex" not in target_agents:
-        required_codex.append("install-targets.json lacks codex")
-    if not (root / ".codex" / "hooks.json").is_file():
-        required_codex.append(".codex/hooks.json missing")
-    adapter_path = root / ".codex" / "hooks" / "rig-adapter.sh"
-    if not adapter_path.is_file():
-        required_codex.append(".codex/hooks/rig-adapter.sh missing")
-    elif not os.access(adapter_path, os.X_OK):
-        required_codex.append(".codex/hooks/rig-adapter.sh not executable")
-    if not (root / ".codex" / "config.toml").is_file():
-        required_codex.append(".codex/config.toml missing")
-    if not skills.is_dir():
-        required_codex.append(".agents/skills missing")
-    target_detail = ("Codex project runtime support present" if not required_codex else
-                     "missing: " + ", ".join(required_codex) +
-                     "; converge with /rig-upgrade --scope=project --mode=agent or install.sh --project-only --project-agent both --strategy merge")
-    check("codex_project_target_runtime", not required_codex, target_detail)
-
-    session_root = rig / "memory" / "sessions"
-    records = []
-    session_errors = []
-    for base in (session_root, session_root / "done"):
-        if not base.is_dir():
-            continue
-        for path in base.glob("session-*.json"):
-            try:
-                data = json.loads(read(path))
-                if isinstance(data, dict):
-                    records.append((path, data))
-                else:
-                    session_errors.append(path.name)
-            except (ValueError, TypeError):
-                session_errors.append(path.name)
-    current_project_id = project_identity()
-    same = [(p, d) for p, d in records
-            if d.get("schema_version") == 1
-            and d.get("project", {}).get("identity") == current_project_id
-            and d.get("agent") == "codex"
-            and d.get("native", {}).get("session_id") == codex_runtime_id]
-    cross = [(p, d) for p, d in records
-             if d.get("schema_version") == 1
-             and d.get("project", {}).get("identity") != current_project_id
-             and d.get("agent") == "codex"
-             and d.get("native", {}).get("session_id") == codex_runtime_id]
-    if session_errors:
-        session_ok, session_detail = False, "session records malformed: " + ", ".join(session_errors[:5])
-    elif len(same) > 1:
-        session_ok, session_detail = False, "duplicate Codex native bindings"
-    elif same:
-        path, data = same[0]
-        if "done" in path.parts or data.get("lifecycle", {}).get("state") == "complete":
-            session_ok, session_detail = False, "current Codex thread is bound only to a completed record"
-        else:
-            session_ok, session_detail = True, "current Codex thread has an active Rig session binding"
-    elif cross:
-        session_ok, session_detail = False, "current Codex thread is bound to another project"
+        selected = ",".join(target_agents) if target_agents else "none"
+        check("codex_project_target_runtime", True,
+              f"Codex runtime detected, but Codex is not an installed project target (agents: {selected})")
+        check("codex_session_runtime", True,
+              "Codex runtime detected, but Codex session binding is not required for this project target")
     else:
-        session_ok = False
-        session_detail = "current Codex thread is not bound; run: bin/rig session retrofit --agent codex --from-env --source resume --json"
-    check("codex_session_runtime", session_ok, session_detail)
+        required_codex = []
+        if not (root / ".codex" / "hooks.json").is_file():
+            required_codex.append(".codex/hooks.json missing")
+        adapter_path = root / ".codex" / "hooks" / "rig-adapter.sh"
+        if not adapter_path.is_file():
+            required_codex.append(".codex/hooks/rig-adapter.sh missing")
+        elif not os.access(adapter_path, os.X_OK):
+            required_codex.append(".codex/hooks/rig-adapter.sh not executable")
+        if not (root / ".codex" / "config.toml").is_file():
+            required_codex.append(".codex/config.toml missing")
+        if not skills.is_dir():
+            required_codex.append(".agents/skills missing")
+        target_detail = ("Codex project runtime support present" if not required_codex else
+                         "missing: " + ", ".join(required_codex) +
+                         "; converge with /rig-upgrade --scope=project --mode=agent or install.sh --project-only --project-agent both --strategy merge")
+        check("codex_project_target_runtime", not required_codex, target_detail)
+
+        session_root = rig / "memory" / "sessions"
+        records = []
+        session_errors = []
+        for base in (session_root, session_root / "done"):
+            if not base.is_dir():
+                continue
+            for path in base.glob("session-*.json"):
+                try:
+                    data = json.loads(read(path))
+                    if isinstance(data, dict):
+                        records.append((path, data))
+                    else:
+                        session_errors.append(path.name)
+                except (ValueError, TypeError):
+                    session_errors.append(path.name)
+        current_project_id = project_identity()
+        same = [(p, d) for p, d in records
+                if d.get("schema_version") == 1
+                and d.get("project", {}).get("identity") == current_project_id
+                and d.get("agent") == "codex"
+                and d.get("native", {}).get("session_id") == codex_runtime_id]
+        cross = [(p, d) for p, d in records
+                 if d.get("schema_version") == 1
+                 and d.get("project", {}).get("identity") != current_project_id
+                 and d.get("agent") == "codex"
+                 and d.get("native", {}).get("session_id") == codex_runtime_id]
+        if session_errors:
+            session_ok, session_detail = False, "session records malformed: " + ", ".join(session_errors[:5])
+        elif len(same) > 1:
+            session_ok, session_detail = False, "duplicate Codex native bindings"
+        elif same:
+            path, data = same[0]
+            if "done" in path.parts or data.get("lifecycle", {}).get("state") == "complete":
+                session_ok, session_detail = False, "current Codex thread is bound only to a completed record"
+            else:
+                session_ok, session_detail = True, "current Codex thread has an active Rig session binding"
+        elif cross:
+            session_ok, session_detail = False, "current Codex thread is bound to another project"
+        else:
+            session_ok = False
+            session_detail = "current Codex thread is not bound; run: bin/rig session retrofit --agent codex --from-env --source resume --json"
+        check("codex_session_runtime", session_ok, session_detail)
 else:
     check("codex_project_target_runtime", True, "Codex runtime not detected")
     check("codex_session_runtime", True, "Codex runtime not detected")
