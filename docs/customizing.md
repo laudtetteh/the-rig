@@ -402,7 +402,9 @@ the installer against your project:
 
 ```bash
 # 1. Pull the latest Rig source
-cd ~/tools/the-rig && git pull
+git -C ~/tools/the-rig checkout main
+git -C ~/tools/the-rig pull --ff-only origin main
+cat ~/tools/the-rig/VERSION
 
 # 2. Run the installer from inside your project
 cd ~/code/my-project

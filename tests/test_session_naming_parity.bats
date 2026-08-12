@@ -47,10 +47,17 @@ PY
 
   for surface in "$claude" "$codex" \
     "$TEST_PROJECT/.claude/commands/wrap.md" \
-    "$TEST_PROJECT/.claude/commands/post-merge.md"; do
+    "$TEST_PROJECT/.agents/skills/wrap/references/command.md" \
+    "$TEST_PROJECT/.claude/commands/post-merge.md" \
+    "$TEST_PROJECT/.agents/skills/post-merge/references/command.md"; do
     grep -Fq '$RIG_DIR/rules/session-naming.md' "$surface"
     grep -Fq 'Never use `CONTEXT_SNAPSHOT.md`, legacy markers, unrelated session files' "$surface"
   done
+
+  grep -Fq 'Codex `$wrap` skill' "$TEST_PROJECT/.agents/skills/wrap/references/command.md"
+  grep -Fq 'Session: unresolved — no final session-file write performed' "$TEST_PROJECT/.agents/skills/wrap/references/command.md"
+  grep -Fq 'Codex `$post-merge` skill' "$TEST_PROJECT/.agents/skills/post-merge/references/command.md"
+  grep -Fq 'Post-merge report — skipped' "$TEST_PROJECT/.agents/skills/post-merge/references/command.md"
 }
 
 @test "adversarial cross-session evidence admits only current conversation and UUID" {

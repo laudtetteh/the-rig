@@ -90,11 +90,17 @@ After printing all three lines, apply these checks in order:
 1. If project and global versions differ:
    > "⚠️ Project is at `$PROJECT_VERSION` but global installer is at `$GLOBAL_VERSION`. Run `/rig-upgrade` to sync."
 
-2. If a GitHub version was retrieved and it differs from `$PROJECT_VERSION`
+2. If a GitHub version was retrieved and it differs from `$GLOBAL_VERSION`
+   (compare after stripping a leading `v` from `$GITHUB_VERSION`):
+   > "⚠️ Stable installer source is at `$GLOBAL_VERSION` but latest release is `$GITHUB_VERSION`.
+   > Update it with: `git -C ~/tools/the-rig checkout main && git -C ~/tools/the-rig pull --ff-only origin main`
+   > Then re-run `/rig-upgrade --version`."
+
+3. If a GitHub version was retrieved and it differs from `$PROJECT_VERSION`
    (compare after stripping a leading `v` from `$GITHUB_VERSION`):
    > "⚠️ A newer release is available: `$GITHUB_VERSION`. Pull `~/tools/the-rig` and run `/rig-upgrade`."
 
-3. If all three are in sync: say nothing extra.
+4. If all three are in sync: say nothing extra.
 
 Then stop — do not proceed to Phase 0.
 
@@ -1044,6 +1050,34 @@ If this project has a bats test suite (`tests/*.bats`), remind the user:
 If `DOCTOR_FAILURES` is non-empty, repeat the warning before moving on:
 > "⚠️ `bin/rig doctor` reported gate failures above — resolve them before
 > considering this upgrade fully verified."
+
+If the project target includes Codex and any `.claude/commands/*.md` file was
+updated, verify the generated skill mirror before considering the upgrade
+complete:
+
+```bash
+test -d "$REPO/.agents/skills"
+test -f "$REPO/.agents/skills/wrap/SKILL.md"
+test -f "$REPO/.agents/skills/wrap/references/command.md"
+test -f "$REPO/.agents/skills/post-merge/SKILL.md"
+test -f "$REPO/.agents/skills/post-merge/references/command.md"
+```
+
+If any check fails, regenerate the mirrors from the canonical Claude command
+sources with the installer generator, then re-run the checks:
+
+```bash
+mapfile -d '' CODEX_COMMAND_SOURCES < <(find "$INSTALLER_SRC/templates/project/.claude/commands" \
+  -maxdepth 1 -type f -name '*.md' -print0)
+python3 "$INSTALLER_SRC/installer/generate-codex-skills.py" \
+  --output "$REPO/.agents/skills" \
+  --base-branch "$BASE_BRANCH" \
+  --skills-source "$INSTALLER_SRC/templates/project/.claude/skills" \
+  "${CODEX_COMMAND_SOURCES[@]}"
+```
+
+Do not patch generated `.agents/skills/*/references/command.md` files by hand
+without making the matching canonical `.claude/commands/*.md` change first.
 
 ### 5a — Commit strategy recommendation
 

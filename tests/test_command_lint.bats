@@ -84,6 +84,8 @@ _fail_with_list() {
   grep -q "Collection phase" "$COMMAND_DIR/wrap.md"
   grep -q "This session" "$COMMAND_DIR/wrap.md"
   grep -q "Wrap report —" "$COMMAND_DIR/wrap.md"
+  grep -Fq 'Codex `$wrap` skill' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'Session: unresolved — no final session-file write performed' "$COMMAND_DIR/wrap.md"
 }
 
 @test "wrap.md: PROGRESS.md trim executes automatically — no confirmation gate" {
@@ -107,10 +109,27 @@ _fail_with_list() {
 @test "post-merge.md: Post-merge report step defines collection and report format" {
   grep -q "Collection phase" "$COMMAND_DIR/post-merge.md"
   grep -q "Post-merge report —" "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'Codex `$post-merge` skill' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'Post-merge report — skipped' "$COMMAND_DIR/post-merge.md"
 }
 
 @test "post-merge.md: executes POST_MERGE_WORKFLOW automatically after report" {
   grep -q "execute POST_MERGE_WORKFLOW steps" "$COMMAND_DIR/post-merge.md"
+}
+
+@test "rig-upgrade.md: --version detects stale stable installer source" {
+  grep -Fq 'Stable installer source is at `$GLOBAL_VERSION` but latest release is `$GITHUB_VERSION`' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'git -C ~/tools/the-rig pull --ff-only origin main' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 're-run `/rig-upgrade --version`' "$COMMAND_DIR/rig-upgrade.md"
+}
+
+@test "wrap and post-merge stop on external Rig memory permission failure" {
+  for command in wrap post-merge; do
+    grep -Fq 'Unable to write Rig memory lock' "$COMMAND_DIR/$command.md"
+    grep -Fq 'Operation not permitted' "$COMMAND_DIR/$command.md"
+    grep -Fq 'request scoped write approval for $RIG_DIR' "$COMMAND_DIR/$command.md"
+    grep -Fq 'No further memory writes were attempted.' "$COMMAND_DIR/$command.md"
+  done
 }
 
 @test "task and run use the fixed PROGRESS top-insertion anchor" {
@@ -142,6 +161,16 @@ _fail_with_list() {
   grep -Fq 'explicitly agreed' "$COMMAND_DIR/handoff-checklist.md"
   grep -Fq 'Silence, hesitation, or an ambiguous answer is not consent' "$COMMAND_DIR/handoff-checklist.md"
   grep -Fq 'Do not run `/post-merge`, `/wrap`, or any checklist step' "$COMMAND_DIR/handoff-checklist.md"
+}
+
+@test "rig-upgrade.md: verifies Codex mirrors after command updates" {
+  grep -Fq '.agents/skills/wrap/SKILL.md' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'installer/generate-codex-skills.py' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq -- '--output "$REPO/.agents/skills"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq -- '--base-branch "$BASE_BRANCH"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq -- '--skills-source "$INSTALLER_SRC/templates/project/.claude/skills"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq '"${CODEX_COMMAND_SOURCES[@]}"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'Do not patch generated `.agents/skills/*/references/command.md` files by hand' "$COMMAND_DIR/rig-upgrade.md"
 }
 
 # ── PR description freshness ───────────────────────────────────────────────────
