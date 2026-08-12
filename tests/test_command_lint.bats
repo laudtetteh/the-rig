@@ -88,6 +88,14 @@ _fail_with_list() {
   grep -Fq 'Session: unresolved — no final session-file write performed' "$COMMAND_DIR/wrap.md"
 }
 
+@test "wrap.md: documents project-only scope and unresolved-session degraded mode" {
+  grep -Fq '**Scope:** wrapping [project name] only' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'Cross-project work' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'run `/post-merge` first' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'degraded mode' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'fabricate a session UUID' "$COMMAND_DIR/wrap.md"
+}
+
 @test "wrap.md: PROGRESS.md trim executes automatically — no confirmation gate" {
   # Must NOT contain the old 'Trim now?' prompt
   if grep -q "Trim now?" "$COMMAND_DIR/wrap.md"; then return 1; fi
@@ -111,6 +119,15 @@ _fail_with_list() {
   grep -q "Post-merge report —" "$COMMAND_DIR/post-merge.md"
   grep -Fq 'Codex `$post-merge` skill' "$COMMAND_DIR/post-merge.md"
   grep -Fq 'Post-merge report — skipped' "$COMMAND_DIR/post-merge.md"
+}
+
+@test "post-merge.md: documents project-only scope and unresolved-session degraded mode" {
+  grep -Fq '**Scope:** post-merge for [project name] only' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'Cross-project work' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'run `/post-merge` for the merged project first, then run' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'In degraded mode for `not_found` or `ended_record`' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'do not fabricate a' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'session UUID' "$COMMAND_DIR/post-merge.md"
 }
 
 @test "post-merge.md: executes POST_MERGE_WORKFLOW automatically after report" {
@@ -145,6 +162,14 @@ _fail_with_list() {
 
   run grep -Eq 'DROP TABLE|TRUNCATE' "$COMMAND_DIR/rig-help.md"
   [ "$status" -ne 0 ]
+}
+
+@test "rig-gaps.md: quick-add mode uses structured memory helper" {
+  grep -Fq '/rig-gaps --add "short title"' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq '## Quick-add mode (`--add`)' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq 'memory append-gap' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq -- '--scope "$SCOPE"' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq 'Do not mark the entry' "$COMMAND_DIR/rig-gaps.md"
 }
 
 @test "docs index convention is wired into feature doc commands" {

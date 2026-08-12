@@ -134,3 +134,53 @@ EOF
 
   [ "$status" -eq 0 ]
 }
+
+@test "memory append-gap follows stealth rig path and writes explicit scope" {
+  rig_external="$TEST_ROOT/external rig"
+  mkdir -p "$rig_external/memory"
+  printf '%s\n' "$rig_external" > "$TEST_PROJECT/.rigpath"
+
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "quick add test" \
+    --scope rig-core \
+    --category workflow \
+    --severity medium \
+    --workflow "/rig-gaps" \
+    --observation "Observed from a focused test." \
+    --suggested-fix "Keep the helper structured." \
+    --json
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  grep -Fq "## [" "$rig_external/memory/RIG_GAPS.md"
+  grep -Fq "**Scope**: rig-core" "$rig_external/memory/RIG_GAPS.md"
+  grep -Fq "Observed from a focused test." "$rig_external/memory/RIG_GAPS.md"
+}
+
+@test "memory append-progress inserts above marker and preserves sid" {
+  write_valid_memory
+
+  run "$TEST_PROJECT/bin/rig" memory append-progress \
+    --title "focused progress" \
+    --body "Focused body." \
+    --sid "abc-123" \
+    --json
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  progress="$TEST_PROJECT/.rig/memory/PROGRESS.md"
+  grep -Fq "<!-- sid:abc-123 -->" "$progress"
+  [ "$(grep -nF 'focused progress' "$progress" | cut -d: -f1)" -lt "$(grep -nF '<!-- Add entries above this line, newest first -->' "$progress" | cut -d: -f1)" ]
+}
+
+@test "memory write-snapshot atomically replaces context snapshot" {
+  printf '# Old\n' > "$TEST_PROJECT/.rig/memory/CONTEXT_SNAPSHOT.md"
+  printf '# New snapshot\n\nBody without trailing newline' > "$TEST_ROOT/new-snapshot.md"
+
+  run "$TEST_PROJECT/bin/rig" memory write-snapshot --file "$TEST_ROOT/new-snapshot.md" --json
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  SNAPSHOT="$TEST_PROJECT/.rig/memory/CONTEXT_SNAPSHOT.md" SOURCE="$TEST_ROOT/new-snapshot.md" \
+    python3 -c 'import os; assert open(os.environ["SNAPSHOT"]).read() == open(os.environ["SOURCE"]).read() + "\n"'
+}

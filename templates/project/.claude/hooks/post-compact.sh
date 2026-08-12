@@ -49,12 +49,19 @@ if [[ -n "$CHECKPOINT" ]] && [[ -f "$CHECKPOINT" ]]; then
     STALE_REASONS+="HEAD changed from ${STORED_HEAD} to ${LIVE_HEAD}"
   fi
   if [[ -n "$STALE_REASONS" ]]; then
-    CONTEXT="⚠️ Advisory: compact checkpoint is stale (${STALE_REASONS}). Treat it as historical context and verify live repository state before continuing.
+    CONTEXT="Advisory: compact checkpoint is stale (${STALE_REASONS}). Treat it as historical context and verify live repository state before continuing.
+
+${CONTEXT}"
+  elif [[ "$CONTEXT" != Advisory:* ]]; then
+    CONTEXT="Advisory: this compact checkpoint is historical handoff context. Verify live repository state, current branch, HEAD, session identity, and open PR status before acting on it.
 
 ${CONTEXT}"
   fi
 elif [[ -f "$SNAPSHOT" ]]; then
   CONTEXT=$(cat "$SNAPSHOT")
+  CONTEXT="Advisory: CONTEXT_SNAPSHOT.md is historical handoff context. Verify live repository state, current branch, HEAD, session identity, and open PR status before acting on it.
+
+${CONTEXT}"
 else
   exit 0
 fi
