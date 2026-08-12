@@ -582,12 +582,27 @@ for the full Phase 2/2a-agent/2b-agent/3d flow.
 ### Verifying an upgrade: `bin/rig doctor` gates
 
 After any upgrade, `bin/rig doctor` (or `bin/rig doctor --json` for scripting)
-runs a set of postflight checks — five added under issue #444 lane 444-H, plus
-two more added under issue #473 for post-upgrade validation against known
-historical bug patterns:
+runs these current postflight checks:
 
 | Gate | What it verifies | Degrades to "skipped" (not "failed") when |
 |---|---|---|
+| `worktree_bootstrap` | A linked worktree has the expected stealth artifacts copied from the primary checkout | Not a linked worktree with a primary `.rigpath` |
+| `rig_directory` | The resolved Rig directory exists and has a readable `memory/` directory | Never; missing Rig state is a failure |
+| `rigpath` | `.rigpath` is a single non-empty line resolving to a usable Rig directory, or local `.rig/` is selected | Never; malformed path state is a failure |
+| `stealth_exclusions` | Stealth/external artifacts are excluded from git visibility | Project is not a stealth/external install |
+| `settings_json` | Claude settings and Codex hooks JSON files parse correctly | Never; invalid JSON is a failure |
+| `claude_commands` | Installed Claude command files match the manifest or at least exist when no manifest baseline is present | Never; missing commands are a failure |
+| `codex_skill_parity` | Generated Codex skills mirror Claude commands when Codex skills are installed | Codex mirroring is not enabled |
+| `codex_project_instructions` | Codex has an effective `AGENTS*` file or configured `CLAUDE.md` fallback when Codex is an installed target | Codex is not an installed project target |
+| `codex_project_target_runtime` | A live Codex runtime has the project target infrastructure it needs | Codex runtime is not detected |
+| `codex_session_runtime` | A live Codex thread is bound to an active Rig session record | Codex runtime is not detected |
+| `issue_tracking` | `CLAUDE.md` has at most one supported `issue-tracking:` value | Never; unsupported tracker configuration is a failure |
+| `github_auth` | GitHub authentication is available when `issue-tracking: github` | A non-GitHub tracker is configured |
+| `tracker_command_guidance` | `/task` and `/ship` guidance covers the configured tracker | Never; stale command guidance is a failure |
+| `recent_commit_references` | Recent commits follow the configured tracker reference convention | Tracker is `none` or there are no commits to inspect |
+| `recent_pr_references` | Recent GitHub PRs contain issue references or close keywords | Non-GitHub tracker, non-GitHub remote, or unavailable GitHub auth |
+| `connector_declarations` | Optional connector dependency declarations have the expected public envelope | No connector declaration file exists |
+| `template_placeholder_content` | Core project docs are not still showing raw scaffold placeholder content | Never; placeholder content is an advisory failure |
 | `manifest_provenance` | Every `.rig-manifest.json` entry's `owner`/`source`/`generator`/`provider`/`type` value is within its known vocabulary | No manifest metadata file exists, or `installer/validate-manifest-provenance.py` isn't colocated (only true for a Rig-dogfooding checkout, not an ordinary downstream install) |
 | `stealth_status` | No Rig-generated artifact is tracked by git or visible-and-unignored in a stealth/external install | The project isn't a stealth/external install, or `installer/audit-stealth.py` isn't colocated |
 | `manifest_mode_hash` | Every Rig-owned artifact's file mode and content hash still match what the manifest recorded (catches hand-edits outside the installer) | No manifest metadata file exists |

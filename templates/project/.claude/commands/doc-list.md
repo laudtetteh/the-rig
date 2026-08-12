@@ -13,7 +13,7 @@ Show the documentation index for this project without loading full doc files.
 > ```
 
 1. Read `$DOCS_DIR/INDEX.md`.
-   - If absent: say "No `docs/INDEX.md` found. Create one with a one-liner per file in `docs/`. Use subfolders such as `architecture/`, `decisions/`, and `troubleshooting/` when a doc does not belong under `docs/features/`."
+   - If absent: say "No `docs/INDEX.md` found. Create one with a one-liner per file in `docs/`. Use `features/` only for product feature traces. Use `runbooks/` for repeatable operational procedures, `reports/` for one-off validation/audit/status reports, `spikes/` for research packages, and `agent-ops/` for Rig/Claude/Codex/browser/MCP operating notes."
 2. Display the table.
 3. Offer: "Which doc should I load into context?"
 
@@ -32,7 +32,10 @@ without loading large files unnecessarily.
 
 - Reads `$DOCS_DIR/INDEX.md` only — does not scan or read the doc files themselves
 - The index is maintained manually; update it when a doc is added or its scope changes
-- New non-feature docs should use clear category folders such as `architecture/`, `decisions/`, or `troubleshooting/`; feature traces belong in `docs/features/`
+- New non-feature docs should use clear category folders: `runbooks/`,
+  `reports/`, `spikes/`, `agent-ops/`, `records/`, or a project-specific
+  category listed in `docs/INDEX.md`
+- `docs/features/` is not a catch-all bucket; feature traces only belong there
 - **Do not display `$DOCS_DIR/features/README.md` here.** Feature docs are a separate
   system managed by `/doc-feature` and `/feature-context` — `/doc-list` shows the
   general docs index only.
