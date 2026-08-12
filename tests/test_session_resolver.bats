@@ -176,6 +176,10 @@ json.dump({
   run env CODEX_THREAD_ID=ended-native-id RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 0 ]
   [[ "$output" == *'"reason": "native_id"'* && "$output" != *'/done/'* ]] || return 1
+
+  run "$CASE_DIR/bin/rig" session doctor --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"unique_native_bindings", "ok": true'* || "$output" == *'"name":"unique_native_bindings","ok":true'* ]] || return 1
 }
 
 @test "ended-record continuation refuses same native id bound to another project" {

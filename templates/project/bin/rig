@@ -416,13 +416,21 @@ with open(lock_path, "a+") as lock:
     existing = path.read_text() if path.exists() else "# Rig Gaps\n\n"
     if not existing.endswith("\n"):
         existing += "\n"
+    marker = "<!-- Add entries below — newest first -->"
+    marker_index = existing.find(marker)
+    if existing.count(marker) > 1:
+        print(json.dumps({"ok": False, "reason": "marker_ambiguous", "file": str(path)}))
+        raise SystemExit(1)
+    if marker_index >= 0:
+        insert_at = marker_index + len(marker)
+        separator = "\n\n" if existing[insert_at:insert_at + 2] != "\n\n" else "\n"
+        new_text = existing[:insert_at] + separator + entry + existing[insert_at:].lstrip("\n")
+    else:
+        new_text = existing + ("" if existing.endswith("\n\n") else "\n") + entry
     fd, tmp = tempfile.mkstemp(prefix=".rig-gaps-", suffix=".tmp", dir=str(memory))
     try:
         with os.fdopen(fd, "w") as handle:
-            handle.write(existing)
-            if not existing.endswith("\n\n"):
-                handle.write("\n")
-            handle.write(entry)
+            handle.write(new_text)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
@@ -1653,7 +1661,17 @@ if action=="doctor":
         anchors.setdefault(d.get("anchor"),[]).append(p.name)
         native=d.get("native",{}).get("session_id")
         if native: natives.setdefault((d.get("project",{}).get("identity"),d.get("agent"),native),[]).append(p.name)
-    dup_a=[k for k,v in anchors.items() if k and len(v)>1]; dup_n=[k for k,v in natives.items() if len(v)>1]
+    dup_a=[k for k,v in anchors.items() if k and len(v)>1]
+    dup_n=[]
+    for key, names in natives.items():
+        if len(names) <= 1:
+            continue
+        pair_records=[(p,d) for p,d in records if p.name in names]
+        active=[(p,d) for p,d in pair_records if "done" not in p.parts and d.get("lifecycle",{}).get("state")!="complete"]
+        done=[(p,d) for p,d in pair_records if "done" in p.parts or d.get("lifecycle",{}).get("state")=="complete"]
+        continuation_ok=(len(active)==1 and len(done)==len(pair_records)-1 and active[0][1].get("lineage",{}).get("kind")=="continuation")
+        if not continuation_ok:
+            dup_n.append(key)
     check("unique_anchors",not dup_a,"unique" if not dup_a else "%d duplicates"%len(dup_a))
     check("unique_native_bindings",not dup_n,"unique" if not dup_n else "%d duplicates"%len(dup_n))
     audit=sessions/"repair-audit.jsonl"; audit_ok=True; audit_detail="absent"

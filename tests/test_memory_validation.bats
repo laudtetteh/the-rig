@@ -138,6 +138,13 @@ EOF
 @test "memory append-gap follows stealth rig path and writes explicit scope" {
   rig_external="$TEST_ROOT/external rig"
   mkdir -p "$rig_external/memory"
+  cat > "$rig_external/memory/RIG_GAPS.md" <<'EOF'
+# Rig Gaps
+
+<!-- Add entries below — newest first -->
+
+## [2026-01-01] — older gap
+EOF
   printf '%s\n' "$rig_external" > "$TEST_PROJECT/.rigpath"
 
   run "$TEST_PROJECT/bin/rig" memory append-gap \
@@ -155,6 +162,28 @@ EOF
   grep -Fq "## [" "$rig_external/memory/RIG_GAPS.md"
   grep -Fq "**Scope**: rig-core" "$rig_external/memory/RIG_GAPS.md"
   grep -Fq "Observed from a focused test." "$rig_external/memory/RIG_GAPS.md"
+  [ "$(grep -nF 'quick add test' "$rig_external/memory/RIG_GAPS.md" | cut -d: -f1)" -lt "$(grep -nF 'older gap' "$rig_external/memory/RIG_GAPS.md" | cut -d: -f1)" ]
+}
+
+@test "memory append-gap refuses duplicated insertion markers without writing" {
+  gaps="$TEST_PROJECT/.rig/memory/RIG_GAPS.md"
+  cat > "$gaps" <<'EOF'
+# Rig Gaps
+
+<!-- Add entries below — newest first -->
+<!-- Add entries below — newest first -->
+EOF
+  before="$(cksum "$gaps")"
+
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "ambiguous gap" \
+    --scope project \
+    --observation "Should not write." \
+    --json
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"reason":"marker_ambiguous"'* || "$output" == *'"reason": "marker_ambiguous"'* ]] || return 1
+  [ "$before" = "$(cksum "$gaps")" ]
 }
 
 @test "memory append-progress inserts above marker and preserves sid" {
