@@ -561,7 +561,7 @@ skills covering the full development lifecycle:
 |---|---|---|
 | `/task` | `NEW_TASK_WORKFLOW` | Three-part intake wizard: goal → autonomy/check-ins/risk/testing configuration → confirmation. Persists operating mode and test requirement in task file. |
 | `/run` | Task execution loop | Executes the active task respecting its stored operating mode. If `## Operating mode` is absent from the task file, surfaces an inline wizard to configure it before proceeding. Chains automatically at High autonomy. |
-| `/sprint` | Conflict-aware planner | Current implementation groups already-qualified tasks into conflict-free waves. Full tracker audit/repair, durable resumable planning, and `rig sprint ... --json` remain planned in issue #378. |
+| `/sprint` | Conflict-aware planner | Audits tracker evidence when available, previews conflict/dependency waves through `rig sprint ... --json`, requires a Dependency Surface Audit before launch, and resumes only from an explicit sprint ID. |
 
 ### Ship and debug
 | Command | Triggers | Key behaviour |

@@ -149,8 +149,13 @@ _fail_with_list() {
 
 @test "docs index convention is wired into feature doc commands" {
   grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/doc-list.md"
-  grep -Fq 'architecture/' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'runbooks/' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'reports/' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'spikes/' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'agent-ops/' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'not a catch-all bucket' "$COMMAND_DIR/doc-list.md"
   grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/doc-feature.md"
+  grep -Fq 'Use this command only for product or business feature traces' "$COMMAND_DIR/doc-feature.md"
   grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/refresh-feature-doc.md"
   grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/rig-help.md"
   run grep -R '\$RIG_DIR/docs' "$COMMAND_DIR"
