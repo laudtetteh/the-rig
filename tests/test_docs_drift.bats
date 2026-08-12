@@ -42,9 +42,11 @@ except IndexError:
 
 actual = set(re.findall(r'check\("([^"]+)"', body))
 try:
-    table = docs.split("### Verifying an upgrade: `bin/rig doctor` gates", 1)[1].split("\n\nBoth new gates", 1)[0]
+    after_heading = docs.split("### Verifying an upgrade: `bin/rig doctor` gates", 1)[1]
 except IndexError:
     raise SystemExit("doctor gate docs table not found")
+next_heading = re.search(r"\n### ", after_heading)
+table = after_heading[: next_heading.start()] if next_heading else after_heading
 documented = set(re.findall(r"(?m)^\| `([^`]+)` \|", table))
 
 missing = sorted(actual - documented)

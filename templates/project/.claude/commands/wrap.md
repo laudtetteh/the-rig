@@ -172,13 +172,20 @@ Print a single structured report before executing anything:
 **Session:** [anchor: UUID | tentative: "..." | suggested final: "type desc #N | type desc #N" | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
 ```
 
-If `bin/rig session resolve --json` returns `not_found` or `ended_record`, enter
-degraded mode: print `Session: unresolved — no final session-file write performed`,
-continue project memory maintenance that does not require an exact session
-record, write `CONTEXT_SNAPSHOT.md`, and skip final session-file mutation. Do not
-fabricate a session UUID or move any record to `sessions/done/`. If it returns
-`ambiguous`, `duplicate_native_id`, `cross_project`, malformed data, or an unsafe
-path, stop before writing because the session state is unsafe.
+If `bin/rig session resolve --json` returns `ended_record` and a native session
+environment variable is present, first run the appropriate exact retrofit:
+`bin/rig session retrofit --agent codex --from-env --source resume --json` for
+Codex, or `bin/rig session retrofit --agent claude --from-env --source resume --json`
+for Claude. Use the returned active continuation record if retrofit succeeds.
+
+If resolve returns `not_found`, or ended-record retrofit cannot create an exact
+active continuation, enter degraded mode: print
+`Session: unresolved — no final session-file write performed`, continue project
+memory maintenance that does not require an exact session record, write
+`CONTEXT_SNAPSHOT.md`, and skip final session-file mutation. Do not fabricate a
+session UUID or move any record to `sessions/done/`. If it returns `ambiguous`,
+`duplicate_native_id`, `cross_project`, malformed data, or an unsafe path, stop
+before writing because the session state is unsafe.
 
 ### Execution
 

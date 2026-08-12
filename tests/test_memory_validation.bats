@@ -173,6 +173,22 @@ EOF
   [ "$(grep -nF 'focused progress' "$progress" | cut -d: -f1)" -lt "$(grep -nF '<!-- Add entries above this line, newest first -->' "$progress" | cut -d: -f1)" ]
 }
 
+@test "memory append-progress refuses duplicated insertion markers without writing" {
+  write_valid_memory
+  progress="$TEST_PROJECT/.rig/memory/PROGRESS.md"
+  printf '%s\n' '<!-- Add entries above this line, newest first -->' >> "$progress"
+  before="$(cksum "$progress")"
+
+  run "$TEST_PROJECT/bin/rig" memory append-progress \
+    --title "ambiguous progress" \
+    --body "Should not be written." \
+    --json
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"reason":"marker_ambiguous"'* || "$output" == *'"reason": "marker_ambiguous"'* ]] || return 1
+  [ "$before" = "$(cksum "$progress")" ]
+}
+
 @test "memory write-snapshot atomically replaces context snapshot" {
   printf '# Old\n' > "$TEST_PROJECT/.rig/memory/CONTEXT_SNAPSHOT.md"
   printf '# New snapshot\n\nBody without trailing newline' > "$TEST_ROOT/new-snapshot.md"

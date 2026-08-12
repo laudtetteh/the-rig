@@ -135,9 +135,14 @@ Gather all findings silently — no output yet:
 5. **Feature doc overlaps** — files changed in the merged PR vs. documented feature entry points (see Feature doc freshness step below)
 6. **Session name** — derive suggestion from session file and conversation context
 7. **Session identity** — run `bin/rig session resolve --json`; if it returns
-   `not_found` or `ended_record`, collect the rest of the report in degraded mode
-   and skip final session-file mutation. Stop on ambiguous, duplicate,
-   cross-project, malformed, or unsafe session state.
+   `ended_record` and a native session environment variable is present, first run
+   `bin/rig session retrofit --agent codex --from-env --source resume --json` or
+   `bin/rig session retrofit --agent claude --from-env --source resume --json`
+   to create an exact active continuation. If it returns `not_found`, or
+   ended-record retrofit cannot create an exact active continuation, collect the
+   rest of the report in degraded mode and skip final session-file mutation.
+   Stop on ambiguous, duplicate, cross-project, malformed, or unsafe session
+   state.
 
 ### Report
 

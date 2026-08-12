@@ -52,9 +52,9 @@ PROJECT_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$RIG_DIR/VERSION" 2>/dev/null \
   || echo "unknown")
 
 # Global installed layer version from manifest metadata. The global layer does
-# not install a VERSION file; ~/.claude/.rig-global-manifest.json is the
+# not install a VERSION file; ~/.claude/.rig-global-manifest is the
 # installed-artifact provenance source.
-GLOBAL_MANIFEST="$HOME/.claude/.rig-global-manifest.json"
+GLOBAL_MANIFEST="$HOME/.claude/.rig-global-manifest"
 GLOBAL_LAYER_VERSION=$(python3 - "$GLOBAL_MANIFEST" <<'PY' 2>/dev/null || echo "not installed"
 import json, sys
 with open(sys.argv[1]) as fh:
@@ -74,6 +74,13 @@ INSTALLER_VERSION=$(cat "$INSTALLER_CHECKOUT/VERSION" 2>/dev/null || echo "not f
 INSTALLER_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$INSTALLER_CHECKOUT/VERSION" 2>/dev/null \
   || stat -c "%y" "$INSTALLER_CHECKOUT/VERSION" 2>/dev/null | cut -d' ' -f1-2 | cut -c1-16 \
   || echo "unknown")
+INSTALLER_BRANCH=$(git -C "$INSTALLER_CHECKOUT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+if git -C "$INSTALLER_CHECKOUT" diff --quiet --ignore-submodules -- 2>/dev/null \
+  && git -C "$INSTALLER_CHECKOUT" diff --cached --quiet --ignore-submodules -- 2>/dev/null; then
+  INSTALLER_DIRTY="clean"
+else
+  INSTALLER_DIRTY="dirty"
+fi
 
 # Latest GitHub release (requires gh CLI; graceful fallback if unavailable)
 GITHUB_VERSION=""
@@ -124,7 +131,7 @@ Output:
 > ─────────────────────────────────────────
 > Project (.rig/VERSION):         1.16.0   (last modified: 2026-05-18 11:41)
 > Global installed layer:         1.16.0   (manifest: 2026-05-18 10:50)
-> Preferred installer checkout:   1.16.0   (~/tools/the-rig, last modified: 2026-05-18 10:52)
+> Preferred installer checkout:   1.16.0   (~/tools/the-rig, branch: main, state: clean, last modified: 2026-05-18 10:52)
 > Latest GitHub release:          v1.16.0  (published: 2026-05-18)
 > Project agent targets:          claude,codex
 > Global agent targets:           claude

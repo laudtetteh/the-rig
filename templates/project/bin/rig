@@ -475,7 +475,11 @@ with open(lock_path, "a+") as lock:
     fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
     text = path.read_text() if path.exists() else "# Progress\n\n## Format\n\n"
     marker = "<!-- Add entries above this line, newest first -->"
-    if marker in text:
+    marker_count = text.count(marker)
+    if marker_count > 1:
+        print(json.dumps({"ok": False, "reason": "marker_ambiguous", "file": str(path)}))
+        raise SystemExit(1)
+    if marker_count == 1:
         text = text.replace(marker, entry + marker, 1)
     else:
         text = text.rstrip() + "\n\n" + entry
@@ -1467,6 +1471,9 @@ if matches:
         print(json.dumps({"ok":False,"reason":"invalid_lifecycle_transition"})); raise SystemExit(3)
 if not matches:
     cross=[d for _,d in records if d.get("schema_version")==1 and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id]
+    cross_project=[d for d in cross if d.get("project",{}).get("identity")!=project_id]
+    if cross_project:
+        print(json.dumps({"ok":False,"reason":"cross_project"})); raise SystemExit(3)
     if cross and not continuation_from_ended:
         print(json.dumps({"ok":False,"reason":"cross_project"})); raise SystemExit(3)
     p=hint_path
@@ -1560,8 +1567,8 @@ session_retrofit() {
   if [[ "$status" -eq 3 ]]; then
     bind_args+=(--allow-continuation)
   fi
-  resolved="$("${bind_args[@]}")"
-  status=$?
+  status=0
+  resolved="$("${bind_args[@]}")" || status=$?
   if [[ "$status" -eq 0 && "$json" == true ]]; then
     printf '%s\n' "$resolved" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["retrofitted"]=True; print(json.dumps(d))'
   elif [[ "$status" -eq 0 ]]; then

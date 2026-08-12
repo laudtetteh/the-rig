@@ -60,7 +60,15 @@ and never silently guess that it is a Rig-core issue.
 If the user says **"add"**, **"--add"**, or provides `/rig-gaps --add "title"`,
 run this flow instead of collection, push, submit, or report mode.
 
-1. Resolve `$RIG_DIR` using the standard stealth-mode block above.
+1. Resolve `$REPO` and `$RIG_DIR` using the standard stealth-mode pattern:
+   ```bash
+   REPO=$(git rev-parse --show-toplevel)
+   if [[ -f "$REPO/.rigpath" ]]; then
+     RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+   else
+     RIG_DIR="$REPO/.rig"
+   fi
+   ```
 2. Collect these fields from the user or from the current conversation:
    `title`, `scope` (`project` or `rig-core`), `category`, `severity`,
    `workflow`, `observation`, and `suggested fix`.

@@ -628,7 +628,8 @@ gh pr view "$PR_NUMBER" --json state,mergedAt
 
 If `state` is `MERGED` and `mergedAt` is non-empty, report that the merge
 succeeded and treat the non-zero exit as local cleanup failure. Do not run
-destructive local branch cleanup. If remote branch deletion is still needed,
+destructive local branch cleanup; do not delete a local linked-worktree branch.
+If remote branch deletion is still needed,
 delete only the remote branch after confirming the PR is merged and the target
 branch name is the PR head branch. If the PR is not merged, surface the original
 merge error and stop.

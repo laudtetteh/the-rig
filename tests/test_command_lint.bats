@@ -93,7 +93,8 @@ _fail_with_list() {
   grep -Fq 'Cross-project work' "$COMMAND_DIR/wrap.md"
   grep -Fq 'run `/post-merge` first' "$COMMAND_DIR/wrap.md"
   grep -Fq 'degraded mode' "$COMMAND_DIR/wrap.md"
-  grep -Fq 'fabricate a session UUID' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'fabricate a' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'session UUID' "$COMMAND_DIR/wrap.md"
 }
 
 @test "wrap.md: PROGRESS.md trim executes automatically — no confirmation gate" {
@@ -135,11 +136,17 @@ _fail_with_list() {
 }
 
 @test "rig-upgrade.md: --version separates installed layers from installer checkout" {
-  grep -Fq 'GLOBAL_MANIFEST="$HOME/.claude/.rig-global-manifest.json"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'GLOBAL_MANIFEST="$HOME/.claude/.rig-global-manifest"' "$COMMAND_DIR/rig-upgrade.md"
+  run grep -F '.rig-global-manifest.json' "$COMMAND_DIR/rig-upgrade.md"
+  [ "$status" -ne 0 ]
   grep -Fq 'GLOBAL_LAYER_VERSION' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 'INSTALLER_CHECKOUT=~/tools/the-rig' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'INSTALLER_BRANCH=$(git -C "$INSTALLER_CHECKOUT" rev-parse --abbrev-ref HEAD' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'INSTALLER_DIRTY="clean"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'INSTALLER_DIRTY="dirty"' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 'Global installed layer:' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 'Preferred installer checkout:' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'branch: main, state: clean' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 'global installed layer is at `$GLOBAL_LAYER_VERSION`' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 'Preferred installer checkout is at `$INSTALLER_VERSION` but latest release is `$GITHUB_VERSION`' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 'git -C ~/tools/the-rig pull --ff-only origin main' "$COMMAND_DIR/rig-upgrade.md"
@@ -278,6 +285,11 @@ _fail_with_list() {
   grep -Fq "linked worktree" "$COMMAND_DIR/ship.md"
   grep -Fq "local cleanup failure" "$COMMAND_DIR/ship.md"
   grep -Fq "Do not run" "$COMMAND_DIR/ship.md"
+  grep -Fq "destructive local branch cleanup" "$COMMAND_DIR/ship.md"
+  grep -Fq "do not delete a local linked-worktree branch" "$COMMAND_DIR/ship.md"
+  grep -Fq "delete only the remote branch after confirming the PR is merged" "$COMMAND_DIR/ship.md"
+  grep -Fq "target" "$COMMAND_DIR/ship.md"
+  grep -Fq "PR head branch" "$COMMAND_DIR/ship.md"
 }
 
 @test "code-review and ship discover PR validation candidates safely" {
@@ -287,10 +299,28 @@ _fail_with_list() {
     grep -Fq "Test plan" "$COMMAND_DIR/$command.md"
     grep -Fq "validation candidates" "$COMMAND_DIR/$command.md"
     grep -Fq "PR-body" "$COMMAND_DIR/$command.md"
+    grep -Fq "Never execute arbitrary" "$COMMAND_DIR/$command.md"
+    grep -Fq "PR-body commands" "$COMMAND_DIR/$command.md"
+    grep -Fq "validation plan" "$COMMAND_DIR/$command.md"
+    grep -Fq "safety gates" "$COMMAND_DIR/$command.md"
     grep -Fq "YARN_NO_PROXY" "$COMMAND_DIR/$command.md"
     grep -Fq "env -u YARN_NO_PROXY" "$COMMAND_DIR/$command.md"
     grep -Fq "at most once" "$COMMAND_DIR/$command.md"
   done
+}
+
+@test "wrap and post-merge try ended-record retrofit before degraded mode" {
+  for command in wrap post-merge; do
+    grep -Fq 'session retrofit --agent codex --from-env --source resume --json' "$COMMAND_DIR/$command.md"
+    grep -Fq 'session retrofit --agent claude --from-env --source resume --json' "$COMMAND_DIR/$command.md"
+    grep -Fq 'active continuation' "$COMMAND_DIR/$command.md"
+    grep -Fq 'degraded mode' "$COMMAND_DIR/$command.md"
+  done
+}
+
+@test "rig-gaps.md: quick-add mode resolves REPO before helper invocation" {
+  grep -Fq 'REPO=$(git rev-parse --show-toplevel)' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq '"$REPO/bin/rig" memory append-gap' "$COMMAND_DIR/rig-gaps.md"
 }
 
 @test "PR template captures dependency impact evidence" {

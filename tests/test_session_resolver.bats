@@ -178,6 +178,18 @@ json.dump({
   [[ "$output" == *'"reason": "native_id"'* && "$output" != *'/done/'* ]] || return 1
 }
 
+@test "ended-record continuation refuses same native id bound to another project" {
+  write_native_session "$CASE_DIR/.rig/memory/sessions/done/session-ended.json" ended-anchor shared-native complete codex
+  write_native_session "$CASE_DIR/.rig/memory/sessions/session-foreign-active.json" foreign-anchor shared-native active codex
+  PATH_F="$CASE_DIR/.rig/memory/sessions/session-foreign-active.json" python3 -c 'import json,os; p=os.environ["PATH_F"]; d=json.load(open(p)); d["project"]["identity"]="foreign-project"; json.dump(d,open(p,"w"))'
+
+  run env CODEX_THREAD_ID=shared-native "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --source resume --json
+
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason":"cross_project"'* || "$output" == *'"reason": "cross_project"'* ]] || return 1
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -maxdepth 1 -type f -name 'session-*.json' | wc -l | tr -d ' ')" -eq 1 ]
+}
+
 @test "atomic writer preserves shell metacharacters and newlines literally" {
   local file="$CASE_DIR/.rig/memory/sessions/session-1.json" name
   write_session "$file" safe feat/current
