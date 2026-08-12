@@ -497,7 +497,7 @@ PY
 }
 
 memory_write_snapshot() {
-  local from_file="" json=false arg
+  local from_file="" json=false arg stdin_tmp=""
   while [[ "$#" -gt 0 ]]; do
     arg="$1"
     case "$arg" in
@@ -508,18 +508,20 @@ memory_write_snapshot() {
     esac
   done
   [[ -n "$from_file" ]] || { usage_error "write-snapshot requires --file FILE or --stdin" "$@"; return; }
+  if [[ "$from_file" == "-" ]]; then
+    stdin_tmp=$(mktemp "${TMPDIR:-/tmp}/rig-snapshot-stdin.XXXXXX") || return 1
+    cat > "$stdin_tmp"
+    from_file="$stdin_tmp"
+  fi
   RIG_DIR="$(rig_dir)" SNAPSHOT_SOURCE="$from_file" SNAPSHOT_JSON="$json" python3 <<'PY'
 import json, os, pathlib, stat, sys, tempfile
 
 source = os.environ["SNAPSHOT_SOURCE"]
-if source == "-":
-    content = sys.stdin.read()
-else:
-    source_path = pathlib.Path(source)
-    if not source_path.is_file():
-        print(json.dumps({"ok": False, "reason": "source_missing"}))
-        raise SystemExit(1)
-    content = source_path.read_text()
+source_path = pathlib.Path(source)
+if not source_path.is_file():
+    print(json.dumps({"ok": False, "reason": "source_missing"}))
+    raise SystemExit(1)
+content = source_path.read_text()
 memory = pathlib.Path(os.environ["RIG_DIR"]) / "memory"
 memory.mkdir(parents=True, exist_ok=True)
 path = memory / "CONTEXT_SNAPSHOT.md"
@@ -542,6 +544,9 @@ finally:
 payload = {"ok": True, "file": str(path)}
 print(json.dumps(payload, separators=(",", ":")) if os.environ["SNAPSHOT_JSON"] == "true" else "Wrote CONTEXT_SNAPSHOT.md")
 PY
+  local status=$?
+  [[ -n "$stdin_tmp" ]] && rm -f "$stdin_tmp"
+  return "$status"
 }
 
 doctor() {

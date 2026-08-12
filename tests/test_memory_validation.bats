@@ -184,3 +184,14 @@ EOF
   SNAPSHOT="$TEST_PROJECT/.rig/memory/CONTEXT_SNAPSHOT.md" SOURCE="$TEST_ROOT/new-snapshot.md" \
     python3 -c 'import os; assert open(os.environ["SNAPSHOT"]).read() == open(os.environ["SOURCE"]).read() + "\n"'
 }
+
+@test "memory write-snapshot accepts stdin content despite Python heredoc wrapper" {
+  printf '# Old\n' > "$TEST_PROJECT/.rig/memory/CONTEXT_SNAPSHOT.md"
+
+  run bash -c 'printf "%s" "# Stdin snapshot"$'\''\n\nBody'\'' | "$1" memory write-snapshot --stdin --json' _ "$TEST_PROJECT/bin/rig"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  grep -Fq "# Stdin snapshot" "$TEST_PROJECT/.rig/memory/CONTEXT_SNAPSHOT.md"
+  grep -Fq "Body" "$TEST_PROJECT/.rig/memory/CONTEXT_SNAPSHOT.md"
+}
