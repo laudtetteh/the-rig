@@ -213,6 +213,50 @@ _fail_with_list() {
   grep -Fq "## Dependency impact" "$COMMAND_DIR/ship.md"
 }
 
+@test "sprint workflow codifies Dependency Surface Audit planning gate" {
+  local process="$REPO_ROOT/templates/project/.rig/processes/SPRINT_WORKFLOW.md"
+  grep -Fq "Dependency Surface Audit (DSA)" "$process"
+  grep -Fq "Upstream inputs" "$process"
+  grep -Fq "Downstream dependents" "$process"
+  grep -Fq "Generated artifacts" "$process"
+  grep -Fq "Upgrade/install path" "$process"
+  grep -Fq "Cross-agent parity" "$process"
+  grep -Fq "Persistent state" "$process"
+  grep -Fq "Validation hooks" "$process"
+  grep -Fq "Dependency Surface Audit required by" "$COMMAND_DIR/sprint.md"
+}
+
+@test "delegated validation protocol forbids duplicate detached full-suite runs" {
+  local process="$REPO_ROOT/templates/project/.rig/processes/SPRINT_WORKFLOW.md"
+  grep -Fq "foreground tool calls" "$process"
+  grep -Fq "exact command and" "$process"
+  grep -Fq "tool/session identifier" "$process"
+  grep -Fq "must not start duplicate validation" "$process"
+  grep -Fq 'full local `bats tests/` suite requires' "$process"
+  grep -Fq "must not run a local full \`bats tests/\` suite" "$COMMAND_DIR/handoff-checklist.md"
+}
+
+@test "ship merge guidance verifies GitHub PR state after non-zero merge" {
+  grep -Fq "## Step 10 — Merge verification and branch cleanup" "$COMMAND_DIR/ship.md"
+  grep -Fq 'gh pr view "$PR_NUMBER" --json state,mergedAt' "$COMMAND_DIR/ship.md"
+  grep -Fq "linked worktree" "$COMMAND_DIR/ship.md"
+  grep -Fq "local cleanup failure" "$COMMAND_DIR/ship.md"
+  grep -Fq "Do not run" "$COMMAND_DIR/ship.md"
+}
+
+@test "code-review and ship discover PR validation candidates safely" {
+  for command in code-review ship; do
+    grep -Fq "Local verification" "$COMMAND_DIR/$command.md"
+    grep -Fq "Validation" "$COMMAND_DIR/$command.md"
+    grep -Fq "Test plan" "$COMMAND_DIR/$command.md"
+    grep -Fq "validation candidates" "$COMMAND_DIR/$command.md"
+    grep -Fq "PR-body" "$COMMAND_DIR/$command.md"
+    grep -Fq "YARN_NO_PROXY" "$COMMAND_DIR/$command.md"
+    grep -Fq "env -u YARN_NO_PROXY" "$COMMAND_DIR/$command.md"
+    grep -Fq "at most once" "$COMMAND_DIR/$command.md"
+  done
+}
+
 @test "PR template captures dependency impact evidence" {
   local template="$REPO_ROOT/templates/project/.github/PULL_REQUEST_TEMPLATE.md"
   grep -Fq "## Dependency impact" "$template"

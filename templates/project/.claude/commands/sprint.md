@@ -24,8 +24,20 @@ approval required by `SPRINT_WORKFLOW.md`. Pass the exact #409 root context
 already established by hooks. Do not resolve sprint identity from conversation,
 branch, PID, title, transcript, or singleton state.
 
+Before launch, produce the Dependency Surface Audit required by
+`SPRINT_WORKFLOW.md`: upstream inputs, downstream dependents, generated
+artifacts, install/upgrade paths, cross-agent parity, persistent state, and
+validation hooks for each ticket or lane. If that audit changes ordering,
+ownership, or shared-file exclusivity, revise the plan and get fresh approval.
+
 ## Execute
 
 After plan approval, delegate task execution through existing `/run` and `/ship`
 gates. Apply #376 validation cards before commits. Never treat sprint approval as
 commit, push, PR, merge, release, tracker-write, or destructive authorization.
+
+When delegating review or validation work, explicitly tell workers not to run a
+local full `bats tests/` suite unless the coordinator grants an exception. Long
+validation commands should run as foreground tool calls; a worker waiting on one
+must report the exact command and tool/session identifier and must not start a
+duplicate run while the prior run is active.

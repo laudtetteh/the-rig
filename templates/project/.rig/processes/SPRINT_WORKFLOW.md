@@ -39,6 +39,28 @@ explicit plan approval, then repeat with `--write --approval-token TOKEN`.
 Planning approval authorizes no task implementation, commit, push, PR, merge,
 release, destructive action, or tracker write.
 
+Before launch, write a **Dependency Surface Audit (DSA)** for every planned
+ticket or lane. Use the same dependency-impact terms as `/ship` so planning and
+pre-ship evidence line up. The DSA must list:
+
+- **Upstream inputs:** commands, hooks, scripts, schemas, external CLIs, memory
+  files, and installed project state the ticket depends on.
+- **Downstream dependents:** commands, hooks, docs, tests, install paths, and
+  user workflows that consume the likely touched files.
+- **Generated artifacts:** Codex skill mirrors, copied templates, manifest
+  metadata, helper scripts, and other derived files.
+- **Upgrade/install path:** fresh install, existing install, tracking mode,
+  Claude-only, Codex-only, and combined agent targets when relevant.
+- **Cross-agent parity:** Claude command, Codex skill, `bin/rig`, hooks, and
+  canonical process surfaces that must preserve the same contract.
+- **Persistent state:** session records, snapshot/progress files, manifests,
+  task/sprint state, and external `$RIG_DIR` writes.
+- **Validation hooks:** focused tests, command-lint, generated-artifact parity,
+  CI/security gates, and live/manual checks.
+
+If the DSA changes ordering, ownership, shared-file exclusivity, or persistent
+state risk, revise the sprint plan before launch and obtain fresh approval.
+
 ## 3. Launch and execute
 
 Before launch, re-audit actual scopes and dependencies. Drift that changes
@@ -49,6 +71,15 @@ cannot approve, launch, or close. Do not introduce another resolver.
 Delegate each approved item to its unchanged task card and `/run` lifecycle.
 Respect exclusive shared-file lanes and worktrees. Checkpoint task and sprint
 state on pause, blocker, deviation, or mode transition.
+
+Delegated workers must run long validation commands as foreground tool calls and
+let the harness manage continuation unless the coordinator explicitly asks for a
+manual detach. A worker waiting on validation must report the exact command and
+tool/session identifier, must not start duplicate validation while that run is
+active, and must preserve the project rule that focused local tests are normal
+while the full local `bats tests/` suite requires an explicit coordinator
+exception. Prompts to review or validation workers must state that constraint
+verbatim.
 
 ## 4. Validate and ship
 
