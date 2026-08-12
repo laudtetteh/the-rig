@@ -161,6 +161,39 @@ json.dump({
   [[ "$output" == *'"reason": "ended_record"'* ]] || return 1
 }
 
+@test "retrofit mints a continuation record for an ended native session" {
+  write_native_session "$CASE_DIR/.rig/memory/sessions/done/session-ended.json" ended-anchor ended-native-id complete codex
+
+  run env CODEX_THREAD_ID=ended-native-id "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --source resume --json
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"retrofitted": true'* && "$output" != *'ended-native-id'* ]] || return 1
+  local file
+  file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  [[ "$file" != *'/done/'* ]] || return 1
+  SESSION_F="$file" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["lifecycle"]["state"]=="active"; assert d["lineage"]["kind"]=="continuation"; assert d["lineage"]["parent_anchor"]=="ended-anchor"'
+
+  run env CODEX_THREAD_ID=ended-native-id RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"reason": "native_id"'* && "$output" != *'/done/'* ]] || return 1
+
+  run "$CASE_DIR/bin/rig" session doctor --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"unique_native_bindings", "ok": true'* || "$output" == *'"name":"unique_native_bindings","ok":true'* ]] || return 1
+}
+
+@test "ended-record continuation refuses same native id bound to another project" {
+  write_native_session "$CASE_DIR/.rig/memory/sessions/done/session-ended.json" ended-anchor shared-native complete codex
+  write_native_session "$CASE_DIR/.rig/memory/sessions/session-foreign-active.json" foreign-anchor shared-native active codex
+  PATH_F="$CASE_DIR/.rig/memory/sessions/session-foreign-active.json" python3 -c 'import json,os; p=os.environ["PATH_F"]; d=json.load(open(p)); d["project"]["identity"]="foreign-project"; json.dump(d,open(p,"w"))'
+
+  run env CODEX_THREAD_ID=shared-native "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --source resume --json
+
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason":"cross_project"'* || "$output" == *'"reason": "cross_project"'* ]] || return 1
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -maxdepth 1 -type f -name 'session-*.json' | wc -l | tr -d ' ')" -eq 1 ]
+}
+
 @test "atomic writer preserves shell metacharacters and newlines literally" {
   local file="$CASE_DIR/.rig/memory/sessions/session-1.json" name
   write_session "$file" safe feat/current

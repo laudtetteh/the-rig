@@ -34,6 +34,7 @@ setup() {
   grep -Fq "**PR number:** 352" "$checkpoint"
   grep -Fq "**Active task:** feat-352" "$checkpoint"
   grep -Eq '^\*\*Captured at:\*\* [0-9]{4}-[0-9]{2}-[0-9]{2}T' "$checkpoint"
+  grep -Fq "Advisory: this compact checkpoint is historical handoff context" "$checkpoint"
 }
 
 @test "pre-compact discovers an open PR when the CLI can identify one" {
@@ -50,7 +51,7 @@ EOF
   grep -Fq '**PR number:** 987' "$RIG_DIR/memory/.compact-checkpoint-987987.md"
 }
 
-@test "post-compact trusts a matching checkpoint without a stale advisory" {
+@test "post-compact frames a matching checkpoint as historical advisory context" {
   head_sha=$(git -C "$CASE_DIR" rev-parse HEAD)
   cat > "$RIG_DIR/memory/.compact-checkpoint-$$.md" <<EOF
 ## Compact checkpoint
@@ -61,7 +62,7 @@ EOF
   before=$(cksum < "$RIG_DIR/memory/.compact-checkpoint-$$.md")
   run bash -c 'cd "$1" && exec "$2/post-compact.sh"' _ "$CASE_DIR" "$HOOK_DIR"
   [ "$status" -eq 0 ]
-  OUTPUT="$output" python3 -c 'import json,os; text=json.loads(os.environ["OUTPUT"])["systemMessage"]; assert "checkpoint is stale" not in text'
+  OUTPUT="$output" python3 -c 'import json,os; text=json.loads(os.environ["OUTPUT"])["systemMessage"]; assert "checkpoint is stale" not in text; assert text.startswith("Advisory: this compact checkpoint is historical handoff context")'
   [ "$(cksum < "$RIG_DIR/memory/.compact-checkpoint-$$.md")" = "$before" ]
 }
 

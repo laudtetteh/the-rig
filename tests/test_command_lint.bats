@@ -88,6 +88,15 @@ _fail_with_list() {
   grep -Fq 'Session: unresolved — no final session-file write performed' "$COMMAND_DIR/wrap.md"
 }
 
+@test "wrap.md: documents project-only scope and unresolved-session degraded mode" {
+  grep -Fq '**Scope:** wrapping [project name] only' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'Cross-project work' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'run `/post-merge` first' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'degraded mode' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'fabricate a' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'session UUID' "$COMMAND_DIR/wrap.md"
+}
+
 @test "wrap.md: PROGRESS.md trim executes automatically — no confirmation gate" {
   # Must NOT contain the old 'Trim now?' prompt
   if grep -q "Trim now?" "$COMMAND_DIR/wrap.md"; then return 1; fi
@@ -113,12 +122,33 @@ _fail_with_list() {
   grep -Fq 'Post-merge report — skipped' "$COMMAND_DIR/post-merge.md"
 }
 
+@test "post-merge.md: documents project-only scope and unresolved-session degraded mode" {
+  grep -Fq '**Scope:** post-merge for [project name] only' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'Cross-project work' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'run `/post-merge` for the merged project first, then run' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'In degraded mode for `not_found` or `ended_record`' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'do not fabricate a' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'session UUID' "$COMMAND_DIR/post-merge.md"
+}
+
 @test "post-merge.md: executes POST_MERGE_WORKFLOW automatically after report" {
   grep -q "execute POST_MERGE_WORKFLOW steps" "$COMMAND_DIR/post-merge.md"
 }
 
-@test "rig-upgrade.md: --version detects stale stable installer source" {
-  grep -Fq 'Stable installer source is at `$GLOBAL_VERSION` but latest release is `$GITHUB_VERSION`' "$COMMAND_DIR/rig-upgrade.md"
+@test "rig-upgrade.md: --version separates installed layers from installer checkout" {
+  grep -Fq 'GLOBAL_MANIFEST="$HOME/.claude/.rig-global-manifest"' "$COMMAND_DIR/rig-upgrade.md"
+  run grep -F '.rig-global-manifest.json' "$COMMAND_DIR/rig-upgrade.md"
+  [ "$status" -ne 0 ]
+  grep -Fq 'GLOBAL_LAYER_VERSION' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'INSTALLER_CHECKOUT=~/tools/the-rig' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'INSTALLER_BRANCH=$(git -C "$INSTALLER_CHECKOUT" rev-parse --abbrev-ref HEAD' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'INSTALLER_DIRTY="clean"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'INSTALLER_DIRTY="dirty"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'Global installed layer:' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'Preferred installer checkout:' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'branch: main, state: clean' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'global installed layer is at `$GLOBAL_LAYER_VERSION`' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'Preferred installer checkout is at `$INSTALLER_VERSION` but latest release is `$GITHUB_VERSION`' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 'git -C ~/tools/the-rig pull --ff-only origin main' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 're-run `/rig-upgrade --version`' "$COMMAND_DIR/rig-upgrade.md"
 }
@@ -147,10 +177,23 @@ _fail_with_list() {
   [ "$status" -ne 0 ]
 }
 
+@test "rig-gaps.md: quick-add mode uses structured memory helper" {
+  grep -Fq '/rig-gaps --add "short title"' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq '## Quick-add mode (`--add`)' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq 'memory append-gap' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq -- '--scope "$SCOPE"' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq 'Do not mark the entry' "$COMMAND_DIR/rig-gaps.md"
+}
+
 @test "docs index convention is wired into feature doc commands" {
   grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/doc-list.md"
-  grep -Fq 'architecture/' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'runbooks/' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'reports/' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'spikes/' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'agent-ops/' "$COMMAND_DIR/doc-list.md"
+  grep -Fq 'not a catch-all bucket' "$COMMAND_DIR/doc-list.md"
   grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/doc-feature.md"
+  grep -Fq 'Use this command only for product or business feature traces' "$COMMAND_DIR/doc-feature.md"
   grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/refresh-feature-doc.md"
   grep -Fq 'docs/INDEX.md' "$COMMAND_DIR/rig-help.md"
   run grep -R '\$RIG_DIR/docs' "$COMMAND_DIR"
@@ -211,6 +254,73 @@ _fail_with_list() {
   grep -Fq "Generated artifacts: PASS / N/A / HOLD" "$COMMAND_DIR/ship.md"
   grep -Fq "Retain this matrix and reuse it in the pull request **Dependency impact** section" "$COMMAND_DIR/ship.md"
   grep -Fq "## Dependency impact" "$COMMAND_DIR/ship.md"
+}
+
+@test "sprint workflow codifies Dependency Surface Audit planning gate" {
+  local process="$REPO_ROOT/templates/project/.rig/processes/SPRINT_WORKFLOW.md"
+  grep -Fq "Dependency Surface Audit (DSA)" "$process"
+  grep -Fq "Upstream inputs" "$process"
+  grep -Fq "Downstream dependents" "$process"
+  grep -Fq "Generated artifacts" "$process"
+  grep -Fq "Upgrade/install path" "$process"
+  grep -Fq "Cross-agent parity" "$process"
+  grep -Fq "Persistent state" "$process"
+  grep -Fq "Validation hooks" "$process"
+  grep -Fq "Dependency Surface Audit required by" "$COMMAND_DIR/sprint.md"
+}
+
+@test "delegated validation protocol forbids duplicate detached full-suite runs" {
+  local process="$REPO_ROOT/templates/project/.rig/processes/SPRINT_WORKFLOW.md"
+  grep -Fq "foreground tool calls" "$process"
+  grep -Fq "exact command and" "$process"
+  grep -Fq "tool/session identifier" "$process"
+  grep -Fq "must not start duplicate validation" "$process"
+  grep -Fq 'full local `bats tests/` suite requires' "$process"
+  grep -Fq "must not run a local full \`bats tests/\` suite" "$COMMAND_DIR/handoff-checklist.md"
+}
+
+@test "ship merge guidance verifies GitHub PR state after non-zero merge" {
+  grep -Fq "## Step 10 — Merge verification and branch cleanup" "$COMMAND_DIR/ship.md"
+  grep -Fq 'gh pr view "$PR_NUMBER" --json state,mergedAt' "$COMMAND_DIR/ship.md"
+  grep -Fq "linked worktree" "$COMMAND_DIR/ship.md"
+  grep -Fq "local cleanup failure" "$COMMAND_DIR/ship.md"
+  grep -Fq "Do not run" "$COMMAND_DIR/ship.md"
+  grep -Fq "destructive local branch cleanup" "$COMMAND_DIR/ship.md"
+  grep -Fq "do not delete a local linked-worktree branch" "$COMMAND_DIR/ship.md"
+  grep -Fq "delete only the remote branch after confirming the PR is merged" "$COMMAND_DIR/ship.md"
+  grep -Fq "target" "$COMMAND_DIR/ship.md"
+  grep -Fq "PR head branch" "$COMMAND_DIR/ship.md"
+}
+
+@test "code-review and ship discover PR validation candidates safely" {
+  for command in code-review ship; do
+    grep -Fq "Local verification" "$COMMAND_DIR/$command.md"
+    grep -Fq "Validation" "$COMMAND_DIR/$command.md"
+    grep -Fq "Test plan" "$COMMAND_DIR/$command.md"
+    grep -Fq "validation candidates" "$COMMAND_DIR/$command.md"
+    grep -Fq "PR-body" "$COMMAND_DIR/$command.md"
+    grep -Fq "Never execute arbitrary" "$COMMAND_DIR/$command.md"
+    grep -Fq "PR-body commands" "$COMMAND_DIR/$command.md"
+    grep -Fq "validation plan" "$COMMAND_DIR/$command.md"
+    grep -Fq "safety gates" "$COMMAND_DIR/$command.md"
+    grep -Fq "YARN_NO_PROXY" "$COMMAND_DIR/$command.md"
+    grep -Fq "env -u YARN_NO_PROXY" "$COMMAND_DIR/$command.md"
+    grep -Fq "at most once" "$COMMAND_DIR/$command.md"
+  done
+}
+
+@test "wrap and post-merge try ended-record retrofit before degraded mode" {
+  for command in wrap post-merge; do
+    grep -Fq 'session retrofit --agent codex --from-env --source resume --json' "$COMMAND_DIR/$command.md"
+    grep -Fq 'session retrofit --agent claude --from-env --source resume --json' "$COMMAND_DIR/$command.md"
+    grep -Fq 'active continuation' "$COMMAND_DIR/$command.md"
+    grep -Fq 'degraded mode' "$COMMAND_DIR/$command.md"
+  done
+}
+
+@test "rig-gaps.md: quick-add mode resolves REPO before helper invocation" {
+  grep -Fq 'REPO=$(git rev-parse --show-toplevel)' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq '"$REPO/bin/rig" memory append-gap' "$COMMAND_DIR/rig-gaps.md"
 }
 
 @test "PR template captures dependency impact evidence" {

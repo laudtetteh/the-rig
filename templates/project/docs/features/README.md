@@ -4,6 +4,11 @@ End-to-end traces for business-critical features in this project.
 Each doc maps a feature from entry point to render: templates, PHP/code, queries,
 data models, business rules, and known gotchas.
 
+`docs/features/` is not a catch-all documentation bucket. Put operational
+runbooks in `docs/runbooks/`, one-off audits and validation artifacts in
+`docs/reports/`, research packages in `docs/spikes/`, and agent/Rig/browser/MCP
+operating notes in `docs/agent-ops/`.
+
 ---
 
 ## When to read these

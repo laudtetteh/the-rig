@@ -7,6 +7,12 @@ Run this any time you've traced through 5+ files to understand how something
 works — capture the knowledge while it's fresh so future sessions don't repeat
 the same archaeology.
 
+Use this command only for product or business feature traces. If the requested
+document is an operational runbook, one-off validation report, research spike,
+agent/Rig/browser/MCP note, or durable project record, put it under the
+appropriate docs category instead and update `docs/INDEX.md`; do not file it
+under `docs/features/`.
+
 > **Tip:** If you haven't already, run `/recon <feature>` first. It sweeps PR
 > history and commit messages so you understand how the feature evolved before
 > you document its current state.

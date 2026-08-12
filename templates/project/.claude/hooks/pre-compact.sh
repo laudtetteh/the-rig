@@ -113,8 +113,12 @@ fi
 
 # ── Write checkpoint ───────────────────────────────────────────────────────────
 
+ADVISORY_HEADER="Advisory: this compact checkpoint is historical handoff context. Verify live repository state, current branch, HEAD, session identity, and open PR status before acting on it."
+
 CHECKPOINT_TMP=$(mktemp "${CHECKPOINT}.tmp.XXXXXX") || exit 0
 cat > "$CHECKPOINT_TMP" <<CPEOF
+${ADVISORY_HEADER}
+
 ## Compact checkpoint — ${TIMESTAMP}
 
 **Branch:** ${BRANCH}

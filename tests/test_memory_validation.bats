@@ -134,3 +134,109 @@ EOF
 
   [ "$status" -eq 0 ]
 }
+
+@test "memory append-gap follows stealth rig path and writes explicit scope" {
+  rig_external="$TEST_ROOT/external rig"
+  mkdir -p "$rig_external/memory"
+  cat > "$rig_external/memory/RIG_GAPS.md" <<'EOF'
+# Rig Gaps
+
+<!-- Add entries below — newest first -->
+
+## [2026-01-01] — older gap
+EOF
+  printf '%s\n' "$rig_external" > "$TEST_PROJECT/.rigpath"
+
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "quick add test" \
+    --scope rig-core \
+    --category workflow \
+    --severity medium \
+    --workflow "/rig-gaps" \
+    --observation "Observed from a focused test." \
+    --suggested-fix "Keep the helper structured." \
+    --json
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  grep -Fq "## [" "$rig_external/memory/RIG_GAPS.md"
+  grep -Fq "**Scope**: rig-core" "$rig_external/memory/RIG_GAPS.md"
+  grep -Fq "Observed from a focused test." "$rig_external/memory/RIG_GAPS.md"
+  [ "$(grep -nF 'quick add test' "$rig_external/memory/RIG_GAPS.md" | cut -d: -f1)" -lt "$(grep -nF 'older gap' "$rig_external/memory/RIG_GAPS.md" | cut -d: -f1)" ]
+}
+
+@test "memory append-gap refuses duplicated insertion markers without writing" {
+  gaps="$TEST_PROJECT/.rig/memory/RIG_GAPS.md"
+  cat > "$gaps" <<'EOF'
+# Rig Gaps
+
+<!-- Add entries below — newest first -->
+<!-- Add entries below — newest first -->
+EOF
+  before="$(cksum "$gaps")"
+
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "ambiguous gap" \
+    --scope project \
+    --observation "Should not write." \
+    --json
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"reason":"marker_ambiguous"'* || "$output" == *'"reason": "marker_ambiguous"'* ]] || return 1
+  [ "$before" = "$(cksum "$gaps")" ]
+}
+
+@test "memory append-progress inserts above marker and preserves sid" {
+  write_valid_memory
+
+  run "$TEST_PROJECT/bin/rig" memory append-progress \
+    --title "focused progress" \
+    --body "Focused body." \
+    --sid "abc-123" \
+    --json
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  progress="$TEST_PROJECT/.rig/memory/PROGRESS.md"
+  grep -Fq "<!-- sid:abc-123 -->" "$progress"
+  [ "$(grep -nF 'focused progress' "$progress" | cut -d: -f1)" -lt "$(grep -nF '<!-- Add entries above this line, newest first -->' "$progress" | cut -d: -f1)" ]
+}
+
+@test "memory append-progress refuses duplicated insertion markers without writing" {
+  write_valid_memory
+  progress="$TEST_PROJECT/.rig/memory/PROGRESS.md"
+  printf '%s\n' '<!-- Add entries above this line, newest first -->' >> "$progress"
+  before="$(cksum "$progress")"
+
+  run "$TEST_PROJECT/bin/rig" memory append-progress \
+    --title "ambiguous progress" \
+    --body "Should not be written." \
+    --json
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"reason":"marker_ambiguous"'* || "$output" == *'"reason": "marker_ambiguous"'* ]] || return 1
+  [ "$before" = "$(cksum "$progress")" ]
+}
+
+@test "memory write-snapshot atomically replaces context snapshot" {
+  printf '# Old\n' > "$TEST_PROJECT/.rig/memory/CONTEXT_SNAPSHOT.md"
+  printf '# New snapshot\n\nBody without trailing newline' > "$TEST_ROOT/new-snapshot.md"
+
+  run "$TEST_PROJECT/bin/rig" memory write-snapshot --file "$TEST_ROOT/new-snapshot.md" --json
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  SNAPSHOT="$TEST_PROJECT/.rig/memory/CONTEXT_SNAPSHOT.md" SOURCE="$TEST_ROOT/new-snapshot.md" \
+    python3 -c 'import os; assert open(os.environ["SNAPSHOT"]).read() == open(os.environ["SOURCE"]).read() + "\n"'
+}
+
+@test "memory write-snapshot accepts stdin content despite Python heredoc wrapper" {
+  printf '# Old\n' > "$TEST_PROJECT/.rig/memory/CONTEXT_SNAPSHOT.md"
+
+  run bash -c 'printf "%s" "# Stdin snapshot"$'\''\n\nBody'\'' | "$1" memory write-snapshot --stdin --json' _ "$TEST_PROJECT/bin/rig"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  grep -Fq "# Stdin snapshot" "$TEST_PROJECT/.rig/memory/CONTEXT_SNAPSHOT.md"
+  grep -Fq "Body" "$TEST_PROJECT/.rig/memory/CONTEXT_SNAPSHOT.md"
+}

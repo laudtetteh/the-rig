@@ -10,6 +10,12 @@ hygiene is skipped.
 **Always run this after a merge.** A `.husky/post-merge` git hook will remind you
 when you pull a merge commit.
 
+`/post-merge` is scoped to the repository whose PR was merged. If the same
+conversation also contains work in another project, do not update that other
+project's Rig memory, task files, or session records here. For a combined
+handoff after a merge, run `/post-merge` for the merged project first, then run
+`/wrap` for the current project; each command owns only its own project state.
+
 ---
 
 ## What this does
@@ -128,6 +134,15 @@ Gather all findings silently — no output yet:
 4. **ERRORS.md additions** — infer from session context whether any unexpected behaviors, footguns, or pitfalls should be added
 5. **Feature doc overlaps** — files changed in the merged PR vs. documented feature entry points (see Feature doc freshness step below)
 6. **Session name** — derive suggestion from session file and conversation context
+7. **Session identity** — run `bin/rig session resolve --json`; if it returns
+   `ended_record` and a native session environment variable is present, first run
+   `bin/rig session retrofit --agent codex --from-env --source resume --json` or
+   `bin/rig session retrofit --agent claude --from-env --source resume --json`
+   to create an exact active continuation. If it returns `not_found`, or
+   ended-record retrofit cannot create an exact active continuation, collect the
+   rest of the report in degraded mode and skip final session-file mutation.
+   Stop on ambiguous, duplicate, cross-project, malformed, or unsafe session
+   state.
 
 ### Report
 
@@ -135,6 +150,9 @@ Print a single structured report before executing POST_MERGE_WORKFLOW:
 
 ```
 ## Post-merge report — [BASE_BRANCH] — [date]
+
+**Scope:** post-merge for [project name] only
+**Cross-project work:** [none | other projects mentioned: project-a, project-b — not updated here]
 
 **Merged:** PR #N — type(scope): description
 
@@ -147,7 +165,7 @@ Print a single structured report before executing POST_MERGE_WORKFLOW:
 **Feature docs:** [⚠ overlap — run /refresh-feature-doc X | no overlaps]
 **Task file:** [TASK_N_slug.md → moving to done/ | no active task found]
 
-**Session name:** [suggested: "type desc #N | type desc #N" | already set — appending: "..." | nothing meaningful shipped, skipped]
+**Session name:** [suggested: "type desc #N | type desc #N" | already set — appending: "..." | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
 ```
 
 If `/post-merge` is skipped, print instead:
@@ -172,6 +190,11 @@ After printing the report, **execute POST_MERGE_WORKFLOW steps 1–8 automatical
 - Apply session name — only if user says "use that" or equivalent
 
 All steps execute automatically. The session name is the only action requiring explicit user input.
+
+In degraded mode for `not_found` or `ended_record`, continue project-level
+post-merge housekeeping and write `CONTEXT_SNAPSHOT.md`, but do not fabricate a
+session UUID, do not move any session record to `sessions/done/`, and do not
+clear exact-session obligations that require a resolvable active session.
 
 ---
 

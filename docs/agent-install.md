@@ -276,13 +276,12 @@ rather than silently trusting a future or bogus revision claim.
 
 ---
 
-## What `/rig-install` does
+## Agent-guided install selection
 
-The Claude `/rig-install` command (and its generated Codex `$rig-install` skill,
-when available in the selected install) asks
-the user three questions, then emits the exact command for their scenario. It is a
-thin wrapper over this document — run it when you need guided install selection,
-refer here for raw flag reference.
+The downstream `/rig-install` and `$rig-install` command adapters were retired.
+Use this document directly when an agent needs guided install selection: collect
+the target project path, tracking mode, agent target, and strategy, then emit the
+exact `install.sh` command for review before running it.
 
 ---
 
@@ -298,8 +297,9 @@ ls -la /path/to/project/.husky/
 # settings.json wired
 cat /path/to/project/.claude/settings.json | grep pre-tool
 
-# Test suite passes (run from the Rig repo, not the project)
-bats tests/
+# Focused installer smoke test from the Rig repo
+bash -n install.sh
+bats tests/test_install_a.bats
 ```
 
 For stealth/external installs, also confirm:

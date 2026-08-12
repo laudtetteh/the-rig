@@ -20,6 +20,16 @@ Performs the session-end housekeeping that prevents state loss between sessions:
 12. **Cleans up housekeeping flags** — deletes `.rig/memory/.wrap-needed` if present
 13. **(opt-in) Auto-scans JSONL transcripts** for frequent Bash patterns and appends new `permissions.allow` entries to `.claude/settings.json` — enable with `touch $RIG_DIR/memory/.fewer-prompts-enabled`
 
+`/wrap` is scoped to the current project only. Do not update another project's
+Rig memory, task files, or session records during this workflow. If the
+conversation includes work in more than one repository, name those other
+projects in the report and leave their wrap/post-merge housekeeping to their own
+project sessions.
+
+If a PR was merged and the session is also ending, run `/post-merge` first for
+the merged project, then run `/wrap` for this project. Do not combine their
+memory writes under one inferred session identity.
+
 ## Usage
 
 ```
@@ -143,6 +153,9 @@ Print a single structured report before executing anything:
 ```
 ## Wrap report — [branch] — [date]
 
+**Scope:** wrapping [project name] only
+**Cross-project work:** [none | other projects mentioned: project-a, project-b — not updated here]
+
 **This session:**
 - PR #N merged: type(scope): short description
 - [other work items]
@@ -156,8 +169,23 @@ Print a single structured report before executing anything:
 **Active tasks:** [task-slug | none]
 **Post-merge:** [skipped — reason and next action | not requested]
 
-**Session:** [anchor: UUID | tentative: "..." | suggested final: "type desc #N | type desc #N" | nothing meaningful shipped, skipped]
+**Session:** [anchor: UUID | tentative: "..." | suggested final: "type desc #N | type desc #N" | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
 ```
+
+If `bin/rig session resolve --json` returns `ended_record` and a native session
+environment variable is present, first run the appropriate exact retrofit:
+`bin/rig session retrofit --agent codex --from-env --source resume --json` for
+Codex, or `bin/rig session retrofit --agent claude --from-env --source resume --json`
+for Claude. Use the returned active continuation record if retrofit succeeds.
+
+If resolve returns `not_found`, or ended-record retrofit cannot create an exact
+active continuation, enter degraded mode: print
+`Session: unresolved — no final session-file write performed`, continue project
+memory maintenance that does not require an exact session record, write
+`CONTEXT_SNAPSHOT.md`, and skip final session-file mutation. Do not fabricate a
+session UUID or move any record to `sessions/done/`. If it returns `ambiguous`,
+`duplicate_native_id`, `cross_project`, malformed data, or an unsafe path, stop
+before writing because the session state is unsafe.
 
 ### Execution
 

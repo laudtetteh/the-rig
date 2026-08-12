@@ -22,6 +22,9 @@ Commands:
   rig session-name set      Set the current session name atomically
   rig memory validate       Validate Rig memory files
   rig memory repair-markers Reposition unambiguous Rig memory markers
+  rig memory append-gap     Append one structured Rig gap
+  rig memory append-progress Append one dated progress entry
+  rig memory write-snapshot Atomically replace CONTEXT_SNAPSHOT.md
   rig codex                 Launch Codex with Rig context
   rig claude                Launch Claude Code with Rig context
   rig version               Print the installed Rig version
@@ -71,7 +74,13 @@ EOF
       ;;
     session-name) printf 'Usage: rig session-name set [--tentative|--final] [--complete] [--json] <name>\n';;
     sprint) printf 'Usage: rig sprint <audit|plan|status> [options] --json\n';;
-    memory) printf 'Usage: rig memory <validate|repair-markers> [--json]\n';;
+    memory) cat <<'EOF'
+Usage: rig memory <validate|repair-markers|append-gap|append-progress|write-snapshot> [options]
+
+Append helpers resolve .rigpath before writing and use atomic file replacement
+where replacement is required.
+EOF
+      ;;
     codex) printf 'Usage: rig codex [-- <codex arguments>]\n';;
     claude) printf 'Usage: rig claude [-- <claude arguments>]\n';;
   esac
@@ -352,6 +361,204 @@ else:
         print("Repositioned markers: " + ", ".join(changed))
 raise SystemExit(0 if ok else 1)
 PY
+}
+
+memory_append_gap() {
+  RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
+import datetime, fcntl, json, os, pathlib, sys, tempfile
+
+args = sys.argv[1:]
+def take(name, default=""):
+    if name not in args:
+        return default
+    index = args.index(name)
+    if index + 1 >= len(args):
+        print(json.dumps({"ok": False, "reason": "invalid_input", "message": name + " requires a value"}))
+        raise SystemExit(64)
+    return args[index + 1]
+json_output = "--json" in args
+recognized = {"--title", "--scope", "--category", "--severity", "--workflow", "--observation", "--suggested-fix", "--json"}
+bad = [arg for arg in args if arg.startswith("--") and arg not in recognized]
+if bad:
+    print(json.dumps({"ok": False, "reason": "invalid_input", "message": "unknown option: " + bad[0]}))
+    raise SystemExit(64)
+title = take("--title").strip()
+scope = take("--scope", "project").strip()
+category = take("--category", "workflow").strip()
+severity = take("--severity", "medium").strip()
+workflow = take("--workflow", "unspecified").strip()
+observation = take("--observation").strip()
+suggested = take("--suggested-fix", "Needs triage.").strip()
+if not title or not observation or scope not in ("project", "rig-core"):
+    print(json.dumps({"ok": False, "reason": "invalid_input", "message": "title, observation, and scope project|rig-core are required"}))
+    raise SystemExit(64)
+today = datetime.date.today().isoformat()
+entry = f"""## [{today}] — {title}
+
+**Category**: {category}
+**Severity**: {severity}
+**Scope**: {scope}
+**Workflow**: {workflow}
+
+**Observation**:
+{observation}
+
+**Suggested fix**:
+{suggested}
+
+"""
+memory = pathlib.Path(os.environ["RIG_DIR"]) / "memory"
+memory.mkdir(parents=True, exist_ok=True)
+path = memory / "RIG_GAPS.md"
+lock_path = memory / ".rig-gaps.lock"
+with open(lock_path, "a+") as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    existing = path.read_text() if path.exists() else "# Rig Gaps\n\n"
+    if not existing.endswith("\n"):
+        existing += "\n"
+    marker = "<!-- Add entries below — newest first -->"
+    marker_index = existing.find(marker)
+    if existing.count(marker) > 1:
+        print(json.dumps({"ok": False, "reason": "marker_ambiguous", "file": str(path)}))
+        raise SystemExit(1)
+    if marker_index >= 0:
+        insert_at = marker_index + len(marker)
+        separator = "\n\n" if existing[insert_at:insert_at + 2] != "\n\n" else "\n"
+        new_text = existing[:insert_at] + separator + entry + existing[insert_at:].lstrip("\n")
+    else:
+        new_text = existing + ("" if existing.endswith("\n\n") else "\n") + entry
+    fd, tmp = tempfile.mkstemp(prefix=".rig-gaps-", suffix=".tmp", dir=str(memory))
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(new_text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+payload = {"ok": True, "file": str(path), "scope": scope, "title": title}
+if json_output:
+    print(json.dumps(payload, separators=(",", ":")))
+else:
+    print("Appended Rig gap: " + title)
+PY
+}
+
+memory_append_progress() {
+  RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
+import datetime, fcntl, json, os, pathlib, sys, tempfile
+
+args = sys.argv[1:]
+json_output = "--json" in args
+def take(name, default=""):
+    if name not in args:
+        return default
+    index = args.index(name)
+    if index + 1 >= len(args):
+        print(json.dumps({"ok": False, "reason": "invalid_input", "message": name + " requires a value"}))
+        raise SystemExit(64)
+    return args[index + 1]
+recognized = {"--title", "--body", "--sid", "--json"}
+bad = [arg for arg in args if arg.startswith("--") and arg not in recognized]
+if bad:
+    print(json.dumps({"ok": False, "reason": "invalid_input", "message": "unknown option: " + bad[0]}))
+    raise SystemExit(64)
+title = take("--title").strip()
+body = take("--body").strip()
+sid = take("--sid").strip()
+if not title or not body:
+    print(json.dumps({"ok": False, "reason": "invalid_input", "message": "title and body are required"}))
+    raise SystemExit(64)
+memory = pathlib.Path(os.environ["RIG_DIR"]) / "memory"
+memory.mkdir(parents=True, exist_ok=True)
+path = memory / "PROGRESS.md"
+lock_path = memory / ".progress.lock"
+today = datetime.date.today().isoformat()
+sid_suffix = f" <!-- sid:{sid} -->" if sid else ""
+entry = f"## [{today}] — {title}{sid_suffix}\n\n{body}\n\n"
+with open(lock_path, "a+") as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    text = path.read_text() if path.exists() else "# Progress\n\n## Format\n\n"
+    marker = "<!-- Add entries above this line, newest first -->"
+    marker_count = text.count(marker)
+    if marker_count > 1:
+        print(json.dumps({"ok": False, "reason": "marker_ambiguous", "file": str(path)}))
+        raise SystemExit(1)
+    if marker_count == 1:
+        text = text.replace(marker, entry + marker, 1)
+    else:
+        text = text.rstrip() + "\n\n" + entry
+    fd, tmp = tempfile.mkstemp(prefix=".progress-", suffix=".tmp", dir=str(memory))
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+payload = {"ok": True, "file": str(path), "title": title, "sid": sid or None}
+print(json.dumps(payload, separators=(",", ":")) if json_output else "Appended progress entry: " + title)
+PY
+}
+
+memory_write_snapshot() {
+  local from_file="" json=false arg stdin_tmp=""
+  while [[ "$#" -gt 0 ]]; do
+    arg="$1"
+    case "$arg" in
+      --file) [[ "$#" -ge 2 ]] || { usage_error "--file requires a value" "$@"; return; }; from_file="$2"; shift 2;;
+      --stdin) from_file="-"; shift;;
+      --json) json=true; shift;;
+      *) usage_error "unknown memory option: $arg" "$@"; return;;
+    esac
+  done
+  [[ -n "$from_file" ]] || { usage_error "write-snapshot requires --file FILE or --stdin" "$@"; return; }
+  if [[ "$from_file" == "-" ]]; then
+    stdin_tmp=$(mktemp "${TMPDIR:-/tmp}/rig-snapshot-stdin.XXXXXX") || return 1
+    cat > "$stdin_tmp"
+    from_file="$stdin_tmp"
+  fi
+  RIG_DIR="$(rig_dir)" SNAPSHOT_SOURCE="$from_file" SNAPSHOT_JSON="$json" python3 <<'PY'
+import json, os, pathlib, stat, sys, tempfile
+
+source = os.environ["SNAPSHOT_SOURCE"]
+source_path = pathlib.Path(source)
+if not source_path.is_file():
+    print(json.dumps({"ok": False, "reason": "source_missing"}))
+    raise SystemExit(1)
+content = source_path.read_text()
+memory = pathlib.Path(os.environ["RIG_DIR"]) / "memory"
+memory.mkdir(parents=True, exist_ok=True)
+path = memory / "CONTEXT_SNAPSHOT.md"
+mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+fd, tmp = tempfile.mkstemp(prefix=".context-snapshot-", suffix=".tmp", dir=str(memory))
+try:
+    with os.fdopen(fd, "w") as handle:
+        handle.write(content)
+        if content and not content.endswith("\n"):
+            handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+finally:
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+payload = {"ok": True, "file": str(path)}
+print(json.dumps(payload, separators=(",", ":")) if os.environ["SNAPSHOT_JSON"] == "true" else "Wrote CONTEXT_SNAPSHOT.md")
+PY
+  local status=$?
+  [[ -n "$stdin_tmp" ]] && rm -f "$stdin_tmp"
+  return "$status"
 }
 
 doctor() {
@@ -1102,7 +1309,12 @@ if native_id:
     matches = [(p,d) for p,d in records if d.get("schema_version") == 1 and
                d.get("project", {}).get("identity") == project_id and d.get("agent") == agent and
                d.get("native", {}).get("session_id") == native_id]
-    if len(matches) > 1: emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
+    if len(matches) > 1:
+        active_matches = [(p, d) for p, d in matches if "done" not in p.parts and d.get("lifecycle", {}).get("state") != "complete"]
+        if len(active_matches) == 1:
+            matches = active_matches
+        else:
+            emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
     if len(matches) == 1:
         p,d = matches[0]
         if "done" in p.parts or d.get("lifecycle", {}).get("state") == "complete":
@@ -1139,7 +1351,12 @@ for native_env_agent, native_env_id in native_env_signals:
     matches = [(p, d) for p, d in records if d.get("schema_version") == 1 and
                d.get("project", {}).get("identity") == project_id and d.get("agent") == native_env_agent and
                d.get("native", {}).get("session_id") == native_env_id]
-    if len(matches) > 1: emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
+    if len(matches) > 1:
+        active_matches = [(p, d) for p, d in matches if "done" not in p.parts and d.get("lifecycle", {}).get("state") != "complete"]
+        if len(active_matches) == 1:
+            matches = active_matches
+        else:
+            emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
     if len(matches) == 1:
         p, d = matches[0]
         if "done" in p.parts or d.get("lifecycle", {}).get("state") == "complete":
@@ -1178,6 +1395,7 @@ def option(name, default=""):
 agent=option("--agent"); native_id=option("--native-session-id"); source=option("--source", "hook")
 root_native=option("--root-session-id") or native_id; parent=option("--parent-native-session-id") or None
 native_title=option("--native-title") or None
+allow_continuation="--allow-continuation" in args
 if agent not in ("claude","codex") or not native_id:
     print(json.dumps({"ok":False,"reason":"invalid_input"})); raise SystemExit(3)
 root=pathlib.Path(os.environ["RIG_ROOT"]).resolve(); rig=pathlib.Path(os.environ["RIG_DIR"]); sessions=rig/"memory"/"sessions"; sessions.mkdir(parents=True,exist_ok=True)
@@ -1236,19 +1454,35 @@ for base in (sessions,sessions/"done"):
 if unsafe_path:
     print(json.dumps({"ok":False,"reason":"invalid_session_path","no_write":True})); raise SystemExit(4)
 matches=[(p,d) for p,d in records if d.get("schema_version")==1 and d.get("project",{}).get("identity")==project_id and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id]
+continuation_from_ended=False
 if len(matches)>1:
-    print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
+    active_matches=[(p,d) for p,d in matches if "done" not in p.parts and d.get("lifecycle",{}).get("state")!="complete"]
+    if len(active_matches)==1:
+        matches=active_matches
+    else:
+        print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
 if matches:
     p,d=matches[0]
     if hint_path and hint_path!=p.resolve():
         print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
     if "done" in p.parts or d.get("lifecycle",{}).get("state")=="complete":
-        print(json.dumps({"ok":False,"reason":"ended_record"})); raise SystemExit(3)
-    if d.get("lifecycle",{}).get("state") in ("conflict","superseded","repair_pending"):
+        if not allow_continuation:
+            print(json.dumps({"ok":False,"reason":"ended_record"})); raise SystemExit(3)
+        ended_path, ended_record = p, d
+        continuation_from_ended=True
+        if not parent:
+            parent = ended_record.get("native", {}).get("session_id") or native_id
+        matches = []
+        p = None
+        d = None
+    elif d.get("lifecycle",{}).get("state") in ("conflict","superseded","repair_pending"):
         print(json.dumps({"ok":False,"reason":"invalid_lifecycle_transition"})); raise SystemExit(3)
-else:
+if not matches:
     cross=[d for _,d in records if d.get("schema_version")==1 and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id]
-    if cross:
+    cross_project=[d for d in cross if d.get("project",{}).get("identity")!=project_id]
+    if cross_project:
+        print(json.dumps({"ok":False,"reason":"cross_project"})); raise SystemExit(3)
+    if cross and not continuation_from_ended:
         print(json.dumps({"ok":False,"reason":"cross_project"})); raise SystemExit(3)
     p=hint_path
     d=read(p) if p else None
@@ -1265,12 +1499,13 @@ else:
     if len(parent_matches)>1:
         print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
     parent_anchor=parent_matches[0].get("anchor") if len(parent_matches)==1 else None
+    lineage_kind="continuation" if allow_continuation and parent_anchor else ("fork" if source=="fork" or parent else "root")
     d={"schema_version":1,"anchor":anchor,"agent":agent,
        "native":{"session_id":native_id,"root_session_id":root_native,"bound_at":now,"source":"launcher_hint" if hint else source},
        "project":{"root_realpath":str(root),"identity":project_id,"worktree_realpath":str(root)},
        "created_at":created,"updated_at":now,
        "runtime":{"pid":int(os.environ.get("RIG_SESSION_PID",os.getppid())),"launcher":"rig" if hint else "raw","cwd":os.getcwd(),"branch":"unknown","head":None},
-       "lineage":{"parent_anchor":parent_anchor,"parent_native_session_id":parent,"kind":"fork" if source=="fork" or parent else "root"},
+       "lineage":{"parent_anchor":parent_anchor,"parent_native_session_id":parent,"kind":lineage_kind},
        "names":{"tentative":legacy.get("tentative_name"),"final":legacy.get("final_name"),"native_title":native_title,"display_title":legacy.get("final_name") or legacy.get("tentative_name") or native_title,"native_sync":"in-sync" if native_title and not (legacy.get("final_name") or legacy.get("tentative_name")) else ("suggested" if native_title else "unknown")},
        "lifecycle":{"state":"active","last_event":"session_start","last_event_at":now,"end_reason":None},
        "flags":{"wrap_needed":False,"post_merge_pending":False},
@@ -1328,12 +1563,20 @@ session_retrofit() {
     return 0
   }
   status=$?
-  if [[ "$status" -ne 1 ]]; then
+  if [[ "$status" -ne 1 && "$status" -ne 3 ]]; then
     if [[ "$json" == true ]]; then printf '%s\n' "$resolved"; else printf 'Unable to retrofit current %s session.\n' "$agent" >&2; fi
     return "$status"
   fi
-  resolved="$(session_bind --agent "$agent" --native-session-id "$native_id" --source "$source")"
-  status=$?
+  if [[ "$status" -eq 3 ]] && ! printf '%s\n' "$resolved" | grep -Fq '"reason": "ended_record"'; then
+    if [[ "$json" == true ]]; then printf '%s\n' "$resolved"; else printf 'Unable to retrofit current %s session.\n' "$agent" >&2; fi
+    return "$status"
+  fi
+  bind_args=(session_bind --agent "$agent" --native-session-id "$native_id" --source "$source")
+  if [[ "$status" -eq 3 ]]; then
+    bind_args+=(--allow-continuation)
+  fi
+  status=0
+  resolved="$("${bind_args[@]}")" || status=$?
   if [[ "$status" -eq 0 && "$json" == true ]]; then
     printf '%s\n' "$resolved" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["retrofitted"]=True; print(json.dumps(d))'
   elif [[ "$status" -eq 0 ]]; then
@@ -1418,7 +1661,17 @@ if action=="doctor":
         anchors.setdefault(d.get("anchor"),[]).append(p.name)
         native=d.get("native",{}).get("session_id")
         if native: natives.setdefault((d.get("project",{}).get("identity"),d.get("agent"),native),[]).append(p.name)
-    dup_a=[k for k,v in anchors.items() if k and len(v)>1]; dup_n=[k for k,v in natives.items() if len(v)>1]
+    dup_a=[k for k,v in anchors.items() if k and len(v)>1]
+    dup_n=[]
+    for key, names in natives.items():
+        if len(names) <= 1:
+            continue
+        pair_records=[(p,d) for p,d in records if p.name in names]
+        active=[(p,d) for p,d in pair_records if "done" not in p.parts and d.get("lifecycle",{}).get("state")!="complete"]
+        done=[(p,d) for p,d in pair_records if "done" in p.parts or d.get("lifecycle",{}).get("state")=="complete"]
+        continuation_ok=(len(active)==1 and len(done)==len(pair_records)-1 and active[0][1].get("lineage",{}).get("kind")=="continuation")
+        if not continuation_ok:
+            dup_n.append(key)
     check("unique_anchors",not dup_a,"unique" if not dup_a else "%d duplicates"%len(dup_a))
     check("unique_native_bindings",not dup_n,"unique" if not dup_n else "%d duplicates"%len(dup_n))
     audit=sessions/"repair-audit.jsonl"; audit_ok=True; audit_detail="absent"
@@ -1636,7 +1889,7 @@ main() {
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help "$command"; return; fi
       subcommand="${1:-}"; shift || true
-      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
+      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
     *) shift; usage_error "unknown command: $command" "$@";;
   esac
 }

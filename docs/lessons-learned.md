@@ -1,6 +1,6 @@
 # Lessons learned
 
-Twenty documented pitfalls — from the original LaudBot pilot (#1-#13) through
+Twenty-two documented pitfalls — from the original LaudBot pilot (#1-#13) through
 The Rig's own ongoing development (#14 onward) — the failures that shaped The Rig.
 
 Every component in this system exists because something went wrong without it. These are the incidents, in the order they were discovered.
