@@ -18,7 +18,7 @@ No arguments. Output the table below directly — do not read individual command
 |---|---|
 | `/task` | Start a new unit of work. Runs the intake wizard: goal, area, constraints, issue number, operating mode (autonomy / check-ins / risk). Creates a task file in `.rig/tasks/`. |
 | `/run` | Work through the task backlog. Surveys ready tasks, proposes an execution order, and drives them to completion in the configured autonomy mode. Accepts an optional `[task-slug]` to run one specific task. Surfaces the operating mode wizard if `## Operating mode` is absent from the task file. |
-| `/ship` | Commit and close a task. Sequential hard gate: task ID → issue → labels → branch → pre-commit cleanup → checklist → testing pause → commit message → commit → post-housekeeping → PR. |
+| `/ship` | Commit and close a task. Sequential hard gate: task ID → issue → labels → branch → pre-commit cleanup → checklist → dependency impact → testing pause → commit message → commit → post-housekeeping → PR. |
 | `/sprint` | Execute a batch of tasks with conflict detection and wave-based ordering to minimize merge friction. Accepts `[slug ...]` to target specific tasks or `--issues #N ...` to resolve by GitHub issue number. Use `/run` for simple sequential execution without conflict analysis. |
 
 ## Session management
@@ -46,7 +46,7 @@ No arguments. Output the table below directly — do not read individual command
 | Command | What it does |
 |---|---|
 | `/debug` | Structured diagnosis. Hypothesis → reproduce → isolate → fix → log in `ERRORS.md`. No code touched until the bug is reproduced. |
-| `/code-review` | Diff-focused review of the current branch. Runs tests + lint (from `test-command:`/`lint-command:` in CLAUDE.md), analyses the diff by category (logic, security, coverage, style), and produces a structured LGTM/HOLD report. Playwright opt-in via `testing: playwright`. |
+| `/code-review` | Diff-focused review of the current branch. Runs tests + lint (from `test-command:`/`lint-command:` in CLAUDE.md), analyses the diff by category (logic, security, coverage, dependency impact, style), and produces a structured LGTM/HOLD report. Playwright opt-in via `testing: playwright`. |
 
 ## Release
 
