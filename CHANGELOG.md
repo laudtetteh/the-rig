@@ -9,11 +9,47 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [1.28.0] — 2026-08-12
+
 ### Added
 
 - `bin/rig session retrofit` safely binds an already-running Codex thread from
   `CODEX_THREAD_ID`, redacting the native ID in public output and avoiding
   transcript/content matching (#529).
+- `bin/rig memory append-gap`, `append-progress`, and `write-snapshot` provide
+  storage-mode-safe helpers for Rig memory updates, including external and
+  stealth `.rigpath` installs (#539).
+- `/rig-gaps --add` provides a quick structured path for "report this to The
+  Rig" intent while preserving `RIG_GAPS.md` newest-first ordering (#540).
+- Project docs now include a taxonomy for non-feature documentation, keeping
+  runbooks, reports, spikes, records, and agent-ops docs out of
+  `docs/features/` (#541).
+- Docs drift coverage now checks mechanically-verifiable public docs facts such
+  as the lessons-learned count and documented `bin/rig doctor` gate IDs (#537).
+
+### Changed
+
+- `/sprint` and `SPRINT_WORKFLOW.md` now require a Dependency Surface Audit
+  before planning multi-ticket work, covering upstream inputs, downstream
+  dependents, generated artifacts, upgrade/install paths, cross-agent parity,
+  persistent state, and validation hooks (#538).
+- Delegated validation guidance now requires foreground tool calls for long
+  validation, exact command/session reporting, and an explicit coordinator
+  exception before any local full `bats tests/` run (#536).
+- `/code-review` and `/ship` now discover validation candidates from PR bodies
+  safely, never execute arbitrary PR-body commands, and document one bounded
+  Yarn `YARN_NO_PROXY` retry for the legacy `noProxy` failure mode (#544).
+- `/ship` now verifies GitHub PR state after a non-zero merge command before
+  deciding whether merge failed, and avoids destructive local branch cleanup
+  from linked worktrees (#535).
+- `/wrap` and `/post-merge` now declare project-only scope, combined
+  post-merge/wrap ordering, and an exact continuation/then-degraded handling
+  path for unresolved session state (#543).
+- `/rig-upgrade --version` now separates project installed version, global
+  installed layer, preferred installer checkout path/version/branch/dirty
+  state, latest release, agent targets, and Codex infrastructure (#542).
 
 ### Fixed
 
@@ -26,6 +62,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Executable Codex hook adapters now refresh manifest mode/hash metadata after
   chmod so doctor no longer reports false drift immediately after install or
   upgrade (#531).
+- Codex session resolution now uses `CODEX_THREAD_ID` as an exact native
+  identity signal, and the Codex hook adapter backfills missing native session
+  fields from Codex thread environment variables (#519).
+- Compact checkpoints and fallback snapshots are always framed as historical
+  advisory context, and stale branch/HEAD claims remain explicit when detected
+  (#534).
+- `bin/rig session retrofit` can create an active continuation record when the
+  same native session resumes after a completed record, while `session doctor`
+  accepts that intended active-plus-done lineage and still rejects real
+  duplicate/cross-project conflicts (#533).
+- `rig memory append-progress` now refuses ambiguous PROGRESS insertion markers,
+  and `write-snapshot --stdin` preserves stdin content despite the Python
+  heredoc wrapper (#539).
+- The hosted security workflow now uses the pinned OSS `gitleaks` CLI instead
+  of the licensed action wrapper, preserving repository history scanning with
+  redaction (#527).
 
 ---
 
