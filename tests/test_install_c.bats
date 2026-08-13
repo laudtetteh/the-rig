@@ -567,7 +567,7 @@ _make_failing_sha_tools() {
   # remains protected even though its hash matches the baseline.
   run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy upgrade"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Skipped customized: 1"* ]] || return 1
+  [[ "$output" == *"Skipped (user-owned): CLAUDE.md"* ]] || return 1
 
   grep -q '# old version' "$fake_home/.claude/CLAUDE.md"
 }
@@ -666,7 +666,7 @@ _make_failing_sha_tools() {
 
   # Run installer with _RIG_DRIFT_DIR pointing to the local (stale) repo
   run bash -c "_RIG_DRIFT_DIR='$local_repo' bash '$INSTALLER' --project-only \
-    --target '$TEST_PROJECT' --project-name 'TestProject' --strategy skip"
+    --target '$TEST_PROJECT' --project-name 'TestProject' --tracking repo --strategy skip"
   [ "$status" -eq 0 ]
   [[ "$output" == *"behind"* ]] || return 1
 }
@@ -689,7 +689,7 @@ _make_failing_sha_tools() {
 
   # Local and remote are in sync
   run bash -c "_RIG_DRIFT_DIR='$local_repo' bash '$INSTALLER' --project-only \
-    --target '$TEST_PROJECT' --project-name 'TestProject' --strategy skip"
+    --target '$TEST_PROJECT' --project-name 'TestProject' --tracking repo --strategy skip"
   [ "$status" -eq 0 ]
   [[ "$output" != *"behind"* ]] || return 1
 }
@@ -716,7 +716,7 @@ _make_failing_sha_tools() {
   git -C "$remote_repo" commit -q -m "new commit on remote"
 
   run bash -c "_RIG_DRIFT_DIR='$local_repo' bash '$INSTALLER' --project-only \
-    --target '$TEST_PROJECT' --project-name 'TestProject' --strategy skip"
+    --target '$TEST_PROJECT' --project-name 'TestProject' --tracking repo --strategy skip"
   [ "$status" -eq 0 ]
   [[ "$output" == *"behind"* ]] || return 1
   # Installer must have continued past the warning — pre-tool.sh is a reliable install marker

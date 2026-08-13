@@ -878,7 +878,7 @@ matrix_upgrade_case() {
 
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Skipped customized: 1"* ]] || return 1
+  [[ "$output" == *"Skipped (user-owned): CLAUDE.md"* ]] || return 1
   grep -q "MY FILLED PROJECT BRAIN" "$TEST_PROJECT/CLAUDE.md"
   grep -q "project: \\[Project Name\\]" "$TEST_PROJECT/CLAUDE.md"
   run grep -q "\\[One paragraph:" "$TEST_PROJECT/CLAUDE.md"

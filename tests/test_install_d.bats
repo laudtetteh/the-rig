@@ -627,14 +627,14 @@ sys.exit(1)
   mkdir -p "$fake_home"
   run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy skip"
   [ "$status" -eq 0 ]
-  printf '\n# retained customization\n' >> "$fake_home/.claude/CLAUDE.md"
+  printf '\n# retained customization\n' >> "$fake_home/.claude/skills/code-review.md"
 
   run bash -c "echo '' | HOME='$fake_home' bash '$INSTALLER' --global-only --strategy upgrade"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Skipped customized: 1"* ]] || return 1
   [[ "$output" == *"Customized files requiring manual review:"* ]] || return 1
-  [[ "$output" == *"  - CLAUDE.md"* ]] || return 1
-  grep -q '# retained customization' "$fake_home/.claude/CLAUDE.md"
+  [[ "$output" == *"  - skills/code-review.md"* ]] || return 1
+  grep -q '# retained customization' "$fake_home/.claude/skills/code-review.md"
   [[ "${lines[$((${#lines[@]} - 1))]}" == "RIG_UPGRADE_REVIEW_REQUIRED=1" ]] || return 1
 }
 
