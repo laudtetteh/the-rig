@@ -113,6 +113,38 @@ print($1)
   [ "$(json_field "len(d['artifacts'])")" != "0" ]
 }
 
+@test "agent-plan is idempotent after agent-upgrade in stealth tracking" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+
+  run env HOME="$fake_home" bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking stealth \
+    --strategy agent-upgrade \
+    --project-agent claude
+  [ "$status" -eq 0 ]
+
+  local before after
+  before="$(find "$TEST_PROJECT" "$fake_home" -type f | sort | xargs cksum)"
+
+  run env HOME="$fake_home" bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking stealth \
+    --strategy agent-plan \
+    --project-agent claude
+  [ "$status" -eq 0 ]
+
+  after="$(find "$TEST_PROJECT" "$fake_home" -type f | sort | xargs cksum)"
+  [ "$before" = "$after" ]
+
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "d['summary']['updated']")" = "0" ]
+  [ "$(json_field "d['summary']['merged']")" = "0" ]
+  [ "$(json_field "d['summary']['converged']")" = "0" ]
+}
+
 @test "agent-plan stdout is exactly one JSON document, not preflight narration followed by JSON (retro-audit finding, PR #446)" {
   # The documented contract (UPGRADE_WORKFLOW.md, and this PR's own code
   # comment) is "prints exactly one JSON document on stdout." The preflight

@@ -138,6 +138,35 @@ is_project_upgrade_base() {
   return 1
 }
 
+rendered_project_template_hash() {
+  local src="$1"
+  local base="${2:-}"
+  local rel="${3:-}"
+
+  is_project_upgrade_base "$base" "$rel" || return 0
+  grep -Eq '\[(REPO_ROOT|BASE_BRANCH|Project Name)\]' "$src" 2>/dev/null || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+
+  local target_abs rendered_hash rendered_tmp
+  target_abs="$(cd "$TARGET" && pwd)"
+  rendered_tmp="$(mktemp /tmp/rig-rendered-template-XXXXXX)"
+  python3 - "$src" "$rendered_tmp" "$target_abs" "$BASE_BRANCH" "$PROJECT_NAME" <<'PYEOF'
+import sys
+
+source, target, repo_root, base_branch, project_name = sys.argv[1:]
+with open(source, "r", encoding="utf-8") as fh:
+    content = fh.read()
+content = content.replace("[REPO_ROOT]", repo_root)
+content = content.replace("[BASE_BRANCH]", base_branch)
+content = content.replace("[Project Name]", project_name)
+with open(target, "w", encoding="utf-8") as fh:
+    fh.write(content)
+PYEOF
+  rendered_hash="$(sha256_file "$rendered_tmp")"
+  rm -f "$rendered_tmp"
+  printf '%s\n' "$rendered_hash"
+}
+
 # ── Manifest helpers ──────────────────────────────────────────────────────────
 # The manifest lives at $MANIFEST_FILE and records the SHA256 of each installed
 # artifact at the time it was last installed by the installer. Format per line:
@@ -2338,6 +2367,12 @@ _copy_upgrade_existing() {
     escaped_target="${abs_target//\//\\/}"
     sed "s/\\[REPO_ROOT\\]/${escaped_target}/g" "$src" > "$tmp_src_subst"
     if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged"; then
+      if cmp -s "$tmp_merged" "$dest"; then
+        info "Up to date: ${rel}"
+        record_upgrade_result up-to-date "$rel"
+        rm -f "$tmp_merged" "$tmp_src_subst"
+        return
+      fi
       # agent-plan: classification only, never write the merged result.
       if [[ "$AGENT_DRY_RUN" != true ]]; then
         [[ -n "$base" ]] && ensure_upgrade_transaction "$base"
@@ -2394,6 +2429,17 @@ _copy_upgrade_existing() {
   if [[ "$dest_hash" == "$new_hash" ]]; then
     info "Up to date: ${rel}"
     record_upgrade_result up-to-date "$rel"
+    return
+  fi
+
+  local rendered_hash
+  rendered_hash="$(rendered_project_template_hash "$src" "${base:-}" "$rel")"
+  if [[ -n "$rendered_hash" && "$dest_hash" == "$rendered_hash" ]]; then
+    info "Up to date: ${rel}"
+    record_upgrade_result up-to-date "$rel"
+    if [[ "$AGENT_DRY_RUN" != true ]]; then
+      write_manifest_entry "$dest_hash" "$rel" "$manifest_file" "$dest"
+    fi
     return
   fi
 
@@ -2672,12 +2718,19 @@ _stealth_install_git_hook() {
   local hook_src="$1" hook_dest="$2" hook_name="$3"
   local rel=".git/hooks/${hook_name}"
   local customized=false
+  local src_hash
+  src_hash="$(sha256_file "$hook_src")"
 
   if [[ -L "$hook_dest" ]]; then
     customized=true
   elif [[ -f "$hook_dest" ]]; then
     local dest_hash manifest_hash
     dest_hash="$(sha256_file "$hook_dest")"
+    if [[ -n "$src_hash" && "$dest_hash" == "$src_hash" ]]; then
+      write_manifest_entry "$dest_hash" "$rel" "$MANIFEST_FILE" "$hook_dest"
+      record_upgrade_result up-to-date "$rel"
+      return 0
+    fi
     manifest_hash="$(read_manifest_hash "$rel" "$MANIFEST_FILE")"
     if [[ -z "$manifest_hash" ]]; then
       # No manifest baseline yet -- e.g. this hook was installed by a Rig
@@ -2688,8 +2741,6 @@ _stealth_install_git_hook() {
       # (issue #495) -- an installed hook that already matches what would be
       # installed is not a customization, just a missing baseline, and
       # should never be permanently misreported as needing manual review.
-      local src_hash
-      src_hash="$(sha256_file "$hook_src")"
       if [[ "$dest_hash" == "$src_hash" ]]; then
         write_manifest_entry "$dest_hash" "$rel" "$MANIFEST_FILE" "$hook_dest"
         record_upgrade_result up-to-date "$rel"
