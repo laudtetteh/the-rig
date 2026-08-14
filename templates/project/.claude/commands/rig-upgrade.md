@@ -239,13 +239,13 @@ echo "Current Rig version: $CURRENT_VERSION"
 Check in order:
 
 ```bash
-# 1. Standard stable installer location
-if [[ -f ~/tools/the-rig/install.sh ]]; then
-  INSTALLER_SRC=~/tools/the-rig
-
-# 2. Explicit env var override
-elif [[ -n "$RIG_INSTALLER_SRC" && -f "$RIG_INSTALLER_SRC/install.sh" ]]; then
+# 1. Explicit env var override, set by the global-first bootstrap or caller
+if [[ -n "${RIG_INSTALLER_SRC:-}" && -f "$RIG_INSTALLER_SRC/install.sh" ]]; then
   INSTALLER_SRC="$RIG_INSTALLER_SRC"
+
+# 2. Standard stable installer location
+elif [[ -f ~/tools/the-rig/install.sh ]]; then
+  INSTALLER_SRC=~/tools/the-rig
 
 # 3. Dev-repo self-install: the repo itself contains install.sh + templates/
 elif [[ -f "$REPO/install.sh" && -d "$REPO/templates/project" ]]; then

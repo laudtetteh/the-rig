@@ -87,20 +87,73 @@ Cons:
 Do not rename or replace `CLAUDE.md` in one step. Implement a two-phase
 migration:
 
-1. Introduce a neutral canonical metadata/brain source under `.rig/` for
-   provider-neutral settings and project-brain content, while continuing to
-   generate or preserve provider-native adapter files.
+1. Introduce `.rig/project.md` as the neutral canonical project-brain source
+   for provider-neutral project context, imports, and settings currently read
+   from `CLAUDE.md`, while continuing to generate or preserve provider-native
+   adapter files.
 2. After adapters and doctor gates prove stable, allow fresh Codex-only installs
-   to prefer `AGENTS.md` or the neutral source without making `CLAUDE.md` the
-   edited canonical file.
+   to edit `.rig/project.md` as the canonical file and receive generated
+   `AGENTS.md` / `CLAUDE.md` adapters as selected by installed agent targets.
 
 This keeps Claude Code compatibility intact while giving Codex-only projects a
 credible path away from a Claude-named source of truth.
 
+## Chosen Path And Schema
+
+Canonical source:
+
+```text
+.rig/project.md
+```
+
+Minimum frontmatter schema:
+
+```yaml
+---
+schema_version: 1
+source: rig-project-brain
+project_name: Example
+base_branch: main
+issue_tracking: github
+agent_targets:
+  - claude
+  - codex
+adapters:
+  claude: CLAUDE.md
+  codex: AGENTS.md
+---
+```
+
+Body content remains Markdown and carries the provider-neutral project brain:
+what the project is, stack, repo structure, conventions, context-loading rules,
+off-limits paths, and `@.rig/rules/*` imports. Provider-specific delivery files
+may add thin native wrappers, but they must not introduce independent policy.
+
+## Conflict Precedence
+
+1. `AGENTS.override.md` is always user-owned and highest precedence for Codex
+   runtime because Codex treats it as an explicit local override. The Rig should
+   report that it shadows generated adapters, never overwrite it.
+2. `.rig/project.md` is the canonical Rig-managed project brain once a project
+   has migrated. Provider-neutral settings and docs should read from it first.
+3. Generated `AGENTS.md` and `CLAUDE.md` are provider adapters. If their
+   manifest metadata proves they are unmodified generated files, upgrade may
+   refresh them from `.rig/project.md`. If customized, guarded convergence or
+   manual review is required.
+4. Pre-migration `CLAUDE.md` remains canonical until `.rig/project.md` exists
+   with valid schema metadata and the manifest records the migration. This
+   prevents old projects from silently switching sources.
+5. `.codex/config.toml` fallback is delivery configuration only. It must point
+   Codex at the selected adapter and must not become a project-brain source of
+   truth.
+6. `.rig/memory/*` remains session memory, not canonical project identity. It
+   may supplement context loading but must not override `.rig/project.md`.
+
 ## Required Implementation Tickets
 
-1. Define the neutral source schema and path.
-2. Add migration/convergence from existing `CLAUDE.md` into the neutral source.
+1. Add `.rig/project.md` template, manifest ownership metadata, and schema
+   validation.
+2. Add migration/convergence from existing `CLAUDE.md` into `.rig/project.md`.
 3. Generate provider-native adapters without overwriting user customizations.
 4. Move provider-neutral setting reads in `bin/rig`, hooks, and commands away
    from hardcoded `CLAUDE.md` parsing.

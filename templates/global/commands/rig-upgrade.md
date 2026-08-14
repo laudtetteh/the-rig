@@ -5,13 +5,31 @@ possibly stale project-installed command.
 
 ## Global-first bootstrap
 
-1. Resolve the target project:
+1. Read the flags before resolving a project checkout. If the user passed
+   `--version` or `--scope=global`, a project checkout is optional. Do not call
+   `git rev-parse --show-toplevel` until the delegated latest command actually
+   needs project scope.
 
 ```bash
-REPO=$(git rev-parse --show-toplevel)
+SCOPE="both"
+VERSION_ONLY=false
+for arg in "$@"; do
+  case "$arg" in
+    --version) VERSION_ONLY=true ;;
+    --scope=*) SCOPE="${arg#--scope=}" ;;
+  esac
+done
 ```
 
-2. Resolve the preferred installer source:
+2. Resolve the target project only for project or both scope:
+
+```bash
+if [[ "$VERSION_ONLY" != true && "$SCOPE" != "global" ]]; then
+  REPO=$(git rev-parse --show-toplevel)
+fi
+```
+
+3. Resolve the preferred installer source:
 
 ```bash
 if [[ -n "${RIG_INSTALLER_SRC:-}" && -f "$RIG_INSTALLER_SRC/install.sh" ]]; then
@@ -24,7 +42,7 @@ fi
 If `$INSTALLER_SRC/install.sh` is missing, stop and tell the user the installer
 source is unavailable. Do not continue from the project-local command.
 
-3. Refresh the installer source before using any upgrade instructions from it:
+4. Refresh the installer source before using any upgrade instructions from it:
 
 ```bash
 if [[ -d "$INSTALLER_SRC/.git" ]]; then
@@ -36,7 +54,14 @@ fi
 If the checkout or pull fails, stop and report the failure. Do not run a project
 upgrade from stale command text unless the user explicitly tells you to proceed.
 
-4. Read and follow the latest project upgrade command from:
+5. Export the resolved installer source so the delegated latest project command
+   cannot silently switch to another checkout:
+
+```bash
+export RIG_INSTALLER_SRC="$INSTALLER_SRC"
+```
+
+6. Read and follow the latest project upgrade command from:
 
 ```bash
 $INSTALLER_SRC/templates/project/.claude/commands/rig-upgrade.md
