@@ -141,6 +141,10 @@ run_install() {
   grep -Fq 'name: code-review' "$TEST_HOME/.agents/skills/code-review/SKILL.md"
   grep -Fq '~/.agents/skills/code-review/SKILL.md' "$TEST_HOME/.agents/skills/code-review/SKILL.md"
   if grep -Fq '~/.claude/skills/code-review.md' "$TEST_HOME/.agents/skills/code-review/SKILL.md"; then return 1; fi
+  [ -f "$TEST_HOME/.agents/skills/rig-upgrade/SKILL.md" ]
+  [ -f "$TEST_HOME/.agents/skills/rig-upgrade/references/command.md" ]
+  grep -Fq 'name: rig-upgrade' "$TEST_HOME/.agents/skills/rig-upgrade/SKILL.md"
+  grep -Fq 'Global-first bootstrap' "$TEST_HOME/.agents/skills/rig-upgrade/references/command.md"
   [ ! -e "$TEST_HOME/.claude" ]
 }
 

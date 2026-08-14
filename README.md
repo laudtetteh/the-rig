@@ -152,6 +152,10 @@ significantly — it adds patterns, never removes them.
 
 ### Upgrading
 
+The global `/rig-upgrade` and `$rig-upgrade` bootstrap commands refresh
+`~/tools/the-rig` first, then follow the latest upgrade workflow from that
+checkout. This avoids starting an upgrade from stale project-local command text.
+
 ```bash
 # 1. Pull the latest Rig source
 git -C ~/tools/the-rig checkout main
@@ -333,8 +337,8 @@ snapshot — hooks are a safety net, not a replacement.
 /rig-gaps          →  compile workflow friction from RIG_GAPS.md + ERRORS.md; format for submission
 /rig-gaps --push   →  append unsubmitted entries to local Rig repo (requires rig-gaps-push-target: in CLAUDE.md)
 /rig-gaps --submit →  create public GitHub issues in laudtetteh/the-rig (opt-in; requires .rig-contribute-enabled + gh auth)
-/rig-upgrade                →  pull latest Rig source and re-run installer with --strategy upgrade
-/rig-upgrade --version      →  print installed version, global installer version, and latest GitHub release; warns if behind
+/rig-upgrade                →  refresh latest Rig source and run guarded upgrade
+/rig-upgrade --version      →  print installed layers, preferred installer checkout, and latest GitHub release; warns if behind
 /rig-upgrade --scope=global →  upgrade global layer only; --scope=project for project layer only
 ```
 

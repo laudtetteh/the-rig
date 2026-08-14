@@ -6,6 +6,14 @@ Handles all known upgrade scenarios: repo, external, and stealth tracking; user-
 files; global layer; VERSION staleness; and settings.json deduplication. Each phase is
 gated — survey before touching anything, confirm before committing.
 
+> **Global-first bootstrap:** when a global Rig command is available, prefer it.
+> A project-installed `/rig-upgrade` can be older than the incoming release it is
+> about to install. Before running project-layer upgrade steps, refresh the
+> preferred installer checkout (`~/tools/the-rig`, or `$RIG_INSTALLER_SRC` when
+> set), then read and follow the command at
+> `$INSTALLER_SRC/templates/project/.claude/commands/rig-upgrade.md`. Treat this
+> project file as a shim once the refreshed installer-source command is loaded.
+
 > **RIG_DIR resolution (stealth/external mode):** Resolve `.rig/` before every step.
 >
 > ```bash
@@ -450,11 +458,13 @@ mode Phase 2 ends up using. What Phase 2 does with that preview depends on
   per customized file in Phase 2b. This path is unchanged from before agent
   mode existed and remains available on request.
 
-Both modes still route through the exact same artifact discovery/
-classification code path in `install.sh` — `agent-upgrade` differs from
-`upgrade` only in how it reports and gates on the result (single JSON
-document, dedicated exit code `3` for "needs manual review"), not in what it
-is willing to touch automatically. See `UPGRADE_WORKFLOW.md` → "Agent-driven
+Both modes still route through the same artifact discovery/classification code
+path in `install.sh`, but they intentionally differ after a customized
+Rig-owned file is detected. `agent-upgrade` attempts guarded convergence first:
+it preserves local edits, adds incoming Rig changes when the merge tool can do
+so defensively, dedupes where the structured merge supports it, and leaves true
+conflicts untouched with JSON repair guidance. Classic `upgrade` keeps the old
+interactive prompt/skip behavior. See `UPGRADE_WORKFLOW.md` → "Agent-driven
 upgrade contract" for the full JSON schema and exit-code table.
 
 ### 1d — Survey changed files
@@ -663,9 +673,10 @@ Otherwise, in an interactive session, ask the user:
 > "Two ways to apply this upgrade:
 > - **[g] Guarded convergence (recommended)** — runs `install.sh --strategy
 >   agent-upgrade`. Applies every safe/convergeable change automatically —
->   including conflict-free structure-aware merges of customized files — never
->   prompts per file, and reports any file that still needs manual review with
->   concrete repair guidance instead of asking you to decide file-by-file.
+>   including conflict-free structure-aware merges of customized Rig-owned
+>   files while preserving local edits — never prompts per file, and reports
+>   any file that still needs manual review with concrete repair guidance
+>   instead of asking you to decide file-by-file.
 > - **[c] Classic upgrade** — runs `install.sh --strategy upgrade`, the
 >   original interactive `[a]ccept template` / `[k]eep yours` / `[s]how full
 >   file` flow for every customized file.
