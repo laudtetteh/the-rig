@@ -259,13 +259,13 @@ retirement), but needs a single JSON result document instead of parsing
 human-oriented stdout text, and needs a reliable, distinct exit code that
 means "something needs a human" rather than "crashed" or "bad flag."
 
-Both modes run the exact same artifact discovery/classification as
-`--strategy upgrade` — there is one classification code path in `install.sh`,
-shared by all three strategies. Neither mode performs real three-way merging
-of customized files; that is out of scope for lane 444-A and is tracked as a
-follow-up (lane 444-C) under #444. A customized or conflicting file is always
-left exactly as `--strategy upgrade` would leave it today: untouched, and
-reported for manual review.
+Both modes run the same artifact discovery/classification as `--strategy
+upgrade` — there is one classification code path in `install.sh`, shared by all
+three strategies. After classification, agent mode has an additional guarded
+convergence step for customized Rig-owned files. It preserves local edits, adds
+incoming Rig changes when the merge tool can do so defensively, dedupes where
+the structured merge supports it, and leaves true conflicts untouched with
+specific repair guidance.
 
 ### `agent-plan` — read-only preflight
 
@@ -284,22 +284,24 @@ install.sh --project-only --target "$(pwd)" --tracking repo --strategy agent-pla
   the same class of error that would make plain `--strategy upgrade` exit `1`
   today.
 
-### `agent-upgrade` — apply the same convergence as `upgrade`
+### `agent-upgrade` — apply guarded convergence
 
 ```bash
 install.sh --project-only --target "$(pwd)" --tracking repo --strategy agent-upgrade
 ```
 
-- Applies the same file operations `--strategy upgrade` already applies
+- Applies the safe file operations `--strategy upgrade` already applies
   non-interactively: creates missing tracked files, updates files whose
   installed hash still matches the manifest baseline, smart-merges
   `.claude/settings.json`, and retires obsolete Rig-owned artifacts (for
   example the legacy `session-end.sh` hook merged into `stop.sh`).
+- Attempts guarded convergence for customized Rig-owned files before reporting
+  them as manual-review conflicts.
 - Never prompts, even if stdin happens to be a TTY.
-- Never silently overwrites a customized file and never silently accepts a
-  stale customized file as converged — a customized or conflicting file is
-  always left untouched and reported, exactly like a non-interactive
-  `--strategy upgrade` run leaves it today.
+- Never silently overwrites a customized file and never silently accepts a stale
+  customized file as converged. A customized file is updated only when the
+  convergence helper can preserve local edits and apply incoming changes
+  defensively; otherwise it is left untouched and reported.
 - Prints the same JSON schema as `agent-plan` (with `"mode":"apply"`) and
   uses the same exit codes (`0` success, `3` refused).
 

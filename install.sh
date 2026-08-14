@@ -717,9 +717,9 @@ for arg in "$@"; do
       echo "                        agent-plan    — read-only: emit a JSON plan of what upgrade"
       echo "                                        would do; zero writes; exit 3 if any file"
       echo "                                        needs manual review (see UPGRADE_WORKFLOW.md)"
-      echo "                        agent-upgrade — apply the same convergence as 'upgrade' and"
-      echo "                                        emit a JSON result; exit 3 if any file was"
-      echo "                                        left for manual review"
+      echo "                        agent-upgrade — apply safe updates plus guarded convergence"
+      echo "                                        for customized files; emit JSON; exit 3 if"
+      echo "                                        any file was left for manual review"
       echo "  --target <path>       Set target project directory."
       echo "  --project-name <name> Set project name (used in CLAUDE.md substitution)."
       echo "  --base-branch <name>  Set base branch name (default: main). Substituted into"
@@ -2732,6 +2732,7 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
 
   CLAUDE_DIR="$HOME/.claude"
   SKILLS_DIR="$CLAUDE_DIR/skills"
+  COMMANDS_DIR="$CLAUDE_DIR/commands"
   DEST_CLAUDE="$CLAUDE_DIR/CLAUDE.md"
 
   if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
@@ -2762,7 +2763,7 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   if has_agent "$GLOBAL_AGENT" claude; then
   if upgrade_prepare_directory "$HOME" "$CLAUDE_DIR" ".claude"; then
     # agent-plan: classification only, never create the global Claude root.
-    [[ "$AGENT_DRY_RUN" == true ]] || mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR"
+    [[ "$AGENT_DRY_RUN" == true ]] || mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR" "$COMMANDS_DIR"
   else
     info "Preserving conflicting global Claude root: .claude"
   fi
@@ -2832,13 +2833,30 @@ PYEOF
       copy_file "$skill_src" "$skill_dest" "$CLAUDE_DIR" "skills/$skill_name"
     fi
   done
+
+  # ── Global commands ───────────────────────────────────────────────────────
+  if compgen -G "$GLOBAL_TEMPLATES/commands/*.md" >/dev/null; then
+    for command_src in "$GLOBAL_TEMPLATES/commands/"*.md; do
+      command_name="$(basename "$command_src")"
+      command_dest="$COMMANDS_DIR/$command_name"
+      if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
+        _copy_global_file_upgrade "$command_src" "$command_dest" "$CLAUDE_DIR" "commands/$command_name"
+      else
+        copy_file "$command_src" "$command_dest" "$CLAUDE_DIR" "commands/$command_name"
+      fi
+    done
+  fi
   fi
 
   if has_agent "$GLOBAL_AGENT" codex; then
     _CODEX_GLOBAL_STAGE="$(mktemp -d /tmp/rig-codex-global-skills-XXXXXX)"
+    _global_generator_args=(--output "$_CODEX_GLOBAL_STAGE" --base-branch main)
+    if compgen -G "$GLOBAL_TEMPLATES/commands/*.md" >/dev/null; then
+      _global_generator_args+=("$GLOBAL_TEMPLATES/commands/"*.md)
+    fi
+    _global_generator_args+=(--global-skills-source "$GLOBAL_TEMPLATES/skills")
     if ! python3 "$SCRIPT_DIR/installer/generate-codex-skills.py" \
-      --output "$_CODEX_GLOBAL_STAGE" --base-branch main \
-      --global-skills-source "$GLOBAL_TEMPLATES/skills"; then
+      "${_global_generator_args[@]}"; then
       rm -rf "$_CODEX_GLOBAL_STAGE"
       error "Could not generate global Codex skills."
       exit 1
