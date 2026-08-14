@@ -127,6 +127,17 @@ is_structurally_user_owned() {
   return 0
 }
 
+is_project_upgrade_base() {
+  local base="${1:-}"
+  local rel="${2:-}"
+
+  [[ -n "${TARGET:-}" && "$base" == "$TARGET" ]] && return 0
+  if [[ "$rel" == .rig/* && -n "${EXTERNAL_RIG_DIR:-}" && "$base" == "$EXTERNAL_RIG_DIR" ]]; then
+    return 0
+  fi
+  return 1
+}
+
 # ── Manifest helpers ──────────────────────────────────────────────────────────
 # The manifest lives at $MANIFEST_FILE and records the SHA256 of each installed
 # artifact at the time it was last installed by the installer. Format per line:
@@ -2369,8 +2380,9 @@ _copy_upgrade_existing() {
   fi
 
   if [[ -n "$manifest_hash" ]] &&
-     [[ "$manifest_owner" == user || -z "$manifest_owner" ]] &&
-     [[ "$rig_owned_default" != true ]] && is_structurally_user_owned "$rel"; then
+     [[ "$rig_owned_default" != true ]] && is_structurally_user_owned "$rel" &&
+     { [[ "$manifest_owner" == user ]] ||
+       { [[ -z "$manifest_owner" ]] && is_project_upgrade_base "${base:-}" "$rel"; }; }; then
     info "Skipped (user-owned): ${rel}"
     if [[ "$rel" == "CLAUDE.md" && -n "${TARGET:-}" && "${base:-}" == "$TARGET" ]]; then
       PROJECT_CLAUDE_PRESERVED_USER=true

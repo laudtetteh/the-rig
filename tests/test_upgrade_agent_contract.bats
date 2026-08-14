@@ -372,6 +372,49 @@ PY
   grep -q 'User progress entry.' "$progress"
 }
 
+@test "agent-plan preserves externalized structurally user-owned memory files with legacy flat manifest only" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+
+  run env HOME="$fake_home" bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking stealth \
+    --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local rig_dir="$fake_home/.rig/projects/TestProject"
+  local progress="$rig_dir/memory/PROGRESS.md"
+  local original_hash
+  original_hash="$(_sha256 "$progress")"
+  printf '# Progress\n\nExternal user progress entry.\n' > "$progress"
+
+  local manifest="$rig_dir/memory/.rig-manifest"
+  /usr/bin/grep -v '  .rig/memory/PROGRESS.md$' "$manifest" > "$manifest.tmp"
+  printf '%s  .rig/memory/PROGRESS.md\n' "$original_hash" >> "$manifest.tmp"
+  mv "$manifest.tmp" "$manifest"
+  python3 - "$rig_dir/memory/.rig-manifest.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as fh:
+    data = json.load(fh)
+data.setdefault("entries", {}).pop(".rig/memory/PROGRESS.md", None)
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2, sort_keys=True)
+    fh.write("\n")
+PY
+
+  run env HOME="$fake_home" bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking stealth \
+    --strategy agent-plan
+  [ "$status" -eq 0 ]
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "any(a['path'] == '.rig/memory/PROGRESS.md' and a['classification'] == 'user-owned-preserved' for a in d['artifacts'])")" = "True" ]
+  grep -q 'External user progress entry.' "$progress"
+}
+
 @test "agent-upgrade on a clean target applies updates and exits 0" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
