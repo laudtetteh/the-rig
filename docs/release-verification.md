@@ -24,6 +24,12 @@ upgrades and interrupted operations:
 - agent-driven callers (`agent-plan`/`agent-upgrade`) get a JSON result with
   exit code 3 on any unresolved conflict, including a future/bogus manifest
   `base_revision`.
+- post-release single-project pilots classify any `agent-upgrade` exit 3 before
+  declaring rollout blocked: true Rig-owned convergence conflict,
+  preserve-only/user-owned classification bug, stale/future manifest issue,
+  symlink/wrong-type conflict, or unknown/manual investigation. The delegated
+  pilot agent stays conservative and does not repair downstream files unless
+  explicitly instructed after coordinator classification.
 
 ## Required hosted checks
 
