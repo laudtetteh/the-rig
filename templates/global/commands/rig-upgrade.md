@@ -68,8 +68,8 @@ $INSTALLER_SRC/templates/project/.claude/commands/rig-upgrade.md
 ```
 
 Use that file as the authoritative workflow for this run, including all flags
-the user passed to this command. The project-installed `/rig-upgrade` or
-`$rig-upgrade` file is only a fallback/shim and must not override the refreshed
+the user passed to this command. The project-installed command or generated
+skill file is only a fallback/shim and must not override the refreshed
 installer-source command.
 
 ## Safety

@@ -96,7 +96,11 @@ GLOBAL_LAYER_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$GLOBAL_MANIFEST" 2>/dev/nu
 
 # Preferred installer checkout version. This is the source used for future
 # upgrades, not proof of what the global layer has already installed.
-INSTALLER_CHECKOUT=~/tools/the-rig
+if [[ -n "${RIG_INSTALLER_SRC:-}" && -f "$RIG_INSTALLER_SRC/install.sh" ]]; then
+  INSTALLER_CHECKOUT="$RIG_INSTALLER_SRC"
+else
+  INSTALLER_CHECKOUT=~/tools/the-rig
+fi
 INSTALLER_VERSION=$(cat "$INSTALLER_CHECKOUT/VERSION" 2>/dev/null || echo "not found")
 INSTALLER_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$INSTALLER_CHECKOUT/VERSION" 2>/dev/null \
   || stat -c "%y" "$INSTALLER_CHECKOUT/VERSION" 2>/dev/null | cut -d' ' -f1-2 | cut -c1-16 \
@@ -1102,6 +1106,19 @@ GLOBAL_SKIPPED+=("skill: $name")
 Print a summary using the result accumulators populated in Phases 2–4:
 
 ```bash
+if [[ "${SKIP_PROJECT:-false}" == true ]]; then
+  echo "=== Global Rig upgrade complete ==="
+  echo ""
+  if [[ ${#GLOBAL_UPDATED[@]} -gt 0 || ${#GLOBAL_SKIPPED[@]} -gt 0 ]]; then
+    echo "Global layer:"
+    for f in "${GLOBAL_UPDATED[@]}"; do printf '  updated: %s\n' "$f"; done
+    for f in "${GLOBAL_SKIPPED[@]}"; do printf '  kept:    %s\n' "$f"; done
+  else
+    echo "Global layer: already current"
+  fi
+  # Stop here for global-only runs.
+else
+
 echo "=== Upgrade complete: $CURRENT_VERSION → $EXPECTED_VERSION (mode: $UPGRADE_MODE) ==="
 echo ""
 
@@ -1160,7 +1177,12 @@ if [[ ${#GLOBAL_UPDATED[@]} -gt 0 || ${#GLOBAL_SKIPPED[@]} -gt 0 ]]; then
 else
   echo "Global layer: skipped"
 fi
+fi
 ```
+
+If `SKIP_PROJECT=true`, stop after the global-only summary. Do not run the
+project test reminder, project doctor warning, project Codex mirror check, or
+commit strategy recommendation.
 
 If this project has a bats test suite (`tests/*.bats`), remind the user:
 > "Run `bats tests/` to verify the installer is still working correctly."
