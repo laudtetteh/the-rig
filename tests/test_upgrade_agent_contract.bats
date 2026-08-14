@@ -306,6 +306,72 @@ PY
   [ "$status" -ne 0 ]
 }
 
+@test "agent-upgrade preserves structurally user-owned PROJECT_BRIEF.md with legacy flat manifest only" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  local brief="$TEST_PROJECT/PROJECT_BRIEF.md"
+  local original_hash
+  original_hash="$(_sha256 "$brief")"
+  printf '# Project Brief: Legacy Product\n\nLegacy user details.\n' > "$brief"
+
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+  /usr/bin/grep -v '  PROJECT_BRIEF.md$' "$manifest" > "$manifest.tmp"
+  printf '%s  PROJECT_BRIEF.md\n' "$original_hash" >> "$manifest.tmp"
+  mv "$manifest.tmp" "$manifest"
+  python3 - "$TEST_PROJECT/.rig/memory/.rig-manifest.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as fh:
+    data = json.load(fh)
+data.setdefault("entries", {}).pop("PROJECT_BRIEF.md", None)
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2, sort_keys=True)
+    fh.write("\n")
+PY
+
+  run_installer --strategy agent-upgrade
+  [ "$status" -eq 0 ]
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "any(a['path'] == 'PROJECT_BRIEF.md' and a['classification'] == 'user-owned-preserved' for a in d['artifacts'])")" = "True" ]
+  grep -q 'Legacy user details.' "$brief"
+  run grep -q '\[What does this product do' "$brief"
+  [ "$status" -ne 0 ]
+}
+
+@test "agent-plan preserves structurally user-owned memory files with legacy flat manifest only" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  local progress="$TEST_PROJECT/.rig/memory/PROGRESS.md"
+  local original_hash
+  original_hash="$(_sha256 "$progress")"
+  printf '# Progress\n\nUser progress entry.\n' > "$progress"
+
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+  /usr/bin/grep -v '  .rig/memory/PROGRESS.md$' "$manifest" > "$manifest.tmp"
+  printf '%s  .rig/memory/PROGRESS.md\n' "$original_hash" >> "$manifest.tmp"
+  mv "$manifest.tmp" "$manifest"
+  python3 - "$TEST_PROJECT/.rig/memory/.rig-manifest.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as fh:
+    data = json.load(fh)
+data.setdefault("entries", {}).pop(".rig/memory/PROGRESS.md", None)
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2, sort_keys=True)
+    fh.write("\n")
+PY
+
+  run_installer --strategy agent-plan
+  [ "$status" -eq 0 ]
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "any(a['path'] == '.rig/memory/PROGRESS.md' and a['classification'] == 'user-owned-preserved' for a in d['artifacts'])")" = "True" ]
+  grep -q 'User progress entry.' "$progress"
+}
+
 @test "agent-upgrade on a clean target applies updates and exits 0" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
