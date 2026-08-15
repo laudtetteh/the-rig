@@ -71,6 +71,11 @@ Three locations work together. The installer repo produces the other two:
 │    ├─ refactor.md        │  │  .github/        ← PR + issue     │
 │    ├─ write-tests.md     │  │                    templates       │
 │    └─ explain.md         │  └───────────────────────────────────┘
+│  ~/.claude/commands/     │
+│    └─ rig-upgrade.md     │
+│  ~/.agents/skills/       │
+│    └─ generated Codex    │
+│       personal skills    │
 │                          │
 └──────────────────────────┘
 ```

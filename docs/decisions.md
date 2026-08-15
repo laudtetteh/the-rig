@@ -142,7 +142,11 @@ Why The Rig is built the way it is. Each entry covers what was decided, what was
 
 ## 12. Global layer now tracked by a separate upgrade manifest
 
-**Decided:** The global layer (`~/.claude/CLAUDE.md`, `~/.claude/skills/`) has its own manifest file (`~/.claude/.rig-global-manifest`) separate from the project-layer `.rig/memory/.rig-manifest`.
+**Decided:** The Claude global layer (`~/.claude/CLAUDE.md`,
+`~/.claude/skills/`, `~/.claude/commands/`) has its own manifest file
+(`~/.claude/.rig-global-manifest`) separate from the project-layer
+`.rig/memory/.rig-manifest`. Generated Codex personal skills use the analogous
+Codex global manifest at `~/.agents/.rig-global-manifest`.
 
 **Rejected:** Re-using the project manifest for global files, or having no manifest for the global layer (leaving it unprotected from silent overwrites on upgrade).
 

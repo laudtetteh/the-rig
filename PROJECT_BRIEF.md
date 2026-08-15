@@ -26,8 +26,8 @@ The shared `.rig` workflow is provider-neutral. Claude commands/hooks and Codex 
 
 ## What it ships
 
-The Rig is actively developed, currently at v1.23.0 with a v1.24.0 release pending
-tag. These are the shipped components:
+The Rig is actively developed, currently at v1.28.2. These are the shipped
+components:
 
 ### Installer (`install.sh`)
 - Single-file Bash installer with seven strategies: merge (new install), skip,
@@ -45,7 +45,7 @@ tag. These are the shipped components:
 - Non-interactive mode (`--strategy`, `--target`, `--tracking`, `--base-branch`
   flags) for scripting and CI
 - Self-install detection, `[BASE_BRANCH]` and `[REPO_ROOT]` placeholder substitution
-- 594 bats tests across 40 files
+- 730 bats tests across 58 files
 
 ### Project layer (scaffolded into target projects)
 - **Memory system**: `PROGRESS.md` (auto-logged by post-commit hook), `ERRORS.md`, `CONTEXT_SNAPSHOT.md` (written by `/wrap`), `DECISIONS.md`, `RIG_GAPS.md`
@@ -56,16 +56,21 @@ tag. These are the shipped components:
 - **Configurable project settings**: `issue-tracking`, `secret-scanner`, `commit-cleanup`, `base-branch`, `housekeeping`
 
 ### Global agent layers
-- Claude: `~/.claude/CLAUDE.md` plus personal skills
-- Codex: generated personal skills under `~/.agents/skills/`
+- Claude: `~/.claude/CLAUDE.md`, personal skills, and
+  `~/.claude/commands/rig-upgrade.md`
+- Codex: generated personal skills under `~/.agents/skills/`, including the
+  global `$rig-upgrade` bootstrap skill
 
 ---
 
-## What shipped in the 1.23.0 → 1.24.0 window
+## Current upgrade architecture highlights
 
 - **Agent-driven convergence**: `agent-plan`/`agent-upgrade` strategies with a
   JSON result contract and exit-3 refusal semantics; `/rig-upgrade` now wires
   its Phase 2 to this orchestrator via `--mode=agent` (default) / `--mode=classic`
+- **Global-first upgrade bootstrap**: `/rig-upgrade` and `$rig-upgrade` refresh
+  the preferred installer checkout first, then load the latest workflow text
+  before mutating project layers.
 - **Manifest provenance**: `base_revision`/`generator`/`provider` fields on every
   manifest entry, plus future/bogus `base_revision` gating (a claimed revision
   newer than the running installer is refused, not silently trusted)
@@ -108,14 +113,15 @@ tag. These are the shipped components:
 
 **Must NOT use:** Runtime dependencies in `install.sh` beyond standard POSIX utils + `git`, `gh`, `gitleaks` (optional)
 
-**Existing code:** This IS the existing code — `install.sh` at v1.23.0 (v1.24.0 pending tag)
+**Existing code:** This IS the existing code — `install.sh` at v1.28.2.
 
 ---
 
 ## Success metrics
 
 - Upgrade path never breaks an existing install
-- All 594 bats tests pass on every commit (hosted CI is the authoritative gate)
+- All 730 bats tests pass on every commit through hosted CI, the authoritative
+  complete-suite gate
 - A new user can install The Rig and complete a first Claude `/task` → `/ship` or Codex `$task` → `$ship` cycle without reading docs
 - Memory survives context compaction — next session picks up exactly where the last one left off
 
@@ -123,6 +129,6 @@ tag. These are the shipped components:
 
 ## Open questions / backlog themes
 
-- [ ] `[BASE_BRANCH]` substitution corrupts manifest hash for process files — causes
-      false "Customized file detected" on next upgrade (still genuinely open; see
-      `ERRORS.md` and `CLAUDE.md`'s "Known gotchas")
+- [ ] Provider-neutral project brain migration from provider-named instruction
+      files to the `.rig/project.md` model described in
+      `docs/provider-neutral-project-brain.md`

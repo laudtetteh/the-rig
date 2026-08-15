@@ -64,6 +64,7 @@ The Rig has two layers that load in sequence at every session start:
 |---|---|---|
 | Global identity | `templates/global/CLAUDE.md` | Hard rules, working style, memory discipline, and a `## Personal context` section to fill in once — loads at every session |
 | Skills (5) | `templates/global/skills/` | Reusable prompt scripts for debug, review, refactor, tests, explain |
+| Global upgrade command | `templates/global/commands/rig-upgrade.md` | Global-first bootstrap for `/rig-upgrade`, with generated Codex personal skill parity |
 | Project brain | `templates/project/CLAUDE.md` | Project-specific identity, stack, conventions, off-limits paths |
 | Processes (8) | `templates/project/.rig/processes/` | Step-by-step workflows, including work modes, new-task, ship, debug, post-merge, sprint, connector preflight, and upgrade |
 | Rules (7) | `templates/project/.rig/rules/` | Coding, git, security, verification, session identity, session naming, and protected-path contracts |
@@ -96,8 +97,10 @@ cd ~/tools/the-rig
 $EDITOR ~/.claude/CLAUDE.md   # look for the ## Personal context section
 ```
 
-This installs the global layer (`~/.claude/CLAUDE.md` + skills) once. Every project
-on your machine shares it.
+This installs the global layer (`~/.claude/CLAUDE.md`, personal skills, and
+`~/.claude/commands/rig-upgrade.md`) once. For Codex targets, the matching
+global personal skill is generated under `~/.agents/skills/rig-upgrade/`.
+Every project on your machine shares it.
 
 ---
 

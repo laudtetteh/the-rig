@@ -92,10 +92,13 @@ cd ~/tools/the-rig
 $EDITOR ~/.your-ai-contexts/PROFILE.md
 ```
 
-The Claude global layer installs `~/.claude/CLAUDE.md` and `~/.claude/skills/`.
-Codex personal skills are generated under `~/.agents/skills/`; selecting both
-agents installs both delivery surfaces while project workflows remain shared
-across all projects on the machine. Run this once per machine, not per project.
+The Claude global layer installs `~/.claude/CLAUDE.md`,
+`~/.claude/skills/`, and the global bootstrap command at
+`~/.claude/commands/rig-upgrade.md`. Codex personal skills are generated under
+`~/.agents/skills/`, including the matching `$rig-upgrade` bootstrap skill;
+selecting both agents installs both delivery surfaces while project workflows
+remain shared across all projects on the machine. Run this once per machine,
+not per project.
 
 ---
 
