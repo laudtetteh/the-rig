@@ -11,6 +11,49 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.29.0] — 2026-08-15
+
+### Added
+
+- Global-first `/rig-upgrade` and `$rig-upgrade` bootstrap surfaces now install
+  at the global layer, refresh the preferred installer checkout before project
+  mutation, and load the latest upgrade workflow text instead of trusting stale
+  project-local command copies (#553).
+- Added a provider-neutral project-brain architecture plan selecting
+  `.rig/project.md` as the future canonical source, with adapter generation and
+  migration guidance for Claude Code, Codex, and both-agent installs (#554).
+
+### Changed
+
+- Project `/rig-upgrade` now acts as a shim when a refreshed global workflow is
+  available, while `--scope=global` can run without project checkout state and
+  `--version` distinguishes project, global layer, preferred installer checkout,
+  GitHub release, and agent-target state (#553).
+- Release-pilot guidance now classifies `agent-upgrade` exit 3/refusal results
+  before declaring rollout blocked, distinguishing true Rig-owned convergence
+  conflicts, preserve-only/user-owned classification bugs, stale/future
+  manifest issues, symlink/wrong-type conflicts, and unknown manual-review
+  cases (#556).
+- Upgrade documentation now accurately distinguishes `agent-plan`,
+  `agent-upgrade`, and classic `upgrade`: agent mode attempts guarded
+  convergence for customized Rig-owned files, while classic upgrade keeps the
+  original prompt/skip behavior (#557).
+
+### Fixed
+
+- Legacy flat-manifest installs now preserve structurally user-owned project
+  files such as `PROJECT_BRIEF.md`, `.rig/memory/*`, rules, and tasks even when
+  JSON owner metadata is absent, without misclassifying Rig-owned artifacts as
+  user-owned (#555).
+- A clean stealth `agent-plan` immediately after successful `agent-upgrade` no
+  longer reports phantom update/merge work for already-converged generated
+  hooks, settings, or rendered templates (#552).
+- README, install docs, architecture docs, project context, and internal
+  dogfood mirrors were refreshed so global command, Codex skill, manifest, and
+  guarded-convergence guidance match the shipped upgrade architecture (#558).
+
+---
+
 ## [1.28.2] — 2026-08-12
 
 ### Fixed
