@@ -64,6 +64,7 @@ The Rig has two layers that load in sequence at every session start:
 |---|---|---|
 | Global identity | `templates/global/CLAUDE.md` | Hard rules, working style, memory discipline, and a `## Personal context` section to fill in once — loads at every session |
 | Skills (5) | `templates/global/skills/` | Reusable prompt scripts for debug, review, refactor, tests, explain |
+| Global upgrade command | `templates/global/commands/rig-upgrade.md` | Global-first bootstrap for `/rig-upgrade`, with generated Codex personal skill parity |
 | Project brain | `templates/project/CLAUDE.md` | Project-specific identity, stack, conventions, off-limits paths |
 | Processes (8) | `templates/project/.rig/processes/` | Step-by-step workflows, including work modes, new-task, ship, debug, post-merge, sprint, connector preflight, and upgrade |
 | Rules (7) | `templates/project/.rig/rules/` | Coding, git, security, verification, session identity, session naming, and protected-path contracts |
@@ -96,8 +97,10 @@ cd ~/tools/the-rig
 $EDITOR ~/.claude/CLAUDE.md   # look for the ## Personal context section
 ```
 
-This installs the global layer (`~/.claude/CLAUDE.md` + skills) once. Every project
-on your machine shares it.
+This installs the global layer (`~/.claude/CLAUDE.md`, personal skills, and
+`~/.claude/commands/rig-upgrade.md`) once. For Codex targets, the matching
+global personal skill is generated under `~/.agents/skills/rig-upgrade/`.
+Every project on your machine shares it.
 
 ---
 
@@ -151,6 +154,10 @@ significantly — it adds patterns, never removes them.
 ---
 
 ### Upgrading
+
+The global `/rig-upgrade` and `$rig-upgrade` bootstrap commands refresh
+`~/tools/the-rig` first, then follow the latest upgrade workflow from that
+checkout. This avoids starting an upgrade from stale project-local command text.
 
 ```bash
 # 1. Pull the latest Rig source
@@ -333,8 +340,8 @@ snapshot — hooks are a safety net, not a replacement.
 /rig-gaps          →  compile workflow friction from RIG_GAPS.md + ERRORS.md; format for submission
 /rig-gaps --push   →  append unsubmitted entries to local Rig repo (requires rig-gaps-push-target: in CLAUDE.md)
 /rig-gaps --submit →  create public GitHub issues in laudtetteh/the-rig (opt-in; requires .rig-contribute-enabled + gh auth)
-/rig-upgrade                →  pull latest Rig source and re-run installer with --strategy upgrade
-/rig-upgrade --version      →  print installed version, global installer version, and latest GitHub release; warns if behind
+/rig-upgrade                →  refresh latest Rig source and run guarded upgrade
+/rig-upgrade --version      →  print installed layers, preferred installer checkout, and latest GitHub release; warns if behind
 /rig-upgrade --scope=global →  upgrade global layer only; --scope=project for project layer only
 ```
 

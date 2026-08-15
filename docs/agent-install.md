@@ -44,8 +44,8 @@ The installer is interactive by default; the flags below bypass all prompts.
 | `overwrite` | Replaces all Rig-owned files unconditionally | Repair/reset |
 | `skip` | Never overwrites anything | Safe read-only test |
 | `interactive` | Asks per file (Custom path only) | Human-supervised, file-by-file review |
-| `agent-plan` | Zero writes; emits a JSON preview of what `upgrade` would do; exits `3` if any file needs manual review | Agent/script preflight before applying an upgrade |
-| `agent-upgrade` | Applies the same safe convergence as `upgrade`; emits a JSON result; exits `3` if any file was left for manual review | Agent/script-driven guarded upgrade with a machine-readable result |
+| `agent-plan` | Zero writes; emits a JSON preview of upgrade classification and guarded convergence; exits `3` if any file needs manual review | Agent/script preflight before applying an upgrade |
+| `agent-upgrade` | Applies safe updates plus guarded convergence for customized Rig-owned files; emits a JSON result; exits `3` if any file was left for manual review | Agent/script-driven guarded upgrade with a machine-readable result |
 
 `agent-plan` and `agent-upgrade` are non-interactive-only: they are accepted by
 `--strategy` but never offered in the interactive "What are you doing?" menu, so
@@ -92,10 +92,13 @@ cd ~/tools/the-rig
 $EDITOR ~/.your-ai-contexts/PROFILE.md
 ```
 
-The Claude global layer installs `~/.claude/CLAUDE.md` and `~/.claude/skills/`.
-Codex personal skills are generated under `~/.agents/skills/`; selecting both
-agents installs both delivery surfaces while project workflows remain shared
-across all projects on the machine. Run this once per machine, not per project.
+The Claude global layer installs `~/.claude/CLAUDE.md`,
+`~/.claude/skills/`, and the global bootstrap command at
+`~/.claude/commands/rig-upgrade.md`. Codex personal skills are generated under
+`~/.agents/skills/`, including the matching `$rig-upgrade` bootstrap skill;
+selecting both agents installs both delivery surfaces while project workflows
+remain shared across all projects on the machine. Run this once per machine,
+not per project.
 
 ---
 
@@ -256,8 +259,8 @@ git pull
 #    anything would need manual review.
 ./install.sh --project-only --target /path/to/project --strategy agent-plan
 
-# 2. If the plan's "status" is "success", apply the same convergence and get
-#    a JSON result back.
+# 2. If the plan's "status" is "success", apply safe updates plus guarded
+#    convergence and get a JSON result back.
 ./install.sh --project-only --target /path/to/project --strategy agent-upgrade
 ```
 

@@ -118,6 +118,55 @@ is_rig_owned() {
   esac
 }
 
+is_structurally_user_owned() {
+  local rel="$1"
+  [[ "$rel" == "" ]] && return 1
+  if is_rig_owned "$rel"; then
+    return 1
+  fi
+  return 0
+}
+
+is_project_upgrade_base() {
+  local base="${1:-}"
+  local rel="${2:-}"
+
+  [[ -n "${TARGET:-}" && "$base" == "$TARGET" ]] && return 0
+  if [[ "$rel" == .rig/* && -n "${EXTERNAL_RIG_DIR:-}" && "$base" == "$EXTERNAL_RIG_DIR" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+rendered_project_template_hash() {
+  local src="$1"
+  local base="${2:-}"
+  local rel="${3:-}"
+
+  is_project_upgrade_base "$base" "$rel" || return 0
+  grep -Eq '\[(REPO_ROOT|BASE_BRANCH|Project Name)\]' "$src" 2>/dev/null || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+
+  local target_abs rendered_hash rendered_tmp
+  target_abs="$(cd "$TARGET" && pwd)"
+  rendered_tmp="$(mktemp /tmp/rig-rendered-template-XXXXXX)"
+  python3 - "$src" "$rendered_tmp" "$target_abs" "$BASE_BRANCH" "$PROJECT_NAME" <<'PYEOF'
+import sys
+
+source, target, repo_root, base_branch, project_name = sys.argv[1:]
+with open(source, "r", encoding="utf-8") as fh:
+    content = fh.read()
+content = content.replace("[REPO_ROOT]", repo_root)
+content = content.replace("[BASE_BRANCH]", base_branch)
+content = content.replace("[Project Name]", project_name)
+with open(target, "w", encoding="utf-8") as fh:
+    fh.write(content)
+PYEOF
+  rendered_hash="$(sha256_file "$rendered_tmp")"
+  rm -f "$rendered_tmp"
+  printf '%s\n' "$rendered_hash"
+}
+
 # ── Manifest helpers ──────────────────────────────────────────────────────────
 # The manifest lives at $MANIFEST_FILE and records the SHA256 of each installed
 # artifact at the time it was last installed by the installer. Format per line:
@@ -717,9 +766,9 @@ for arg in "$@"; do
       echo "                        agent-plan    — read-only: emit a JSON plan of what upgrade"
       echo "                                        would do; zero writes; exit 3 if any file"
       echo "                                        needs manual review (see UPGRADE_WORKFLOW.md)"
-      echo "                        agent-upgrade — apply the same convergence as 'upgrade' and"
-      echo "                                        emit a JSON result; exit 3 if any file was"
-      echo "                                        left for manual review"
+      echo "                        agent-upgrade — apply safe updates plus guarded convergence"
+      echo "                                        for customized files; emit JSON; exit 3 if"
+      echo "                                        any file was left for manual review"
       echo "  --target <path>       Set target project directory."
       echo "  --project-name <name> Set project name (used in CLAUDE.md substitution)."
       echo "  --base-branch <name>  Set base branch name (default: main). Substituted into"
@@ -2318,6 +2367,12 @@ _copy_upgrade_existing() {
     escaped_target="${abs_target//\//\\/}"
     sed "s/\\[REPO_ROOT\\]/${escaped_target}/g" "$src" > "$tmp_src_subst"
     if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged"; then
+      if cmp -s "$tmp_merged" "$dest"; then
+        info "Up to date: ${rel}"
+        record_upgrade_result up-to-date "$rel"
+        rm -f "$tmp_merged" "$tmp_src_subst"
+        return
+      fi
       # agent-plan: classification only, never write the merged result.
       if [[ "$AGENT_DRY_RUN" != true ]]; then
         [[ -n "$base" ]] && ensure_upgrade_transaction "$base"
@@ -2359,8 +2414,10 @@ _copy_upgrade_existing() {
     return
   fi
 
-  if [[ -n "$manifest_hash" && "$manifest_owner" == user ]] &&
-     [[ "$rig_owned_default" != true ]] && ! is_rig_owned "$rel"; then
+  if [[ -n "$manifest_hash" ]] &&
+     [[ "$rig_owned_default" != true ]] && is_structurally_user_owned "$rel" &&
+     { [[ "$manifest_owner" == user ]] ||
+       { [[ -z "$manifest_owner" ]] && is_project_upgrade_base "${base:-}" "$rel"; }; }; then
     info "Skipped (user-owned): ${rel}"
     if [[ "$rel" == "CLAUDE.md" && -n "${TARGET:-}" && "${base:-}" == "$TARGET" ]]; then
       PROJECT_CLAUDE_PRESERVED_USER=true
@@ -2372,6 +2429,17 @@ _copy_upgrade_existing() {
   if [[ "$dest_hash" == "$new_hash" ]]; then
     info "Up to date: ${rel}"
     record_upgrade_result up-to-date "$rel"
+    return
+  fi
+
+  local rendered_hash
+  rendered_hash="$(rendered_project_template_hash "$src" "${base:-}" "$rel")"
+  if [[ -n "$rendered_hash" && "$dest_hash" == "$rendered_hash" ]]; then
+    info "Up to date: ${rel}"
+    record_upgrade_result up-to-date "$rel"
+    if [[ "$AGENT_DRY_RUN" != true ]]; then
+      write_manifest_entry "$dest_hash" "$rel" "$manifest_file" "$dest"
+    fi
     return
   fi
 
@@ -2650,12 +2718,19 @@ _stealth_install_git_hook() {
   local hook_src="$1" hook_dest="$2" hook_name="$3"
   local rel=".git/hooks/${hook_name}"
   local customized=false
+  local src_hash
+  src_hash="$(sha256_file "$hook_src")"
 
   if [[ -L "$hook_dest" ]]; then
     customized=true
   elif [[ -f "$hook_dest" ]]; then
     local dest_hash manifest_hash
     dest_hash="$(sha256_file "$hook_dest")"
+    if [[ -n "$src_hash" && "$dest_hash" == "$src_hash" ]]; then
+      write_manifest_entry "$dest_hash" "$rel" "$MANIFEST_FILE" "$hook_dest"
+      record_upgrade_result up-to-date "$rel"
+      return 0
+    fi
     manifest_hash="$(read_manifest_hash "$rel" "$MANIFEST_FILE")"
     if [[ -z "$manifest_hash" ]]; then
       # No manifest baseline yet -- e.g. this hook was installed by a Rig
@@ -2666,8 +2741,6 @@ _stealth_install_git_hook() {
       # (issue #495) -- an installed hook that already matches what would be
       # installed is not a customization, just a missing baseline, and
       # should never be permanently misreported as needing manual review.
-      local src_hash
-      src_hash="$(sha256_file "$hook_src")"
       if [[ "$dest_hash" == "$src_hash" ]]; then
         write_manifest_entry "$dest_hash" "$rel" "$MANIFEST_FILE" "$hook_dest"
         record_upgrade_result up-to-date "$rel"
@@ -2732,6 +2805,7 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
 
   CLAUDE_DIR="$HOME/.claude"
   SKILLS_DIR="$CLAUDE_DIR/skills"
+  COMMANDS_DIR="$CLAUDE_DIR/commands"
   DEST_CLAUDE="$CLAUDE_DIR/CLAUDE.md"
 
   if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
@@ -2762,7 +2836,7 @@ if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   if has_agent "$GLOBAL_AGENT" claude; then
   if upgrade_prepare_directory "$HOME" "$CLAUDE_DIR" ".claude"; then
     # agent-plan: classification only, never create the global Claude root.
-    [[ "$AGENT_DRY_RUN" == true ]] || mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR"
+    [[ "$AGENT_DRY_RUN" == true ]] || mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR" "$COMMANDS_DIR"
   else
     info "Preserving conflicting global Claude root: .claude"
   fi
@@ -2832,13 +2906,30 @@ PYEOF
       copy_file "$skill_src" "$skill_dest" "$CLAUDE_DIR" "skills/$skill_name"
     fi
   done
+
+  # ── Global commands ───────────────────────────────────────────────────────
+  if compgen -G "$GLOBAL_TEMPLATES/commands/*.md" >/dev/null; then
+    for command_src in "$GLOBAL_TEMPLATES/commands/"*.md; do
+      command_name="$(basename "$command_src")"
+      command_dest="$COMMANDS_DIR/$command_name"
+      if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
+        _copy_global_file_upgrade "$command_src" "$command_dest" "$CLAUDE_DIR" "commands/$command_name"
+      else
+        copy_file "$command_src" "$command_dest" "$CLAUDE_DIR" "commands/$command_name"
+      fi
+    done
+  fi
   fi
 
   if has_agent "$GLOBAL_AGENT" codex; then
     _CODEX_GLOBAL_STAGE="$(mktemp -d /tmp/rig-codex-global-skills-XXXXXX)"
+    _global_generator_args=(--output "$_CODEX_GLOBAL_STAGE" --base-branch main)
+    if compgen -G "$GLOBAL_TEMPLATES/commands/*.md" >/dev/null; then
+      _global_generator_args+=("$GLOBAL_TEMPLATES/commands/"*.md)
+    fi
+    _global_generator_args+=(--global-skills-source "$GLOBAL_TEMPLATES/skills")
     if ! python3 "$SCRIPT_DIR/installer/generate-codex-skills.py" \
-      --output "$_CODEX_GLOBAL_STAGE" --base-branch main \
-      --global-skills-source "$GLOBAL_TEMPLATES/skills"; then
+      "${_global_generator_args[@]}"; then
       rm -rf "$_CODEX_GLOBAL_STAGE"
       error "Could not generate global Codex skills."
       exit 1

@@ -113,6 +113,38 @@ print($1)
   [ "$(json_field "len(d['artifacts'])")" != "0" ]
 }
 
+@test "agent-plan is idempotent after agent-upgrade in stealth tracking" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+
+  run env HOME="$fake_home" bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking stealth \
+    --strategy agent-upgrade \
+    --project-agent claude
+  [ "$status" -eq 0 ]
+
+  local before after
+  before="$(find "$TEST_PROJECT" "$fake_home" -type f | sort | xargs cksum)"
+
+  run env HOME="$fake_home" bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking stealth \
+    --strategy agent-plan \
+    --project-agent claude
+  [ "$status" -eq 0 ]
+
+  after="$(find "$TEST_PROJECT" "$fake_home" -type f | sort | xargs cksum)"
+  [ "$before" = "$after" ]
+
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "d['summary']['updated']")" = "0" ]
+  [ "$(json_field "d['summary']['merged']")" = "0" ]
+  [ "$(json_field "d['summary']['converged']")" = "0" ]
+}
+
 @test "agent-plan stdout is exactly one JSON document, not preflight narration followed by JSON (retro-audit finding, PR #446)" {
   # The documented contract (UPGRADE_WORKFLOW.md, and this PR's own code
   # comment) is "prints exactly one JSON document on stdout." The preflight
@@ -304,6 +336,115 @@ PY
   grep -q 'Real user-owned project details.' "$brief"
   run grep -q '\[What does this product do' "$brief"
   [ "$status" -ne 0 ]
+}
+
+@test "agent-upgrade preserves structurally user-owned PROJECT_BRIEF.md with legacy flat manifest only" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  local brief="$TEST_PROJECT/PROJECT_BRIEF.md"
+  local original_hash
+  original_hash="$(_sha256 "$brief")"
+  printf '# Project Brief: Legacy Product\n\nLegacy user details.\n' > "$brief"
+
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+  /usr/bin/grep -v '  PROJECT_BRIEF.md$' "$manifest" > "$manifest.tmp"
+  printf '%s  PROJECT_BRIEF.md\n' "$original_hash" >> "$manifest.tmp"
+  mv "$manifest.tmp" "$manifest"
+  python3 - "$TEST_PROJECT/.rig/memory/.rig-manifest.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as fh:
+    data = json.load(fh)
+data.setdefault("entries", {}).pop("PROJECT_BRIEF.md", None)
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2, sort_keys=True)
+    fh.write("\n")
+PY
+
+  run_installer --strategy agent-upgrade
+  [ "$status" -eq 0 ]
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "any(a['path'] == 'PROJECT_BRIEF.md' and a['classification'] == 'user-owned-preserved' for a in d['artifacts'])")" = "True" ]
+  grep -q 'Legacy user details.' "$brief"
+  run grep -q '\[What does this product do' "$brief"
+  [ "$status" -ne 0 ]
+}
+
+@test "agent-plan preserves structurally user-owned memory files with legacy flat manifest only" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  local progress="$TEST_PROJECT/.rig/memory/PROGRESS.md"
+  local original_hash
+  original_hash="$(_sha256 "$progress")"
+  printf '# Progress\n\nUser progress entry.\n' > "$progress"
+
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+  /usr/bin/grep -v '  .rig/memory/PROGRESS.md$' "$manifest" > "$manifest.tmp"
+  printf '%s  .rig/memory/PROGRESS.md\n' "$original_hash" >> "$manifest.tmp"
+  mv "$manifest.tmp" "$manifest"
+  python3 - "$TEST_PROJECT/.rig/memory/.rig-manifest.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as fh:
+    data = json.load(fh)
+data.setdefault("entries", {}).pop(".rig/memory/PROGRESS.md", None)
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2, sort_keys=True)
+    fh.write("\n")
+PY
+
+  run_installer --strategy agent-plan
+  [ "$status" -eq 0 ]
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "any(a['path'] == '.rig/memory/PROGRESS.md' and a['classification'] == 'user-owned-preserved' for a in d['artifacts'])")" = "True" ]
+  grep -q 'User progress entry.' "$progress"
+}
+
+@test "agent-plan preserves externalized structurally user-owned memory files with legacy flat manifest only" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+
+  run env HOME="$fake_home" bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking stealth \
+    --strategy upgrade
+  [ "$status" -eq 0 ]
+
+  local rig_dir="$fake_home/.rig/projects/TestProject"
+  local progress="$rig_dir/memory/PROGRESS.md"
+  local original_hash
+  original_hash="$(_sha256 "$progress")"
+  printf '# Progress\n\nExternal user progress entry.\n' > "$progress"
+
+  local manifest="$rig_dir/memory/.rig-manifest"
+  /usr/bin/grep -v '  .rig/memory/PROGRESS.md$' "$manifest" > "$manifest.tmp"
+  printf '%s  .rig/memory/PROGRESS.md\n' "$original_hash" >> "$manifest.tmp"
+  mv "$manifest.tmp" "$manifest"
+  python3 - "$rig_dir/memory/.rig-manifest.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as fh:
+    data = json.load(fh)
+data.setdefault("entries", {}).pop(".rig/memory/PROGRESS.md", None)
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2, sort_keys=True)
+    fh.write("\n")
+PY
+
+  run env HOME="$fake_home" bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking stealth \
+    --strategy agent-plan
+  [ "$status" -eq 0 ]
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "any(a['path'] == '.rig/memory/PROGRESS.md' and a['classification'] == 'user-owned-preserved' for a in d['artifacts'])")" = "True" ]
+  grep -q 'External user progress entry.' "$progress"
 }
 
 @test "agent-upgrade on a clean target applies updates and exits 0" {

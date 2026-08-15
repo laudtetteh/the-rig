@@ -455,6 +455,17 @@ print(len(s.get('permissions', {}).get('deny', [])))
   [ "$status" -eq 0 ]
 }
 
+@test "global Claude target installs rig-upgrade bootstrap command" {
+  local fake_home="$TEMP_DIR/fake-home"
+  mkdir -p "$fake_home"
+  run env HOME="$fake_home" bash "$INSTALLER" \
+    --global-only --global-agent claude --strategy merge
+  [ "$status" -eq 0 ]
+  [ -f "$fake_home/.claude/commands/rig-upgrade.md" ]
+  grep -Fq 'Global-first bootstrap' "$fake_home/.claude/commands/rig-upgrade.md"
+  grep -q '  commands/rig-upgrade.md$' "$fake_home/.claude/.rig-global-manifest"
+}
+
 @test "rig-notify fails open for CI dumb and unknown events" {
   local helper="$REPO_ROOT/templates/global/bin/rig-notify"
   run env CI=1 TERM=xterm bash "$helper" stop

@@ -6,7 +6,18 @@ Handles all known upgrade scenarios: repo, external, and stealth tracking; user-
 files; global layer; VERSION staleness; and settings.json deduplication. Each phase is
 gated — survey before touching anything, confirm before committing.
 
-> **RIG_DIR resolution (stealth/external mode):** Resolve `.rig/` before every step.
+> **Global-first bootstrap:** when a global Rig command is available, prefer it.
+> A project-installed `/rig-upgrade` can be older than the incoming release it is
+> about to install. Before running project-layer upgrade steps, refresh the
+> preferred installer checkout (`~/tools/the-rig`, or `$RIG_INSTALLER_SRC` when
+> set), then read and follow the command at
+> `$INSTALLER_SRC/templates/project/.claude/commands/rig-upgrade.md`. Treat this
+> project file as a shim once the refreshed installer-source command is loaded.
+
+> **RIG_DIR resolution (stealth/external mode):** Resolve `.rig/` before every
+> project-scope step. `--version` and `--scope=global` must still work when no
+> project checkout is available; in those modes, skip project-only probes if
+> `git rev-parse --show-toplevel` fails.
 >
 > ```bash
 > REPO=$(git rev-parse --show-toplevel)
@@ -45,11 +56,27 @@ command through `--preflight --json` and stop on a nonzero result.
 If the user passes `--version`, skip all phases and print version info only:
 
 ```bash
+if REPO=$(git rev-parse --show-toplevel 2>/dev/null); then
+  if [[ -f "$REPO/.rigpath" ]]; then
+    RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+  else
+    RIG_DIR="$REPO/.rig"
+  fi
+else
+  REPO=""
+  RIG_DIR=""
+fi
+
 # Project installed version
-PROJECT_VERSION=$(cat "$RIG_DIR/VERSION" 2>/dev/null || echo "not installed")
-PROJECT_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$RIG_DIR/VERSION" 2>/dev/null \
-  || stat -c "%y" "$RIG_DIR/VERSION" 2>/dev/null | cut -d' ' -f1-2 | cut -c1-16 \
-  || echo "unknown")
+if [[ -n "$RIG_DIR" ]]; then
+  PROJECT_VERSION=$(cat "$RIG_DIR/VERSION" 2>/dev/null || echo "not installed")
+  PROJECT_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$RIG_DIR/VERSION" 2>/dev/null \
+    || stat -c "%y" "$RIG_DIR/VERSION" 2>/dev/null | cut -d' ' -f1-2 | cut -c1-16 \
+    || echo "unknown")
+else
+  PROJECT_VERSION="not in project"
+  PROJECT_TS="n/a"
+fi
 
 # Global installed layer version from manifest metadata. The global layer does
 # not install a VERSION file; ~/.claude/.rig-global-manifest is the
@@ -69,7 +96,11 @@ GLOBAL_LAYER_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$GLOBAL_MANIFEST" 2>/dev/nu
 
 # Preferred installer checkout version. This is the source used for future
 # upgrades, not proof of what the global layer has already installed.
-INSTALLER_CHECKOUT=~/tools/the-rig
+if [[ -n "${RIG_INSTALLER_SRC:-}" && -f "$RIG_INSTALLER_SRC/install.sh" ]]; then
+  INSTALLER_CHECKOUT="$RIG_INSTALLER_SRC"
+else
+  INSTALLER_CHECKOUT=~/tools/the-rig
+fi
 INSTALLER_VERSION=$(cat "$INSTALLER_CHECKOUT/VERSION" 2>/dev/null || echo "not found")
 INSTALLER_TS=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$INSTALLER_CHECKOUT/VERSION" 2>/dev/null \
   || stat -c "%y" "$INSTALLER_CHECKOUT/VERSION" 2>/dev/null | cut -d' ' -f1-2 | cut -c1-16 \
@@ -94,13 +125,18 @@ if command -v gh >/dev/null 2>&1; then
 fi
 
 # Installed agent target metadata (agent support, not just VERSION files)
-PROJECT_TARGETS_FILE="$RIG_DIR/install-targets.json"
-PROJECT_AGENTS=$(python3 - "$PROJECT_TARGETS_FILE" <<'PY' 2>/dev/null || echo "unknown"
+if [[ -n "$RIG_DIR" ]]; then
+  PROJECT_TARGETS_FILE="$RIG_DIR/install-targets.json"
+  PROJECT_AGENTS=$(python3 - "$PROJECT_TARGETS_FILE" <<'PY' 2>/dev/null || echo "unknown"
 import json, sys
 with open(sys.argv[1]) as fh:
     print(",".join(json.load(fh).get("agents", [])) or "none")
 PY
 )
+else
+  PROJECT_TARGETS_FILE=""
+  PROJECT_AGENTS="not in project"
+fi
 GLOBAL_TARGETS_FILE="$HOME/.rig/install-targets.json"
 GLOBAL_AGENTS=$(python3 - "$GLOBAL_TARGETS_FILE" <<'PY' 2>/dev/null || echo "unknown"
 import json, sys
@@ -110,7 +146,7 @@ PY
 )
 
 CODEX_INFRA_STATUS="not selected"
-if [[ ",$PROJECT_AGENTS," == *",codex,"* ]]; then
+if [[ -n "$REPO" && ",$PROJECT_AGENTS," == *",codex,"* ]]; then
   missing_codex=()
   [[ -f "$REPO/.codex/hooks.json" ]] || missing_codex+=(".codex/hooks.json")
   [[ -x "$REPO/.codex/hooks/rig-adapter.sh" ]] || missing_codex+=(".codex/hooks/rig-adapter.sh executable")
@@ -145,7 +181,8 @@ If `GITHUB_VERSION` is empty (gh not available or network failed), print instead
 
 After printing the version and target lines, apply these checks in order:
 
-1. If project and global installed-layer versions differ:
+1. If `$PROJECT_VERSION` is not `not in project` and project and global
+   installed-layer versions differ:
    > "⚠️ Project is at `$PROJECT_VERSION` but global installed layer is at `$GLOBAL_LAYER_VERSION`. Run `/rig-upgrade` to sync."
 
 2. If a GitHub version was retrieved and it differs from `$INSTALLER_VERSION`
@@ -154,19 +191,23 @@ After printing the version and target lines, apply these checks in order:
    > Update it with: `git -C ~/tools/the-rig checkout main && git -C ~/tools/the-rig pull --ff-only origin main`
    > Then re-run `/rig-upgrade --version`."
 
-3. If a GitHub version was retrieved and it differs from `$PROJECT_VERSION`
-   (compare after stripping a leading `v` from `$GITHUB_VERSION`):
+3. If `$PROJECT_VERSION` is not `not in project`, and a GitHub version was
+   retrieved and it differs from `$PROJECT_VERSION` (compare after stripping a
+   leading `v` from `$GITHUB_VERSION`):
    > "⚠️ A newer release is available: `$GITHUB_VERSION`. Pull `~/tools/the-rig` and run `/rig-upgrade`."
 
-4. If `CODEX_THREAD_ID` is set and `$PROJECT_AGENTS` does not include `codex`:
+4. If `CODEX_THREAD_ID` is set, `$PROJECT_AGENTS` is not `not in project`, and
+   `$PROJECT_AGENTS` does not include `codex`:
    > "⚠️ This is a Codex session, but the project target metadata is `$PROJECT_AGENTS`.
    > Run `/rig-upgrade --scope=project --mode=agent` or install with `--project-agent both` to retrofit Codex project support."
 
-5. If `CODEX_THREAD_ID` is set and `$CODEX_INFRA_STATUS` is not `complete`:
+5. If `CODEX_THREAD_ID` is set, `$PROJECT_AGENTS` is not `not in project`, and
+   `$CODEX_INFRA_STATUS` is not `complete`:
    > "⚠️ Codex project support is incomplete: `$CODEX_INFRA_STATUS`.
    > Run `/rig-upgrade --scope=project --mode=agent`, then verify with `bin/rig doctor --json`."
 
-6. If `CODEX_THREAD_ID` is set and `bin/rig session resolve --json` reports `reason: not_found`:
+6. If `CODEX_THREAD_ID` is set, `$REPO` is not empty, and `bin/rig session
+   resolve --json` reports `reason: not_found`:
    > "⚠️ Current Codex thread is not bound to Rig session memory.
    > After the project target is converged, run: `bin/rig session retrofit --agent codex --from-env --source resume --json`."
 
@@ -179,10 +220,15 @@ Then stop — do not proceed to Phase 0.
 Read the scope flag before Phase 0. Default is `both` (current behavior).
 
 - `--scope=project`: set `SKIP_GLOBAL=true`. Phase 4 is skipped entirely.
-- `--scope=global`: set `SKIP_PROJECT=true`. Phases 1, 2, and 3 are skipped entirely. Jump directly to Phase 4.
+- `--scope=global`: set `SKIP_PROJECT=true`. Project checkout and `$RIG_DIR`
+  are optional. Skip Phase 0 project session checks plus Phases 1, 2, and 3;
+  resolve the installer source, then jump directly to Phase 4.
 - `--scope=both`: normal flow (no skip).
 
-These flags do not suppress the Phase 0 session state check — always run 0a first.
+For `--scope=project` and `--scope=both`, these flags do not suppress the Phase
+0 session state check — always run 0a first. For `--scope=global`, do not read
+project memory flags or `$RIG_DIR`; a global-only invocation must work outside a
+Git project.
 
 ### `--mode` flag
 
@@ -203,6 +249,9 @@ the project-layer upgrade, and short-circuits the interactive mode prompt in
 ---
 
 ## Phase 0 — Pre-flight
+
+Skip Phase 0 entirely when `SKIP_PROJECT=true` from `--scope=global`. Resolve
+the installer source using Phase 0c, then continue directly to Phase 4.
 
 ### 0a — Session state
 
@@ -231,13 +280,13 @@ echo "Current Rig version: $CURRENT_VERSION"
 Check in order:
 
 ```bash
-# 1. Standard stable installer location
-if [[ -f ~/tools/the-rig/install.sh ]]; then
-  INSTALLER_SRC=~/tools/the-rig
-
-# 2. Explicit env var override
-elif [[ -n "$RIG_INSTALLER_SRC" && -f "$RIG_INSTALLER_SRC/install.sh" ]]; then
+# 1. Explicit env var override, set by the global-first bootstrap or caller
+if [[ -n "${RIG_INSTALLER_SRC:-}" && -f "$RIG_INSTALLER_SRC/install.sh" ]]; then
   INSTALLER_SRC="$RIG_INSTALLER_SRC"
+
+# 2. Standard stable installer location
+elif [[ -f ~/tools/the-rig/install.sh ]]; then
+  INSTALLER_SRC=~/tools/the-rig
 
 # 3. Dev-repo self-install: the repo itself contains install.sh + templates/
 elif [[ -f "$REPO/install.sh" && -d "$REPO/templates/project" ]]; then
@@ -450,11 +499,13 @@ mode Phase 2 ends up using. What Phase 2 does with that preview depends on
   per customized file in Phase 2b. This path is unchanged from before agent
   mode existed and remains available on request.
 
-Both modes still route through the exact same artifact discovery/
-classification code path in `install.sh` — `agent-upgrade` differs from
-`upgrade` only in how it reports and gates on the result (single JSON
-document, dedicated exit code `3` for "needs manual review"), not in what it
-is willing to touch automatically. See `UPGRADE_WORKFLOW.md` → "Agent-driven
+Both modes still route through the same artifact discovery/classification code
+path in `install.sh`, but they intentionally differ after a customized
+Rig-owned file is detected. `agent-upgrade` attempts guarded convergence first:
+it preserves local edits, adds incoming Rig changes when the merge tool can do
+so defensively, dedupes where the structured merge supports it, and leaves true
+conflicts untouched with JSON repair guidance. Classic `upgrade` keeps the old
+interactive prompt/skip behavior. See `UPGRADE_WORKFLOW.md` → "Agent-driven
 upgrade contract" for the full JSON schema and exit-code table.
 
 ### 1d — Survey changed files
@@ -663,9 +714,10 @@ Otherwise, in an interactive session, ask the user:
 > "Two ways to apply this upgrade:
 > - **[g] Guarded convergence (recommended)** — runs `install.sh --strategy
 >   agent-upgrade`. Applies every safe/convergeable change automatically —
->   including conflict-free structure-aware merges of customized files — never
->   prompts per file, and reports any file that still needs manual review with
->   concrete repair guidance instead of asking you to decide file-by-file.
+>   including conflict-free structure-aware merges of customized Rig-owned
+>   files while preserving local edits — never prompts per file, and reports
+>   any file that still needs manual review with concrete repair guidance
+>   instead of asking you to decide file-by-file.
 > - **[c] Classic upgrade** — runs `install.sh --strategy upgrade`, the
 >   original interactive `[a]ccept template` / `[k]eep yours` / `[s]how full
 >   file` flow for every customized file.
@@ -1054,6 +1106,19 @@ GLOBAL_SKIPPED+=("skill: $name")
 Print a summary using the result accumulators populated in Phases 2–4:
 
 ```bash
+if [[ "${SKIP_PROJECT:-false}" == true ]]; then
+  echo "=== Global Rig upgrade complete ==="
+  echo ""
+  if [[ ${#GLOBAL_UPDATED[@]} -gt 0 || ${#GLOBAL_SKIPPED[@]} -gt 0 ]]; then
+    echo "Global layer:"
+    for f in "${GLOBAL_UPDATED[@]}"; do printf '  updated: %s\n' "$f"; done
+    for f in "${GLOBAL_SKIPPED[@]}"; do printf '  kept:    %s\n' "$f"; done
+  else
+    echo "Global layer: already current"
+  fi
+  # Stop here for global-only runs.
+else
+
 echo "=== Upgrade complete: $CURRENT_VERSION → $EXPECTED_VERSION (mode: $UPGRADE_MODE) ==="
 echo ""
 
@@ -1112,7 +1177,12 @@ if [[ ${#GLOBAL_UPDATED[@]} -gt 0 || ${#GLOBAL_SKIPPED[@]} -gt 0 ]]; then
 else
   echo "Global layer: skipped"
 fi
+fi
 ```
+
+If `SKIP_PROJECT=true`, stop after the global-only summary. Do not run the
+project test reminder, project doctor warning, project Codex mirror check, or
+commit strategy recommendation.
 
 If this project has a bats test suite (`tests/*.bats`), remind the user:
 > "Run `bats tests/` to verify the installer is still working correctly."
