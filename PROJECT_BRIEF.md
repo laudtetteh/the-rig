@@ -26,7 +26,7 @@ The shared `.rig` workflow is provider-neutral. Claude commands/hooks and Codex 
 
 ## What it ships
 
-The Rig is actively developed, currently at v1.28.2. These are the shipped
+The Rig is actively developed, currently at v1.29.0. These are the shipped
 components:
 
 ### Installer (`install.sh`)
@@ -113,7 +113,7 @@ components:
 
 **Must NOT use:** Runtime dependencies in `install.sh` beyond standard POSIX utils + `git`, `gh`, `gitleaks` (optional)
 
-**Existing code:** This IS the existing code — `install.sh` at v1.28.2.
+**Existing code:** This IS the existing code — `install.sh` at v1.29.0.
 
 ---
 
