@@ -231,7 +231,8 @@ print($1)
 
   # The customized file itself must be untouched on disk.
   grep -q "locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
-  ! grep -q '^<<<<<<<' "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  run grep -q '^<<<<<<<' "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  [ "$status" -ne 0 ]
 }
 
 @test "agent-plan on a true conflict emits refused with populated conflicts, exits 3, and writes nothing" {
@@ -248,9 +249,16 @@ print($1)
   # base and the incoming template, so all three sides touch it.
   local old_tag old_hash
   old_tag="$(git -C "$REPO_ROOT" tag --list 'v1.2*' | sort -V | head -1)"
-  [ -n "$old_tag" ] || skip "no historical tags available in this checkout"
+  # A hard failure, not a skip. These are the only tests proving a genuine
+  # three-way conflict still refuses with exit 3 rather than silently
+  # converging; skipping them leaves CI green while proving nothing, which is
+  # exactly what ci.yml's fetch-depth: 0 exists to prevent.
+  [ -n "$old_tag" ] || { echo "no release tags reachable — fetch-depth: 0 required" >&2; return 1; }
   old_hash="$(git -C "$REPO_ROOT" show "$old_tag:templates/project/.claude/hooks/pre-tool.sh" 2>/dev/null | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
-  [ -n "$old_hash" ] || skip "hook not present at $old_tag"
+  # `git show | shasum` emits the SHA of the EMPTY stream when git fails, so a
+  # plain -n test can never fire. Check git's own exit status instead.
+  git -C "$REPO_ROOT" cat-file -e "$old_tag:templates/project/.claude/hooks/pre-tool.sh" 2>/dev/null \
+    || { echo "pre-tool.sh absent at $old_tag" >&2; return 1; }
 
   git -C "$REPO_ROOT" show "$old_tag:templates/project/.claude/hooks/pre-tool.sh" > "$hook"
   python3 - "$hook" "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh" <<'PYEOF'
@@ -553,9 +561,16 @@ PY
   local hook="$TEST_PROJECT/.claude/hooks/pre-tool.sh"
   local old_tag old_hash
   old_tag="$(git -C "$REPO_ROOT" tag --list 'v1.2*' | sort -V | head -1)"
-  [ -n "$old_tag" ] || skip "no historical tags available in this checkout"
+  # A hard failure, not a skip. These are the only tests proving a genuine
+  # three-way conflict still refuses with exit 3 rather than silently
+  # converging; skipping them leaves CI green while proving nothing, which is
+  # exactly what ci.yml's fetch-depth: 0 exists to prevent.
+  [ -n "$old_tag" ] || { echo "no release tags reachable — fetch-depth: 0 required" >&2; return 1; }
   old_hash="$(git -C "$REPO_ROOT" show "$old_tag:templates/project/.claude/hooks/pre-tool.sh" 2>/dev/null | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
-  [ -n "$old_hash" ] || skip "hook not present at $old_tag"
+  # `git show | shasum` emits the SHA of the EMPTY stream when git fails, so a
+  # plain -n test can never fire. Check git's own exit status instead.
+  git -C "$REPO_ROOT" cat-file -e "$old_tag:templates/project/.claude/hooks/pre-tool.sh" 2>/dev/null \
+    || { echo "pre-tool.sh absent at $old_tag" >&2; return 1; }
 
   git -C "$REPO_ROOT" show "$old_tag:templates/project/.claude/hooks/pre-tool.sh" > "$hook"
   python3 - "$hook" "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh" <<'PYEOF'

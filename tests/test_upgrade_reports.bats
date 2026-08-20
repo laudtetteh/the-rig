@@ -405,7 +405,8 @@ print('ok')
   printf '\n# SUPERSECRET-CANARY-VALUE\n' >> "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
 
   run_installer --strategy agent-upgrade
-  ! grep -q "SUPERSECRET-CANARY-VALUE" "$(_report_file)"
+  run grep -q "SUPERSECRET-CANARY-VALUE" "$(_report_file)"
+  [ "$status" -ne 0 ]
 }
 
 @test "upgrade report: does not embed the recovery journal" {
@@ -432,6 +433,6 @@ print('ok')
   _seed_project
 
   run_installer --strategy upgrade
-  [[ "$output" == *"Upgrade report:"* ]]
-  [[ "$output" == *"rig upgrade rollback"* ]]
+  [[ "$output" == *"Upgrade report:"* ]] || return 1
+  [[ "$output" == *"rig upgrade rollback"* ]] || return 1
 }

@@ -124,8 +124,8 @@ Original body.
     --output "$TEMP_DIR/base.out"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
-  [[ "$output" == *'"base_tag":"v1.14.0"'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
+  [[ "$output" == *'"base_tag":"v1.14.0"'* ]] || return 1
 }
 
 @test "historical base: resolved content is the exact recorded baseline" {
@@ -153,7 +153,7 @@ Added upstream line.
   _resolve --rel .claude/commands/wrap.md --recorded-hash "$baseline"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"base_tag":"v1.17.0"'* ]]
+  [[ "$output" == *'"base_tag":"v1.17.0"'* ]] || return 1
 }
 
 @test "historical base: a wrong base_revision hint never changes the resolved base" {
@@ -170,7 +170,7 @@ Original body.
     --hint-revision 1.29.0
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"base_tag":"v1.14.0"'* ]]
+  [[ "$output" == *'"base_tag":"v1.14.0"'* ]] || return 1
 }
 
 @test "historical base: a correct hint short-circuits the tag scan" {
@@ -186,7 +186,7 @@ Original body.
   [ "$status" -eq 0 ]
   # One checked-out-template candidate (which does not match here) plus the
   # hinted tag. Without the hint this file needs the full three-revision scan.
-  [[ "$output" == *'"tags_scanned":2'* ]]
+  [[ "$output" == *'"tags_scanned":2'* ]] || return 1
 }
 
 # ── Checked-out template candidate ───────────────────────────────────────────
@@ -206,8 +206,8 @@ Newest upstream line.
   _resolve --rel .claude/commands/wrap.md --recorded-hash "$baseline"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"base_tag":"worktree"'* ]]
-  [[ "$output" == *'"tags_scanned":1'* ]]
+  [[ "$output" == *'"base_tag":"worktree"'* ]] || return 1
+  [[ "$output" == *'"tags_scanned":1'* ]] || return 1
 }
 
 @test "historical base: resolves from the checked-out template with no tags at all" {
@@ -229,7 +229,7 @@ Body.
     --output "$TEMP_DIR/base.out"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"base_tag":"worktree"'* ]]
+  [[ "$output" == *'"base_tag":"worktree"'* ]] || return 1
   [ "$(_sha256 "$TEMP_DIR/base.out")" = "$baseline" ]
 }
 
@@ -245,8 +245,8 @@ Body.
     --recorded-hash "$(_sha256_string 'some older release content')"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no release tags"* ]]
-  [[ "$output" == *"git fetch --tags"* ]]
+  [[ "$output" == *"no release tags"* ]] || return 1
+  [[ "$output" == *"git fetch --tags"* ]] || return 1
 }
 
 @test "historical base: never follows a symlinked template in the checked-out tree" {
@@ -260,7 +260,7 @@ Body.
 ')"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *'"ok":false'* ]]
+  [[ "$output" == *'"ok":false'* ]] || return 1
 }
 
 # ── Artifact-kind coverage ───────────────────────────────────────────────────
@@ -295,7 +295,7 @@ description = "v1.14.0"
   _resolve --rel .gitleaks.toml --recorded-hash "$baseline"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
 }
 
 @test "historical base: resolves a process Markdown baseline" {
@@ -311,7 +311,7 @@ Step one.
   _resolve --rel .rig/processes/SHIP_WORKFLOW.md --recorded-hash "$baseline"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
 }
 
 @test "historical base: resolves a dispatcher baseline" {
@@ -327,7 +327,7 @@ echo rig v1.20.0
   _resolve --rel bin/rig --recorded-hash "$baseline"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
 }
 
 # ── Substitution ─────────────────────────────────────────────────────────────
@@ -348,7 +348,7 @@ base-branch: develop
     --project-name "4Culture" --base-branch "develop"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
 }
 
 @test "historical base: resolves an unsubstituted baseline for a non-allowlisted file" {
@@ -370,7 +370,7 @@ Target: [BASE_BRANCH]
     --base-branch "develop"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"ok":true'* ]]
+  [[ "$output" == *'"ok":true'* ]] || return 1
 }
 
 # ── Generated Codex mirrors ──────────────────────────────────────────────────
@@ -397,7 +397,7 @@ Run /wrap to finish.
     --output "$TEMP_DIR/gen-base.out"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"generated":true'* ]]
+  [[ "$output" == *'"generated":true'* ]] || return 1
   # Reproduced by replaying the generator, never copied from downstream.
   [ "$(_sha256 "$TEMP_DIR/gen-base.out")" = "$baseline" ]
 }
@@ -429,7 +429,7 @@ Rewritten upstream.
     --recorded-hash "$baseline" --base-branch develop
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"base_tag":"v1.20.0"'* ]]
+  [[ "$output" == *'"base_tag":"v1.20.0"'* ]] || return 1
 }
 
 @test "historical base: refuses a generated mirror whose canonical command is unresolvable" {
@@ -443,8 +443,8 @@ Rewritten upstream.
     --recorded-hash "$(_sha256_string 'anything')" --base-branch develop
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *'"ok":false'* ]]
-  [[ "$output" == *"no canonical Claude command"* ]]
+  [[ "$output" == *'"ok":false'* ]] || return 1
+  [[ "$output" == *"no canonical Claude command"* ]] || return 1
 }
 
 @test "historical base: refuses a generated skill path with no <name>/<artifact> shape" {
@@ -454,7 +454,7 @@ Rewritten upstream.
     --recorded-hash "$(_sha256_string 'anything')"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no <name>/<artifact> shape"* ]]
+  [[ "$output" == *"no <name>/<artifact> shape"* ]] || return 1
 }
 
 # ── Hostile manifest input ───────────────────────────────────────────────────
@@ -471,7 +471,7 @@ Rewritten upstream.
 ')" --output "$TEMP_DIR/leaked"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"escapes the template tree"* ]]
+  [[ "$output" == *"escapes the template tree"* ]] || return 1
   [ ! -e "$TEMP_DIR/leaked" ]
 }
 
@@ -481,7 +481,7 @@ Rewritten upstream.
   _resolve --rel /etc/hosts --recorded-hash "$(_sha256_string 'anything')"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"not relative"* ]]
+  [[ "$output" == *"not relative"* ]] || return 1
 }
 
 @test "historical base: refuses a manifest path with an embedded traversal" {
@@ -491,7 +491,7 @@ Rewritten upstream.
     --recorded-hash "$(_sha256_string 'anything')"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"escapes the template tree"* ]]
+  [[ "$output" == *"escapes the template tree"* ]] || return 1
 }
 
 # ── I/O failures stay on the JSON contract ───────────────────────────────────
@@ -508,7 +508,7 @@ Original body.
 
   # Exit 2 is the I/O code; exit 1 would misreport this as a refusal.
   [ "$status" -eq 2 ]
-  [[ "$output" != *"Traceback"* ]]
+  [[ "$output" != *"Traceback"* ]] || return 1
   echo "$output" | python3 -c 'import json,sys; json.loads(sys.stdin.read())'
 }
 
@@ -541,7 +541,7 @@ Original.
     --recorded-hash "$baseline" --base-branch develop
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"base_tag":"v1.10.0"'* ]]
+  [[ "$output" == *'"base_tag":"v1.10.0"'* ]] || return 1
 }
 
 # ── Refusals: never guess ────────────────────────────────────────────────────
@@ -553,9 +553,9 @@ Original.
     --recorded-hash "$(_sha256_string 'content that was never released')"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *'"ok":false'* ]]
-  [[ "$output" == *"no historical revision reproduces the recorded baseline"* ]]
-  [[ "$output" == *'"repair_guidance"'* ]]
+  [[ "$output" == *'"ok":false'* ]] || return 1
+  [[ "$output" == *"no historical revision reproduces the recorded baseline"* ]] || return 1
+  [[ "$output" == *'"repair_guidance"'* ]] || return 1
 }
 
 @test "historical base: refusal names how many revisions were scanned" {
@@ -566,7 +566,7 @@ Original.
 
   [ "$status" -eq 1 ]
   # The checked-out template plus each distinct released revision of this file.
-  [[ "$output" == *'"tags_scanned":4'* ]]
+  [[ "$output" == *'"tags_scanned":4'* ]] || return 1
 }
 
 @test "historical base: writes no output file when it refuses" {
@@ -587,7 +587,7 @@ Original.
     --recorded-hash "$(_sha256_string 'anything')"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no historical template exists"* ]]
+  [[ "$output" == *"no historical template exists"* ]] || return 1
 }
 
 @test "historical base: refuses when the installer source is not a git work tree" {
@@ -598,7 +598,7 @@ Original.
     --recorded-hash "$(_sha256_string 'anything')"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"not a git work tree"* ]]
+  [[ "$output" == *"not a git work tree"* ]] || return 1
 }
 
 @test "historical base: refuses when the installer source exposes no release tags" {
@@ -611,7 +611,7 @@ Original.
     --recorded-hash "$(_sha256_string 'anything')"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no release tags"* ]]
+  [[ "$output" == *"no release tags"* ]] || return 1
 }
 
 @test "historical base: refuses a malformed recorded hash" {
@@ -620,7 +620,7 @@ Original.
   _resolve --rel .claude/commands/wrap.md --recorded-hash "not-a-sha256"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"not a SHA256 hex digest"* ]]
+  [[ "$output" == *"not a SHA256 hex digest"* ]] || return 1
 }
 
 @test "historical base: emits exactly one machine-readable JSON line" {

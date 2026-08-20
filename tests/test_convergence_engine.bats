@@ -243,7 +243,8 @@ open(p, 'w').write(new_text)
 
   grep -q "locally customized body content" "$agent_file"
   # The merged file must not carry conflict markers.
-  ! grep -q '^<<<<<<<' "$agent_file"
+  run grep -q '^<<<<<<<' "$agent_file"
+  [ "$status" -ne 0 ]
 }
 
 @test "agent-upgrade converges a TOML file when the customization adds a whole new table" {
@@ -284,7 +285,8 @@ open(p, 'w').write(new_text)
   [ "$(json_field "'.claude/hooks/pre-tool.sh' in [a['path'] for a in d['artifacts'] if a['classification'] == 'converged']")" = "True" ]
 
   grep -q "# locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
-  ! grep -q '^<<<<<<<' "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  run grep -q '^<<<<<<<' "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  [ "$status" -ne 0 ]
   # Executable mode must survive convergence -- a hook that loses +x is dead.
   [ -x "$TEST_PROJECT/.claude/hooks/pre-tool.sh" ]
 }
@@ -302,9 +304,16 @@ open(p, 'w').write(new_text)
   # 4Culture shape. Then edit the same first lines the upstream change touched.
   local old_tag old_hash
   old_tag="$(git -C "$REPO_ROOT" tag --list 'v1.2*' | sort -V | head -1)"
-  [ -n "$old_tag" ] || skip "no historical tags available in this checkout"
+  # A hard failure, not a skip. These are the only tests proving a genuine
+  # three-way conflict still refuses with exit 3 rather than silently
+  # converging; skipping them leaves CI green while proving nothing, which is
+  # exactly what ci.yml's fetch-depth: 0 exists to prevent.
+  [ -n "$old_tag" ] || { echo "no release tags reachable — fetch-depth: 0 required" >&2; return 1; }
   old_hash="$(git -C "$REPO_ROOT" show "$old_tag:templates/project/.claude/hooks/pre-tool.sh" 2>/dev/null | _sha256_stdin)"
-  [ -n "$old_hash" ] || skip "hook not present at $old_tag"
+  # `git show | shasum` emits the SHA of the EMPTY stream when git fails, so a
+  # plain -n test can never fire. Check git's own exit status instead.
+  git -C "$REPO_ROOT" cat-file -e "$old_tag:templates/project/.claude/hooks/pre-tool.sh" 2>/dev/null \
+    || { echo "pre-tool.sh absent at $old_tag" >&2; return 1; }
 
   git -C "$REPO_ROOT" show "$old_tag:templates/project/.claude/hooks/pre-tool.sh" > "$hook"
   # Overlap has to be constructed, not assumed: editing arbitrary early lines

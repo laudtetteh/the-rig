@@ -1683,6 +1683,9 @@ init_upgrade_report() {
 # files, or a rolled-back project would claim a version and a set of baseline
 # hashes that no longer match its own contents (issue #562/#563).
 UPGRADE_METADATA_SNAPSHOT=""
+# Set when a manifest already existed at the start of this run — i.e. this is a
+# genuine upgrade of an existing install rather than a first install.
+UPGRADE_HAD_PRIOR_MANIFEST=false
 
 snapshot_upgrade_metadata() {
   upgrade_report_enabled || return 0
@@ -1699,6 +1702,15 @@ snapshot_upgrade_metadata() {
   # from _upgrade_write(), which the global layer reaches first. A bare
   # dereference aborts the whole installer under `set -u`.
   [[ -n "${TARGET:-}" ]] || return 0
+  # Was this a real upgrade, or a first install? A fresh install has no prior
+  # state to return to, and recording its creations would make
+  # `rig upgrade rollback --last` immediately after installing delete the whole
+  # Rig installation — an uninstall wearing an upgrade's clothes. Decided here,
+  # before the first manifest write, which is the last moment the answer is
+  # still visible.
+  if [[ -f "$MANIFEST_FILE" ]]; then
+    UPGRADE_HAD_PRIOR_MANIFEST=true
+  fi
   init_upgrade_report
   UPGRADE_METADATA_SNAPSHOT="$(mktemp -d)"
   local source target
@@ -1727,6 +1739,18 @@ record_report_artifact() {
   local post_hash="$7" post_mode="$8" post_type="$9"
   local backup_path="${10:-}"
   upgrade_report_enabled || return 0
+  # Project-layer artifacts only. The global layer runs FIRST, with
+  # MANIFEST_FILE temporarily repointed and TARGET not yet assigned, so
+  # without this a `--strategy upgrade` run that also touches the global
+  # layer records entries rooted at ~/.claude into the project's report.
+  # Rollback then refuses those (correctly — they are outside the project),
+  # which makes the whole plan incomplete, skips the metadata restore, and
+  # leaves the manifest disagreeing with the files on disk. Guarding
+  # snapshot_upgrade_metadata() alone was not enough: that protects the
+  # metadata snapshot, not the artifact records.
+  [[ -n "${TARGET:-}" ]] || return 0
+  [[ "${MANIFEST_FILE:-}" == "${GLOBAL_MANIFEST_FILE:-}" ]] && return 0
+  [[ "${MANIFEST_FILE:-}" == "${CODEX_GLOBAL_MANIFEST_FILE:-}" ]] && return 0
   init_upgrade_report
   [[ -n "$UPGRADE_REPORT_JOURNAL" ]] || return 0
   printf '%s\x1e%s\x1e%s\x1e%s\x1e%s\x1e%s\x1e%s\x1e%s\x1e%s\x1e%s\n' \
@@ -1760,6 +1784,9 @@ write_upgrade_report() {
   upgrade_report_enabled || return 0
   [[ -n "$UPGRADE_REPORT_JOURNAL" && -s "$UPGRADE_REPORT_JOURNAL" ]] || return 0
   command -v python3 >/dev/null 2>&1 || return 0
+  # No prior manifest means this run was a first install, not an upgrade.
+  # There is no earlier state to roll back to, so offering one would be a lie.
+  [[ "$UPGRADE_HAD_PRIOR_MANIFEST" == true ]] || return 0
 
   local report_dir report_path report_status metadata_dir=""
   # No project target means no project-layer report to write (rollback is
@@ -1957,6 +1984,14 @@ collapsed = {
     )
 }
 
+if not collapsed:
+    # Nothing actually changed, so there is nothing to roll back. Writing a
+    # report anyway would drop a new file into the project on every no-op
+    # upgrade — accumulating forever, and breaking the installer's own
+    # idempotence contract ("a second consecutive upgrade makes no further
+    # changes to the installed tree"). Exit 3 tells the caller to clean up.
+    raise SystemExit(3)
+
 document = {
     "schema": "https://the-rig.dev/schemas/upgrade-report/v1",
     "schema_version": 1,
@@ -1998,6 +2033,14 @@ finally:
 PYEOF
   report_status=$?
   set -e
+  # Exit 3 is the deliberate "nothing changed, so no report" signal — not a
+  # failure. Remove the metadata snapshot staged for a report that will not
+  # exist, so a no-op upgrade leaves the tree byte-identical.
+  if [[ "$report_status" -eq 3 ]]; then
+    [[ -n "$metadata_dir" && -d "$metadata_dir" ]] && rm -rf "$metadata_dir"
+    rmdir "$report_dir" 2>/dev/null || true
+    return 0
+  fi
   # A report that could not be written must never fail the upgrade that already
   # succeeded on disk; it just means no rollback candidate is offered.
   [[ "$report_status" -eq 0 ]] || { warn "Could not write the upgrade report."; return 0; }
@@ -3301,9 +3344,34 @@ _stealth_install_git_hook() {
   # under merge/skip/overwrite/interactive, so the #451 symlink-refusal
   # fix never actually applied outside an explicit --strategy upgrade run.
   guard_destination_before_write "$TARGET" "$hook_dest" "$rel" || return 0
+  # Capture the pre-state before the write. This function never routes through
+  # copy_file()/_upgrade_write(), so without an explicit record a stealth
+  # .git/hooks/ rewrite sits entirely outside the rollback contract: the hook
+  # is replaced and its manifest entry updated, but `rig upgrade rollback`
+  # reports a clean success while silently leaving the new hook in place. In
+  # stealth mode those hooks ARE the Rig — gitleaks scanning, commit-msg
+  # validation, PROGRESS logging — so a user rolling back precisely because a
+  # new hook broke their workflow would be told it worked and keep it.
+  local _gh_pre_hash="" _gh_pre_mode="" _gh_pre_type="" _gh_backup=""
+  if upgrade_report_enabled; then
+    _gh_pre_type="$(upgrade_path_type "$hook_dest")"
+    if [[ "$_gh_pre_type" == file ]]; then
+      _gh_pre_hash="$(sha256_file "$hook_dest")"
+      _gh_pre_mode="$(manifest_artifact_mode "$hook_dest")"
+    fi
+  fi
   # agent-plan: classification only, never write the hook file.
   [[ "$AGENT_DRY_RUN" == true ]] || cp "$hook_src" "$hook_dest"
   [[ "$AGENT_DRY_RUN" == true ]] || chmod +x "$hook_dest"
+  if [[ "$AGENT_DRY_RUN" != true ]] && upgrade_report_enabled; then
+    [[ -n "$BACKUP_DIR" && -f "$BACKUP_DIR/$rel" ]] && _gh_backup="$BACKUP_DIR/$rel"
+    local _gh_op="modified"
+    [[ "$_gh_pre_type" == absent ]] && _gh_op="created"
+    record_report_artifact "$_gh_op" "$TARGET" "$rel" \
+      "$_gh_pre_hash" "$_gh_pre_mode" "$_gh_pre_type" \
+      "$(sha256_file "$hook_dest")" "$(manifest_artifact_mode "$hook_dest")" "file" \
+      "$_gh_backup"
+  fi
   write_manifest_entry "$(sha256_file "$hook_dest")" "$rel" "$MANIFEST_FILE" "$hook_dest"
   success "Stealth: installed $hook_name → .git/hooks/"
   record_upgrade_result updated "$rel"

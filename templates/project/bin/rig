@@ -2175,6 +2175,22 @@ for change in selected.get("changes", []):
     if not backup or not os.path.isfile(backup) or os.path.islink(backup):
         refusals.append({"path": rel, "reason": "its backup is unavailable"})
         continue
+    # Anchor the CONTENT SOURCE, not just the destination.
+    #
+    # Confining where a restore writes is not enough: the bytes it writes come
+    # from `backup_path`, which the report also supplies. Every hash check
+    # around it is self-consistent between two values from the same untrusted
+    # document — `after.hash` is just the SHA256 of the pristine template at
+    # the victim's version, which anyone holding that release can compute — so
+    # a forged report can name a payload anywhere on disk and pass all of them.
+    # Under repo tracking `.rig/` is committed, so such a report travels in an
+    # ordinary pull request.
+    if not under_anchor(backup):
+        refusals.append({
+            "path": rel,
+            "reason": "its backup lies outside this project",
+        })
+        continue
     before = change.get("before") or {}
     # A recorded hash is mandatory, not optional. Without one there is nothing
     # tying this backup to this path, and the report is just a file on disk --
@@ -2230,6 +2246,20 @@ def metadata_writable(destination):
     return not os.path.islink(destination)
 
 
+# Metadata DESTINATIONS are derived here, from this installation's own rig
+# dir — never read from the report. The report previously supplied
+# `manifest_file` and `version_path` directly, and while both were anchored,
+# nothing required them to actually BE a manifest or a VERSION file: a forged
+# report could name `bin/rig-sprint` or `.git/hooks/pre-commit` and have
+# arbitrary content copied over it, keeping the destination's executable mode.
+# The report now only decides *whether* metadata is restored, not *where*.
+RIG_DIR = os.environ.get("RIG_ANCHOR_DIR") or ""
+KNOWN_METADATA = (
+    (os.path.join(RIG_DIR, "memory", ".rig-manifest"), ".rig-manifest"),
+    (os.path.join(RIG_DIR, "memory", ".rig-manifest.json"), ".rig-manifest.json"),
+    (os.path.join(RIG_DIR, "VERSION"), "VERSION"),
+) if RIG_DIR else ()
+
 snapshot_dir = metadata.get("snapshot_dir")
 if (
     isinstance(snapshot_dir, str)
@@ -2238,16 +2268,10 @@ if (
     and not os.path.islink(snapshot_dir)
     and under_anchor(snapshot_dir)
 ):
-    manifest_file = metadata.get("manifest_file")
-    if isinstance(manifest_file, str) and manifest_file:
-        for suffix in ("", ".json"):
-            source = os.path.join(snapshot_dir, os.path.basename(manifest_file) + suffix)
-            if os.path.isfile(source) and metadata_writable(manifest_file + suffix):
-                metadata_plan.append({"from": source, "to": manifest_file + suffix})
-    version_path = metadata.get("version_path")
-    version_source = os.path.join(snapshot_dir, "VERSION")
-    if os.path.isfile(version_source) and metadata_writable(version_path):
-        metadata_plan.append({"from": version_source, "to": version_path})
+    for destination, source_name in KNOWN_METADATA:
+        source = os.path.join(snapshot_dir, source_name)
+        if os.path.isfile(source) and metadata_writable(destination):
+            metadata_plan.append({"from": source, "to": destination})
 
 # `ok` here means "this plan can complete", not "the tool ran". Metadata is
 # only restored when nothing is refused, so a plan with refusals must not

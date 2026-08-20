@@ -110,36 +110,36 @@ _rollback_id() {
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name "TestProject" --tracking repo --strategy upgrade
   rig --help
-  [[ "$output" == *"upgrade rollback"* ]]
+  [[ "$output" == *"upgrade rollback"* ]] || return 1
 }
 
 @test "rollback: help distinguishes it from install.sh --recover" {
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name "TestProject" --tracking repo --strategy upgrade
   rig upgrade --help
-  [[ "$output" == *"--recover"* ]]
-  [[ "$output" == *"interrupted"* ]]
+  [[ "$output" == *"--recover"* ]] || return 1
+  [[ "$output" == *"interrupted"* ]] || return 1
 }
 
 @test "rollback: requires --last or --id" {
   _upgraded_project
   rig upgrade rollback --dry-run
   [ "$status" -ne 0 ]
-  [[ "$output" == *"--last or --id"* ]]
+  [[ "$output" == *"--last or --id"* ]] || return 1
 }
 
 @test "rollback: refuses to act without --dry-run or --confirm" {
   _upgraded_project
   rig upgrade rollback --last
   [ "$status" -ne 0 ]
-  [[ "$output" == *"--dry-run or --confirm"* ]]
+  [[ "$output" == *"--dry-run or --confirm"* ]] || return 1
 }
 
 @test "rollback: refuses a confirmation token that does not match the report" {
   _upgraded_project
   rig upgrade rollback --last --confirm not-the-right-id
   [ "$status" -ne 0 ]
-  [[ "$output" == *"confirmation token does not match"* ]]
+  [[ "$output" == *"confirmation token does not match"* ]] || return 1
 }
 
 @test "rollback: reports when no upgrade report exists" {
@@ -147,14 +147,14 @@ _rollback_id() {
     --project-name "TestProject" --tracking repo --strategy skip
   rig upgrade rollback --last --dry-run
   [ "$status" -ne 0 ]
-  [[ "$output" == *"no upgrade reports"* ]]
+  [[ "$output" == *"no upgrade reports"* ]] || return 1
 }
 
 @test "rollback: reports when no report matches the given id" {
   _upgraded_project
   rig upgrade rollback --id 19990101_000000_1 --dry-run
   [ "$status" -ne 0 ]
-  [[ "$output" == *"no upgrade report matches"* ]]
+  [[ "$output" == *"no upgrade report matches"* ]] || return 1
 }
 
 # ── Dry run is genuinely dry ─────────────────────────────────────────────────
@@ -163,8 +163,8 @@ _rollback_id() {
   _upgraded_project
   rig upgrade rollback --last --dry-run
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Rollback plan"* ]]
-  [[ "$output" == *"restore:"* ]]
+  [[ "$output" == *"Rollback plan"* ]] || return 1
+  [[ "$output" == *"restore:"* ]] || return 1
 }
 
 @test "rollback: dry run changes nothing on disk" {
@@ -200,9 +200,13 @@ print('ok')
 
 @test "rollback: restores the version the project was on before the upgrade" {
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
-    --project-name "TestProject" --tracking repo --strategy upgrade
+    --project-name "TestProject" --tracking repo --strategy merge
+  [ "$status" -eq 0 ]
   local version_before
-  version_before="$(cat "$TEST_PROJECT/.rig/VERSION")"
+  # Age a file so the measured run has real work. Without it the only change
+  # is a convergence to identical bytes, which is correctly dropped as a no-op
+  # — leaving no report, so --last would reach back to an earlier one.
+  _age_file .claude/commands/wrap.md
   printf '\n# local note\n' >> "$TEST_PROJECT/.claude/commands/task.md"
   # Force a version difference so the rollback has something to undo.
   echo "0.0.1-test" > "$TEST_PROJECT/.rig/VERSION"
@@ -497,7 +501,7 @@ PYEOF
 
   rig upgrade rollback --last --dry-run
   [ "$status" -ne 0 ]
-  [[ "$output" == *"schema_version"* ]]
+  [[ "$output" == *"schema_version"* ]] || return 1
 }
 
 # ── Flag handling ────────────────────────────────────────────────────────────
@@ -512,7 +516,7 @@ PYEOF
   # destructive one.
   rig upgrade rollback --id "$id" --dry-run --confirm "$id"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"mutually exclusive"* ]]
+  [[ "$output" == *"mutually exclusive"* ]] || return 1
   [ "$(cat "$TEST_PROJECT/.rig/VERSION")" = "$version_before" ]
 }
 
@@ -520,7 +524,7 @@ PYEOF
   _upgraded_project
   rig upgrade rollback --id --dry-run
   [ "$status" -ne 0 ]
-  [[ "$output" == *"--id requires a report id"* ]]
+  [[ "$output" == *"--id requires a report id"* ]] || return 1
 }
 
 # ── Metadata is only restored when the file plan fully succeeded ─────────────
@@ -568,7 +572,7 @@ print(next(c['backup_path'] for c in d['changes'] if 'backup_path' in c))
   rig upgrade rollback --last --dry-run --json
   chmod 644 "$backup"
 
-  [[ "$output" != *"Traceback"* ]]
+  [[ "$output" != *"Traceback"* ]] || return 1
   run python3 -c "
 import json, sys
 json.loads(sys.stdin.read())
@@ -680,7 +684,7 @@ print('ok')
   printf 'not json' > "$TEST_PROJECT/.rig/upgrade-reports/00000000_000001.json"
 
   rig upgrade rollback --id "$id" --dry-run --json
-  [[ "$output" != *"Traceback"* ]]
+  [[ "$output" != *"Traceback"* ]] || return 1
   run python3 -c "
 import json, sys
 d = json.loads(sys.stdin.read())
@@ -708,7 +712,7 @@ PYEOF
   # kill the process AFTER the file was already overwritten — tree mutated,
   # no JSON, no rollback report.
   rig upgrade rollback --last --dry-run --json
-  [[ "$output" != *"Traceback"* ]]
+  [[ "$output" != *"Traceback"* ]] || return 1
   run python3 -c "
 import json, sys
 d = json.loads(sys.stdin.read())
@@ -730,7 +734,10 @@ print('ok')
   # own islink refusal or shutil.copyfile follows it.
   ln -s "$outside" "$TEST_PROJECT/.rig/memory/.rig-manifest-link"
   local snapshot
-  snapshot="$(ls -d "$TEST_PROJECT/.rig/upgrade-reports/"*.metadata | tail -1)"
+  snapshot="$(ls -d "$TEST_PROJECT/.rig/upgrade-reports/"*.metadata 2>/dev/null | tail -1)"
+  # Guard the glob: an absent .metadata directory would leave this empty and
+  # send the next write to /.rig-manifest-link, outside the temp dir.
+  [ -n "$snapshot" ] || { echo "no .metadata snapshot to tamper with" >&2; return 1; }
   printf 'ATTACKER CONTENT\n' > "$snapshot/.rig-manifest-link"
   python3 - "$(_latest_report)" "$TEST_PROJECT" <<'PYEOF'
 import json, sys
@@ -746,7 +753,8 @@ PYEOF
   rig upgrade rollback --id "$id" --confirm "$id" --json
 
   grep -q "ORIGINAL OUTSIDE CONTENT" "$outside"
-  ! grep -q "ATTACKER CONTENT" "$outside"
+  run grep -q "ATTACKER CONTENT" "$outside"
+  [ "$status" -ne 0 ]
 }
 
 # ── Exit-code contract ───────────────────────────────────────────────────────
