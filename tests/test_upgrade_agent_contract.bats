@@ -201,14 +201,89 @@ print($1)
   [[ "$output" == \{* ]] || return 1
 }
 
-@test "agent-plan on a target with a customized file emits refused with populated conflicts and exits 3" {
+@test "agent-plan on a convergeable customized file predicts convergence and still writes nothing" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
   stabilize_substitution_baseline
 
   # Tamper with a Rig-owned file after the manifest baseline was recorded —
   # its hash now differs from the manifest, making it "customized".
+  #
+  # Since issue #561 this file CONVERGES: a trusted base is proven from the
+  # manifest hash, the incoming template is unchanged from that base, so only
+  # the user's edit exists and it is simply kept. The zero-write assertion is
+  # the point of this test — the AGENT_DRY_RUN guard inside the convergence
+  # branch is now the only thing keeping agent-plan read-only for a file it
+  # would otherwise rewrite.
   echo "# locally customized by the user" >> "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+
+  local before after
+  before="$(tree_snapshot)"
+
+  run_installer --strategy agent-plan
+  [ "$status" -eq 0 ]
+
+  after="$(tree_snapshot)"
+  [ "$before" = "$after" ]
+
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "'.claude/hooks/pre-tool.sh' in [a['path'] for a in d['artifacts'] if a['classification'] == 'converged']")" = "True" ]
+
+  # The customized file itself must be untouched on disk.
+  grep -q "locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  ! grep -q '^<<<<<<<' "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+}
+
+@test "agent-plan on a true conflict emits refused with populated conflicts, exits 3, and writes nothing" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  local hook="$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+
+  # A genuine conflict has to be constructed, not assumed: appending to a file
+  # Rig did not otherwise change merges cleanly. Point the recorded baseline at
+  # an older release, then rewrite exactly the region that differs between that
+  # base and the incoming template, so all three sides touch it.
+  local old_tag old_hash
+  old_tag="$(git -C "$REPO_ROOT" tag --list 'v1.2*' | sort -V | head -1)"
+  [ -n "$old_tag" ] || skip "no historical tags available in this checkout"
+  old_hash="$(git -C "$REPO_ROOT" show "$old_tag:templates/project/.claude/hooks/pre-tool.sh" 2>/dev/null | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
+  [ -n "$old_hash" ] || skip "hook not present at $old_tag"
+
+  git -C "$REPO_ROOT" show "$old_tag:templates/project/.claude/hooks/pre-tool.sh" > "$hook"
+  python3 - "$hook" "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh" <<'PYEOF'
+import difflib, sys
+base_path, incoming_path = sys.argv[1:3]
+with open(base_path) as fh:
+    base = fh.readlines()
+with open(incoming_path) as fh:
+    incoming = fh.readlines()
+matcher = difflib.SequenceMatcher(None, base, incoming, autojunk=False)
+target = None
+for tag, i1, i2, _, _ in matcher.get_opcodes():
+    if tag in ("replace", "delete") and i2 > i1:
+        target = (i1, i2)
+        break
+if target is None:
+    raise SystemExit("no differing region between base and incoming")
+start, end = target
+base[start:end] = ["# user rewrote this exact region\n"]
+with open(base_path, "w") as fh:
+    fh.writelines(base)
+PYEOF
+  python3 - "$manifest" "$old_hash" <<'PYEOF'
+import sys
+manifest, old_hash = sys.argv[1:3]
+out = []
+for line in open(manifest):
+    if line.rstrip("\n").endswith("  .claude/hooks/pre-tool.sh"):
+        out.append("%s  .claude/hooks/pre-tool.sh\n" % old_hash)
+    else:
+        out.append(line)
+open(manifest, "w").writelines(out)
+PYEOF
 
   local before after
   before="$(tree_snapshot)"
@@ -225,7 +300,7 @@ print($1)
   [ "$(json_field "bool(d['conflicts'][0]['repair_guidance'])")" = "True" ]
 
   # The customized file itself must be untouched.
-  grep -q "locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  grep -q "user rewrote this exact region" "$hook"
 }
 
 @test "agent-plan never writes .codex/config.toml, even with --project-agent codex (retro-audit finding, PR #446)" {
@@ -469,7 +544,47 @@ PY
   [ "$status" -eq 0 ]
   stabilize_substitution_baseline
 
-  echo "# locally customized by the user" >> "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  # A true conflict has to be constructed. Since issue #561 a plain append
+  # converges (the incoming template equals the proven base, so only the user
+  # changed anything and their edit is kept) — which is correct, but would make
+  # this test's exit-3 assertion vacuous. Point the recorded baseline at an
+  # older release and rewrite exactly the region that differs from the incoming
+  # template, so all three sides touch it.
+  local hook="$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  local old_tag old_hash
+  old_tag="$(git -C "$REPO_ROOT" tag --list 'v1.2*' | sort -V | head -1)"
+  [ -n "$old_tag" ] || skip "no historical tags available in this checkout"
+  old_hash="$(git -C "$REPO_ROOT" show "$old_tag:templates/project/.claude/hooks/pre-tool.sh" 2>/dev/null | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
+  [ -n "$old_hash" ] || skip "hook not present at $old_tag"
+
+  git -C "$REPO_ROOT" show "$old_tag:templates/project/.claude/hooks/pre-tool.sh" > "$hook"
+  python3 - "$hook" "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh" <<'PYEOF'
+import difflib, sys
+base_path, incoming_path = sys.argv[1:3]
+with open(base_path) as fh:
+    base = fh.readlines()
+with open(incoming_path) as fh:
+    incoming = fh.readlines()
+matcher = difflib.SequenceMatcher(None, base, incoming, autojunk=False)
+for tag, i1, i2, _, _ in matcher.get_opcodes():
+    if tag in ("replace", "delete") and i2 > i1:
+        base[i1:i2] = ["# locally customized by the user\n"]
+        break
+else:
+    raise SystemExit("no differing region between base and incoming")
+with open(base_path, "w") as fh:
+    fh.writelines(base)
+PYEOF
+  python3 - "$TEST_PROJECT/.rig/memory/.rig-manifest" "$old_hash" <<'PYEOF'
+import sys
+manifest, old_hash = sys.argv[1:3]
+suffix = "  .claude/hooks/pre-tool.sh"
+out = []
+for line in open(manifest):
+    out.append("%s%s\n" % (old_hash, suffix) if line.rstrip("\n").endswith(suffix) else line)
+open(manifest, "w").writelines(out)
+PYEOF
+
   rm -f "$TEST_PROJECT/.claude/commands/status.md"
 
   run_installer --strategy agent-upgrade

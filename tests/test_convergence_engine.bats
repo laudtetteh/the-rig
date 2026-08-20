@@ -42,6 +42,10 @@ _sha256() {
   sha256sum "$1" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$1" | awk '{print $1}'
 }
 
+_sha256_stdin() {
+  { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}'
+}
+
 # Same known pre-existing ordering issue documented in
 # tests/test_upgrade_agent_contract.bats and this repo's CLAUDE.md ("`main`
 # substitution runs after `write_manifest_entry`"): stabilize the handful of
@@ -112,19 +116,18 @@ assert 'PreToolUse' in data['hooks']
 "
 }
 
-@test "agent-plan reports the specific conflicting JSON key when customization and incoming touch the same key" {
+@test "agent-upgrade preserves a customized JSON key the incoming template did not change" {
   run_installer --strategy upgrade --project-agent codex
   [ "$status" -eq 0 ]
   stabilize_substitution_baseline
 
   local hooks="$TEST_PROJECT/.codex/hooks.json"
-  local original_description
-  original_description="$(python3 -c "import json; print(json.load(open('$hooks'))['description'])")"
 
-  # Change an EXISTING key's value. The incoming template still has the
-  # original value for that same key -- current and incoming now disagree
-  # on "description" with no trusted base to arbitrate, so this must be a
-  # conflict, not a guess.
+  # Change an EXISTING key's value. Before issue #560 there was no trusted
+  # base, so "current and incoming disagree" was reported as a conflict --
+  # the engine could not tell who had changed it. With a base proven by hash,
+  # incoming == base shows Rig never touched this key, so the user's value is
+  # kept. That is a convergence, not a guess.
   python3 -c "
 import json
 p = '$hooks'
@@ -133,18 +136,20 @@ data['description'] = 'locally customized description'
 json.dump(data, open(p, 'w'), indent=2)
 "
 
-  run_installer --strategy agent-plan --project-agent codex
-  [ "$status" -eq 3 ]
+  run_installer --strategy agent-upgrade --project-agent codex
+  [ "$status" -eq 0 ]
 
-  [ "$(json_field "d['status']")" = "refused" ]
-  local conflict_entry
-  conflict_entry="$(json_field "next(c for c in d['conflicts'] if c['path'] == '.codex/hooks.json')")"
-  [[ -n "$conflict_entry" ]] || return 1
-  [ "$(json_field "any(x['path'] == 'description' for x in next(c for c in d['conflicts'] if c['path'] == '.codex/hooks.json')['details'])")" = "True" ]
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "'.codex/hooks.json' in [a['path'] for a in d['artifacts'] if a['classification'] == 'converged']")" = "True" ]
 
-  # agent-plan must never write -- the tampered value is still there.
-  grep -q "locally customized description" "$hooks"
-  [[ "$(python3 -c "import json; print(json.load(open('$hooks'))['description'])")" != "$original_description" ]] || return 1
+  # The user's value survived and the rest of the document is intact.
+  python3 -c "
+import json
+data = json.load(open('$hooks'))
+assert data['description'] == 'locally customized description', data['description']
+assert 'hooks' in data
+"
+
 }
 
 @test "agent-upgrade converges a frontmatter+Markdown file when only a new frontmatter key was added" {
@@ -219,7 +224,7 @@ open(p, 'w').write(new_text)
   grep -q "^name: code-reviewer$" "$agent_file"
 }
 
-@test "agent-plan reports a body conflict for a frontmatter+Markdown file when the prose body was customized" {
+@test "agent-upgrade converges a frontmatter+Markdown file whose prose body was customized" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
   stabilize_substitution_baseline
@@ -227,16 +232,18 @@ open(p, 'w').write(new_text)
   local agent_file="$TEST_PROJECT/.claude/agents/code-reviewer.md"
   echo "locally customized body content" >> "$agent_file"
 
-  run_installer --strategy agent-plan
-  [ "$status" -eq 3 ]
+  # Before issue #561 the body was one atomic value, so any body edit refused
+  # outright. With a proven base the body merges line-level: Rig did not touch
+  # this document, so the user's addition is simply kept.
+  run_installer --strategy agent-upgrade
+  [ "$status" -eq 0 ]
 
-  [ "$(json_field "d['status']")" = "refused" ]
-  local conflict_entry
-  conflict_entry="$(json_field "next(c for c in d['conflicts'] if c['path'] == '.claude/agents/code-reviewer.md')")"
-  [[ -n "$conflict_entry" ]] || return 1
-  [ "$(json_field "any(x['path'] == 'body' for x in next(c for c in d['conflicts'] if c['path'] == '.claude/agents/code-reviewer.md')['details'])")" = "True" ]
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "'.claude/agents/code-reviewer.md' in [a['path'] for a in d['artifacts'] if a['classification'] == 'converged']")" = "True" ]
 
   grep -q "locally customized body content" "$agent_file"
+  # The merged file must not carry conflict markers.
+  ! grep -q '^<<<<<<<' "$agent_file"
 }
 
 @test "agent-upgrade converges a TOML file when the customization adds a whole new table" {
@@ -261,27 +268,91 @@ open(p, 'w').write(new_text)
   grep -q '\[allowlist\]' "$gitleaks"
 }
 
-@test "agent-plan reports specific line-range detail for a plain-text fallback conflict" {
+@test "agent-upgrade converges a customized shell hook through the plain-text path" {
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
   stabilize_substitution_baseline
 
   # .claude/hooks/pre-tool.sh has no known structure (not JSON/TOML/
-  # frontmatter), so it must fall through to the plain-text three-way
-  # fallback -- which has no trusted base in this lane and therefore always
-  # conflicts on a real difference, but must say specifically where.
+  # frontmatter), so it falls through to the plain-text three-way path.
   echo "# locally customized by the user" >> "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+
+  run_installer --strategy agent-upgrade
+  [ "$status" -eq 0 ]
+
+  [ "$(json_field "d['status']")" = "success" ]
+  [ "$(json_field "'.claude/hooks/pre-tool.sh' in [a['path'] for a in d['artifacts'] if a['classification'] == 'converged']")" = "True" ]
+
+  grep -q "# locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  ! grep -q '^<<<<<<<' "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  # Executable mode must survive convergence -- a hook that loses +x is dead.
+  [ -x "$TEST_PROJECT/.claude/hooks/pre-tool.sh" ]
+}
+
+@test "agent-plan still refuses when the user and the incoming template edited the same region" {
+  run_installer --strategy upgrade
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  local hook="$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+
+  # Point the recorded baseline at this file's content in an older release, so
+  # the resolved base genuinely differs from the incoming template -- the real
+  # 4Culture shape. Then edit the same first lines the upstream change touched.
+  local old_tag old_hash
+  old_tag="$(git -C "$REPO_ROOT" tag --list 'v1.2*' | sort -V | head -1)"
+  [ -n "$old_tag" ] || skip "no historical tags available in this checkout"
+  old_hash="$(git -C "$REPO_ROOT" show "$old_tag:templates/project/.claude/hooks/pre-tool.sh" 2>/dev/null | _sha256_stdin)"
+  [ -n "$old_hash" ] || skip "hook not present at $old_tag"
+
+  git -C "$REPO_ROOT" show "$old_tag:templates/project/.claude/hooks/pre-tool.sh" > "$hook"
+  # Overlap has to be constructed, not assumed: editing arbitrary early lines
+  # merges cleanly whenever the upstream change happens to sit elsewhere in the
+  # file. Locate a region that genuinely differs between base and incoming, and
+  # rewrite exactly that region locally so all three sides touch it.
+  python3 - "$hook" "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh" <<'PYEOF'
+import difflib, sys
+base_path, incoming_path = sys.argv[1:3]
+with open(base_path) as fh:
+    base = fh.readlines()
+with open(incoming_path) as fh:
+    incoming = fh.readlines()
+matcher = difflib.SequenceMatcher(None, base, incoming, autojunk=False)
+target = None
+for tag, i1, i2, _, _ in matcher.get_opcodes():
+    if tag in ("replace", "delete") and i2 > i1:
+        target = (i1, i2)
+        break
+if target is None:
+    raise SystemExit("no differing region between base and incoming")
+start, end = target
+base[start:end] = ["# user rewrote this exact region\n"]
+with open(base_path, "w") as fh:
+    fh.writelines(base)
+PYEOF
+  python3 - "$manifest" "$old_hash" <<'PYEOF'
+import sys
+manifest, old_hash = sys.argv[1:3]
+out = []
+for line in open(manifest):
+    if line.rstrip("\n").endswith("  .claude/hooks/pre-tool.sh"):
+        out.append("%s  .claude/hooks/pre-tool.sh\n" % old_hash)
+    else:
+        out.append(line)
+open(manifest, "w").writelines(out)
+PYEOF
 
   run_installer --strategy agent-plan
   [ "$status" -eq 3 ]
 
   [ "$(json_field "d['status']")" = "refused" ]
-  local conflict_entry
-  conflict_entry="$(json_field "next(c for c in d['conflicts'] if c['path'] == '.claude/hooks/pre-tool.sh')")"
-  [[ -n "$conflict_entry" ]] || return 1
+  [ "$(json_field "any(c['path'] == '.claude/hooks/pre-tool.sh' for c in d['conflicts'])")" = "True" ]
+  # The refusal names the overlapping hunks, not a generic "customized".
   [ "$(json_field "len(next(c for c in d['conflicts'] if c['path'] == '.claude/hooks/pre-tool.sh')['details'])")" != "0" ]
-  [ "$(json_field "'lines' in next(c for c in d['conflicts'] if c['path'] == '.claude/hooks/pre-tool.sh')['details'][0]['path']")" = "True" ]
-  [ "$(json_field "'locally customized by the user' in next(c for c in d['conflicts'] if c['path'] == '.claude/hooks/pre-tool.sh')['details'][0]['current']")" = "True" ]
+
+  # agent-plan never writes.
+  grep -q "user rewrote this exact region" "$hook"
 }
 
 @test "existing --strategy upgrade behavior is unchanged by the convergence engine" {

@@ -304,6 +304,97 @@ install.sh --project-only --target "$(pwd)" --tracking repo --strategy agent-upg
   defensively; otherwise it is left untouched and reported.
 - Prints the same JSON schema as `agent-plan` (with `"mode":"apply"`) and
   uses the same exit codes (`0` success, `3` refused).
+- Writes a durable upgrade report and adds `report_path` and `rollback_id` to
+  the JSON (see below).
+
+### Trusted merge bases
+
+Guarded convergence needs to know which side actually changed a customized
+file, which means it needs the file's original content — not just its hash.
+That base is recovered **by content, not by version number**: the installer
+takes the baseline SHA256 the manifest recorded and finds the template revision
+that reproduces it exactly, checking the installer's checked-out templates
+first and then its release tags. A base is accepted only on exact hash
+equality, so it is proven rather than assumed.
+
+Two consequences worth knowing:
+
+- Projects tracked only in the **legacy flat manifest** — which records a hash
+  and nothing else, with no `base_revision` — converge fine. The recorded hash
+  is all the resolver needs.
+- The installer source must be a git checkout whose **release tags are
+  reachable**. In a shallow clone with no tags, only the currently checked-out
+  template can serve as a base; anything older refuses with that reason rather
+  than guessing. `git -C <installer-source> fetch --tags` restores full
+  coverage.
+
+When a base is proven, Markdown prose bodies and unstructured files merge
+line-level, so edits to different parts of the same file combine cleanly.
+Overlapping edits to the same region remain a true conflict and are reported
+hunk by hunk. Without a proven base the installer falls back to whole-file
+comparison and refuses on any difference.
+
+### Durable upgrade reports
+
+Every completed upgrade-family mutation writes one report:
+
+- repo/local tracking: `.rig/upgrade-reports/YYYYMMDD_HHMMSS.json`
+- stealth/external tracking: `$RIG_DIR/upgrade-reports/YYYYMMDD_HHMMSS.json`
+
+`agent-plan` writes **no** report — it is a zero-write classification pass.
+
+The report is a rollback contract rather than an audit log. Per changed path it
+records the operation, the storage root and relative path, before/after hash,
+mode and type, and either a backup path or an explicit `absent_before`.
+Alongside that it records the rollback id, version before/after, backup root,
+preflight snapshot, and a snapshot of the manifest pair and `.rig/VERSION` as
+they stood before the run.
+
+The operations actually emitted are `created`, `modified`, and `deleted`. The
+schema reserves `mode-only` and `manifest-only` for changes that alter nothing
+but a file's mode or its manifest entry; nothing emits them today, so do not
+rely on their presence.
+
+The report JSON itself records paths and metadata only — never file contents,
+and never the recovery journal. It is written `0600`. Note that the pre-run
+manifest pair and `.rig/VERSION` *are* copied verbatim into a sibling
+`YYYYMMDD_HHMMSS.metadata/` directory next to the report, because rollback has
+to restore them; that directory is mode `0700`.
+
+### Undoing a completed upgrade
+
+```bash
+bin/rig upgrade rollback --last --dry-run
+bin/rig upgrade rollback --id <rollback-id> --dry-run
+bin/rig upgrade rollback --id <rollback-id> --confirm <rollback-id>
+```
+
+Rollback restores only the paths the selected report records as changed — never
+the whole preflight snapshot, which would also revert unrelated work done
+since. It verifies each path still matches the report's recorded after-state
+before touching it, and refuses:
+
+- any path edited since the upgrade (your later work is never discarded);
+- any destination that is now a symlink, a directory, or the wrong type;
+- any path that would escape its storage root, or cross a symlinked parent;
+- any change whose backup is missing or no longer matches the recorded
+  pre-state.
+
+It restores the manifest pair and `.rig/VERSION` alongside the files — but only
+when every path succeeded. Reverting the bookkeeping while some file stayed at
+its post-upgrade content would claim a state the tree is not in, and every later
+upgrade would then misclassify files as customized. It writes its own durable
+rollback report either way.
+
+Exit codes: `0` fully undone, `3` some paths refused (nothing went wrong, but
+the upgrade is not fully reversed), `70` a restore actually failed. `3` matches
+the agent-mode refusal contract above, so a caller can tell "undone" from
+"declined" without parsing the JSON.
+
+> `install.sh --recover` is a different operation: it restores an **interrupted**
+> transaction from `.rig-backup/.in-progress`. Rollback undoes a **completed**
+> run. Use recovery for a run that died partway; use rollback for a run that
+> finished and that you have decided against.
 
 ### Refusal semantics and exit code 3
 
@@ -355,9 +446,16 @@ exit codes `install.sh` already uses elsewhere:
       "reason": "human-readable explanation",
       "repair_guidance": "concrete next step for a human or a follow-up agent run"
     }
-  ]
+  ],
+  "report_path": "absolute path to this run's durable report",
+  "rollback_id": "identifier to pass to bin/rig upgrade rollback --id"
 }
 ```
+
+`report_path` and `rollback_id` appear only when a real mutation was applied,
+so `agent-plan` output never carries them and their absence means "no rollback
+candidate", not an error. Their presence adds no extra stdout narration — the
+document is still exactly one machine-readable JSON object.
 
 - `summary` mirrors the same `UPGRADE_*_COUNT` bookkeeping the human-oriented
   `--strategy upgrade` summary already prints (`Updated:`, `Merged:`,

@@ -42,6 +42,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # Tags are what makes the historical-base tests meaningful here. The
+          # resolver (installer/resolve-historical-base.py, issue #560) proves
+          # a merge base by matching the manifest's recorded hash against
+          # template content at release tags. Without tags it does not fail
+          # hard — it falls back to the checked-out template and otherwise
+          # refuses with a specific "git fetch --tags" reason — but the entire
+          # tag-scan path would go unexercised, and any test asserting
+          # convergence from an older revision would pass locally and fail here
+          # for a reason unrelated to the code under test.
+          fetch-depth: 0
 
       - name: Install bats-core
         run: |
