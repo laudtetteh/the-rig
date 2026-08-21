@@ -2226,6 +2226,53 @@ _upgrade_write() {
   mark_written_this_run "$dest"
 }
 
+DIRECT_REPORT_BASE=""
+DIRECT_REPORT_DEST=""
+DIRECT_REPORT_REL=""
+DIRECT_REPORT_PRE_HASH=""
+DIRECT_REPORT_PRE_MODE=""
+DIRECT_REPORT_PRE_TYPE=""
+
+begin_direct_writer_report() {
+  local base="$1" dest="$2" rel="$3"
+  DIRECT_REPORT_BASE=""
+  DIRECT_REPORT_DEST=""
+  DIRECT_REPORT_REL=""
+  DIRECT_REPORT_PRE_HASH=""
+  DIRECT_REPORT_PRE_MODE=""
+  DIRECT_REPORT_PRE_TYPE=""
+  [[ "$AGENT_DRY_RUN" == true ]] && return 0
+  if upgrade_report_enabled && [[ -n "$base" && "$dest" == "$base"/* ]]; then
+    snapshot_upgrade_metadata
+    DIRECT_REPORT_BASE="$base"
+    DIRECT_REPORT_DEST="$dest"
+    DIRECT_REPORT_REL="$rel"
+    DIRECT_REPORT_PRE_TYPE="$(upgrade_path_type "$dest")"
+    if [[ "$DIRECT_REPORT_PRE_TYPE" == file ]]; then
+      DIRECT_REPORT_PRE_HASH="$(sha256_file "$dest")"
+      DIRECT_REPORT_PRE_MODE="$(manifest_artifact_mode "$dest")"
+    fi
+  fi
+}
+
+finish_direct_writer_report() {
+  [[ -n "$DIRECT_REPORT_REL" ]] || return 0
+  local post_type post_hash="" post_mode="" operation="modified" backup_path=""
+  post_type="$(upgrade_path_type "$DIRECT_REPORT_DEST")"
+  if [[ "$post_type" == file ]]; then
+    post_hash="$(sha256_file "$DIRECT_REPORT_DEST")"
+    post_mode="$(manifest_artifact_mode "$DIRECT_REPORT_DEST")"
+  fi
+  [[ "$DIRECT_REPORT_PRE_TYPE" == absent ]] && operation="created"
+  if [[ "$DIRECT_REPORT_PRE_TYPE" == file && -n "$BACKUP_DIR" &&
+        -f "$BACKUP_DIR/$DIRECT_REPORT_REL" ]]; then
+    backup_path="$BACKUP_DIR/$DIRECT_REPORT_REL"
+  fi
+  record_report_artifact "$operation" "$DIRECT_REPORT_BASE" "$DIRECT_REPORT_REL" \
+    "$DIRECT_REPORT_PRE_HASH" "$DIRECT_REPORT_PRE_MODE" "$DIRECT_REPORT_PRE_TYPE" \
+    "$post_hash" "$post_mode" "$post_type" "$backup_path"
+}
+
 record_created() {
   local base="$1" destination="$2"
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
@@ -4167,10 +4214,12 @@ if [[ "$DO_PROJECT" == true ]]; then
       # elsewhere as "zero writes, read-only") actually mutated
       # .codex/config.toml whenever --project-agent codex/both was passed.
       if [[ "$AGENT_DRY_RUN" != true ]]; then
+        begin_direct_writer_report "$TARGET" "$_CODEX_CONFIG" ".codex/config.toml"
         if ! _codex_merge_result="$(python3 "$SCRIPT_DIR/installer/merge-codex-config.py" "$_CODEX_CONFIG")"; then
           error "Codex project config was not changed. Fix $_CODEX_CONFIG and retry."
           exit 1
         fi
+        finish_direct_writer_report
         success "Codex project instructions: CLAUDE.md fallback ${_codex_merge_result}"
       fi
     else
@@ -4721,7 +4770,9 @@ PYEOF
       _project_state_rel=".rig/install-targets.json"
     fi
     if guard_destination_before_write "$_project_state_base" "$PROJECT_TARGET_STATE" "$_project_state_rel"; then
+      begin_direct_writer_report "$_project_state_base" "$PROJECT_TARGET_STATE" "$_project_state_rel"
       write_agent_state "$PROJECT_TARGET_STATE" project "$PROJECT_AGENT" "$TARGET_ABS"
+      finish_direct_writer_report
     fi
   fi
   success "Postflight targets: project=$PROJECT_AGENT; smoke=$_project_smoke"

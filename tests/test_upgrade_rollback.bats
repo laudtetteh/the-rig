@@ -776,6 +776,27 @@ PYEOF
   [ "$status" -eq 0 ]
 }
 
+@test "rollback: restores Codex direct-writer state when undoing a Codex target upgrade" {
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name "TestProject" --tracking repo --project-agent claude --strategy merge
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_PROJECT/.codex/config.toml" ]
+  /usr/bin/grep -q '"agents":\["claude"\]' "$TEST_PROJECT/.rig/install-targets.json"
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name "TestProject" --tracking repo --project-agent codex --strategy agent-upgrade
+  [ "$status" -eq 0 ]
+  [ -e "$TEST_PROJECT/.codex/config.toml" ]
+  /usr/bin/grep -q '"agents":\["codex"\]' "$TEST_PROJECT/.rig/install-targets.json"
+
+  local id; id="$(_rollback_id)"
+  rig upgrade rollback --id "$id" --confirm "$id"
+  [ "$status" -eq 0 ]
+
+  [ ! -e "$TEST_PROJECT/.codex/config.toml" ]
+  /usr/bin/grep -q '"agents":\["claude"\]' "$TEST_PROJECT/.rig/install-targets.json"
+}
+
 @test "rollback: a dry run with refusals does not advertise metadata it will skip" {
   _upgraded_project
   echo "# edited after the upgrade" >> "$TEST_PROJECT/.claude/commands/wrap.md"
