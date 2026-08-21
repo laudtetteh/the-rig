@@ -25,7 +25,7 @@ upgrades and interrupted operations:
   exit code 3 on any unresolved conflict, including a future/bogus manifest
   `base_revision`.
 - every completed upgrade-family mutation writes a durable, redacted report
-  (`upgrade-reports/YYYYMMDD_HHMMSS.json`), and `agent-plan` writes none;
+  (`upgrade-reports/YYYYMMDD_HHMMSS_PID.json`), and `agent-plan` writes none;
 - `rig upgrade rollback` can undo one completed upgrade from that report, and
   refuses any path edited since, any wrong-type or symlinked destination, any
   path escaping its storage root, and any unverifiable backup.
@@ -40,12 +40,15 @@ upgrades and interrupted operations:
 
 The required checks are:
 
-1. `bats test suite` — complete `bats tests/` coverage.
-2. `shell and static checks` — Bash syntax, Python compilation, ShellCheck, and
+1. `bats test suite` — complete `bats tests/` coverage, sharded.
+2. `bats test suite (shard coverage check)` — verifies every `tests/*.bats`
+   file was claimed by some shard. Sharding's own failure mode is a file
+   silently belonging to no shard and therefore never running.
+3. `shell and static checks` — Bash syntax, Python compilation, ShellCheck, and
    whitespace/error checks.
-3. `security and recovery gates` — focused path, symlink, permission,
+4. `security and recovery gates` — focused path, symlink, permission,
    redaction, and upgrade-recovery regression tests plus gitleaks.
-4. GitGuardian — hosted secret scanning for the repository and pull request.
+5. GitGuardian — hosted secret scanning for the repository and pull request.
 
 If an upgrade is interrupted by a failed write, permission error, process exit,
 or disk-full condition, the operator must preserve the failure output, inspect

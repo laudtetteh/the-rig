@@ -226,6 +226,13 @@ acquiring the index lock and works correctly inside hooks on all Git versions.
 | `.rig/VERSION` still shows old version after installer | Update manually: `echo "X.Y.Z" > .rig/VERSION` then fix manifest hash |
 | A Rig-owned file wasn't updated (installer said "Customized") | Copy the template manually: `cp ~/tools/the-rig/templates/project/<path> <dest>` |
 | Global CLAUDE.md was overwritten with placeholders | Restore from `.rig-backup/` and re-apply surgical edits |
+| The upgrade completed but you want it undone | `bin/rig upgrade rollback --last --dry-run`, review the plan, then `bin/rig upgrade rollback --id <rollback-id> --confirm <rollback-id>`. Restores only what that upgrade changed |
+| Rollback refuses a file as "edited since the upgrade" | Working as intended — something changed it after the upgrade and rollback will not discard that. Resolve the file yourself, then re-run |
+| Rollback exits `3` | Some paths were refused. Nothing went wrong, but the upgrade is not fully reversed — read `refused[]` in `--json`. Exit `0` means fully undone, `70` means a restore actually failed |
+| `--dry-run` and `--confirm` together is rejected | Deliberate. They are mutually exclusive so the belt-and-braces invocation can never be the destructive one |
+| Rollback says "no upgrade reports found" | Either the project predates durable reports, or the run changed nothing so no report was written. A first install never writes one — there is no earlier state to return to |
+| Every file refuses with a base-resolution reason | The installer source has no reachable release tags. `git -C ~/tools/the-rig fetch --tags` and re-run — this is not a genuine conflict |
+| An upgrade was *interrupted* (killed, disk full, permission error) | Use `install.sh --recover`, not rollback. Recovery restores an in-flight transaction; rollback undoes a completed one |
 
 ---
 
@@ -338,8 +345,8 @@ comparison and refuses on any difference.
 
 Every completed upgrade-family mutation writes one report:
 
-- repo/local tracking: `.rig/upgrade-reports/YYYYMMDD_HHMMSS.json`
-- stealth/external tracking: `$RIG_DIR/upgrade-reports/YYYYMMDD_HHMMSS.json`
+- repo/local tracking: `.rig/upgrade-reports/YYYYMMDD_HHMMSS_PID.json`
+- stealth/external tracking: `$RIG_DIR/upgrade-reports/YYYYMMDD_HHMMSS_PID.json`
 
 `agent-plan` writes **no** report — it is a zero-write classification pass.
 
@@ -358,7 +365,7 @@ rely on their presence.
 The report JSON itself records paths and metadata only — never file contents,
 and never the recovery journal. It is written `0600`. Note that the pre-run
 manifest pair and `.rig/VERSION` *are* copied verbatim into a sibling
-`YYYYMMDD_HHMMSS.metadata/` directory next to the report, because rollback has
+`YYYYMMDD_HHMMSS_PID.metadata/` directory next to the report, because rollback has
 to restore them; that directory is mode `0700`.
 
 ### Undoing a completed upgrade
@@ -513,16 +520,20 @@ path first route it to one of four narrowly-scoped merge helpers under
 | `*.json` (except `settings.json`, which is always smart-merged elsewhere and never reaches this path) | `merge-json.py` — key-level three-way merge |
 | `*.toml` | `merge-toml.py` — section/key-aware merge |
 | `.claude/commands/*.md`, `.claude/agents/*.md`, `.rig/processes/*.md` | `merge-frontmatter-markdown.py` — structural frontmatter merge; whole-side-wins body when only one side changed, explicit conflict when both changed |
-| everything else | `merge-text3way.py` — plain-text fallback; resolves only unambiguous whole-file cases, otherwise reports a specific line-range conflict, never a guessed splice |
+| everything else | `merge-text3way.py` — plain-text fallback; whole-file rules first, then a line-level three-way merge when a trusted base is available |
 
-No trusted `base_revision` exists to diff against until lane 444-B's
-provenance fields are actually consumed here (444-B itself has merged as of
-this writing, but 444-C's merge call sites still invoke the helpers with only
-`--current`/`--incoming`, no `--base` — wiring a real base is a thin adapter
-at the call site, not a redesign, per the PR description). Without a base,
-the merge algorithm degrades to a conservative rule: a key or line that
-differs between the customized file and the incoming template is always
-reported as a conflict, never guessed.
+A trusted base **is** supplied: `attempt_convergence_merge()` resolves one via
+`installer/resolve-historical-base.py` and passes `--base` to every helper
+above. With it, Markdown prose bodies and unstructured text merge line-level
+through `git merge-file`, so edits to different parts of the same file combine
+cleanly and only genuinely overlapping edits conflict.
+
+When no base can be *proven* — see "Trusted merge bases" above — the helpers
+run without `--base` and fall back to the conservative rule: a key or line that
+differs between the customized file and the incoming template is reported as a
+conflict rather than guessed. A refusal in that state usually means the
+installer source has no reachable release tags, not that the file genuinely
+conflicts; the refusal reason says which.
 
 A successful merge is recorded as a new `converged` classification instead of
 forcing a refusal:
