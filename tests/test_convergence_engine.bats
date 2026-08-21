@@ -364,6 +364,56 @@ PYEOF
   grep -q "user rewrote this exact region" "$hook"
 }
 
+@test "agent-plan reports missing tags as the historical-base refusal reason" {
+  local no_tags_source="$TEMP_DIR/no-tags-source"
+  git clone --quiet --no-tags --single-branch "$REPO_ROOT" "$no_tags_source"
+  cp "$REPO_ROOT/install.sh" "$no_tags_source/install.sh"
+  rm -rf "$no_tags_source/installer"
+  cp -R "$REPO_ROOT/installer" "$no_tags_source/installer"
+  [ "$(git -C "$no_tags_source" tag --list | wc -l | tr -d ' ')" = "0" ]
+
+  run bash "$no_tags_source/install.sh" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking repo \
+    --strategy merge
+  [ "$status" -eq 0 ]
+  stabilize_substitution_baseline
+
+  local hook="$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
+  local old_tag old_hash
+  old_tag="$(git -C "$REPO_ROOT" tag --list 'v1.2*' | sort -V | head -1)"
+  [ -n "$old_tag" ] || { echo "no release tags reachable — fetch-depth: 0 required" >&2; return 1; }
+  git -C "$REPO_ROOT" cat-file -e "$old_tag:templates/project/.claude/hooks/pre-tool.sh" 2>/dev/null \
+    || { echo "pre-tool.sh absent at $old_tag" >&2; return 1; }
+  git -C "$REPO_ROOT" show "$old_tag:templates/project/.claude/hooks/pre-tool.sh" > "$hook"
+  old_hash="$(_sha256 "$hook")"
+  printf '\n# local customization on an old baseline\n' >> "$hook"
+
+  python3 - "$manifest" "$old_hash" <<'PYEOF'
+import sys
+manifest, old_hash = sys.argv[1:3]
+out = []
+for line in open(manifest):
+    if line.rstrip("\n").endswith("  .claude/hooks/pre-tool.sh"):
+        out.append("%s  .claude/hooks/pre-tool.sh\n" % old_hash)
+    else:
+        out.append(line)
+open(manifest, "w").writelines(out)
+PYEOF
+
+  run bash "$no_tags_source/install.sh" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking repo \
+    --strategy agent-plan
+  [ "$status" -eq 3 ]
+
+  [ "$(json_field "d['status']")" = "refused" ]
+  [ "$(json_field "any('git fetch --tags' in item.get('current', '') for c in d['conflicts'] for item in c.get('details', []))")" = "True" ]
+}
+
 @test "existing --strategy upgrade behavior is unchanged by the convergence engine" {
   run_installer --strategy upgrade --project-agent codex
   [ "$status" -eq 0 ]

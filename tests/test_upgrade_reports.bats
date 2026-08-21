@@ -122,6 +122,26 @@ print('report_path' in d or 'rollback_id' in d)
   [ "$output" = "False" ]
 }
 
+@test "upgrade report: agent-upgrade stdout omits rollback_id when no report was written" {
+  run_installer --strategy merge
+  [ "$status" -eq 0 ]
+
+  printf '\n# local customization that converges to no net template change\n' \
+    >> "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+
+  run_installer --strategy agent-upgrade
+  [ "$status" -eq 0 ]
+  [ ! -d "$TEST_PROJECT/.rig/upgrade-reports" ]
+
+  run python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+print('report_path' in d or 'rollback_id' in d)
+" <<< "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "False" ]
+}
+
 # ── A completed apply run writes one ─────────────────────────────────────────
 
 @test "upgrade report: a completed apply run writes exactly one report" {

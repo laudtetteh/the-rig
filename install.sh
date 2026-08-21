@@ -2795,7 +2795,10 @@ resolve_historical_base() {
   python3 -c '
 import json, sys
 try:
-    print(json.loads(sys.argv[1]).get("reason", "base resolution failed"))
+    doc = json.loads(sys.argv[1])
+    reason = doc.get("reason", "base resolution failed")
+    guidance = doc.get("repair_guidance", "")
+    print(reason + (("; " + guidance) if guidance else ""))
 except Exception:
     print("base resolution failed")
 ' "$reason" 2>/dev/null || echo "base resolution failed"
@@ -2816,7 +2819,7 @@ except Exception:
 # Never writes to $dest itself.
 attempt_convergence_merge() {
   local src="$1" dest="$2" rel="$3" manifest_hash="${4:-}"
-  local tool out report status base base_arg
+  local tool out report status base base_arg base_failure
   command -v python3 >/dev/null 2>&1 || { echo "[]"; return 1; }
   tool="$(agent_convergence_merge_tool "$rel")"
   [[ -n "$tool" ]] || { echo "[]"; return 1; }
@@ -2826,7 +2829,9 @@ attempt_convergence_merge() {
   base_arg=()
   if base="$(resolve_historical_base "$rel" "$manifest_hash")"; then
     base_arg=(--base "$base")
+    base_failure=""
   else
+    base_failure="$base"
     base=""
   fi
   out="$(mktemp)"
@@ -2851,8 +2856,15 @@ try:
     assert isinstance(conflicts, list)
 except Exception:
     conflicts = []
+base_failure = sys.argv[2]
+if base_failure:
+    conflicts.insert(0, {
+        "path": "historical base",
+        "current": base_failure,
+        "incoming": "",
+    })
 print(json.dumps(conflicts, separators=(",", ":")))
-' "$report" 2>/dev/null || echo "[]"
+' "$report" "$base_failure" 2>/dev/null || echo "[]"
   return 1
 }
 
@@ -4989,7 +5001,7 @@ doc = {
 # tell "no rollback candidate" from "rollback available" without guessing.
 if report_path:
     doc["report_path"] = report_path
-if rollback_id:
+if report_path and rollback_id:
     doc["rollback_id"] = rollback_id
 print(json.dumps(doc, separators=(",", ":")))
 PYEOF
