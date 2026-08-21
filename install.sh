@@ -4527,7 +4527,11 @@ PYEOF
     if [[ -d "$TARGET/.rig" ]]; then
       blank
       warn "In-repo .rig/ found at $TARGET/.rig/ — superseded by the external install at $EXTERNAL_RIG_DIR."
-      if confirm "Remove the stale in-repo .rig/ now?" "y"; then
+      if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+        warn "Left in place because upgrade rollback cannot restore a removed .rig/ directory."
+        warn "Remove it manually after validating the upgrade:"
+        warn "  rm -rf \"$TARGET/.rig\""
+      elif confirm "Remove the stale in-repo .rig/ now?" "y"; then
         rm -rf "$TARGET/.rig"
         success "Removed stale in-repo .rig/"
       else

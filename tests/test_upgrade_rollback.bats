@@ -446,6 +446,47 @@ print('ok')
   [ "$output" = "ok" ]
 }
 
+@test "rollback: refuses a forged backup path elsewhere inside the project" {
+  _upgraded_project
+  local report victim payload
+  report="$(_latest_report)"
+  victim="$TEST_PROJECT/.claude/commands/wrap.md"
+  payload="$TEST_PROJECT/payload.txt"
+  printf 'ATTACKER PAYLOAD\n' > "$payload"
+
+  python3 - "$report" "$TEST_PROJECT" "$victim" "$payload" <<'PYEOF'
+import hashlib, json, sys
+report, root, victim, payload = sys.argv[1:5]
+with open(report) as fh:
+    d = json.load(fh)
+d["changes"] = [{
+    "operation": "modified",
+    "storage_root": root,
+    "path": ".claude/commands/wrap.md",
+    "before": {"hash": hashlib.sha256(open(payload, "rb").read()).hexdigest(),
+               "mode": "644", "type": "file"},
+    "after": {"hash": hashlib.sha256(open(victim, "rb").read()).hexdigest(),
+              "mode": "644", "type": "file"},
+    "backup_path": payload,
+}]
+with open(report, "w") as fh:
+    json.dump(d, fh)
+PYEOF
+
+  local id; id="$(_rollback_id)"
+  rig upgrade rollback --id "$id" --confirm "$id" --json
+
+  ! grep -q "ATTACKER PAYLOAD" "$victim"
+  run python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+assert any('not in this upgrade' in r['reason'] for r in d['refused']), d['refused']
+print('ok')
+" <<< "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
 @test "rollback: refuses an operation it does not understand instead of restoring blind" {
   _upgraded_project
   # wrap.md, not task.md: task.md converges to identical bytes here, so it is

@@ -2059,6 +2059,32 @@ def under_anchor(destination):
     return False
 
 
+def expected_backup_source(backup, rel):
+    """A backup must be in this rollback id's own backup slot.
+
+    Anchoring alone is not enough: a forged report can name any ordinary file
+    under the project as `backup_path` and supply the matching `before.hash`.
+    The source path is therefore derived from the running installation's roots,
+    rollback id, and the already-validated relative destination path.
+    """
+    if not isinstance(backup, str) or not rollback_id:
+        return False
+    backup_abs = os.path.realpath(backup)
+    allowed_dir = re.compile(r"^%s(?:_[0-9]+)?$" % re.escape(rollback_id))
+    for root in ANCHOR_ROOTS:
+        backup_dir = os.path.dirname(backup_abs)
+        suffix = os.path.relpath(backup_dir, os.path.join(root, ".rig-backup"))
+        if suffix.startswith("..") or suffix == ".":
+            continue
+        parts = suffix.split(os.sep)
+        if not parts or not allowed_dir.fullmatch(parts[0]):
+            continue
+        expected = os.path.realpath(os.path.join(root, ".rig-backup", parts[0], rel))
+        if backup_abs == expected:
+            return True
+    return False
+
+
 def path_type(path):
     if os.path.islink(path):
         return "symlink"
@@ -2189,6 +2215,12 @@ for change in selected.get("changes", []):
         refusals.append({
             "path": rel,
             "reason": "its backup lies outside this project",
+        })
+        continue
+    if not expected_backup_source(backup, rel):
+        refusals.append({
+            "path": rel,
+            "reason": "its backup is not in this upgrade's backup directory",
         })
         continue
     before = change.get("before") or {}
