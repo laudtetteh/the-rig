@@ -4472,7 +4472,9 @@ PYEOF
   if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
     # Write the pointer file so hooks can resolve RIG_DIR at runtime
     if [[ "$_RIGPATH_MUTATION_OK" == true ]]; then
+      begin_direct_writer_report "$TARGET" "$RIGPATH_FILE" ".rigpath"
       echo "$EXTERNAL_RIG_DIR" > "$RIGPATH_FILE"
+      finish_direct_writer_report
       success "Created .rigpath → $EXTERNAL_RIG_DIR"
     else
       info "Skipped .rigpath due to a conflicting destination."
@@ -4481,11 +4483,17 @@ PYEOF
     # Exclude .rigpath from git tracking (per-clone, not shared via .gitignore)
     GIT_EXCLUDE="$TARGET/.git/info/exclude"
     if [[ -f "$GIT_EXCLUDE" ]]; then
-      if ! grep -qF ".rigpath" "$GIT_EXCLUDE"; then
-        echo ".rigpath" >> "$GIT_EXCLUDE"
-        success "Added .rigpath to .git/info/exclude"
+      if guard_destination_before_write "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"; then
+        begin_direct_writer_report "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"
+        if ! grep -qF ".rigpath" "$GIT_EXCLUDE"; then
+          echo ".rigpath" >> "$GIT_EXCLUDE"
+          success "Added .rigpath to .git/info/exclude"
+        else
+          info ".rigpath already in .git/info/exclude"
+        fi
+        finish_direct_writer_report
       else
-        info ".rigpath already in .git/info/exclude"
+        info "Skipped .git/info/exclude update due to a conflicting destination."
       fi
     else
       warn ".git/info/exclude not found — add '.rigpath' to your .gitignore manually"
@@ -4533,11 +4541,17 @@ PYEOF
   if [[ "$RIG_TRACKING" == "exclude" ]]; then
     GIT_EXCLUDE="$TARGET/.git/info/exclude"
     if [[ -f "$GIT_EXCLUDE" ]]; then
-      if ! grep -qF ".rig/" "$GIT_EXCLUDE"; then
-        printf "\n# The Rig system files — local only, not shared with teammates\n.rig/\n" >> "$GIT_EXCLUDE"
-        success "Added .rig/ to .git/info/exclude (local only — teammates won't see it)"
+      if guard_destination_before_write "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"; then
+        begin_direct_writer_report "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"
+        if ! grep -qF ".rig/" "$GIT_EXCLUDE"; then
+          printf "\n# The Rig system files — local only, not shared with teammates\n.rig/\n" >> "$GIT_EXCLUDE"
+          success "Added .rig/ to .git/info/exclude (local only — teammates won't see it)"
+        else
+          info ".rig/ already in .git/info/exclude"
+        fi
+        finish_direct_writer_report
       else
-        info ".rig/ already in .git/info/exclude"
+        info "Skipped .git/info/exclude update due to a conflicting destination."
       fi
     else
       warn ".git/info/exclude not found — add '.rig/' to your .gitignore manually"
@@ -4548,57 +4562,63 @@ PYEOF
   if [[ "$RIG_TRACKING" == "stealth" ]]; then
     GIT_EXCLUDE="$TARGET/.git/info/exclude"
     if [[ -f "$GIT_EXCLUDE" ]]; then
-      # Helper: append entry only if not already present.
-      # -x (whole-line) matters here: without it, a substring match on
-      # "bin/rig" is satisfied by an already-written "bin/rig-sprint" line,
-      # silently skipping the real "bin/rig" entry depending on find(1)'s
-      # enumeration order. Exact-line matching removes that ordering hazard
-      # for every entry, not just the bin/rig* ones.
-      _stealth_exclude() {
-        local entry="$1"
-        if ! grep -qxF "$entry" "$GIT_EXCLUDE"; then
-          echo "$entry" >> "$GIT_EXCLUDE"
-          success "Stealth: excluded $entry from git"
-        else
-          info "Stealth: $entry already in .git/info/exclude"
-        fi
-      }
+      if guard_destination_before_write "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"; then
+        begin_direct_writer_report "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"
+        # Helper: append entry only if not already present.
+        # -x (whole-line) matters here: without it, a substring match on
+        # "bin/rig" is satisfied by an already-written "bin/rig-sprint" line,
+        # silently skipping the real "bin/rig" entry depending on find(1)'s
+        # enumeration order. Exact-line matching removes that ordering hazard
+        # for every entry, not just the bin/rig* ones.
+        _stealth_exclude() {
+          local entry="$1"
+          if ! grep -qxF "$entry" "$GIT_EXCLUDE"; then
+            echo "$entry" >> "$GIT_EXCLUDE"
+            success "Stealth: excluded $entry from git"
+          else
+            info "Stealth: $entry already in .git/info/exclude"
+          fi
+        }
 
-      printf "\n# The Rig — stealth mode: all Rig artifacts excluded from git tracking\n" >> "$GIT_EXCLUDE"
-      _stealth_exclude "CLAUDE.md"
-      _stealth_exclude "PROJECT_BRIEF.md"
-      _stealth_exclude ".claude/"
-      _stealth_exclude ".agents/"
-      _stealth_exclude ".codex/"
-      _stealth_exclude ".mcp.json"
-      _stealth_exclude ".playwright-mcp/"
-      _stealth_exclude ".github/"
-      _stealth_exclude ".gitleaks.toml"
-      _stealth_exclude "docs/INDEX.md"
-      _stealth_exclude "docs/features/README.md"
-      _stealth_exclude ".rig-backup/"
-      _stealth_exclude ".rig/"
-      # Exclude every generated launcher under bin/ — not just bin/rig.
-      # Enumerated from the installer's own templates/project/bin/ source
-      # rather than a hardcoded per-name list or a "bin/rig*" glob:
-      #   - a hardcoded list drifts the moment a new launcher ships (this is
-      #     exactly how bin/rig-connector-preflight, bin/rig-sprint, and
-      #     bin/rig-tab-title-watch went unexcluded — they were added to
-      #     templates/project/bin/ without a matching entry here);
-      #   - a "bin/rig*" glob in .git/info/exclude is future-proof but would
-      #     also silently swallow an unrelated file a project author later
-      #     adds at bin/rig-<anything>, hiding it from git without their
-      #     knowledge — not a call this installer should make on a user's
-      #     behalf without asking.
-      # Enumerating our own template source excludes exactly (and only)
-      # what we install, with zero drift on future launcher additions and
-      # zero risk of over-excluding a file we did not generate.
-      if [[ -d "$PROJECT_TEMPLATES/bin" ]]; then
-        while IFS= read -r -d '' _launcher_src; do
-          _stealth_exclude "bin/$(basename "$_launcher_src")"
-        done < <(find "$PROJECT_TEMPLATES/bin" -type f -print0)
+        printf "\n# The Rig — stealth mode: all Rig artifacts excluded from git tracking\n" >> "$GIT_EXCLUDE"
+        _stealth_exclude "CLAUDE.md"
+        _stealth_exclude "PROJECT_BRIEF.md"
+        _stealth_exclude ".claude/"
+        _stealth_exclude ".agents/"
+        _stealth_exclude ".codex/"
+        _stealth_exclude ".mcp.json"
+        _stealth_exclude ".playwright-mcp/"
+        _stealth_exclude ".github/"
+        _stealth_exclude ".gitleaks.toml"
+        _stealth_exclude "docs/INDEX.md"
+        _stealth_exclude "docs/features/README.md"
+        _stealth_exclude ".rig-backup/"
+        _stealth_exclude ".rig/"
+        # Exclude every generated launcher under bin/ — not just bin/rig.
+        # Enumerated from the installer's own templates/project/bin/ source
+        # rather than a hardcoded per-name list or a "bin/rig*" glob:
+        #   - a hardcoded list drifts the moment a new launcher ships (this is
+        #     exactly how bin/rig-connector-preflight, bin/rig-sprint, and
+        #     bin/rig-tab-title-watch went unexcluded — they were added to
+        #     templates/project/bin/ without a matching entry here);
+        #   - a "bin/rig*" glob in .git/info/exclude is future-proof but would
+        #     also silently swallow an unrelated file a project author later
+        #     adds at bin/rig-<anything>, hiding it from git without their
+        #     knowledge — not a call this installer should make on a user's
+        #     behalf without asking.
+        # Enumerating our own template source excludes exactly (and only)
+        # what we install, with zero drift on future launcher additions and
+        # zero risk of over-excluding a file we did not generate.
+        if [[ -d "$PROJECT_TEMPLATES/bin" ]]; then
+          while IFS= read -r -d '' _launcher_src; do
+            _stealth_exclude "bin/$(basename "$_launcher_src")"
+          done < <(find "$PROJECT_TEMPLATES/bin" -type f -print0)
+        else
+          _stealth_exclude "bin/rig"
+        fi
+        finish_direct_writer_report
       else
-        _stealth_exclude "bin/rig"
+        info "Skipped stealth .git/info/exclude update due to a conflicting destination."
       fi
       # .rigpath is already excluded by the external-mode block above
     else

@@ -797,6 +797,59 @@ PYEOF
   /usr/bin/grep -q '"agents":\["claude"\]' "$TEST_PROJECT/.rig/install-targets.json"
 }
 
+@test "rollback: restores stealth git-exclude bookkeeping written during upgrade" {
+  local rig_ext="$TEMP_DIR/rig-ext"
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name "TestProject" --tracking stealth --rig-dir "$rig_ext" \
+    --project-agent claude --strategy merge
+  [ "$status" -eq 0 ]
+
+  local rel=".claude/commands/wrap.md"
+  printf '# aged fixture content\n' > "$TEST_PROJECT/$rel"
+  local hash
+  hash="$(_sha256 "$TEST_PROJECT/$rel")"
+  python3 - "$rig_ext/memory/.rig-manifest" "$hash" "$rel" <<'PYEOF'
+import sys
+manifest, digest, rel = sys.argv[1:4]
+out = []
+for line in open(manifest):
+    out.append("%s  %s\n" % (digest, rel) if line.rstrip("\n").endswith("  " + rel) else line)
+open(manifest, "w").writelines(out)
+PYEOF
+
+  # Model an older stealth install whose local exclude predates the current
+  # full stealth-entry set. The upgrade should add the entries, and rollback
+  # should restore this exact per-clone bookkeeping file.
+  python3 - "$TEST_PROJECT/.git/info/exclude" <<'PYEOF'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+remove = {
+    "CLAUDE.md", "PROJECT_BRIEF.md", ".claude/", ".agents/", ".codex/",
+    ".mcp.json", ".playwright-mcp/", ".github/", ".gitleaks.toml",
+    "docs/INDEX.md", "docs/features/README.md", ".rig-backup/", ".rig/",
+    "bin/rig", "bin/rig-sprint", "bin/rig-connector-preflight",
+    "bin/rig-tab-title-watch",
+}
+lines = [
+    line for line in p.read_text().splitlines()
+    if "The Rig" not in line and line not in remove
+]
+p.write_text("\n".join(lines).rstrip() + "\n")
+PYEOF
+  cp "$TEST_PROJECT/.git/info/exclude" "$TEMP_DIR/exclude.before"
+
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name "TestProject" --tracking stealth --rig-dir "$rig_ext" \
+    --project-agent claude --strategy agent-upgrade
+  [ "$status" -eq 0 ]
+  grep -q "The Rig" "$TEST_PROJECT/.git/info/exclude"
+
+  local id; id="$(_rollback_id)"
+  rig upgrade rollback --id "$id" --confirm "$id"
+  [ "$status" -eq 0 ]
+  cmp -s "$TEMP_DIR/exclude.before" "$TEST_PROJECT/.git/info/exclude"
+}
+
 @test "rollback: a dry run with refusals does not advertise metadata it will skip" {
   _upgraded_project
   echo "# edited after the upgrade" >> "$TEST_PROJECT/.claude/commands/wrap.md"
