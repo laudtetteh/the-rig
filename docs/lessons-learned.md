@@ -1,6 +1,6 @@
 # Lessons learned
 
-Twenty-two documented pitfalls — from the original LaudBot pilot (#1-#13) through
+Twenty-three documented pitfalls — from the original LaudBot pilot (#1-#13) through
 The Rig's own ongoing development (#14 onward) — the failures that shaped The Rig.
 
 Every component in this system exists because something went wrong without it. These are the incidents, in the order they were discovered.
@@ -273,3 +273,32 @@ The manifest was later extended (v1.10.0) to track **all** files — not just Ri
 **Fix**: The two new tests that hit this (issue #489) were rewritten to use `run <command>; [ "$status" -eq N ]` instead of a bare/negated `[[ ]]` — `run` captures the exit status explicitly and doesn't depend on `errexit` propagation at all, so it's immune regardless of bash version or statement position. Proof-by-revert was then genuinely re-verified (the rewritten test correctly failed against the reverted fix, unlike the original). The pre-existing 306 occurrences across the rest of the suite were later audited and covered by issue #502, with a scanner added to prevent new unsafe Bats assertions from landing.
 
 **Watch for**: This directly undermines the "proof-by-revert" local verification practice this repo's own process mandates (deliberately break a fix, confirm the new test fails, restore, confirm it passes) for any test using a mid-test bare `[[ ]]` or `!`-negated assertion — the "confirm it fails" step can silently lie on this class of machine. Believed local-machine-specific for the `[[ ]]` case (CI's hosted Linux runners use modern bash 5.x, where this repo's CI-authority convention already treats the hosted suite as sole authority for the complete run) but the `!`-negation exemption is standard bash behavior that may affect CI too. Going forward, write every new bats assertion as `run <command>; [ "$status" -eq/-ne N ]` — never a bare `[[ ]]` or `!`-negated command — unless it is provably the test's own final statement.
+
+---
+
+## 23. Narrow convergence fixtures passed while historical downstream state still refused everywhere
+
+**Symptom**: The upgrade-convergence tests were green, but a real downstream
+rollout still refused every generic customized Rig-owned file. The reference
+project had 16 customized files tracked only by the legacy flat manifest, with
+no per-entry `base_revision`, `source`, `generator`, or `provider` provenance.
+
+**Root cause**: The earlier fixtures exercised current-template and narrow
+format paths, not a historical downstream state where the manifest baseline had
+to be proven from released template content. A resolver keyed on
+`base_revision` would not have found the right base for legacy flat-manifest
+projects; the base had to be proven by SHA256 equality against rendered
+release-tagged templates. The same class also exposed a CI/environment hazard:
+without reachable tags, the resolver degrades to refusal even though local
+tests with tags pass.
+
+**Fix**: Added historical-base fixtures for legacy flat manifests, changed the
+resolver to use content-addressed proof with `base_revision` only ordering the
+scan, and made hosted CI fetch tags so the release-tag path is exercised.
+
+**Watch for**: Green structure-aware merge tests do not prove old customized
+projects will converge. Any release touching upgrade behavior, report schema,
+rollback, or installer mutation paths still needs the policy-class fixture set
+and a live/adversarial pilot. The current reference measurement remains a
+ceiling, not an unblock: 5 of 16 files converge and 11 refuse as true
+overlapping edits.

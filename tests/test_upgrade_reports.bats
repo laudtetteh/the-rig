@@ -35,6 +35,15 @@ run_installer() {
     "$@"
 }
 
+run_installer_stealth() {
+  run bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking stealth \
+    --rig-dir "$1" \
+    "$@"
+}
+
 _sha256() {
   { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1"; } | awk '{print $1}'
 }
@@ -186,6 +195,30 @@ print(json.loads(sys.stdin.read())['report_path'])
   [ "$reported" = "$(_report_file)" ]
 }
 
+@test "upgrade report: stealth tracking writes the report under the external Rig dir" {
+  local rig_ext="$TEMP_DIR/rig-ext"
+  run_installer_stealth "$rig_ext" --strategy merge
+  [ "$status" -eq 0 ]
+  rm -f "$TEST_PROJECT/.claude/commands/wrap.md"
+
+  run_installer_stealth "$rig_ext" --strategy agent-upgrade
+  [ "$status" -eq 0 ]
+
+  [ -d "$rig_ext/upgrade-reports" ]
+  [ ! -d "$TEST_PROJECT/.rig/upgrade-reports" ]
+  [ "$(ls "$rig_ext/upgrade-reports/"*.json | wc -l | tr -d ' ')" = "1" ]
+  run python3 -c "
+import json, os, sys
+d = json.load(open(sys.argv[1]))
+assert d['tracking'] == 'stealth', d['tracking']
+assert d['target'] == os.path.realpath(sys.argv[3]), (d['target'], sys.argv[3])
+assert d['rig_dir'] == os.path.realpath(sys.argv[2]), (d['rig_dir'], sys.argv[2])
+print('ok')
+" "$(ls "$rig_ext/upgrade-reports/"*.json | tail -1)" "$rig_ext" "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
 # ── Schema and rollback-critical fields ──────────────────────────────────────
 
 @test "upgrade report: records schema, rollback id, mode and status" {
@@ -204,6 +237,21 @@ print(json.loads(sys.stdin.read())['report_path'])
 
   [ "$(_report_field "d['version']['after']")" = "$(cat "$REPO_ROOT/VERSION")" ]
   [ "$(_report_field "bool(d['version']['before'])")" = "True" ]
+}
+
+@test "upgrade report: records resolved ownership roots" {
+  _seed_project
+  run_installer --strategy agent-upgrade
+
+  run python3 -c "
+import json, os, sys
+d = json.load(open(sys.argv[1]))
+assert d['target'] == os.path.realpath(sys.argv[2]), (d['target'], sys.argv[2])
+assert d['rig_dir'] is None, d['rig_dir']
+print('ok')
+" "$(_report_file)" "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
 }
 
 @test "upgrade report: the fixture produces several changes, not one" {
@@ -405,6 +453,21 @@ print('ok')
 
   [ "$(_report_field "bool(d['backup_root'])")" = "True" ]
   [ "$(_report_field "'preflight_snapshot' in d")" = "True" ]
+}
+
+@test "upgrade report: writes a private sibling metadata snapshot" {
+  _seed_project
+  run_installer --strategy agent-upgrade
+
+  local report metadata_dir mode
+  report="$(_report_file)"
+  metadata_dir="${report%.json}.metadata"
+  [ -d "$metadata_dir" ]
+  [ -f "$metadata_dir/.rig-manifest" ]
+  [ -f "$metadata_dir/.rig-manifest.json" ]
+  [ -f "$metadata_dir/VERSION" ]
+  mode="$(stat -c '%a' "$metadata_dir" 2>/dev/null || stat -f '%Lp' "$metadata_dir")"
+  [ "$mode" = "700" ]
 }
 
 # ── Privacy and hygiene ──────────────────────────────────────────────────────

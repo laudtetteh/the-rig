@@ -2004,6 +2004,9 @@ if not collapsed:
     # changes to the installed tree"). Exit 3 tells the caller to clean up.
     raise SystemExit(3)
 
+target = os.path.realpath(target) if target else target
+external_rig_dir = os.path.realpath(external_rig_dir) if external_rig_dir else external_rig_dir
+
 document = {
     "schema": "https://the-rig.dev/schemas/upgrade-report/v1",
     "schema_version": 1,
@@ -2834,6 +2837,7 @@ resolve_historical_base() {
   local repo_root_abs
   repo_root_abs="$(cd "${TARGET:-}" 2>/dev/null && pwd)" || repo_root_abs="${TARGET:-}"
   out="$(mktemp)"
+  trap 'rm -f "$out"' RETURN
   set +e
   reason="$(python3 "$SCRIPT_DIR/installer/resolve-historical-base.py" \
     --source-repo "$SCRIPT_DIR" \
@@ -2847,10 +2851,12 @@ resolve_historical_base() {
   status=$?
   set -e
   if [[ "$status" -eq 0 ]]; then
+    trap - RETURN
     printf '%s\n' "$out"
     return 0
   fi
   rm -f "$out"
+  trap - RETURN
   python3 -c '
 import json, sys
 try:

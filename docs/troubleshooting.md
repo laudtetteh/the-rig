@@ -23,7 +23,30 @@ sections below for specific symptoms.
 
 ---
 
-## 1. Hooks aren't firing
+## 1. A completed upgrade needs to be undone
+
+**Symptom:** An upgrade finished and wrote changes, but review shows you need to
+return the Rig-managed files to their pre-upgrade state.
+
+First inspect the rollback plan:
+
+```bash
+bin/rig upgrade rollback --last --dry-run
+```
+
+If the plan is correct, confirm with the rollback id printed by the dry run:
+
+```bash
+bin/rig upgrade rollback --id <rollback_id> --confirm <rollback_id>
+```
+
+Rollback is for completed upgrades that wrote a durable report under
+`upgrade-reports/`. If the installer was interrupted before completion, use
+`install.sh --recover` instead.
+
+---
+
+## 2. Hooks aren't firing
 
 **Symptom:** Claude Code makes writes or runs `git commit` without going through the
 pre-tool or post-tool checks. The commit sentinel flow doesn't trigger. PROGRESS.md
@@ -63,7 +86,7 @@ If `.claude/settings.json` is missing the hook entries entirely, re-run the inst
 
 ---
 
-## 2. Commit gate is blocking unexpectedly
+## 3. Commit gate is blocking unexpectedly
 
 **Symptom:** `git commit` is blocked with "waiting for sentinel" even though you
 already said the trigger phrase. Or the sentinel file (`.rig-commit-ok`) exists but

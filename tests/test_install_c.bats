@@ -76,7 +76,11 @@ _sentinel_check() {
 # Hoisted into every split file's shared header -- _sha256() is called
 # from outside the section that originally defined it in test_install.bats.
 _sha256() {
-  sha256sum "$1" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$1" | awk '{print $1}'
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
 }
 
 # ── is_rig_owned classification ───────────────────────────────────────────────
@@ -226,7 +230,7 @@ print(sum(len(v) for v in s.get('hooks', {}).values()))
   run_installer --strategy skip
   [ "$status" -eq 0 ]
   local before_hash
-  before_hash="$(sha256sum "$TEST_PROJECT/.claude/settings.json" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$TEST_PROJECT/.claude/settings.json" | awk '{print $1}')"
+  before_hash="$(_sha256 "$TEST_PROJECT/.claude/settings.json")"
 
   # Second install via merge hits the merge branch against an existing
   # settings.json. Before issue #470's fix, this specific branch's backup
@@ -240,7 +244,7 @@ print(sum(len(v) for v in s.get('hooks', {}).values()))
   [ "$status" -eq 0 ]
   [ -n "$output" ]
   local backup_hash
-  backup_hash="$(sha256sum "$output" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$output" | awk '{print $1}')"
+  backup_hash="$(_sha256 "$output")"
   [ "$backup_hash" = "$before_hash" ]
 }
 
@@ -479,7 +483,11 @@ print(len(s.get('permissions', {}).get('deny', [])))
 }
 
 _sha256() {
-  sha256sum "$1" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$1" | awk '{print $1}'
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
 }
 
 _make_failing_sha_tools() {

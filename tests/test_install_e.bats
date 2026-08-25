@@ -99,7 +99,11 @@ _sentinel_check() {
 # Hoisted into every split file's shared header -- _sha256() is called
 # from outside the section that originally defined it in test_install.bats.
 _sha256() {
-  sha256sum "$1" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$1" | awk '{print $1}'
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
 }
 
 # ── Fresh install — skip strategy ─────────────────────────────────────────────

@@ -479,13 +479,13 @@ What each field means:
 - **`provider`** — which agent context the artifact belongs to: `claude`,
   `codex`, `both`, or `none`, using the install-target vocabulary described
   above.
-- **`base_revision`** — the trusted upstream template revision a future
-  three-way merge should diff against. There is no separate per-file template
-  version yet, so this is set to the installer's own `VERSION` at write time
-  (the same value as `installer_version`) — the two fields are kept distinct
-  because they answer different questions (which installer executable wrote
-  this vs. what revision to merge against), even though they share a value
-  today.
+- **`base_revision`** — a hint used only to order the historical template scan.
+  It is never trusted as the lookup key for a three-way merge. The resolver
+  proves the base by comparing the manifest's recorded SHA256 hash against
+  rendered template content from reachable release tags and, first, the current
+  worktree candidate. There is no separate per-file template version yet, so
+  this is set to the installer's own `VERSION` at write time (the same value as
+  `installer_version`) even though the fields answer different questions.
 
 An entry written before this metadata existed (pre-issue-#444) simply omits
 these fields, or carries explicit `null` — that is normal "legacy/unknown
@@ -525,8 +525,13 @@ before continuing. To perform recovery without applying a new version, run:
 
 Recovery records contain operation types and relative paths only; they do not
 contain file contents or command output. A successful upgrade moves the journal
-into its timestamped backup directory for audit and rollback reference.
-Your customizations are safe.
+into its timestamped backup directory for local recovery evidence.
+
+Completed upgrades have a separate undo path: upgrade and agent-upgrade runs
+write a durable report under `upgrade-reports/`, and `bin/rig upgrade rollback`
+uses that report to undo one completed upgrade after a dry-run review. It is
+not a replacement for `install.sh --recover`, which only handles interrupted
+transactions. Your customizations are safe.
 
 ### Choosing the right intent
 
@@ -557,12 +562,14 @@ always skipped and reported, never silently changed). That behavior has not
 changed.
 
 Separately, `install.sh` also accepts two more `--strategy` values that exist
-specifically for a calling agent or script: `agent-plan` (read-only — emits a
-JSON plan of what an upgrade would do, zero writes) and `agent-upgrade`
-(applies the same convergeable actions non-interactive `upgrade` already
-applies, plus a structure-aware/three-way merge step for customized files with
-known formats — JSON, TOML, frontmatter Markdown — where the incoming and
-local changes don't conflict). Both print one machine-readable JSON document
+specifically for a calling agent or script: `agent-plan` is read-only and emits
+a JSON plan of what an upgrade would do with zero writes; `agent-upgrade`
+applies the same convergeable actions non-interactive `upgrade` already
+applies, plus a structure-aware/three-way merge step for customized files when
+the incoming and local changes don't conflict. `settings.json` has a dedicated
+JSON merge path; JSON, TOML, frontmatter Markdown, and other text artifacts use
+the convergence helper appropriate to their file type. Both print one
+machine-readable JSON document
 and exit `3` (`status: "refused"`) rather than `0` if anything still needs a
 human — see `.rig/processes/UPGRADE_WORKFLOW.md` → "Agent-driven upgrade
 contract" for the full schema, exit codes, and worked examples.

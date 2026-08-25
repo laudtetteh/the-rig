@@ -455,8 +455,8 @@ def candidate_contents(args, candidates, generated, seen_commands):
     across 37 releases is read and rendered once, not 37 times; a generated
     skill is replayed once per distinct (generator, command-tree) pair rather
     than once per tag. Tags whose revision was already tried are skipped
-    entirely, so `tags_scanned` reports distinct revisions examined — the
-    number that actually reflects the search.
+    entirely, so `tags_scanned` reports distinct tag revisions examined — the
+    number that actually reflects the historical search.
     """
     if generated:
         seen = set()
@@ -518,7 +518,6 @@ def resolve(args):
     # The checked-out template first: most likely base, and needs no tags.
     worktree_raw = worktree_candidate(args, generated)
     if worktree_raw is not None:
-        scanned += 1
         seen_template = True
         rendered = matches(args, worktree_raw)
         if rendered is not None:
