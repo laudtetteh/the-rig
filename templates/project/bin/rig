@@ -25,6 +25,7 @@ Commands:
   rig memory append-gap     Append one structured Rig gap
   rig memory append-progress Append one dated progress entry
   rig memory write-snapshot Atomically replace CONTEXT_SNAPSHOT.md
+  rig upgrade rollback      Undo one completed Rig upgrade
   rig codex                 Launch Codex with Rig context
   rig claude                Launch Claude Code with Rig context
   rig version               Print the installed Rig version
@@ -63,6 +64,7 @@ command_help() {
     doctor) printf 'Usage: rig doctor [--json]\n';;
     connector) printf 'Usage: rig connector preflight --skill ID [--evidence FILE|-] [--refresh] [--json]\n';;
     worktree) printf 'Usage: rig worktree bootstrap\n';;
+    upgrade) printf 'Usage: rig upgrade rollback (--last | --id ID) [--dry-run | --confirm ID] [--json]\n\nUndoes one completed upgrade using the report that run wrote.\nRestores only the paths that upgrade changed, and refuses anything\nedited since. For an interrupted upgrade, use install.sh --recover.\n\nExit codes: 0 fully undone, 3 some paths refused, 70 a restore failed.\n';;
     session) cat <<'EOF'
 Usage: rig session <resolve|current|list|doctor|repair|retrofit|obligation> [options]
 
@@ -1879,6 +1881,669 @@ launch_codex() {
   exec codex "$@"
 }
 
+# ── Completed-upgrade rollback (issue #563) ───────────────────────────────────
+# Distinct from `install.sh --recover`, which restores an *interrupted*
+# transaction from .rig-backup/.in-progress. This undoes one *completed*
+# upgrade using the durable report that run wrote (issue #562), restoring only
+# the paths that report records as changed -- never the whole preflight
+# snapshot, which would also revert unrelated work done since.
+upgrade_rollback() {
+  local reports_dir; reports_dir="$(rig_dir)/upgrade-reports"
+  # The project root and rig dir are computed HERE, from the running
+  # installation, and are the only trusted anchors the restore logic gets.
+  # Everything else it reads comes out of a report file, which is just a
+  # document on disk that a user or another tool can edit.
+  RIG_REPORTS_DIR="$reports_dir" RIG_ANCHOR_ROOT="$(rig_root)" RIG_ANCHOR_DIR="$(rig_dir)" \
+    python3 - "$@" <<'PY'
+import hashlib, json, os, re, shutil, sys
+
+reports_dir = os.environ["RIG_REPORTS_DIR"]
+PROJECT_ROOT = os.path.realpath(os.environ["RIG_ANCHOR_ROOT"])
+RIG_DIR = os.path.realpath(os.environ["RIG_ANCHOR_DIR"])
+ANCHOR_ROOTS = [
+    os.path.realpath(p)
+    for p in (os.environ["RIG_ANCHOR_ROOT"], os.environ["RIG_ANCHOR_DIR"])
+    if p
+]
+
+args = sys.argv[1:]
+want_last = "--last" in args
+dry_run = "--dry-run" in args
+as_json = "--json" in args
+
+
+def flag_value(name):
+    if name in args:
+        index = args.index(name)
+        if index + 1 < len(args):
+            value = args[index + 1]
+            # `--id --dry-run` would otherwise yield the id "--dry-run" and
+            # fail much later with a confusing "no report matches" message.
+            if not value.startswith("-"):
+                return value
+    return None
+
+
+report_id = flag_value("--id")
+confirm = flag_value("--confirm")
+
+
+def valid_report_id(value):
+    return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9._-]+", value) is not None
+
+
+def fail(message, code=64):
+    if as_json:
+        print(json.dumps({"ok": False, "error": message}, separators=(",", ":")))
+    else:
+        sys.stderr.write("rig: %s\n" % message)
+    sys.exit(code)
+
+
+# Check the malformed-flag cases first: `--id --dry-run` would otherwise fall
+# through to the generic "specify --last or --id", which does not tell the user
+# what actually went wrong.
+if "--id" in args and not report_id:
+    fail("--id requires a report id")
+if "--confirm" in args and not confirm:
+    fail("--confirm requires a report id")
+if report_id and not valid_report_id(report_id):
+    fail("--id contains unsupported characters")
+if confirm and not valid_report_id(confirm):
+    fail("--confirm contains unsupported characters")
+if not want_last and not report_id:
+    fail("specify --last or --id <report-id>")
+if not dry_run and not confirm:
+    fail("refusing to roll back without --dry-run or --confirm <report-id>")
+if dry_run and confirm:
+    # Previously --confirm silently won, so the belt-and-braces invocation was
+    # the destructive one. Refuse rather than guess which was meant.
+    fail("--dry-run and --confirm are mutually exclusive")
+
+if not os.path.isdir(reports_dir):
+    fail("no upgrade reports found at %s" % reports_dir, 69)
+
+# Exclude this tool's own outcome documents. They live in the same directory
+# and "rollback_" sorts after any timestamp, so including them would make
+# --last select the previous rollback's report -- which has no changes, so a
+# dry run prints an empty plan and --confirm reports success having done
+# nothing.
+candidates = sorted(
+    name for name in os.listdir(reports_dir)
+    if name.endswith(".json") and not name.startswith("rollback_")
+)
+if not candidates:
+    fail("no upgrade reports found at %s" % reports_dir, 69)
+
+
+def load(name):
+    # A report is a plain file in a directory this tool also writes to, so a
+    # truncated or hand-edited document is expected, not exceptional. Returning
+    # None lets the caller skip it instead of dying with a JSONDecodeError
+    # traceback that breaks the --json contract.
+    try:
+        with open(os.path.join(reports_dir, name)) as handle:
+            document = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return document if isinstance(document, dict) else None
+
+
+def octal_mode(value):
+    """Validate a mode string from the report before it reaches os.chmod."""
+    if isinstance(value, str) and re.fullmatch(r"[0-7]{3,4}", value):
+        return int(value, 8)
+    return None
+
+
+selected = None
+selected_name = ""
+if want_last:
+    # Walk back from the newest until one parses; a corrupt newest report must
+    # not make every older one unreachable.
+    for name in reversed(candidates):
+        selected = load(name)
+        if selected is not None:
+            selected_name = name[: -len(".json")]
+            break
+    if selected is None:
+        fail("no readable upgrade report found in %s" % reports_dir, 69)
+else:
+    for name in candidates:
+        document = load(name)
+        if document is None:
+            continue
+        if report_id in (document.get("rollback_id"), name[: -len(".json")]):
+            selected = document
+            selected_name = name[: -len(".json")]
+            break
+    if selected is None:
+        fail("no upgrade report matches id %s" % report_id, 69)
+
+rollback_id = selected.get("rollback_id") or ""
+if not valid_report_id(rollback_id):
+    fail("upgrade report rollback_id contains unsupported characters", 69)
+# Gate the schema. A future report may carry operations this version does not
+# understand; combined with fail-closed handling that is safe, but refusing up
+# front says so plainly instead of reporting a pile of unexplained refusals.
+if selected.get("schema_version") != 1:
+    fail("unsupported upgrade report schema_version %r; upgrade The Rig first"
+         % (selected.get("schema_version"),), 69)
+if confirm and confirm != rollback_id:
+    fail("confirmation token does not match this report's rollback id (%s)" % rollback_id)
+
+
+def digest(path):
+    # Returns None rather than raising: an unreadable file must become a
+    # refusal with a reason, not a traceback that breaks the --json contract
+    # and leaks internal detail to the user.
+    try:
+        with open(path, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def mode_of(path):
+    try:
+        return oct(os.stat(path, follow_symlinks=False).st_mode & 0o777)[2:]
+    except OSError:
+        return None
+
+
+def under_anchor(destination):
+    """True when `destination` sits inside this installation's own roots.
+
+    The project root and rig dir are computed from the running install, never
+    read from the report. Without this anchor a report's `storage_root` (or a
+    metadata path) is an unrestricted write primitive: `unsafe_relpath` only
+    confines a path RELATIVE to whatever root it is handed.
+
+    The final path component is deliberately NOT resolved. A destination that
+    is itself a symlink pointing out of the project must be reported as a
+    symlink, not as an out-of-project root -- and following it here would also
+    let a symlinked file masquerade as being wherever it points.
+    """
+    if not ANCHOR_ROOTS:
+        return False
+    parent = os.path.realpath(os.path.dirname(destination) or ".")
+    resolved = os.path.join(parent, os.path.basename(destination))
+    for root in ANCHOR_ROOTS:
+        if resolved == root or resolved.startswith(root.rstrip(os.sep) + os.sep):
+            return True
+    return False
+
+
+def load_allowed_change_paths():
+    """Return destination allowlists derived from this install, not the report."""
+    project_paths = {
+        ".claude/settings.json",
+        ".codex/config.toml",
+        ".git/info/exclude",
+        ".rig/install-targets.json",
+        ".rigpath",
+        "CLAUDE.md",
+        "PROJECT_BRIEF.md",
+    }
+    rig_paths = {
+        "VERSION",
+        "install-targets.json",
+        "memory/.rig-manifest",
+        "memory/.rig-manifest.json",
+    }
+    manifest_metadata = os.path.join(RIG_DIR, "memory", ".rig-manifest.json")
+    try:
+        with open(manifest_metadata) as handle:
+            metadata = json.load(handle)
+    except (OSError, ValueError):
+        metadata = {}
+    entries = metadata.get("entries")
+    if isinstance(entries, dict):
+        for rel, entry in entries.items():
+            if not isinstance(rel, str) or not isinstance(entry, dict):
+                continue
+            if (
+                entry.get("owner") != "rig"
+                and entry.get("source") not in ("claude-native", "codex-native", "generated-codex", "shared-rig", "project-tooling")
+                and rel not in project_paths
+            ):
+                continue
+            project_paths.add(rel)
+            if rel.startswith(".rig/"):
+                rig_paths.add(rel[len(".rig/"):])
+            elif rel in ("VERSION", "install-targets.json"):
+                rig_paths.add(rel)
+    return project_paths, rig_paths
+
+
+ALLOWED_PROJECT_PATHS, ALLOWED_RIG_PATHS = load_allowed_change_paths()
+LEGACY_DELETED_RIG_PATHS = {
+    ".claude/hooks/session-end.sh",
+}
+
+
+def change_path_allowed(root, rel, operation):
+    root_real = os.path.realpath(root)
+    if root_real == PROJECT_ROOT:
+        return rel in ALLOWED_PROJECT_PATHS or (
+            operation == "deleted" and rel in LEGACY_DELETED_RIG_PATHS
+        )
+    if root_real == RIG_DIR:
+        return rel in ALLOWED_RIG_PATHS
+    return False
+
+
+def expected_backup_source(backup, rel):
+    """A backup must be in this rollback id's own backup slot.
+
+    Anchoring alone is not enough: a forged report can name any ordinary file
+    under the project as `backup_path` and supply the matching `before.hash`.
+    The source path is therefore derived from the running installation's roots,
+    rollback id, and the already-validated relative destination path.
+    """
+    if not isinstance(backup, str) or not rollback_id:
+        return False
+    backup_abs = os.path.realpath(backup)
+    allowed_dir = re.compile(r"^%s(?:_[0-9]+)?$" % re.escape(rollback_id))
+    for root in ANCHOR_ROOTS:
+        backup_dir = os.path.dirname(backup_abs)
+        suffix = os.path.relpath(backup_dir, os.path.join(root, ".rig-backup"))
+        if suffix.startswith("..") or suffix == ".":
+            continue
+        parts = suffix.split(os.sep)
+        if not parts or not allowed_dir.fullmatch(parts[0]):
+            continue
+        expected = os.path.realpath(os.path.join(root, ".rig-backup", parts[0], rel))
+        if backup_abs == expected:
+            return True
+    return False
+
+
+def path_type(path):
+    if os.path.islink(path):
+        return "symlink"
+    if os.path.isdir(path):
+        return "directory"
+    if os.path.isfile(path):
+        return "file"
+    if os.path.exists(path):
+        return "other"
+    return "absent"
+
+
+def unsafe_relpath(root, rel):
+    """Reject traversal, absolute paths, and any symlinked component.
+
+    Mirrors the installer's own recovery guard: a rollback writes to paths
+    named in a file on disk, so it must never be talked into escaping the
+    storage root or following a link out of it.
+    """
+    if not rel or rel.startswith("/") or os.path.isabs(rel):
+        return "path is not relative"
+    parts = rel.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return "path contains a traversal component"
+    current = root
+    for part in parts[:-1]:
+        current = os.path.join(current, part)
+        if os.path.islink(current):
+            return "path crosses a symlink at %s" % part
+    root_real = os.path.realpath(root)
+    target_real = os.path.realpath(os.path.join(root, os.path.dirname(rel)))
+    if target_real != root_real and not target_real.startswith(root_real + os.sep):
+        return "path resolves outside its storage root"
+    return None
+
+
+plan, refusals = [], []
+for change in selected.get("changes", []):
+    root = change.get("storage_root") or ""
+    rel = change.get("path") or ""
+    operation = change.get("operation")
+    if not isinstance(root, str) or not isinstance(rel, str):
+        refusals.append({"path": str(rel), "reason": "malformed path in report"})
+        continue
+    target = os.path.join(root, rel)
+
+    reason = unsafe_relpath(root, rel) if root else "change has no storage root"
+    if reason:
+        refusals.append({"path": rel, "reason": reason})
+        continue
+    # Classify the destination before anchoring it, so a symlink gets the
+    # symlink refusal rather than a confusing "outside this project" one.
+    actual_type = path_type(target)
+    if actual_type == "symlink":
+        refusals.append({"path": rel, "reason": "destination is now a symlink"})
+        continue
+    # Anchor the root itself. unsafe_relpath only confines `rel` relative to
+    # `root`; without this a report naming any storage_root at all is an
+    # arbitrary write (or unlink) anywhere the user can reach.
+    if not under_anchor(root) or not under_anchor(target):
+        refusals.append({
+            "path": rel,
+            "reason": "storage root is outside this project",
+        })
+        continue
+    if not change_path_allowed(root, rel, operation):
+        refusals.append({
+            "path": rel,
+            "reason": "path is not a Rig-managed rollback target",
+        })
+        continue
+    if operation not in ("created", "modified", "deleted"):
+        # Fail closed. An operation this version does not understand has no
+        # verified precondition, so restoring it would skip the
+        # "unchanged since the upgrade" guard entirely and could overwrite work.
+        refusals.append({
+            "path": rel,
+            "reason": "unsupported operation %r in report" % (operation,),
+        })
+        continue
+
+    after = change.get("after") or {}
+    if operation in ("created", "modified"):
+        if actual_type != "file":
+            refusals.append({
+                "path": rel,
+                "reason": "destination is now %s, not a file" % actual_type,
+            })
+            continue
+        current_digest = digest(target)
+        if current_digest is None:
+            refusals.append({"path": rel, "reason": "destination is unreadable"})
+            continue
+        if current_digest != (after.get("hash") or ""):
+            # Someone edited this file after the upgrade. Restoring would
+            # discard work the report knows nothing about.
+            refusals.append({"path": rel, "reason": "edited since the upgrade"})
+            continue
+        if after.get("mode") and mode_of(target) != after["mode"]:
+            refusals.append({"path": rel, "reason": "mode changed since the upgrade"})
+            continue
+    elif operation == "deleted":
+        # The upgrade removed this path. Recreating it is only safe while it is
+        # still absent — anything there now was put back deliberately.
+        if actual_type != "absent":
+            refusals.append({
+                "path": rel,
+                "reason": "recreated since the upgrade (now %s)" % actual_type,
+            })
+            continue
+
+    if operation == "created":
+        plan.append({"action": "delete", "path": rel, "target": target})
+        continue
+
+    if change.get("backup_missing"):
+        refusals.append({"path": rel, "reason": "its backup is missing"})
+        continue
+    backup = change.get("backup_path")
+    if not backup or not os.path.isfile(backup) or os.path.islink(backup):
+        refusals.append({"path": rel, "reason": "its backup is unavailable"})
+        continue
+    # Anchor the CONTENT SOURCE, not just the destination.
+    #
+    # Confining where a restore writes is not enough: the bytes it writes come
+    # from `backup_path`, which the report also supplies. Every hash check
+    # around it is self-consistent between two values from the same untrusted
+    # document — `after.hash` is just the SHA256 of the pristine template at
+    # the victim's version, which anyone holding that release can compute — so
+    # a forged report can name a payload anywhere on disk and pass all of them.
+    # Under repo tracking `.rig/` is committed, so such a report travels in an
+    # ordinary pull request.
+    if not under_anchor(backup):
+        refusals.append({
+            "path": rel,
+            "reason": "its backup lies outside this project",
+        })
+        continue
+    if not expected_backup_source(backup, rel):
+        refusals.append({
+            "path": rel,
+            "reason": "its backup is not in this upgrade's backup directory",
+        })
+        continue
+    before = change.get("before") or {}
+    # A recorded hash is mandatory, not optional. Without one there is nothing
+    # tying this backup to this path, and the report is just a file on disk --
+    # copying an unverified source over a project file is exactly the move a
+    # tampered report would want.
+    if not before.get("hash"):
+        refusals.append({"path": rel, "reason": "its recorded pre-state has no hash to verify against"})
+        continue
+    backup_digest = digest(backup)
+    if backup_digest is None:
+        refusals.append({"path": rel, "reason": "its backup is unreadable"})
+        continue
+    if backup_digest != before["hash"]:
+        refusals.append({"path": rel, "reason": "its backup no longer matches the recorded pre-state"})
+        continue
+    restore_mode = before.get("mode")
+    if restore_mode is not None and octal_mode(restore_mode) is None:
+        # Caught here, not at os.chmod: a bad mode there raises ValueError
+        # AFTER the file has already been overwritten, killing the process with
+        # no JSON and no rollback report -- the tree mutated with zero record.
+        refusals.append({"path": rel, "reason": "recorded mode is not a valid octal mode"})
+        continue
+    plan.append({
+        "action": "restore",
+        "path": rel,
+        "target": target,
+        "backup": backup,
+        "mode": restore_mode,
+    })
+
+metadata = selected.get("metadata") or {}
+metadata_plan = []
+
+
+def expected_metadata_source_dir(snapshot_dir):
+    if not isinstance(snapshot_dir, str) or not snapshot_dir or not rollback_id:
+        return False
+    snapshot_real = os.path.realpath(snapshot_dir)
+    expected = os.path.realpath(os.path.join(reports_dir, rollback_id + ".metadata"))
+    if snapshot_real == expected:
+        return True
+    if selected_name:
+        alternate = os.path.realpath(os.path.join(reports_dir, selected_name + ".metadata"))
+        if snapshot_real == alternate:
+            return True
+    return False
+
+
+# Metadata destinations are absolute paths read out of the report, so they get
+# the same anchor as every other write. Deriving the allowed roots from the
+# report itself would be circular — a crafted document could simply name the
+# directory it wanted to widen the allowlist to.
+def metadata_writable(destination):
+    """A metadata destination must be anchored AND not a symlink.
+
+    under_anchor() deliberately does not resolve the final path component, so
+    that a symlinked change destination is reported as a symlink rather than as
+    out-of-project. That is right for the change path, which checks for a
+    symlink separately -- but it means a symlink sitting inside the project and
+    pointing outside it passes the anchor, and shutil.copyfile follows it. The
+    change path refuses symlinks; this one has to as well.
+    """
+    if not isinstance(destination, str) or not destination:
+        return False
+    if not under_anchor(destination):
+        return False
+    return not os.path.islink(destination)
+
+
+# Metadata DESTINATIONS are derived here, from this installation's own rig
+# dir — never read from the report. The report previously supplied
+# `manifest_file` and `version_path` directly, and while both were anchored,
+# nothing required them to actually BE a manifest or a VERSION file: a forged
+# report could name `bin/rig-sprint` or `.git/hooks/pre-commit` and have
+# arbitrary content copied over it, keeping the destination's executable mode.
+# The report now only decides *whether* metadata is restored, not *where*.
+RIG_DIR = os.environ.get("RIG_ANCHOR_DIR") or ""
+KNOWN_METADATA = (
+    (os.path.join(RIG_DIR, "memory", ".rig-manifest"), ".rig-manifest"),
+    (os.path.join(RIG_DIR, "memory", ".rig-manifest.json"), ".rig-manifest.json"),
+    (os.path.join(RIG_DIR, "VERSION"), "VERSION"),
+) if RIG_DIR else ()
+
+snapshot_dir = metadata.get("snapshot_dir")
+if (
+    isinstance(snapshot_dir, str)
+    and snapshot_dir
+    and os.path.isdir(snapshot_dir)
+    and not os.path.islink(snapshot_dir)
+    and under_anchor(snapshot_dir)
+    and expected_metadata_source_dir(snapshot_dir)
+):
+    for destination, source_name in KNOWN_METADATA:
+        source = os.path.join(snapshot_dir, source_name)
+        if os.path.isfile(source) and not os.path.islink(source) and metadata_writable(destination):
+            metadata_plan.append({"from": source, "to": destination})
+
+# `ok` here means "this plan can complete", not "the tool ran". Metadata is
+# only restored when at least one artifact is being rolled back and nothing is
+# refused. A report with `changes: []` is not a real completed-upgrade rollback
+# contract; letting one restore metadata would turn an attacker-populated
+# <id>.metadata directory into a manifest/VERSION write primitive.
+plan_complete = not refusals
+metadata_complete = plan_complete and bool(plan)
+result = {
+    "ok": plan_complete,
+    "complete": plan_complete,
+    "rollback_id": rollback_id,
+    "report": selected.get("schema_version"),
+    "version": selected.get("version"),
+    "would_restore": [p for p in plan if p["action"] == "restore"],
+    "would_delete": [p for p in plan if p["action"] == "delete"],
+    "would_restore_metadata": [p["to"] for p in metadata_plan] if metadata_complete else [],
+    "metadata_skipped": (
+        None if metadata_complete
+        else (
+            "would be skipped because some paths are refused"
+            if not plan_complete
+            else "would be skipped because the report has no artifact changes"
+        )
+    ),
+    "refused": refusals,
+    "dry_run": bool(dry_run and not confirm),
+}
+
+if dry_run and not confirm:
+    if as_json:
+        print(json.dumps(result, separators=(",", ":")))
+    else:
+        print("Rollback plan for %s" % rollback_id)
+        print("  restore: %d" % len(result["would_restore"]))
+        for item in result["would_restore"]:
+            print("    - %s" % item["path"])
+        print("  delete:  %d" % len(result["would_delete"]))
+        for item in result["would_delete"]:
+            print("    - %s" % item["path"])
+        print("  metadata: %d" % (len(metadata_plan) if metadata_complete else 0))
+        print("  refused: %d" % len(refusals))
+        for item in refusals:
+            print("    - %s (%s)" % (item["path"], item["reason"]))
+        print("\nConfirm with: rig upgrade rollback --id %s --confirm %s"
+              % (rollback_id, rollback_id))
+    sys.exit(0)
+
+restored, deleted, failed = [], [], []
+for item in plan:
+    try:
+        if item["action"] == "delete":
+            os.unlink(item["target"])
+            deleted.append(item["path"])
+        else:
+            # A deleted path's parent directory may itself have been removed.
+            parent = os.path.dirname(item["target"])
+            if parent and not os.path.isdir(parent):
+                os.makedirs(parent, exist_ok=True)
+            shutil.copyfile(item["backup"], item["target"])
+            mode_bits = octal_mode(item.get("mode")) if item.get("mode") else None
+            if mode_bits is not None:
+                os.chmod(item["target"], mode_bits)
+            restored.append(item["path"])
+    except OSError as exc:
+        failed.append({"path": item["path"], "reason": str(exc)})
+
+metadata_restored = []
+metadata_skipped = None
+if refusals or failed:
+    # The manifest baselines and VERSION describe the file set as a whole. If
+    # any path could not be put back, restoring them would claim a state the
+    # tree is not in — e.g. reverting VERSION to v1 over a v3 install, after
+    # which every later upgrade misclassifies files as customized. Leaving the
+    # bookkeeping alone is the honest outcome.
+    metadata_skipped = "not restored because some paths were refused or failed"
+elif not plan:
+    metadata_skipped = "not restored because the report has no artifact changes"
+else:
+    for item in metadata_plan:
+        try:
+            shutil.copyfile(item["from"], item["to"])
+            metadata_restored.append(item["to"])
+        except OSError as exc:
+            failed.append({"path": item["to"], "reason": str(exc)})
+
+outcome = {
+    # `ok` means "this rollback did what it set out to do". A run that restored
+    # nothing because every path was refused is not a success, and a caller
+    # must be able to tell "undone" from "declined".
+    "ok": not failed and not refusals,
+    "complete": not failed and not refusals,
+    "rollback_id": rollback_id,
+    "restored": restored,
+    "deleted": deleted,
+    "metadata_restored": metadata_restored,
+    "refused": refusals,
+    "failed": failed,
+    "dry_run": False,
+}
+if metadata_skipped:
+    outcome["metadata_skipped"] = metadata_skipped
+
+# The rollback itself is durable evidence too. Include a timestamp so retrying
+# a partially-failed rollback does not overwrite the record of the first
+# attempt -- that record is the evidence of what state the tree was left in.
+try:
+    import time
+    os.makedirs(reports_dir, exist_ok=True)
+    rollback_report = os.path.join(
+        reports_dir,
+        "rollback_%s_%s.json" % (rollback_id, time.strftime("%Y%m%d_%H%M%S")),
+    )
+    with open(rollback_report, "w") as handle:
+        json.dump(outcome, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.chmod(rollback_report, 0o600)
+    outcome["rollback_report"] = rollback_report
+except OSError:
+    pass
+
+if as_json:
+    print(json.dumps(outcome, separators=(",", ":")))
+else:
+    print("Rolled back %s" % rollback_id)
+    print("  restored: %d" % len(restored))
+    print("  deleted:  %d" % len(deleted))
+    print("  metadata: %d" % len(metadata_restored))
+    if refusals:
+        print("  refused:  %d" % len(refusals))
+        for item in refusals:
+            print("    - %s (%s)" % (item["path"], item["reason"]))
+    if failed:
+        print("  FAILED:   %d" % len(failed))
+        for item in failed:
+            print("    - %s (%s)" % (item["path"], item["reason"]))
+# 0 complete · 3 refused (nothing wrong, but not fully undone) · 70 failed.
+# Exit 3 matches install.sh's agent-mode "refused" contract, so a caller can
+# tell "undone" from "declined" without parsing JSON.
+if failed:
+    sys.exit(70)
+sys.exit(3 if refusals else 0)
+PY
+}
+
 main() {
   local command="${1:-}" subcommand
   case "$command" in
@@ -1890,6 +2555,14 @@ main() {
     connector) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help connector; else exec "$(dirname "${BASH_SOURCE[0]}")/rig-connector-preflight" "$@"; fi;;
     worktree) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help worktree; else worktree_bootstrap "$@"; fi;;
     sprint) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help sprint; else exec "$(dirname "${BASH_SOURCE[0]}")/rig-sprint" "$@"; fi;;
+    upgrade)
+      shift
+      if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help upgrade; return; fi
+      subcommand="${1:-}"; shift || true
+      case "$subcommand" in
+        rollback) upgrade_rollback "$@";;
+        *) usage_error "unexpected upgrade subcommand" "$@";;
+      esac;;
     session|session-name|memory)
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help "$command"; return; fi

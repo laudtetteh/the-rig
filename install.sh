@@ -567,6 +567,12 @@ write_manifest_entry() {
   if ! upgrade_manifest_mutation_allowed "$manifest_file" "$rel"; then
     return 0
   fi
+  # Capture the pre-run manifest pair before the FIRST entry is written, not
+  # just before the first file write (issue #562). An up-to-date artifact
+  # refreshes its manifest entry without ever calling _upgrade_write(), so
+  # latching the snapshot there alone caught the flat manifest already mutated
+  # and left rollback unable to restore it.
+  snapshot_upgrade_metadata
   mkdir -p "$(dirname "$manifest_file")"
   if [[ ! -f "$manifest_file" ]]; then
     {
@@ -1144,6 +1150,20 @@ refresh_executable_manifest_entry() {
   [[ -f "$path" && ! -L "$path" ]] || return 0
   [[ -n "$(read_manifest_hash "$rel")" ]] || return 0
   write_manifest_entry "$(sha256_file "$path")" "$rel" "$MANIFEST_FILE" "$path"
+  # The chmod +x above happens AFTER _upgrade_write() recorded this file's
+  # after-state, so the report's recorded mode is the pre-chmod one and
+  # rollback refuses the file as "mode changed since the upgrade". This is the
+  # fifth site of that class; the manifest half (#498) was here already and the
+  # report half (#562) was not. Key it on the same (base, rel) copy_file used.
+  local _x_base="$TARGET"
+  if [[ ( "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ) &&
+        -n "${EXTERNAL_RIG_DIR:-}" && "$path" == "$EXTERNAL_RIG_DIR"/* ]]; then
+    _x_base="$EXTERNAL_RIG_DIR"
+  fi
+  if [[ -n "${_x_base:-}" && "$path" == "$_x_base"/* ]]; then
+    record_report_artifact "refresh" "$_x_base" "${path#"$_x_base"/}" \
+      "" "" "" "$(sha256_file "$path")" "$(manifest_artifact_mode "$path")" "file" ""
+  fi
 }
 
 # Shared no-follow safety check for any direct-writer mutation: only a
@@ -1632,6 +1652,413 @@ UPGRADE_JOURNAL=""
 UPGRADE_TRANSACTION_ACTIVE=false
 UPGRADE_TRANSACTION_BASE=""
 
+# ── Durable upgrade report (issue #562) ───────────────────────────────────────
+# The recovery journal above is deliberately minimal and is never copied into a
+# report (see its comment). The report is a separate, richer artifact whose
+# purpose is to be a rollback contract: it records, per changed path, enough
+# state for `rig upgrade rollback` to verify nothing moved underneath it before
+# restoring. Records accumulate in a temp file rather than a shell array because
+# some writers run inside command substitutions, where an array assignment would
+# be lost with the subshell.
+UPGRADE_REPORT_JOURNAL=""
+UPGRADE_REPORT_PATH=""
+UPGRADE_ROLLBACK_ID=""
+UPGRADE_VERSION_BEFORE=""
+
+upgrade_report_enabled() {
+  # agent-plan is a classification pass and must stay zero-write, so it never
+  # opens a report. Only real upgrade-family mutations do.
+  [[ "$COLLISION_STRATEGY" == upgrade && "$AGENT_DRY_RUN" != true ]]
+}
+
+init_upgrade_report() {
+  upgrade_report_enabled || return 0
+  [[ -z "$UPGRADE_REPORT_JOURNAL" ]] || return 0
+  UPGRADE_REPORT_JOURNAL="$(mktemp)"
+  UPGRADE_ROLLBACK_ID="${BACKUP_TS}_$$"
+}
+
+# Preserve the manifest pair and .rig/VERSION exactly once per run, before the
+# first one is rewritten. Rollback has to restore this metadata alongside the
+# files, or a rolled-back project would claim a version and a set of baseline
+# hashes that no longer match its own contents (issue #562/#563).
+UPGRADE_METADATA_SNAPSHOT=""
+# Set when a manifest already existed at the start of this run — i.e. this is a
+# genuine upgrade of an existing install rather than a first install.
+UPGRADE_HAD_PRIOR_MANIFEST=false
+
+project_prior_manifest_exists() {
+  [[ -n "${TARGET:-}" ]] || return 1
+  [[ -n "${MANIFEST_FILE:-}" && -f "$MANIFEST_FILE" ]] && return 0
+  [[ -f "$TARGET/.rig/memory/.rig-manifest" ]] && return 0
+  if [[ -f "$TARGET/.rigpath" && ! -L "$TARGET/.rigpath" ]]; then
+    local _prior_rig_dir
+    _prior_rig_dir="$(tr -d '[:space:]' < "$TARGET/.rigpath" 2>/dev/null || true)"
+    [[ -n "$_prior_rig_dir" && -f "$_prior_rig_dir/memory/.rig-manifest" ]] && return 0
+  fi
+  return 1
+}
+
+snapshot_upgrade_metadata() {
+  upgrade_report_enabled || return 0
+  [[ -z "$UPGRADE_METADATA_SNAPSHOT" ]] || return 0
+  [[ -n "${MANIFEST_FILE:-}" ]] || return 0
+  # Rollback is project-layer only, and the global layer runs first with
+  # MANIFEST_FILE temporarily pointing at a global manifest. Snapshotting then
+  # would store global bookkeeping under a report that names the project
+  # manifest. Skip without latching, so the first project-layer write still
+  # captures the right pair.
+  [[ "$MANIFEST_FILE" == "${GLOBAL_MANIFEST_FILE:-}" ]] && return 0
+  [[ "$MANIFEST_FILE" == "${CODEX_GLOBAL_MANIFEST_FILE:-}" ]] && return 0
+  # `${TARGET:-}`: TARGET is assigned inside the project layer, but this runs
+  # from _upgrade_write(), which the global layer reaches first. A bare
+  # dereference aborts the whole installer under `set -u`.
+  [[ -n "${TARGET:-}" ]] || return 0
+  # Was this a real upgrade, or a first install? A fresh install has no prior
+  # state to return to, and recording its creations would make
+  # `rig upgrade rollback --last` immediately after installing delete the whole
+  # Rig installation — an uninstall wearing an upgrade's clothes. Decided here,
+  # before the first manifest write, which is the last moment the answer is
+  # still visible.
+  if project_prior_manifest_exists; then
+    UPGRADE_HAD_PRIOR_MANIFEST=true
+  fi
+  init_upgrade_report
+  UPGRADE_METADATA_SNAPSHOT="$(mktemp -d)"
+  local source target
+  for source in "$MANIFEST_FILE" "${MANIFEST_FILE}.json"; do
+    [[ -f "$source" && ! -L "$source" ]] || continue
+    target="$UPGRADE_METADATA_SNAPSHOT/$(basename "$source")"
+    cp "$source" "$target" 2>/dev/null || true
+  done
+  if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
+    source="${EXTERNAL_RIG_DIR:-}/VERSION"
+  else
+    source="${TARGET:-}/.rig/VERSION"
+  fi
+  if [[ -f "$source" && ! -L "$source" ]]; then
+    cp "$source" "$UPGRADE_METADATA_SNAPSHOT/VERSION" 2>/dev/null || true
+  fi
+}
+
+# Record one changed path. Field order is fixed and unit-separated so the
+# report writer can parse it without quoting rules.
+#   operation \x1e base \x1e rel \x1e pre_hash \x1e pre_mode \x1e pre_type
+#             \x1e post_hash \x1e post_mode \x1e post_type \x1e backup_path
+record_report_artifact() {
+  local operation="$1" base="$2" rel="$3"
+  local pre_hash="$4" pre_mode="$5" pre_type="$6"
+  local post_hash="$7" post_mode="$8" post_type="$9"
+  local backup_path="${10:-}"
+  upgrade_report_enabled || return 0
+  # Project-layer artifacts only. The global layer runs FIRST, with
+  # MANIFEST_FILE temporarily repointed and TARGET not yet assigned, so
+  # without this a `--strategy upgrade` run that also touches the global
+  # layer records entries rooted at ~/.claude into the project's report.
+  # Rollback then refuses those (correctly — they are outside the project),
+  # which makes the whole plan incomplete, skips the metadata restore, and
+  # leaves the manifest disagreeing with the files on disk. Guarding
+  # snapshot_upgrade_metadata() alone was not enough: that protects the
+  # metadata snapshot, not the artifact records.
+  [[ -n "${TARGET:-}" ]] || return 0
+  [[ "${MANIFEST_FILE:-}" == "${GLOBAL_MANIFEST_FILE:-}" ]] && return 0
+  [[ "${MANIFEST_FILE:-}" == "${CODEX_GLOBAL_MANIFEST_FILE:-}" ]] && return 0
+  init_upgrade_report
+  [[ -n "$UPGRADE_REPORT_JOURNAL" ]] || return 0
+  printf '%s\x1e%s\x1e%s\x1e%s\x1e%s\x1e%s\x1e%s\x1e%s\x1e%s\x1e%s\n' \
+    "$operation" "$base" "$rel" "$pre_hash" "$pre_mode" "$pre_type" \
+    "$post_hash" "$post_mode" "$post_type" "$backup_path" \
+    >> "$UPGRADE_REPORT_JOURNAL"
+}
+
+# Classify a path's current on-disk state without following symlinks.
+upgrade_path_type() {
+  local path="$1"
+  if [[ -L "$path" ]]; then echo symlink
+  elif [[ -d "$path" ]]; then echo directory
+  elif [[ -f "$path" ]]; then echo file
+  elif [[ -e "$path" ]]; then echo other
+  else echo absent
+  fi
+}
+
+upgrade_report_dir() {
+  if [[ ( "$RIG_TRACKING" == "stealth" || "$RIG_TRACKING" == "external" ) && -n "${EXTERNAL_RIG_DIR:-}" ]]; then
+    printf '%s\n' "${EXTERNAL_RIG_DIR}/upgrade-reports"
+  else
+    printf '%s\n' "${TARGET:-}/.rig/upgrade-reports"
+  fi
+}
+
+# Write the durable report for a completed upgrade-family mutation.
+# Sets UPGRADE_REPORT_PATH on success. Never called for agent-plan.
+write_upgrade_report() {
+  upgrade_report_enabled || return 0
+  [[ -n "$UPGRADE_REPORT_JOURNAL" && -s "$UPGRADE_REPORT_JOURNAL" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  # No prior manifest means this run was a first install, not an upgrade.
+  # There is no earlier state to roll back to, so offering one would be a lie.
+  [[ "$UPGRADE_HAD_PRIOR_MANIFEST" == true ]] || return 0
+
+  local report_dir report_path report_status metadata_dir=""
+  # No project target means no project-layer report to write (rollback is
+  # project-layer only). Also keeps `set -u` from aborting a global-only run.
+  [[ -n "${TARGET:-}" ]] || return 0
+  report_dir="$(upgrade_report_dir)"
+  mkdir -p "$report_dir" 2>/dev/null || return 0
+  # $$ as well as the timestamp: two runs starting in the same second would
+  # otherwise overwrite each other's report, and rollback_id already carries it.
+  report_path="$report_dir/${BACKUP_TS}_$$.json"
+
+  # Park the pre-run manifest/VERSION beside the report rather than in a temp
+  # directory, so the rollback contract survives this process exiting.
+  if [[ -n "$UPGRADE_METADATA_SNAPSHOT" && -d "$UPGRADE_METADATA_SNAPSHOT" ]]; then
+    metadata_dir="$report_dir/${BACKUP_TS}_$$.metadata"
+    if mkdir -p "$metadata_dir" 2>/dev/null; then
+      # `/.` not `/*`: the manifest pair is dotfiles (.rig-manifest and
+      # .rig-manifest.json), which a bare glob silently skips — leaving a
+      # rollback that restores VERSION but not the baseline hashes beside it.
+      cp -R "$UPGRADE_METADATA_SNAPSHOT/." "$metadata_dir/" 2>/dev/null || true
+      chmod 700 "$metadata_dir" 2>/dev/null || true
+    else
+      metadata_dir=""
+    fi
+  fi
+
+  set +e
+  python3 - "$UPGRADE_REPORT_JOURNAL" "$report_path" \
+      "${AGENT_MODE:-classic}" "${1:-success}" "$UPGRADE_ROLLBACK_ID" \
+      "$UPGRADE_VERSION_BEFORE" "$INSTALLER_VERSION" "${TARGET:-}" \
+      "${EXTERNAL_RIG_DIR:-}" "$RIG_TRACKING" "${BACKUP_DIR:-}" \
+      "${PREFLIGHT_SNAPSHOT_DIR:-}" "$metadata_dir" "${MANIFEST_FILE:-}" <<'PYEOF'
+import json, os, sys, tempfile
+
+(journal, report_path, mode, status, rollback_id, version_before,
+ version_after, target, external_rig_dir, tracking, backup_root,
+ snapshot_dir, metadata_dir, manifest_file) = sys.argv[1:15]
+
+OPERATIONS = {"created", "modified", "deleted", "mode-only", "manifest-only"}
+# "refresh" is not a change of its own. It corrects the after-state of a path
+# this run already changed, for the post-copy substitution passes that rewrite
+# a file after _upgrade_write() recorded it. A refresh for a path that was
+# never changed is dropped: substitution on an already-substituted file is a
+# no-op, and inventing a change with no backup would make rollback refuse it.
+REFRESH = "refresh"
+
+
+def sha256_of(path):
+    import hashlib
+    try:
+        with open(path, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def resolve_backup(path, expected_hash):
+    """Re-point a backup recorded mid-transaction at its finalized location.
+
+    Backups are written into <base>/.rig-backup/.in-progress/<rel> while the
+    upgrade runs, and finish_upgrade_transaction() renames that directory to a
+    timestamped one once the run completes. A report is a rollback contract, so
+    a path that dangles the moment the run ends would be worse than useless.
+
+    A single run can finalize several transactions against different bases, and
+    a path backed up again in a later one holds POST-mutation content. Picking
+    the newest directory that merely has the right name would therefore hand
+    rollback the wrong bytes, so every candidate must hash to the pre-state
+    this record captured. Content decides, not directory order.
+    """
+    def acceptable(candidate):
+        if not candidate or not os.path.isfile(candidate):
+            return False
+        if not expected_hash:
+            return False
+        return sha256_of(candidate) == expected_hash
+
+    if acceptable(path):
+        return path
+    marker = os.sep + ".in-progress" + os.sep
+    if not path or marker not in path:
+        return None
+    head, _, tail = path.partition(marker)
+    if backup_root:
+        candidate = os.path.join(backup_root, tail)
+        if acceptable(candidate):
+            return candidate
+    try:
+        names = sorted(os.listdir(head), reverse=True)
+    except OSError:
+        return None
+    for name in names:
+        if name == ".in-progress":
+            continue
+        candidate = os.path.join(head, name, tail)
+        if acceptable(candidate):
+            return candidate
+    return None
+
+
+changes = []
+with open(journal) as fh:
+    for line in fh:
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        fields = line.split("\x1e")
+        if len(fields) < 10:
+            continue
+        (operation, base, rel, pre_hash, pre_mode, pre_type,
+         post_hash, post_mode, post_type, backup_path) = fields[:10]
+        if operation not in OPERATIONS and operation != REFRESH:
+            continue
+        entry = {
+            "operation": operation,
+            "storage_root": base,
+            "path": rel,
+            "before": {
+                "hash": pre_hash or None,
+                "mode": pre_mode or None,
+                "type": pre_type or "absent",
+            },
+            "after": {
+                "hash": post_hash or None,
+                "mode": post_mode or None,
+                "type": post_type or "absent",
+            },
+        }
+        resolved_backup = resolve_backup(backup_path, pre_hash)
+        if resolved_backup:
+            entry["backup_path"] = resolved_backup
+        elif entry["before"]["type"] == "absent":
+            # Nothing existed to preserve. Stating that explicitly keeps
+            # rollback from reading this as a *missing* backup: the correct
+            # undo is to delete the created file, not to restore anything.
+            entry["absent_before"] = True
+        else:
+            # Something existed but its backup cannot be located. Rollback must
+            # refuse this path rather than silently skip it.
+            entry["backup_missing"] = True
+        changes.append(entry)
+
+# Last write per path wins: a single run can legitimately touch a path more
+# than once, and rollback cares about the net before/after, not each step.
+collapsed = {}
+for entry in changes:
+    key = (entry["storage_root"], entry["path"])
+    if key not in collapsed:
+        if entry["operation"] == REFRESH:
+            continue  # nothing this run changed; not a rollback candidate
+        collapsed[key] = entry
+        continue
+    first = collapsed[key]
+    if entry["operation"] == REFRESH:
+        # Keep the original change, adopt only the corrected after-state.
+        first["after"] = entry["after"]
+        continue
+    # A genuine second change to the same path this run: keep the earliest
+    # before-state and its backup, and the latest after-state.
+    entry["before"] = first["before"]
+    # Re-derive the backup flags from the inherited before-state: the later
+    # record carries no backup of its own, and leaving its own
+    # absent_before/backup_missing set would contradict what it just inherited.
+    entry.pop("absent_before", None)
+    entry.pop("backup_missing", None)
+    if "backup_path" in first:
+        entry["backup_path"] = first["backup_path"]
+    elif first.get("absent_before"):
+        entry["absent_before"] = True
+    elif first.get("backup_missing"):
+        entry["backup_missing"] = True
+    # A path created earlier in the run is still a creation overall, however
+    # many times it was rewritten afterwards -- undoing it means deleting it.
+    # But a path that was DELETED and then recreated nets out to a
+    # modification: calling that "created" while it still carries the deleted
+    # record's backup would tell rollback to delete a file it should restore.
+    if first["operation"] == "created":
+        entry["operation"] = "created"
+    elif first["operation"] == "deleted" and entry["operation"] == "created":
+        entry["operation"] = "modified"
+    collapsed[key] = entry
+
+# Drop no-op changes. A convergence whose merge result equals what was already
+# on disk (base == incoming, so the user's version is simply kept) rewrites the
+# file with identical bytes. Recording that as a change is misleading twice
+# over: the report claims a file changed when it did not, and rollback would
+# "restore" it on every run forever, since its post-state always matches.
+collapsed = {
+    key: entry for key, entry in collapsed.items()
+    if not (
+        entry["operation"] == "modified"
+        and entry["before"]["hash"]
+        and entry["before"]["hash"] == entry["after"]["hash"]
+        and entry["before"].get("mode") == entry["after"].get("mode")
+    )
+}
+
+if not collapsed:
+    # Nothing actually changed, so there is nothing to roll back. Writing a
+    # report anyway would drop a new file into the project on every no-op
+    # upgrade — accumulating forever, and breaking the installer's own
+    # idempotence contract ("a second consecutive upgrade makes no further
+    # changes to the installed tree"). Exit 3 tells the caller to clean up.
+    raise SystemExit(3)
+
+document = {
+    "schema": "https://the-rig.dev/schemas/upgrade-report/v1",
+    "schema_version": 1,
+    "rollback_id": rollback_id,
+    "mode": mode,
+    "status": status,
+    "tracking": tracking,
+    "target": target,
+    "rig_dir": external_rig_dir or None,
+    "version": {"before": version_before or None, "after": version_after},
+    "backup_root": backup_root or None,
+    "preflight_snapshot": snapshot_dir or None,
+    # Everything rollback needs to put the bookkeeping back exactly as it was.
+    "metadata": {
+        "snapshot_dir": metadata_dir or None,
+        "manifest_file": manifest_file or None,
+        "version_path": (
+            os.path.join(external_rig_dir, "VERSION")
+            if tracking in ("external", "stealth") and external_rig_dir
+            else os.path.join(target, ".rig", "VERSION")
+        ),
+    },
+    "changes": sorted(
+        collapsed.values(), key=lambda e: (e["storage_root"], e["path"])
+    ),
+}
+
+directory = os.path.dirname(os.path.abspath(report_path)) or "."
+fd, temporary = tempfile.mkstemp(prefix=".rig-report.", dir=directory, text=True)
+try:
+    with os.fdopen(fd, "w") as fh:
+        json.dump(document, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, report_path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PYEOF
+  report_status=$?
+  set -e
+  # Exit 3 is the deliberate "nothing changed, so no report" signal — not a
+  # failure. Remove the metadata snapshot staged for a report that will not
+  # exist, so a no-op upgrade leaves the tree byte-identical.
+  if [[ "$report_status" -eq 3 ]]; then
+    [[ -n "$metadata_dir" && -d "$metadata_dir" ]] && rm -rf "$metadata_dir"
+    rmdir "$report_dir" 2>/dev/null || true
+    return 0
+  fi
+  # A report that could not be written must never fail the upgrade that already
+  # succeeded on disk; it just means no rollback candidate is offered.
+  [[ "$report_status" -eq 0 ]] || { warn "Could not write the upgrade report."; return 0; }
+  UPGRADE_REPORT_PATH="$report_path"
+}
+
 # Upgrade transactions deliberately contain only operation types and relative
 # paths. They are local recovery metadata, never copied to reports or printed
 # with file contents. A fixed in-progress directory makes an interrupted run
@@ -1778,14 +2205,84 @@ _upgrade_write() {
   local src="$1" dest="$2" base="$3"
   # agent-plan: classification only, never write or back up.
   [[ "$AGENT_DRY_RUN" == true ]] && return 0
+  # Capture pre-state before anything mutates it. Every upgrade write funnels
+  # through here, so this is the one place that sees both sides of a change
+  # (issue #562).
+  local _rep_rel="" _rep_pre_hash="" _rep_pre_mode="" _rep_pre_type="" _rep_backup=""
+  snapshot_upgrade_metadata
+  if upgrade_report_enabled && [[ -n "$base" && "$dest" == "$base"/* ]]; then
+    _rep_rel="${dest#"$base"/}"
+    _rep_pre_type="$(upgrade_path_type "$dest")"
+    if [[ "$_rep_pre_type" == file ]]; then
+      _rep_pre_hash="$(sha256_file "$dest")"
+      _rep_pre_mode="$(manifest_artifact_mode "$dest")"
+    fi
+  fi
   if [[ ( -e "$dest" || -L "$dest" ) && -n "$base" ]]; then
     backup_file "$dest" "$base"
+    [[ -n "$_rep_rel" && -n "$BACKUP_DIR" && -f "$BACKUP_DIR/$_rep_rel" ]] &&
+      _rep_backup="$BACKUP_DIR/$_rep_rel"
   fi
   cp "$src" "$dest"
+  if [[ -n "$_rep_rel" ]]; then
+    local _rep_op="modified"
+    [[ "$_rep_pre_type" == absent ]] && _rep_op="created"
+    record_report_artifact "$_rep_op" "$base" "$_rep_rel" \
+      "$_rep_pre_hash" "$_rep_pre_mode" "$_rep_pre_type" \
+      "$(sha256_file "$dest")" "$(manifest_artifact_mode "$dest")" "file" \
+      "$_rep_backup"
+  fi
   # See _RUN_WRITTEN_DESTINATIONS above guard_destination_before_write():
   # a later guard call reaching this same destination this run must know
   # it was just written, not genuinely pre-existing (issue #493).
   mark_written_this_run "$dest"
+}
+
+DIRECT_REPORT_BASE=""
+DIRECT_REPORT_DEST=""
+DIRECT_REPORT_REL=""
+DIRECT_REPORT_PRE_HASH=""
+DIRECT_REPORT_PRE_MODE=""
+DIRECT_REPORT_PRE_TYPE=""
+
+begin_direct_writer_report() {
+  local base="$1" dest="$2" rel="$3"
+  DIRECT_REPORT_BASE=""
+  DIRECT_REPORT_DEST=""
+  DIRECT_REPORT_REL=""
+  DIRECT_REPORT_PRE_HASH=""
+  DIRECT_REPORT_PRE_MODE=""
+  DIRECT_REPORT_PRE_TYPE=""
+  [[ "$AGENT_DRY_RUN" == true ]] && return 0
+  if upgrade_report_enabled && [[ -n "$base" && "$dest" == "$base"/* ]]; then
+    snapshot_upgrade_metadata
+    DIRECT_REPORT_BASE="$base"
+    DIRECT_REPORT_DEST="$dest"
+    DIRECT_REPORT_REL="$rel"
+    DIRECT_REPORT_PRE_TYPE="$(upgrade_path_type "$dest")"
+    if [[ "$DIRECT_REPORT_PRE_TYPE" == file ]]; then
+      DIRECT_REPORT_PRE_HASH="$(sha256_file "$dest")"
+      DIRECT_REPORT_PRE_MODE="$(manifest_artifact_mode "$dest")"
+    fi
+  fi
+}
+
+finish_direct_writer_report() {
+  [[ -n "$DIRECT_REPORT_REL" ]] || return 0
+  local post_type post_hash="" post_mode="" operation="modified" backup_path=""
+  post_type="$(upgrade_path_type "$DIRECT_REPORT_DEST")"
+  if [[ "$post_type" == file ]]; then
+    post_hash="$(sha256_file "$DIRECT_REPORT_DEST")"
+    post_mode="$(manifest_artifact_mode "$DIRECT_REPORT_DEST")"
+  fi
+  [[ "$DIRECT_REPORT_PRE_TYPE" == absent ]] && operation="created"
+  if [[ "$DIRECT_REPORT_PRE_TYPE" == file && -n "$BACKUP_DIR" &&
+        -f "$BACKUP_DIR/$DIRECT_REPORT_REL" ]]; then
+    backup_path="$BACKUP_DIR/$DIRECT_REPORT_REL"
+  fi
+  record_report_artifact "$operation" "$DIRECT_REPORT_BASE" "$DIRECT_REPORT_REL" \
+    "$DIRECT_REPORT_PRE_HASH" "$DIRECT_REPORT_PRE_MODE" "$DIRECT_REPORT_PRE_TYPE" \
+    "$post_hash" "$post_mode" "$post_type" "$backup_path"
 }
 
 record_created() {
@@ -2128,6 +2625,16 @@ copy_file() {
       # (issue #493): a later guard call reaching this same destination this
       # run must know it was just created, not genuinely pre-existing.
       mark_written_this_run "$dest"
+      # Creations are the bulk of a real version-to-version upgrade, and this
+      # branch never reaches _upgrade_write(), which only runs when the
+      # destination already exists. Without this the rollback contract is
+      # near-empty for exactly the upgrades that change the most (issue #562).
+      if upgrade_report_enabled && [[ -n "$base" && "$dest" == "$base"/* ]]; then
+        snapshot_upgrade_metadata
+        record_report_artifact "created" "$base" "${dest#"$base"/}" \
+          "" "" "absent" \
+          "$(sha256_file "$dest")" "$(manifest_artifact_mode "$dest")" "file" ""
+      fi
     fi
     success "Created ${dest#${base}/}"
     record_upgrade_result updated "${rel:-${dest#${base}/}}"
@@ -2257,15 +2764,18 @@ copy_codex_owned_initial() {
 # call this — their o/s/d prompt and non-interactive skip-with-review
 # behavior are unchanged byte-for-byte.
 #
-# No trusted base/provenance is available yet: issue #444 lane 444-B (which
-# adds base_revision/generator/provider manifest fields for exactly this
-# purpose) had not merged as of this lane. Every merge helper below is
-# called with only --current/--incoming and degrades to a conservative
-# 2-way rule in that mode: a key/section/line that differs between the
-# current (customized) file and the incoming template is always reported as
-# a conflict rather than guessed — see installer/_convergence_common.py.
-# Wiring a real --base once 444-B lands is a thin adapter at the call site
-# below, not a redesign of the helpers themselves.
+# A trusted base IS available since issue #560: installer/resolve-historical-
+# base.py recovers the exact content the manifest recorded as this artifact's
+# baseline, proven by SHA256 equality against historical release tags in the
+# installer source. Every merge helper below is therefore called with
+# --base/--current/--incoming and can apply the real three-way rule.
+#
+# When no base can be *proven*, the helpers still receive only
+# --current/--incoming and degrade to the conservative 2-way rule: a
+# key/section/line that differs between the current (customized) file and the
+# incoming template is reported as a conflict rather than guessed — see
+# installer/_convergence_common.py. Degrading is never silent; the refusal
+# carries the resolver's precise reason.
 agent_convergence_merge_tool() {
   local rel="$1"
   case "$rel" in
@@ -2275,6 +2785,83 @@ agent_convergence_merge_tool() {
     .claude/commands/*.md|.claude/agents/*.md|.rig/processes/*.md) echo "merge-frontmatter-markdown.py" ;;
     *) echo "merge-text3way.py" ;;
   esac
+}
+
+# The base_revision recorded for one artifact in the JSON manifest companion,
+# or empty when the entry is legacy/absent. Used only to order the historical
+# scan below — never as the lookup key. Every real blocker this feature was
+# built for (see issue #560) has no base_revision at all.
+read_manifest_base_revision() {
+  local rel="$1"
+  local metadata_file="${2:-$MANIFEST_FILE}.json"
+  [[ -f "$metadata_file" ]] || { echo ""; return 0; }
+  command -v python3 >/dev/null 2>&1 || { echo ""; return 0; }
+  python3 - "$metadata_file" "$rel" <<'PYEOF' 2>/dev/null || true
+import json, sys
+path, rel = sys.argv[1:3]
+try:
+    with open(path) as fh:
+        entries = json.load(fh).get("entries", {})
+except (OSError, ValueError):
+    print("")
+else:
+    print((entries.get(rel) or {}).get("base_revision") or "")
+PYEOF
+}
+
+# Resolve the trusted historical base for one customized artifact.
+# Echoes a temp file path holding the proven base content (exit 0), or the
+# resolver's refusal reason (exit 1). Called from a command substitution, so
+# like attempt_convergence_merge() it must return everything via stdout.
+resolve_historical_base() {
+  local rel="$1" manifest_hash="$2" out hint status reason
+  [[ -n "$manifest_hash" ]] || { echo "no recorded manifest baseline"; return 1; }
+  command -v python3 >/dev/null 2>&1 || { echo "python3 unavailable"; return 1; }
+  [[ -f "$SCRIPT_DIR/installer/resolve-historical-base.py" ]] || {
+    echo "historical-base resolver not installed"; return 1
+  }
+  hint="$(read_manifest_base_revision "$rel")"
+  # The manifest hash was recorded against the *absolute* target path (see
+  # rendered_project_template_hash(), which uses `cd "$TARGET" && pwd`), but
+  # $TARGET is stored raw from --target and may be relative. Passing the raw
+  # value would substitute a different [REPO_ROOT] than the one on record, so
+  # no rendering would ever match and every [REPO_ROOT]-bearing artifact would
+  # refuse. Pass the same absolute form, and pass the values unconditionally so
+  # an empty PROJECT_NAME still substitutes the empty string the installer used.
+  # `:-` on each: these are assigned during the project-layer flow, but this
+  # helper is also reachable from a global-layer copy, where an unset name
+  # would abort the installer under `set -u`.
+  local repo_root_abs
+  repo_root_abs="$(cd "${TARGET:-}" 2>/dev/null && pwd)" || repo_root_abs="${TARGET:-}"
+  out="$(mktemp)"
+  set +e
+  reason="$(python3 "$SCRIPT_DIR/installer/resolve-historical-base.py" \
+    --source-repo "$SCRIPT_DIR" \
+    --rel "$rel" \
+    --recorded-hash "$manifest_hash" \
+    ${hint:+--hint-revision "$hint"} \
+    --repo-root "$repo_root_abs" \
+    --base-branch "${BASE_BRANCH:-}" \
+    --project-name "${PROJECT_NAME:-}" \
+    --output "$out" 2>/dev/null)"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  rm -f "$out"
+  python3 -c '
+import json, sys
+try:
+    doc = json.loads(sys.argv[1])
+    reason = doc.get("reason", "base resolution failed")
+    guidance = doc.get("repair_guidance", "")
+    print(reason + (("; " + guidance) if guidance else ""))
+except Exception:
+    print("base resolution failed")
+' "$reason" 2>/dev/null || echo "base resolution failed"
+  return 1
 }
 
 # Attempt a convergence merge for one customized file. The caller invokes
@@ -2290,15 +2877,31 @@ agent_convergence_merge_tool() {
 #             snippets may contain escaped newlines).
 # Never writes to $dest itself.
 attempt_convergence_merge() {
-  local src="$1" dest="$2" rel="$3" tool out report status
+  local src="$1" dest="$2" rel="$3" manifest_hash="${4:-}"
+  local tool out report status base base_arg base_failure
   command -v python3 >/dev/null 2>&1 || { echo "[]"; return 1; }
   tool="$(agent_convergence_merge_tool "$rel")"
   [[ -n "$tool" ]] || { echo "[]"; return 1; }
+  # A proven historical base turns the conservative 2-way rule into a real
+  # three-way merge. Failure here is not fatal: the helpers still run without
+  # --base and report a conflict rather than guessing.
+  base_arg=()
+  if base="$(resolve_historical_base "$rel" "$manifest_hash")"; then
+    base_arg=(--base "$base")
+    base_failure=""
+  else
+    base_failure="$base"
+    base=""
+  fi
   out="$(mktemp)"
   set +e
-  report="$(python3 "$SCRIPT_DIR/installer/$tool" --current "$dest" --incoming "$src" --output "$out" 2>/dev/null)"
+  # "${base_arg[@]+"${base_arg[@]}"}" — bash 3.2 (macOS default) treats an
+  # empty array as unbound under `set -u`, so the plain "${base_arg[@]}" form
+  # would abort the installer whenever no base was resolved.
+  report="$(python3 "$SCRIPT_DIR/installer/$tool" "${base_arg[@]+"${base_arg[@]}"}" --current "$dest" --incoming "$src" --output "$out" 2>/dev/null)"
   status=$?
   set -e
+  [[ -n "$base" ]] && rm -f "$base"
   if [[ "$status" -eq 0 ]]; then
     printf '%s\n' "$out"
     return 0
@@ -2312,8 +2915,15 @@ try:
     assert isinstance(conflicts, list)
 except Exception:
     conflicts = []
+base_failure = sys.argv[2]
+if base_failure:
+    conflicts.insert(0, {
+        "path": "historical base",
+        "current": base_failure,
+        "incoming": "",
+    })
 print(json.dumps(conflicts, separators=(",", ":")))
-' "$report" 2>/dev/null || echo "[]"
+' "$report" "$base_failure" 2>/dev/null || echo "[]"
   return 1
 }
 
@@ -2534,7 +3144,7 @@ PYEOF
       # (exit 0) or a JSON conflicts array on failure (exit 1) — see its own
       # comment for why it can't hand this back via a global variable.
       local _converged_output
-      if _converged_output="$(attempt_convergence_merge "$src" "$dest" "$rel")"; then
+      if _converged_output="$(attempt_convergence_merge "$src" "$dest" "$rel" "$manifest_hash")"; then
         if [[ "$AGENT_DRY_RUN" != true ]]; then
           _upgrade_write "$_converged_output" "$dest" "$base"
           write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file" "$dest"
@@ -2679,12 +3289,27 @@ retire_legacy_session_end() {
   fi
 
   ensure_upgrade_transaction "$TARGET"
+  # Capture the pre-state before the backup/removal, so this retirement is
+  # inside the rollback contract like any other change (issue #562). Without
+  # it a removed legacy hook could never be restored by
+  # `rig upgrade rollback`, even though its backup exists.
+  local _rm_hash="" _rm_mode="" _rm_backup=""
+  if upgrade_report_enabled && [[ -f "$legacy" && ! -L "$legacy" ]]; then
+    _rm_hash="$(sha256_file "$legacy")"
+    _rm_mode="$(manifest_artifact_mode "$legacy")"
+  fi
   backup_file "$legacy" "$TARGET"
+  [[ -n "$_rm_hash" && -n "$BACKUP_DIR" && -f "$BACKUP_DIR/$rel" ]] &&
+    _rm_backup="$BACKUP_DIR/$rel"
   # agent-plan: classification only, never delete the legacy hook.
   if [[ "$AGENT_DRY_RUN" != true ]]; then
     if ! rm -f "$legacy"; then
       error "Could not retire legacy hook: $rel"
       return 1
+    fi
+    if [[ -n "$_rm_hash" ]]; then
+      record_report_artifact "deleted" "$TARGET" "$rel" \
+        "$_rm_hash" "$_rm_mode" "file" "" "" "absent" "$_rm_backup"
     fi
   fi
   success "Removed obsolete legacy hook: $rel"
@@ -2790,9 +3415,34 @@ _stealth_install_git_hook() {
   # under merge/skip/overwrite/interactive, so the #451 symlink-refusal
   # fix never actually applied outside an explicit --strategy upgrade run.
   guard_destination_before_write "$TARGET" "$hook_dest" "$rel" || return 0
+  # Capture the pre-state before the write. This function never routes through
+  # copy_file()/_upgrade_write(), so without an explicit record a stealth
+  # .git/hooks/ rewrite sits entirely outside the rollback contract: the hook
+  # is replaced and its manifest entry updated, but `rig upgrade rollback`
+  # reports a clean success while silently leaving the new hook in place. In
+  # stealth mode those hooks ARE the Rig — gitleaks scanning, commit-msg
+  # validation, PROGRESS logging — so a user rolling back precisely because a
+  # new hook broke their workflow would be told it worked and keep it.
+  local _gh_pre_hash="" _gh_pre_mode="" _gh_pre_type="" _gh_backup=""
+  if upgrade_report_enabled; then
+    _gh_pre_type="$(upgrade_path_type "$hook_dest")"
+    if [[ "$_gh_pre_type" == file ]]; then
+      _gh_pre_hash="$(sha256_file "$hook_dest")"
+      _gh_pre_mode="$(manifest_artifact_mode "$hook_dest")"
+    fi
+  fi
   # agent-plan: classification only, never write the hook file.
   [[ "$AGENT_DRY_RUN" == true ]] || cp "$hook_src" "$hook_dest"
   [[ "$AGENT_DRY_RUN" == true ]] || chmod +x "$hook_dest"
+  if [[ "$AGENT_DRY_RUN" != true ]] && upgrade_report_enabled; then
+    [[ -n "$BACKUP_DIR" && -f "$BACKUP_DIR/$rel" ]] && _gh_backup="$BACKUP_DIR/$rel"
+    local _gh_op="modified"
+    [[ "$_gh_pre_type" == absent ]] && _gh_op="created"
+    record_report_artifact "$_gh_op" "$TARGET" "$rel" \
+      "$_gh_pre_hash" "$_gh_pre_mode" "$_gh_pre_type" \
+      "$(sha256_file "$hook_dest")" "$(manifest_artifact_mode "$hook_dest")" "file" \
+      "$_gh_backup"
+  fi
   write_manifest_entry "$(sha256_file "$hook_dest")" "$rel" "$MANIFEST_FILE" "$hook_dest"
   success "Stealth: installed $hook_name → .git/hooks/"
   record_upgrade_result updated "$rel"
@@ -3576,10 +4226,12 @@ if [[ "$DO_PROJECT" == true ]]; then
       # elsewhere as "zero writes, read-only") actually mutated
       # .codex/config.toml whenever --project-agent codex/both was passed.
       if [[ "$AGENT_DRY_RUN" != true ]]; then
+        begin_direct_writer_report "$TARGET" "$_CODEX_CONFIG" ".codex/config.toml"
         if ! _codex_merge_result="$(python3 "$SCRIPT_DIR/installer/merge-codex-config.py" "$_CODEX_CONFIG")"; then
           error "Codex project config was not changed. Fix $_CODEX_CONFIG and retry."
           exit 1
         fi
+        finish_direct_writer_report
         success "Codex project instructions: CLAUDE.md fallback ${_codex_merge_result}"
       fi
     else
@@ -3611,6 +4263,11 @@ if [[ "$DO_PROJECT" == true ]]; then
       _rig_version_base="$TARGET"
     fi
     if guard_destination_before_write "$_rig_version_base" "$_RIG_VER_DEST" ".rig/VERSION"; then
+      # Record the version this project was on before the bump, while the old
+      # value is still readable (issue #562: reports state version before/after).
+      if [[ -f "$_RIG_VER_DEST" ]]; then
+        IFS= read -r UPGRADE_VERSION_BEFORE < "$_RIG_VER_DEST" || UPGRADE_VERSION_BEFORE=""
+      fi
       # agent-plan: classification only, never write .rig/VERSION.
       if [[ "$AGENT_DRY_RUN" != true ]]; then
         mkdir -p "$(dirname "$_RIG_VER_DEST")" 2>/dev/null || true
@@ -3714,6 +4371,13 @@ PYEOF
       ESCAPED_PATH="${TARGET_ABS//\//\\/}"
       sed_inplace "s/\\[REPO_ROOT\\]/${ESCAPED_PATH}/g" "$TARGET_SETTINGS"
       success "Substituted [REPO_ROOT] in .claude/settings.json → $TARGET_ABS"
+      # settings.json is rewritten here after copy_file recorded it, so its
+      # recorded after-state is stale for exactly the same reason
+      # _subst_base_branch()'s files were (issue #562). Refresh it, or rollback
+      # refuses the file as "edited since the upgrade".
+      record_report_artifact "refresh" "$TARGET" ".claude/settings.json" \
+        "" "" "" "$(sha256_file "$TARGET_SETTINGS")" \
+        "$(manifest_artifact_mode "$TARGET_SETTINGS")" "file" ""
     fi
   fi
 
@@ -3744,6 +4408,31 @@ PYEOF
     # manifest files despite fresh on-disk content, misclassifying an
     # untouched file as "customized" on the very next upgrade. Issue #498.
     write_manifest_entry "$(sha256_file "$f")" "$rel" "$MANIFEST_FILE" "$f"
+    # The durable upgrade report goes stale here for exactly the same reason
+    # (issue #562). _upgrade_write() recorded this file's after-state before
+    # the substitution above, so a later `rig upgrade rollback` would compare
+    # the pre-substitution hash against real on-disk content and refuse the
+    # file as "edited since the upgrade". Re-record the true after-state; the
+    # report writer keeps the first entry's before/backup and the last
+    # entry's after.
+    # The refresh must key on the SAME (base, rel) pair copy_file() used, or
+    # the collapse in write_upgrade_report() will not match it to the recorded
+    # change and will silently drop it -- leaving a stale `after` hash that
+    # makes rollback refuse the file as "edited since the upgrade".
+    #
+    # `$base` above is the *manifest* base (the .rig root for .rig/* paths).
+    # copy_file() instead uses $EXTERNAL_RIG_DIR for external/stealth tracking
+    # and $TARGET for repo/local -- where the in-repo .rig lives *under*
+    # $TARGET, so the manifest base and the copy base differ.
+    local _report_base="$TARGET"
+    if [[ ( "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ) &&
+          -n "${EXTERNAL_RIG_DIR:-}" && "$f" == "$EXTERNAL_RIG_DIR"/* ]]; then
+      _report_base="$EXTERNAL_RIG_DIR"
+    fi
+    if [[ "$f" == "$_report_base"/* ]]; then
+      record_report_artifact "refresh" "$_report_base" "${f#"$_report_base"/}" \
+        "" "" "" "$(sha256_file "$f")" "$(manifest_artifact_mode "$f")" "file" ""
+    fi
   }
   _subst_base_branch "$TARGET/CLAUDE.md"
   _subst_base_branch "$TARGET/.claude/commands/ship.md"
@@ -3795,7 +4484,9 @@ PYEOF
   if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
     # Write the pointer file so hooks can resolve RIG_DIR at runtime
     if [[ "$_RIGPATH_MUTATION_OK" == true ]]; then
+      begin_direct_writer_report "$TARGET" "$RIGPATH_FILE" ".rigpath"
       echo "$EXTERNAL_RIG_DIR" > "$RIGPATH_FILE"
+      finish_direct_writer_report
       success "Created .rigpath → $EXTERNAL_RIG_DIR"
     else
       info "Skipped .rigpath due to a conflicting destination."
@@ -3804,11 +4495,17 @@ PYEOF
     # Exclude .rigpath from git tracking (per-clone, not shared via .gitignore)
     GIT_EXCLUDE="$TARGET/.git/info/exclude"
     if [[ -f "$GIT_EXCLUDE" ]]; then
-      if ! grep -qF ".rigpath" "$GIT_EXCLUDE"; then
-        echo ".rigpath" >> "$GIT_EXCLUDE"
-        success "Added .rigpath to .git/info/exclude"
+      if guard_destination_before_write "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"; then
+        begin_direct_writer_report "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"
+        if ! grep -qF ".rigpath" "$GIT_EXCLUDE"; then
+          echo ".rigpath" >> "$GIT_EXCLUDE"
+          success "Added .rigpath to .git/info/exclude"
+        else
+          info ".rigpath already in .git/info/exclude"
+        fi
+        finish_direct_writer_report
       else
-        info ".rigpath already in .git/info/exclude"
+        info "Skipped .git/info/exclude update due to a conflicting destination."
       fi
     else
       warn ".git/info/exclude not found — add '.rigpath' to your .gitignore manually"
@@ -3830,6 +4527,11 @@ PYEOF
       # only runs for external/stealth tracking, after _subst_base_branch()
       # already ran and correctly refreshed the hash for its own edit).
       write_manifest_entry "$(sha256_file "$TARGET_CLAUDE")" "CLAUDE.md" "$MANIFEST_FILE" "$TARGET_CLAUDE"
+      # And refresh the durable upgrade report's after-state for the same
+      # reason (issue #562) -- otherwise rollback reads this file as edited
+      # since the upgrade and refuses it.
+      record_report_artifact "refresh" "$TARGET" "CLAUDE.md" "" "" "" \
+        "$(sha256_file "$TARGET_CLAUDE")" "$(manifest_artifact_mode "$TARGET_CLAUDE")" "file" ""
     fi
 
     # Stale in-repo .rig/ cleanup: if the project has an old in-repo .rig/
@@ -3837,7 +4539,11 @@ PYEOF
     if [[ -d "$TARGET/.rig" ]]; then
       blank
       warn "In-repo .rig/ found at $TARGET/.rig/ — superseded by the external install at $EXTERNAL_RIG_DIR."
-      if confirm "Remove the stale in-repo .rig/ now?" "y"; then
+      if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+        warn "Left in place because upgrade rollback cannot restore a removed .rig/ directory."
+        warn "Remove it manually after validating the upgrade:"
+        warn "  rm -rf \"$TARGET/.rig\""
+      elif confirm "Remove the stale in-repo .rig/ now?" "y"; then
         rm -rf "$TARGET/.rig"
         success "Removed stale in-repo .rig/"
       else
@@ -3851,11 +4557,17 @@ PYEOF
   if [[ "$RIG_TRACKING" == "exclude" ]]; then
     GIT_EXCLUDE="$TARGET/.git/info/exclude"
     if [[ -f "$GIT_EXCLUDE" ]]; then
-      if ! grep -qF ".rig/" "$GIT_EXCLUDE"; then
-        printf "\n# The Rig system files — local only, not shared with teammates\n.rig/\n" >> "$GIT_EXCLUDE"
-        success "Added .rig/ to .git/info/exclude (local only — teammates won't see it)"
+      if guard_destination_before_write "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"; then
+        begin_direct_writer_report "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"
+        if ! grep -qF ".rig/" "$GIT_EXCLUDE"; then
+          printf "\n# The Rig system files — local only, not shared with teammates\n.rig/\n" >> "$GIT_EXCLUDE"
+          success "Added .rig/ to .git/info/exclude (local only — teammates won't see it)"
+        else
+          info ".rig/ already in .git/info/exclude"
+        fi
+        finish_direct_writer_report
       else
-        info ".rig/ already in .git/info/exclude"
+        info "Skipped .git/info/exclude update due to a conflicting destination."
       fi
     else
       warn ".git/info/exclude not found — add '.rig/' to your .gitignore manually"
@@ -3866,57 +4578,63 @@ PYEOF
   if [[ "$RIG_TRACKING" == "stealth" ]]; then
     GIT_EXCLUDE="$TARGET/.git/info/exclude"
     if [[ -f "$GIT_EXCLUDE" ]]; then
-      # Helper: append entry only if not already present.
-      # -x (whole-line) matters here: without it, a substring match on
-      # "bin/rig" is satisfied by an already-written "bin/rig-sprint" line,
-      # silently skipping the real "bin/rig" entry depending on find(1)'s
-      # enumeration order. Exact-line matching removes that ordering hazard
-      # for every entry, not just the bin/rig* ones.
-      _stealth_exclude() {
-        local entry="$1"
-        if ! grep -qxF "$entry" "$GIT_EXCLUDE"; then
-          echo "$entry" >> "$GIT_EXCLUDE"
-          success "Stealth: excluded $entry from git"
-        else
-          info "Stealth: $entry already in .git/info/exclude"
-        fi
-      }
+      if guard_destination_before_write "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"; then
+        begin_direct_writer_report "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"
+        # Helper: append entry only if not already present.
+        # -x (whole-line) matters here: without it, a substring match on
+        # "bin/rig" is satisfied by an already-written "bin/rig-sprint" line,
+        # silently skipping the real "bin/rig" entry depending on find(1)'s
+        # enumeration order. Exact-line matching removes that ordering hazard
+        # for every entry, not just the bin/rig* ones.
+        _stealth_exclude() {
+          local entry="$1"
+          if ! grep -qxF "$entry" "$GIT_EXCLUDE"; then
+            echo "$entry" >> "$GIT_EXCLUDE"
+            success "Stealth: excluded $entry from git"
+          else
+            info "Stealth: $entry already in .git/info/exclude"
+          fi
+        }
 
-      printf "\n# The Rig — stealth mode: all Rig artifacts excluded from git tracking\n" >> "$GIT_EXCLUDE"
-      _stealth_exclude "CLAUDE.md"
-      _stealth_exclude "PROJECT_BRIEF.md"
-      _stealth_exclude ".claude/"
-      _stealth_exclude ".agents/"
-      _stealth_exclude ".codex/"
-      _stealth_exclude ".mcp.json"
-      _stealth_exclude ".playwright-mcp/"
-      _stealth_exclude ".github/"
-      _stealth_exclude ".gitleaks.toml"
-      _stealth_exclude "docs/INDEX.md"
-      _stealth_exclude "docs/features/README.md"
-      _stealth_exclude ".rig-backup/"
-      _stealth_exclude ".rig/"
-      # Exclude every generated launcher under bin/ — not just bin/rig.
-      # Enumerated from the installer's own templates/project/bin/ source
-      # rather than a hardcoded per-name list or a "bin/rig*" glob:
-      #   - a hardcoded list drifts the moment a new launcher ships (this is
-      #     exactly how bin/rig-connector-preflight, bin/rig-sprint, and
-      #     bin/rig-tab-title-watch went unexcluded — they were added to
-      #     templates/project/bin/ without a matching entry here);
-      #   - a "bin/rig*" glob in .git/info/exclude is future-proof but would
-      #     also silently swallow an unrelated file a project author later
-      #     adds at bin/rig-<anything>, hiding it from git without their
-      #     knowledge — not a call this installer should make on a user's
-      #     behalf without asking.
-      # Enumerating our own template source excludes exactly (and only)
-      # what we install, with zero drift on future launcher additions and
-      # zero risk of over-excluding a file we did not generate.
-      if [[ -d "$PROJECT_TEMPLATES/bin" ]]; then
-        while IFS= read -r -d '' _launcher_src; do
-          _stealth_exclude "bin/$(basename "$_launcher_src")"
-        done < <(find "$PROJECT_TEMPLATES/bin" -type f -print0)
+        printf "\n# The Rig — stealth mode: all Rig artifacts excluded from git tracking\n" >> "$GIT_EXCLUDE"
+        _stealth_exclude "CLAUDE.md"
+        _stealth_exclude "PROJECT_BRIEF.md"
+        _stealth_exclude ".claude/"
+        _stealth_exclude ".agents/"
+        _stealth_exclude ".codex/"
+        _stealth_exclude ".mcp.json"
+        _stealth_exclude ".playwright-mcp/"
+        _stealth_exclude ".github/"
+        _stealth_exclude ".gitleaks.toml"
+        _stealth_exclude "docs/INDEX.md"
+        _stealth_exclude "docs/features/README.md"
+        _stealth_exclude ".rig-backup/"
+        _stealth_exclude ".rig/"
+        # Exclude every generated launcher under bin/ — not just bin/rig.
+        # Enumerated from the installer's own templates/project/bin/ source
+        # rather than a hardcoded per-name list or a "bin/rig*" glob:
+        #   - a hardcoded list drifts the moment a new launcher ships (this is
+        #     exactly how bin/rig-connector-preflight, bin/rig-sprint, and
+        #     bin/rig-tab-title-watch went unexcluded — they were added to
+        #     templates/project/bin/ without a matching entry here);
+        #   - a "bin/rig*" glob in .git/info/exclude is future-proof but would
+        #     also silently swallow an unrelated file a project author later
+        #     adds at bin/rig-<anything>, hiding it from git without their
+        #     knowledge — not a call this installer should make on a user's
+        #     behalf without asking.
+        # Enumerating our own template source excludes exactly (and only)
+        # what we install, with zero drift on future launcher additions and
+        # zero risk of over-excluding a file we did not generate.
+        if [[ -d "$PROJECT_TEMPLATES/bin" ]]; then
+          while IFS= read -r -d '' _launcher_src; do
+            _stealth_exclude "bin/$(basename "$_launcher_src")"
+          done < <(find "$PROJECT_TEMPLATES/bin" -type f -print0)
+        else
+          _stealth_exclude "bin/rig"
+        fi
+        finish_direct_writer_report
       else
-        _stealth_exclude "bin/rig"
+        info "Skipped stealth .git/info/exclude update due to a conflicting destination."
       fi
       # .rigpath is already excluded by the external-mode block above
     else
@@ -4088,7 +4806,9 @@ PYEOF
       _project_state_rel=".rig/install-targets.json"
     fi
     if guard_destination_before_write "$_project_state_base" "$PROJECT_TARGET_STATE" "$_project_state_rel"; then
+      begin_direct_writer_report "$_project_state_base" "$PROJECT_TARGET_STATE" "$_project_state_rel"
       write_agent_state "$PROJECT_TARGET_STATE" project "$PROJECT_AGENT" "$TARGET_ABS"
+      finish_direct_writer_report
     fi
   fi
   success "Postflight targets: project=$PROJECT_AGENT; smoke=$_project_smoke"
@@ -4229,6 +4949,10 @@ if [[ -n "$AGENT_MODE" ]]; then
   # status="success", whether or not anything was actually updated.
   _agent_status="success"
   [[ "$UPGRADE_REVIEW_REQUIRED" -eq 1 ]] && _agent_status="refused"
+  # A refused run can still have mutated safe paths before refusing, so the
+  # report is written for both outcomes (issue #562). agent-plan never reaches
+  # here with AGENT_DRY_RUN true because write_upgrade_report() no-ops on it.
+  write_upgrade_report "$_agent_status"
   # The artifact log is passed via a temp file, not a pipe: python3 - <<'PYEOF'
   # already claims stdin to read its own script source, so piping data into
   # the same stdin would silently discard it (the heredoc redirect wins over
@@ -4239,12 +4963,14 @@ if [[ -n "$AGENT_MODE" ]]; then
     "$AGENT_MODE" "$_agent_status" "$_agent_records_file" \
     "$UPGRADE_UPDATED_COUNT" "$UPGRADE_MERGED_COUNT" "$UPGRADE_REMOVED_COUNT" \
     "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" "$UPGRADE_SKIPPED_CONFLICT_COUNT" \
-    "$UPGRADE_SKIPPED_UNTRACKED_COUNT" "$UPGRADE_STALE_COUNT" "$UPGRADE_CONVERGED_COUNT" <<'PYEOF'
+    "$UPGRADE_SKIPPED_UNTRACKED_COUNT" "$UPGRADE_STALE_COUNT" "$UPGRADE_CONVERGED_COUNT" \
+    "$UPGRADE_REPORT_PATH" "$UPGRADE_ROLLBACK_ID" <<'PYEOF'
 import json, sys
 
 mode, status, records_path = sys.argv[1], sys.argv[2], sys.argv[3]
 (updated, merged, removed, skipped_customized, skipped_conflict,
  skipped_untracked, stale, converged) = (int(x) for x in sys.argv[4:12])
+report_path, rollback_id = sys.argv[12], sys.argv[13]
 
 # result-code (as passed to record_upgrade_result in install.sh) -> fields.
 CLASSIFICATION = {
@@ -4358,6 +5084,12 @@ doc = {
     "artifacts": artifacts,
     "conflicts": conflicts,
 }
+# Present only when a durable report was actually written, so a consumer can
+# tell "no rollback candidate" from "rollback available" without guessing.
+if report_path:
+    doc["report_path"] = report_path
+if report_path and rollback_id:
+    doc["rollback_id"] = rollback_id
 print(json.dumps(doc, separators=(",", ":")))
 PYEOF
 )"
@@ -4371,6 +5103,7 @@ fi
 
 blank
 if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+  write_upgrade_report "success"
   bold "── Upgrade summary ──"
   echo "Updated: $UPGRADE_UPDATED_COUNT"
   echo "Merged: $UPGRADE_MERGED_COUNT"
@@ -4406,6 +5139,13 @@ if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
     for _future_file in "${UPGRADE_FUTURE_REVISION_FILES[@]}"; do
       echo "  - $_future_file"
     done
+  fi
+  # Where the evidence lives, and how to undo this run (issue #562/#563).
+  [[ -n "$BACKUP_DIR" ]] && echo "Backups: $BACKUP_DIR"
+  [[ -n "${PREFLIGHT_SNAPSHOT_DIR:-}" ]] && echo "Preflight snapshot: $PREFLIGHT_SNAPSHOT_DIR"
+  if [[ -n "$UPGRADE_REPORT_PATH" ]]; then
+    echo "Upgrade report: $UPGRADE_REPORT_PATH"
+    echo "Roll back this upgrade: bin/rig upgrade rollback --id $UPGRADE_ROLLBACK_ID --dry-run"
   fi
   python3 -c 'import json,sys
 d=json.load(sys.stdin)

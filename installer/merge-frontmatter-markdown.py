@@ -18,12 +18,18 @@ conflict. If either side's frontmatter block does not parse as flat
 comparison so the merge never partially rewrites a block it did not fully
 understand.
 
-The prose body is treated as one atomic value: if the user's body and the
-incoming body are identical, nothing to do; if they differ, this lane runs
-without a trusted base (issue #444 lane 444-B, which supplies one, is
-unmerged), so there is no way to know which side "changed" -- differing
-bodies are always reported as a conflict rather than guessed, never
-semantically merged.
+The prose body is merged line-level when a trusted --base is supplied
+(issue #561, via `git merge-file` -- see merge_text_3way() in
+_convergence_common.py). It used to be treated as one atomic value because
+issue #444 lane 444-B never supplied a base, which made "both sides edited
+this document anywhere" an automatic conflict; on the real downstream install
+that motivated issue #561 that rule alone left 13 of 13 customized command
+files refusing even with a perfect base. Overlapping edits to the same region
+are still a genuine conflict and are still refused, with the specific hunks
+reported.
+
+Without a trusted base the old behaviour is unchanged: differing bodies are
+reported as a conflict rather than guessed, never semantically merged.
 
 Usage:
     merge-frontmatter-markdown.py --current <path> --incoming <path> \
@@ -40,7 +46,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _convergence_common import merge_dict  # noqa: E402
+from _convergence_common import merge_dict, merge_text_3way  # noqa: E402
 
 _KV_RE = re.compile(r'^([A-Za-z0-9_.\-]+):[ \t]?(.*)$')
 
@@ -152,6 +158,25 @@ def main():
 
     conflicts = []
     merged = merge_dict(base_struct, current_struct, incoming_struct, "", conflicts)
+
+    # merge_dict compares the body as one atomic value, so any concurrent edit
+    # to the document lands here as a single "body" conflict. With a trusted
+    # base that is far too coarse: edits to different sections of the same file
+    # merge cleanly line-level. Retry just the body, and keep the conflict only
+    # if the regions genuinely overlap.
+    # Guard on the base FILE existing, not just on the flag being set: load()
+    # returns an empty body for a missing path, which would be a fabricated
+    # base rather than a trusted one.
+    body_conflicts = [c for c in conflicts if c["path"] == "body"]
+    if body_conflicts and args.base and os.path.exists(args.base):
+        merged_body, hunks = merge_text_3way(
+            base_body, cur_body, inc_body, label="body"
+        )
+        if merged_body is not None:
+            conflicts = [c for c in conflicts if c["path"] != "body"]
+            merged["body"] = merged_body
+        elif hunks:
+            conflicts = [c for c in conflicts if c["path"] != "body"] + hunks
 
     if conflicts:
         print(json.dumps({"ok": False, "conflicts": conflicts}))

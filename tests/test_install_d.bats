@@ -261,6 +261,35 @@ _main_branch_check() {
   [ ! -d "$TEST_PROJECT/.rig" ]
 }
 
+@test "stealth migration under agent-upgrade leaves stale in-repo .rig for manual cleanup" {
+  # Start with a repo-tracked install so .rig/ exists in the project directory.
+  run_installer --strategy merge --tracking repo
+  [ "$status" -eq 0 ]
+  [ -d "$TEST_PROJECT/.rig" ]
+
+  local rig_ext="$TEMP_DIR/rig-stealth-agent-upgrade"
+  run bash "$INSTALLER" --project-only \
+    --target "$TEST_PROJECT" \
+    --project-name "TestProject" \
+    --tracking stealth \
+    --rig-dir "$rig_ext" \
+    --strategy agent-upgrade
+  [ "$status" -eq 0 ]
+  [ -d "$TEST_PROJECT/.rig" ]
+  [ -f "$rig_ext/memory/.rig-manifest" ]
+  run python3 -c "
+import json, pathlib, sys
+d = json.loads(sys.stdin.read())
+report = pathlib.Path(d['report_path'])
+assert d['rollback_id'], d
+assert report.is_file(), report
+assert report.parent == pathlib.Path(sys.argv[1]) / 'upgrade-reports', report
+print('ok')
+" "$rig_ext" <<< "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
 @test "upgrade auto-detects repo mode when .rig/ is git-committed" {
   # Simulate a project previously installed in repo mode: .rig/ files committed.
   run_installer --strategy skip --tracking repo

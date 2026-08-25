@@ -764,6 +764,25 @@ Interpret `$AGENT_UPGRADE_STATUS`:
   (or, if it is empty, say the command produced no output), stop, and do not
   proceed to 2c or Phase 3.
 
+**Only if `$AGENT_UPGRADE_STATUS` was `0` or `3`**, capture the durable report
+identifiers. Skip this block entirely for any other exit code — you already
+stopped there, and `$AGENT_UPGRADE_JSON` may be empty, which would make these
+commands fail with a JSON parse error.
+
+Both keys are present only when a real mutation was applied, so absence means
+"no rollback candidate", not an error:
+
+```bash
+UPGRADE_REPORT_PATH="$(echo "$AGENT_UPGRADE_JSON" | python3 -c "
+import json, sys
+print(json.load(sys.stdin).get('report_path', ''))
+")"
+UPGRADE_ROLLBACK_ID="$(echo "$AGENT_UPGRADE_JSON" | python3 -c "
+import json, sys
+print(json.load(sys.stdin).get('rollback_id', ''))
+")"
+```
+
 Parse the JSON to populate the result accumulators:
 
 ```bash
@@ -983,11 +1002,14 @@ FIXED+=("commands: installed $name")
 
 ### 3d — `bin/rig doctor` postflight gates
 
-Run the installed project's own `bin/rig doctor` to verify the five gates it
-checks (`manifest_provenance`, `stealth_status`, `manifest_mode_hash`,
-`stale_manifest_entries`, `idempotence` — see `UPGRADE_WORKFLOW.md` →
-"Post-upgrade verification: `bin/rig doctor` gates" for what each one
-verifies) actually pass on the state the upgrade just produced:
+Run the installed project's own `bin/rig doctor` to verify its gates pass on
+the state the upgrade just produced. `doctor` emits well over twenty named
+checks — do not assume a fixed list. The upgrade-critical ones are
+`manifest_provenance`, `stealth_status`, `manifest_mode_hash`,
+`stale_manifest_entries`, `idempotence`, `codex_skill_parity`, and the
+`upgrade_pattern_*` family; `docs/customizing.md` carries the full table.
+Read whatever `checks[]` the JSON actually returns rather than a list
+memorised from this file:
 
 ```bash
 if [[ -x "$REPO/bin/rig" ]]; then
@@ -1258,6 +1280,26 @@ If `$TRACKING == repo` and `$TOTAL_CHANGED` <= 3:
 > `chore(rig): upgrade to $EXPECTED_VERSION [#N]` commit to `$BASE_BRANCH`
 > is acceptable if `housekeeping: direct-push` is set."
 
+If `$UPGRADE_REPORT_PATH` is non-empty, always close the summary with the
+evidence trail and the exact undo command, so the user never has to ask where
+the upgrade's record went or how to reverse it:
+
+> "**Evidence and undo**
+> - Report: `$UPGRADE_REPORT_PATH`
+> - Backups: `$BACKUP_DIR`
+> - Roll back this upgrade:
+>   `bin/rig upgrade rollback --id $UPGRADE_ROLLBACK_ID --dry-run`
+>   then, to apply it:
+>   `bin/rig upgrade rollback --id $UPGRADE_ROLLBACK_ID --confirm $UPGRADE_ROLLBACK_ID`
+>
+> Rollback restores only the paths this upgrade changed. It refuses any file
+> edited since, so review the dry run before confirming. For an *interrupted*
+> upgrade use `install.sh --recover` instead — that is a different operation."
+
+If `$UPGRADE_REPORT_PATH` is empty, say instead:
+> "No durable report was written, so there is no rollback candidate for this
+> run. That is expected when nothing was mutated."
+
 Then say:
 > "Upgrade complete. What's next?"
 
@@ -1277,5 +1319,9 @@ Then say:
 | `agent-upgrade` exits `3` (`status: "refused"`) | Not a failure — every safe action was still applied. Resolve each `conflicts[]` entry using its own `repair_guidance`, then re-run `/rig-upgrade` |
 | `bin/rig doctor` reports a gate failure after upgrade | Review the failing gate's `detail` string (Phase 3d); it names the exact mismatch (e.g. hash drift, stale manifest entry) |
 | `bin/rig doctor` not found | The project was installed before issue #444 lane 444-H shipped `bin/rig` — Phase 3d skips cleanly; re-run `/rig-upgrade` after this upgrade completes to pick it up |
+| The upgrade landed but you want it undone | `bin/rig upgrade rollback --last --dry-run`, review the plan, then re-run with `--confirm <rollback-id>`. Restores only what this upgrade changed |
+| Rollback refuses a file as "edited since the upgrade" | Working as intended — something changed it after the upgrade and rollback will not discard that. Resolve or revert the file yourself, then re-run |
+| Rollback says "no upgrade reports found" | The project predates durable reports, or nothing was mutated. Use `.rig-backup/` manually |
+| An upgrade was *interrupted* (killed, disk full, permission error) | Use `install.sh --recover`, not rollback — recovery restores an in-flight transaction, rollback undoes a completed one |
 
 Full upgrade docs: `$RIG_DIR/processes/UPGRADE_WORKFLOW.md`

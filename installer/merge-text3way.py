@@ -2,31 +2,28 @@
 """Plain-text three-way merge fallback (issue #444, lane 444-C).
 
 The catch-all for any customized artifact with no known structure (shell
-scripts, plain docs, anything not handled by merge-json.py,
-merge-toml.py, or merge-frontmatter-markdown.py). Unlike those three, this
-tool deliberately does NOT attempt a line/hunk-level diff3 merge -- an
-unstructured file has no reliable notion of an independent "path" the way a
-JSON key or a TOML table does, so a hand-rolled hunk-aligning 3-way merge
-algorithm would be guessing at semantics it cannot verify. That risk is
-explicitly out of scope here: "a hand-rolled line-based 3-way merge is
-acceptable if you keep it simple" -- keeping it simple means resolving only
-the three unambiguous whole-file cases and refusing (with a specific,
-actionable report) everything else, never a partial/best-guess splice.
+scripts, plain docs, anything not handled by merge-json.py, merge-toml.py, or
+merge-frontmatter-markdown.py).
 
-Resolved without conflict:
-  - current == incoming                    -> already converged
+Resolved without conflict, in order:
+  - current == incoming                             -> already converged
   - a trusted --base is given and current == base   -> only incoming changed, take incoming
   - a trusted --base is given and incoming == base  -> only current changed, take current
+  - a trusted --base is given                       -> line-level three-way merge
 
-Everything else is a conflict. This lane runs without a trusted base
-(issue #444 lane 444-B, which supplies one, is unmerged), so in practice
-every customized file that reaches this tool with current != incoming
-conflicts -- this is intentional, not a bug: without a base there is no way
-to know which side actually changed, so guessing would silently discard
-either the user's customization or the incoming Rig improvement. The
-conflict report is still specific: it locates and previews every differing
-line range between the current and incoming files (via difflib), not just
-a generic "customized, skipped" message.
+The line-level step (issue #561) delegates to `git merge-file` rather than a
+hand-rolled hunk-aligning algorithm. Originally this tool resolved only the
+three whole-file cases above, because issue #444 lane 444-B never supplied a
+base and guessing which side changed would silently discard either the user's
+customization or the incoming Rig improvement. Now that
+installer/resolve-historical-base.py proves a base by hash (issue #560), the
+ambiguity is gone and standard diff3 semantics apply.
+
+Without a trusted base the old conservative behaviour is unchanged: any
+difference between current and incoming is a conflict. The conflict report is
+specific either way -- git's conflicting hunks when a base was available, or
+every differing line range between current and incoming (via difflib) when it
+was not.
 
 Usage:
     merge-text3way.py --current <path> --incoming <path> --output <path> \
@@ -42,13 +39,19 @@ import os
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _convergence_common import merge_text_3way  # noqa: E402
+
 _SNIPPET_LIMIT = 200
 
 
 def read_lines(path):
     if not path or not os.path.exists(path):
         return None
-    with open(path, encoding="utf-8") as handle:
+    # newline="" disables universal-newline translation. Without it a CRLF file
+    # is read as LF and written back as LF, so a merge that changed nothing
+    # would silently rewrite every line and still report a clean convergence.
+    with open(path, encoding="utf-8", newline="") as handle:
         return handle.readlines()
 
 
@@ -101,6 +104,17 @@ def main():
         merged_lines = incoming_lines
     elif base_lines is not None and incoming_lines == base_lines:
         merged_lines = current_lines
+    elif base_lines is not None:
+        merged_text, hunks = merge_text_3way(
+            "".join(base_lines), "".join(current_lines), "".join(incoming_lines)
+        )
+        if merged_text is None:
+            # Real overlapping edits, or git unavailable. Fall back to the
+            # difflib report when git gave us no hunks to show.
+            conflicts = hunks or line_conflicts(current_lines, incoming_lines)
+            print(json.dumps({"ok": False, "conflicts": conflicts}))
+            return 1
+        merged_lines = [merged_text]
     else:
         conflicts = line_conflicts(current_lines, incoming_lines)
         print(json.dumps({"ok": False, "conflicts": conflicts}))
@@ -109,7 +123,7 @@ def main():
     directory = os.path.dirname(os.path.abspath(args.output)) or "."
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".rig-merge-text.")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             handle.writelines(merged_lines)
         os.replace(tmp, args.output)
     finally:
