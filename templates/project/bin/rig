@@ -2077,8 +2077,10 @@ def under_anchor(destination):
 def load_allowed_change_paths():
     """Return destination allowlists derived from this install, not the report."""
     project_paths = {
+        ".claude/settings.json",
         ".codex/config.toml",
         ".git/info/exclude",
+        ".rig/install-targets.json",
         ".rigpath",
         "CLAUDE.md",
         "PROJECT_BRIEF.md",
@@ -2100,7 +2102,11 @@ def load_allowed_change_paths():
         for rel, entry in entries.items():
             if not isinstance(rel, str) or not isinstance(entry, dict):
                 continue
-            if entry.get("owner") != "rig" and rel not in project_paths:
+            if (
+                entry.get("owner") != "rig"
+                and entry.get("source") not in ("claude-native", "codex-native", "generated-codex", "shared-rig", "project-tooling")
+                and rel not in project_paths
+            ):
                 continue
             project_paths.add(rel)
             if rel.startswith(".rig/"):
