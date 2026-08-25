@@ -1928,6 +1928,10 @@ report_id = flag_value("--id")
 confirm = flag_value("--confirm")
 
 
+def valid_report_id(value):
+    return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9._-]+", value) is not None
+
+
 def fail(message, code=64):
     if as_json:
         print(json.dumps({"ok": False, "error": message}, separators=(",", ":")))
@@ -1943,6 +1947,10 @@ if "--id" in args and not report_id:
     fail("--id requires a report id")
 if "--confirm" in args and not confirm:
     fail("--confirm requires a report id")
+if report_id and not valid_report_id(report_id):
+    fail("--id contains unsupported characters")
+if confirm and not valid_report_id(confirm):
+    fail("--confirm contains unsupported characters")
 if not want_last and not report_id:
     fail("specify --last or --id <report-id>")
 if not dry_run and not confirm:
@@ -2013,6 +2021,8 @@ else:
         fail("no upgrade report matches id %s" % report_id, 69)
 
 rollback_id = selected.get("rollback_id") or ""
+if not valid_report_id(rollback_id):
+    fail("upgrade report rollback_id contains unsupported characters", 69)
 # Gate the schema. A future report may carry operations this version does not
 # understand; combined with fail-closed handling that is safe, but refusing up
 # front says so plainly instead of reporting a pile of unexplained refusals.

@@ -923,6 +923,43 @@ print('ok')
   [ "$output" = "ok" ]
 }
 
+@test "rollback: rejects rollback_id traversal before metadata restore" {
+  _upgraded_project
+  local report payload_dir
+  report="$(_latest_report)"
+  payload_dir="$TEST_PROJECT/.rig/payload.metadata"
+  mkdir -p "$payload_dir"
+  printf 'attacker manifest\n' > "$payload_dir/.rig-manifest"
+  printf '{"schema_version":1,"entries":{}}\n' > "$payload_dir/.rig-manifest.json"
+  printf '999.999.999\n' > "$payload_dir/VERSION"
+
+  python3 - "$report" "$payload_dir" <<'PYEOF'
+import json, sys
+report, payload_dir = sys.argv[1:3]
+with open(report) as fh:
+    d = json.load(fh)
+d["rollback_id"] = "../payload"
+d["changes"] = []
+d["metadata"]["snapshot_dir"] = payload_dir
+with open(report, "w") as fh:
+    json.dump(d, fh)
+PYEOF
+
+  rig upgrade rollback --id "../payload" --confirm "../payload" --json
+  [ "$status" -eq 64 ]
+  [ "$(_sha256 "$TEST_PROJECT/.rig/memory/.rig-manifest")" != "$(_sha256 "$payload_dir/.rig-manifest")" ]
+  [ "$(cat "$TEST_PROJECT/.rig/VERSION")" != "999.999.999" ]
+  run python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+assert d['ok'] is False, d
+assert 'unsupported characters' in d['error'], d
+print('ok')
+" <<< "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
 # ── Exit-code contract ───────────────────────────────────────────────────────
 
 @test "rollback: exits 3 when paths were refused, not 0" {
