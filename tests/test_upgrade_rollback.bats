@@ -923,6 +923,44 @@ print('ok')
   [ "$output" = "ok" ]
 }
 
+@test "rollback: skips metadata restore for a forged report with no artifact changes" {
+  _upgraded_project
+  local report payload_dir id snapshot
+  report="$(_latest_report)"
+  id="$(_rollback_id)"
+  snapshot="$(ls -d "$TEST_PROJECT/.rig/upgrade-reports/"*.metadata 2>/dev/null | tail -1)"
+  [ -n "$snapshot" ] || { echo "no .metadata snapshot to tamper with" >&2; return 1; }
+  payload_dir="$snapshot"
+  printf 'attacker manifest\n' > "$payload_dir/.rig-manifest"
+  printf '{"schema_version":1,"entries":{}}\n' > "$payload_dir/.rig-manifest.json"
+  printf '999.999.999\n' > "$payload_dir/VERSION"
+
+  python3 - "$report" <<'PYEOF'
+import json, sys
+report = sys.argv[1]
+with open(report) as fh:
+    d = json.load(fh)
+d["changes"] = []
+with open(report, "w") as fh:
+    json.dump(d, fh)
+PYEOF
+
+  rig upgrade rollback --id "$id" --confirm "$id" --json
+  [ "$status" -eq 0 ]
+  [ "$(_sha256 "$TEST_PROJECT/.rig/memory/.rig-manifest")" != "$(_sha256 "$payload_dir/.rig-manifest")" ]
+  [ "$(cat "$TEST_PROJECT/.rig/VERSION")" != "999.999.999" ]
+  run python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+assert d['ok'] is True, d
+assert d['metadata_restored'] == [], d
+assert 'no artifact changes' in d['metadata_skipped'], d
+print('ok')
+" <<< "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
 @test "rollback: rejects rollback_id traversal before metadata restore" {
   _upgraded_project
   local report payload_dir

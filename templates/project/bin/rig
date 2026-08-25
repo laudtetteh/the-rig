@@ -2395,9 +2395,12 @@ if (
             metadata_plan.append({"from": source, "to": destination})
 
 # `ok` here means "this plan can complete", not "the tool ran". Metadata is
-# only restored when nothing is refused, so a plan with refusals must not
-# advertise metadata it will skip.
+# only restored when at least one artifact is being rolled back and nothing is
+# refused. A report with `changes: []` is not a real completed-upgrade rollback
+# contract; letting one restore metadata would turn an attacker-populated
+# <id>.metadata directory into a manifest/VERSION write primitive.
 plan_complete = not refusals
+metadata_complete = plan_complete and bool(plan)
 result = {
     "ok": plan_complete,
     "complete": plan_complete,
@@ -2406,10 +2409,14 @@ result = {
     "version": selected.get("version"),
     "would_restore": [p for p in plan if p["action"] == "restore"],
     "would_delete": [p for p in plan if p["action"] == "delete"],
-    "would_restore_metadata": [p["to"] for p in metadata_plan] if plan_complete else [],
+    "would_restore_metadata": [p["to"] for p in metadata_plan] if metadata_complete else [],
     "metadata_skipped": (
-        None if plan_complete
-        else "would be skipped because some paths are refused"
+        None if metadata_complete
+        else (
+            "would be skipped because some paths are refused"
+            if not plan_complete
+            else "would be skipped because the report has no artifact changes"
+        )
     ),
     "refused": refusals,
     "dry_run": bool(dry_run and not confirm),
@@ -2462,6 +2469,8 @@ if refusals or failed:
     # which every later upgrade misclassifies files as customized. Leaving the
     # bookkeeping alone is the honest outcome.
     metadata_skipped = "not restored because some paths were refused or failed"
+elif not plan:
+    metadata_skipped = "not restored because the report has no artifact changes"
 else:
     for item in metadata_plan:
         try:
