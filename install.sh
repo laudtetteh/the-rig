@@ -1687,6 +1687,18 @@ UPGRADE_METADATA_SNAPSHOT=""
 # genuine upgrade of an existing install rather than a first install.
 UPGRADE_HAD_PRIOR_MANIFEST=false
 
+project_prior_manifest_exists() {
+  [[ -n "${TARGET:-}" ]] || return 1
+  [[ -n "${MANIFEST_FILE:-}" && -f "$MANIFEST_FILE" ]] && return 0
+  [[ -f "$TARGET/.rig/memory/.rig-manifest" ]] && return 0
+  if [[ -f "$TARGET/.rigpath" && ! -L "$TARGET/.rigpath" ]]; then
+    local _prior_rig_dir
+    _prior_rig_dir="$(tr -d '[:space:]' < "$TARGET/.rigpath" 2>/dev/null || true)"
+    [[ -n "$_prior_rig_dir" && -f "$_prior_rig_dir/memory/.rig-manifest" ]] && return 0
+  fi
+  return 1
+}
+
 snapshot_upgrade_metadata() {
   upgrade_report_enabled || return 0
   [[ -z "$UPGRADE_METADATA_SNAPSHOT" ]] || return 0
@@ -1708,7 +1720,7 @@ snapshot_upgrade_metadata() {
   # Rig installation — an uninstall wearing an upgrade's clothes. Decided here,
   # before the first manifest write, which is the last moment the answer is
   # still visible.
-  if [[ -f "$MANIFEST_FILE" ]]; then
+  if project_prior_manifest_exists; then
     UPGRADE_HAD_PRIOR_MANIFEST=true
   fi
   init_upgrade_report

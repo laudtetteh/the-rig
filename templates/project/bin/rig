@@ -1898,6 +1898,8 @@ upgrade_rollback() {
 import hashlib, json, os, re, shutil, sys
 
 reports_dir = os.environ["RIG_REPORTS_DIR"]
+PROJECT_ROOT = os.path.realpath(os.environ["RIG_ANCHOR_ROOT"])
+RIG_DIR = os.path.realpath(os.environ["RIG_ANCHOR_DIR"])
 ANCHOR_ROOTS = [
     os.path.realpath(p)
     for p in (os.environ["RIG_ANCHOR_ROOT"], os.environ["RIG_ANCHOR_DIR"])
@@ -2059,6 +2061,59 @@ def under_anchor(destination):
     return False
 
 
+def load_allowed_change_paths():
+    """Return destination allowlists derived from this install, not the report."""
+    project_paths = {
+        ".codex/config.toml",
+        ".git/info/exclude",
+        ".rigpath",
+        "CLAUDE.md",
+        "PROJECT_BRIEF.md",
+    }
+    rig_paths = {
+        "VERSION",
+        "install-targets.json",
+        "memory/.rig-manifest",
+        "memory/.rig-manifest.json",
+    }
+    manifest_metadata = os.path.join(RIG_DIR, "memory", ".rig-manifest.json")
+    try:
+        with open(manifest_metadata) as handle:
+            metadata = json.load(handle)
+    except (OSError, ValueError):
+        metadata = {}
+    entries = metadata.get("entries")
+    if isinstance(entries, dict):
+        for rel, entry in entries.items():
+            if not isinstance(rel, str) or not isinstance(entry, dict):
+                continue
+            if entry.get("owner") != "rig" and rel not in project_paths:
+                continue
+            project_paths.add(rel)
+            if rel.startswith(".rig/"):
+                rig_paths.add(rel[len(".rig/"):])
+            elif rel in ("VERSION", "install-targets.json"):
+                rig_paths.add(rel)
+    return project_paths, rig_paths
+
+
+ALLOWED_PROJECT_PATHS, ALLOWED_RIG_PATHS = load_allowed_change_paths()
+LEGACY_DELETED_RIG_PATHS = {
+    ".claude/hooks/session-end.sh",
+}
+
+
+def change_path_allowed(root, rel, operation):
+    root_real = os.path.realpath(root)
+    if root_real == PROJECT_ROOT:
+        return rel in ALLOWED_PROJECT_PATHS or (
+            operation == "deleted" and rel in LEGACY_DELETED_RIG_PATHS
+        )
+    if root_real == RIG_DIR:
+        return rel in ALLOWED_RIG_PATHS
+    return False
+
+
 def expected_backup_source(backup, rel):
     """A backup must be in this rollback id's own backup slot.
 
@@ -2148,6 +2203,12 @@ for change in selected.get("changes", []):
         refusals.append({
             "path": rel,
             "reason": "storage root is outside this project",
+        })
+        continue
+    if not change_path_allowed(root, rel, operation):
+        refusals.append({
+            "path": rel,
+            "reason": "path is not a Rig-managed rollback target",
         })
         continue
     if operation not in ("created", "modified", "deleted"):

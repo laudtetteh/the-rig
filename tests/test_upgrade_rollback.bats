@@ -475,14 +475,102 @@ PYEOF
 
   local id; id="$(_rollback_id)"
   rig upgrade rollback --id "$id" --confirm "$id" --json
+  local rollback_output="$output"
 
-  ! grep -q "ATTACKER PAYLOAD" "$victim"
+  run grep -q "ATTACKER PAYLOAD" "$victim"
+  [ "$status" -ne 0 ]
   run python3 -c "
 import json, sys
 d = json.loads(sys.stdin.read())
 assert any('not in this upgrade' in r['reason'] for r in d['refused']), d['refused']
 print('ok')
-" <<< "$output"
+" <<< "$rollback_output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "rollback: refuses a forged created path outside the Rig surface" {
+  _upgraded_project
+  local report victim
+  report="$(_latest_report)"
+  victim="$TEST_PROJECT/app.txt"
+  printf 'application data\n' > "$victim"
+
+  python3 - "$report" "$TEST_PROJECT" "$victim" <<'PYEOF'
+import hashlib, json, sys
+report, root, victim = sys.argv[1:4]
+with open(report) as fh:
+    d = json.load(fh)
+d["changes"] = [{
+    "operation": "created",
+    "storage_root": root,
+    "path": "app.txt",
+    "before": {"hash": None, "mode": None, "type": "absent"},
+    "after": {"hash": hashlib.sha256(open(victim, "rb").read()).hexdigest(),
+              "mode": "644", "type": "file"},
+    "absent_before": True,
+}]
+with open(report, "w") as fh:
+    json.dump(d, fh)
+PYEOF
+
+  local id; id="$(_rollback_id)"
+  rig upgrade rollback --id "$id" --confirm "$id" --json
+  local rollback_output="$output"
+
+  grep -q "application data" "$victim"
+  run python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+assert any('not a Rig-managed rollback target' in r['reason'] for r in d['refused']), d['refused']
+print('ok')
+" <<< "$rollback_output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
+@test "rollback: refuses a forged modified path outside the Rig surface" {
+  _upgraded_project
+  local report victim backup id
+  report="$(_latest_report)"
+  victim="$TEST_PROJECT/app.txt"
+  printf 'application data\n' > "$victim"
+  id="$(_rollback_id)"
+  backup="$TEST_PROJECT/.rig-backup/$id/app.txt"
+  mkdir -p "$(dirname "$backup")"
+  printf 'ATTACKER PAYLOAD\n' > "$backup"
+
+  python3 - "$report" "$TEST_PROJECT" "$victim" "$backup" <<'PYEOF'
+import hashlib, json, sys
+report, root, victim, backup = sys.argv[1:5]
+with open(report) as fh:
+    d = json.load(fh)
+d["changes"] = [{
+    "operation": "modified",
+    "storage_root": root,
+    "path": "app.txt",
+    "before": {"hash": hashlib.sha256(open(backup, "rb").read()).hexdigest(),
+               "mode": "644", "type": "file"},
+    "after": {"hash": hashlib.sha256(open(victim, "rb").read()).hexdigest(),
+              "mode": "644", "type": "file"},
+    "backup_path": backup,
+}]
+with open(report, "w") as fh:
+    json.dump(d, fh)
+PYEOF
+
+  rig upgrade rollback --id "$id" --confirm "$id" --json
+  local rollback_output="$output"
+
+  grep -q "application data" "$victim"
+  run grep -q "ATTACKER PAYLOAD" "$victim"
+  [ "$status" -ne 0 ]
+  run python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+assert any('not a Rig-managed rollback target' in r['reason'] for r in d['refused']), d['refused']
+print('ok')
+" <<< "$rollback_output"
   [ "$status" -eq 0 ]
   [ "$output" = "ok" ]
 }

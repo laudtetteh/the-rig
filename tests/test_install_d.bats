@@ -277,7 +277,17 @@ _main_branch_check() {
   [ "$status" -eq 0 ]
   [ -d "$TEST_PROJECT/.rig" ]
   [ -f "$rig_ext/memory/.rig-manifest" ]
-  [ ! -d "$rig_ext/upgrade-reports" ]
+  run python3 -c "
+import json, pathlib, sys
+d = json.loads(sys.stdin.read())
+report = pathlib.Path(d['report_path'])
+assert d['rollback_id'], d
+assert report.is_file(), report
+assert report.parent == pathlib.Path(sys.argv[1]) / 'upgrade-reports', report
+print('ok')
+" "$rig_ext" <<< "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
 }
 
 @test "upgrade auto-detects repo mode when .rig/ is git-committed" {
