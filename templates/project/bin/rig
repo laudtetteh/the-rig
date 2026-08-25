@@ -1989,12 +1989,14 @@ def octal_mode(value):
 
 
 selected = None
+selected_name = ""
 if want_last:
     # Walk back from the newest until one parses; a corrupt newest report must
     # not make every older one unreachable.
     for name in reversed(candidates):
         selected = load(name)
         if selected is not None:
+            selected_name = name[: -len(".json")]
             break
     if selected is None:
         fail("no readable upgrade report found in %s" % reports_dir, 69)
@@ -2005,6 +2007,7 @@ else:
             continue
         if report_id in (document.get("rollback_id"), name[: -len(".json")]):
             selected = document
+            selected_name = name[: -len(".json")]
             break
     if selected is None:
         fail("no upgrade report matches id %s" % report_id, 69)
@@ -2318,6 +2321,20 @@ metadata = selected.get("metadata") or {}
 metadata_plan = []
 
 
+def expected_metadata_source_dir(snapshot_dir):
+    if not isinstance(snapshot_dir, str) or not snapshot_dir or not rollback_id:
+        return False
+    snapshot_real = os.path.realpath(snapshot_dir)
+    expected = os.path.realpath(os.path.join(reports_dir, rollback_id + ".metadata"))
+    if snapshot_real == expected:
+        return True
+    if selected_name:
+        alternate = os.path.realpath(os.path.join(reports_dir, selected_name + ".metadata"))
+        if snapshot_real == alternate:
+            return True
+    return False
+
+
 # Metadata destinations are absolute paths read out of the report, so they get
 # the same anchor as every other write. Deriving the allowed roots from the
 # report itself would be circular — a crafted document could simply name the
@@ -2360,10 +2377,11 @@ if (
     and os.path.isdir(snapshot_dir)
     and not os.path.islink(snapshot_dir)
     and under_anchor(snapshot_dir)
+    and expected_metadata_source_dir(snapshot_dir)
 ):
     for destination, source_name in KNOWN_METADATA:
         source = os.path.join(snapshot_dir, source_name)
-        if os.path.isfile(source) and metadata_writable(destination):
+        if os.path.isfile(source) and not os.path.islink(source) and metadata_writable(destination):
             metadata_plan.append({"from": source, "to": destination})
 
 # `ok` here means "this plan can complete", not "the tool ran". Metadata is
