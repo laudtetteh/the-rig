@@ -1108,6 +1108,15 @@ print('ok')
   [ "$output" = "ok" ]
 }
 
+@test "rollback: a text dry run with refusals does not advertise metadata it will skip" {
+  _upgraded_project
+  echo "# edited after the upgrade" >> "$TEST_PROJECT/.claude/commands/wrap.md"
+
+  rig upgrade rollback --last --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"  metadata: 0"* ]] || return 1
+}
+
 # ── Safety refusals ──────────────────────────────────────────────────────────
 
 @test "rollback: refuses a path edited after the upgrade" {

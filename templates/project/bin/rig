@@ -2433,7 +2433,7 @@ if dry_run and not confirm:
         print("  delete:  %d" % len(result["would_delete"]))
         for item in result["would_delete"]:
             print("    - %s" % item["path"])
-        print("  metadata: %d" % len(metadata_plan))
+        print("  metadata: %d" % (len(metadata_plan) if metadata_complete else 0))
         print("  refused: %d" % len(refusals))
         for item in refusals:
             print("    - %s (%s)" % (item["path"], item["reason"]))
