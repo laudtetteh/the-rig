@@ -58,6 +58,38 @@ teardown() { rm -rf "$TEST_ROOT"; }
   [ "$(printf '%s' "$output" | jq -r '.operation')" = install ]
 }
 
+@test "preflight json reports the same project destination when stdout is redirected" {
+  fake_bin="$TEST_ROOT/bin"; mkdir -p "$fake_bin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_bin/claude"
+  chmod +x "$fake_bin/claude"
+  redirected="$TEST_ROOT/preflight.json"
+
+  run env HOME="$TEST_HOME" PATH="$fake_bin:$PATH" bash "$INSTALLER" --project-only --project-agent claude --target "$TEST_PROJECT" --tracking stealth --strategy agent-upgrade --preflight --json
+  [ "$status" -eq 0 ]
+  direct_status="$(printf '%s' "$output" | jq -r '.dependencies[] | select(.id == "project-destination") | .status')"
+
+  run bash -c 'env HOME="$1" PATH="$2" bash "$3" --project-only --project-agent claude --target "$4" --tracking stealth --strategy agent-upgrade --preflight --json > "$5"' _ "$TEST_HOME" "$fake_bin:$PATH" "$INSTALLER" "$TEST_PROJECT" "$redirected"
+  [ "$status" -eq 0 ]
+  redirected_status="$(jq -r '.dependencies[] | select(.id == "project-destination") | .status' "$redirected")"
+
+  [ "$direct_status" = ok ]
+  [ "$redirected_status" = "$direct_status" ]
+}
+
+@test "preflight json annotates unwritable existing project destination without changing v1 status" {
+  fake_bin="$TEST_ROOT/bin"; mkdir -p "$fake_bin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_bin/claude"
+  chmod +x "$fake_bin/claude"
+  chmod a-w "$TEST_PROJECT"
+
+  run env HOME="$TEST_HOME" PATH="$fake_bin:$PATH" bash "$INSTALLER" --project-only --project-agent claude --target "$TEST_PROJECT" --tracking stealth --strategy agent-upgrade --preflight --json
+  chmod u+w "$TEST_PROJECT"
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | jq -e 'any(.dependencies[]; .id == "project-destination" and .status == "missing" and .detail == "unwritable")' >/dev/null
+  printf '%s' "$output" | jq -e 'any(.errors[]; .code == "missing-project-destination")' >/dev/null
+  printf '%s' "$output" | jq -e 'any(.warnings[]; .code == "unwritable-project-destination")' >/dev/null
+}
+
 @test "public operation maps upgrade and overwrite to upgrade and repair" {
   run env HOME="$TEST_HOME" bash "$INSTALLER" --project-only --project-agent none --target "$TEST_PROJECT" --strategy upgrade --preflight --json
   [ "$(printf '%s' "$output" | jq -r '.operation')" = upgrade ]

@@ -11,6 +11,12 @@ p.add_argument("--project-destination", required=True); p.add_argument("--state-
 a = p.parse_args()
 forced_missing = set(os.environ.get("_RIG_TEST_MISSING_COMMANDS", "").split(","))
 def available(name): return name not in forced_missing and bool(shutil.which(name))
+def destination_status(path):
+    if not os.path.isdir(path):
+        return "missing", None
+    if not os.access(path, os.W_OK):
+        return "missing", "unwritable"
+    return "ok", None
 
 def agents(value): return [] if value == "none" else ["claude", "codex"] if value == "both" else [value]
 deps = [{"id":"bash","classification":"required","scope":"both","agents":[],"status":"ok","required_for":["installer"],"remediation":"Install Bash 3.2 or newer"},
@@ -23,7 +29,10 @@ for agent in ("claude", "codex"):
     if agent in selected:
         deps.append({"id":agent,"classification":"required","scope":"both","agents":[agent],"status":"ok" if available(agent) else "missing","required_for":[f"{agent}-integration"],"remediation":f"Install and authenticate the {agent} CLI"})
 if a.project_enabled and agents(a.project_agent):
-    deps.append({"id":"project-destination","classification":"project","scope":"project","agents":agents(a.project_agent),"status":"ok" if os.path.isdir(a.project_destination) and os.access(a.project_destination, os.W_OK) else "missing","required_for":["project-install"],"remediation":"Choose an existing writable project directory"})
+    project_destination_status, project_destination_detail = destination_status(a.project_destination)
+    project_destination_dep = {"id":"project-destination","classification":"project","scope":"project","agents":agents(a.project_agent),"status":project_destination_status,"required_for":["project-install"],"remediation":"Choose an existing writable project directory"}
+    if project_destination_detail: project_destination_dep["detail"] = project_destination_detail
+    deps.append(project_destination_dep)
     deps.append({"id":"git","classification":"project","scope":"project","agents":agents(a.project_agent),"status":"ok" if available("git") else "missing","required_for":["project-rig-core"],"remediation":"Install git"})
     deps.append({"id":"gitleaks","classification":"optional","scope":"project","agents":[],"status":"ok" if shutil.which("gitleaks") else "missing","required_for":["secret-scanning"],"remediation":"Install gitleaks to enable commit secret scanning"})
     deps.append({"id":"sha256","classification":"optional","scope":"project","agents":[],"status":"ok" if (shutil.which("sha256sum") or shutil.which("shasum")) else "missing","required_for":["customization-detection"],"remediation":"Install sha256sum or shasum for upgrade customization detection"})
@@ -41,9 +50,12 @@ for dep in deps:
 degraded = []
 if any(d["id"] == "gitleaks" and d["status"] != "ok" for d in deps): degraded.append("secret-scanning")
 if any(d["id"] == "sha256" and d["status"] != "ok" for d in deps): degraded.append("customization-detection")
+warnings = []
+if any(d["id"] == "project-destination" and d.get("detail") == "unwritable" for d in deps):
+    warnings.append({"code":"unwritable-project-destination","message":"Project destination exists but is not writable by this process"})
 operation = "upgrade" if a.operation == "upgrade" else "repair" if a.operation == "overwrite" else "install"
 result={"schema":"https://the-rig.dev/schemas/install-preflight/v1","schema_version":1,"ok":not errors,"installer_version":a.version,"operation":operation,
 "layers":{"global":{"enabled":a.global_enabled,"agents":agents(a.global_agent),"destination":a.global_destination},"project":{"enabled":a.project_enabled,"agents":agents(a.project_agent),"destination":a.project_destination}},
-"dependencies":deps,"degraded_features":degraded,"errors":errors,"warnings":[],"next_steps":[f"Launch {x}" for x in sorted(set(selected))],"auto_install_dependencies":False}
+"dependencies":deps,"degraded_features":degraded,"errors":errors,"warnings":warnings,"next_steps":[f"Launch {x}" for x in sorted(set(selected))],"auto_install_dependencies":False}
 print(json.dumps(result,separators=(",",":")))
 sys.exit(0 if result["ok"] else 1)
