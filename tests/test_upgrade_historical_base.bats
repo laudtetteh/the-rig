@@ -184,9 +184,9 @@ Original body.
     --hint-revision 1.14.0
 
   [ "$status" -eq 0 ]
-  # One checked-out-template candidate (which does not match here) plus the
-  # hinted tag. Without the hint this file needs the full three-revision scan.
-  [[ "$output" == *'"tags_scanned":2'* ]] || return 1
+  # The checked-out-template candidate does not match here. It is not a tag,
+  # so the counter reports only the hinted tag.
+  [[ "$output" == *'"tags_scanned":1'* ]] || return 1
 }
 
 # ── Checked-out template candidate ───────────────────────────────────────────
@@ -207,7 +207,7 @@ Newest upstream line.
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"base_tag":"worktree"'* ]] || return 1
-  [[ "$output" == *'"tags_scanned":1'* ]] || return 1
+  [[ "$output" == *'"tags_scanned":0'* ]] || return 1
 }
 
 @test "historical base: resolves from the checked-out template with no tags at all" {
@@ -565,8 +565,9 @@ Original.
     --recorded-hash "$(_sha256_string 'never released')"
 
   [ "$status" -eq 1 ]
-  # The checked-out template plus each distinct released revision of this file.
-  [[ "$output" == *'"tags_scanned":4'* ]] || return 1
+  # Each distinct released revision of this file. The checked-out template is
+  # examined first but is not a tag, so it is not included in this count.
+  [[ "$output" == *'"tags_scanned":3'* ]] || return 1
 }
 
 @test "historical base: writes no output file when it refuses" {

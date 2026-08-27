@@ -8,10 +8,10 @@ on:
 
 env:
   # Weighted by tests/.ci-shard-weights.json and planned dynamically from the
-  # freshly globbed tests/*.bats inventory. Unlisted files receive a default
-  # weight, so new tests are always assigned and the coverage job below still
-  # verifies exact-once execution.
-  SHARD_COUNT: 8
+  # freshly globbed tests/*.bats inventory. Every Bats file must have an
+  # explicit weight entry, so new tests cannot silently inherit the old 5s
+  # default and skew the hosted wall-clock target.
+  SHARD_COUNT: 12
 
 jobs:
   plan-shards:

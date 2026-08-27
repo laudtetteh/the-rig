@@ -37,19 +37,21 @@ components:
 - Manifest tracking (SHA256 of all installed files, plus a JSON companion
   carrying per-artifact provenance: `owner`/`source`/`generator`/`provider`/
   `base_revision`) — upgrade strategy detects user customizations before
-  overwriting, and refuses to trust a `base_revision` claiming a newer
-  installer version than the one running
+  overwriting; historical merge bases are proven by SHA256 equality against
+  release-tagged template content, while `base_revision` only orders the scan
 - Stealth mode: all Rig artifacts excluded from git; `.rig/` at external path;
   hooks in `.git/hooks/` (manifest-tracked and backed up, with a safe lifecycle
   under agent-driven upgrades)
 - Non-interactive mode (`--strategy`, `--target`, `--tracking`, `--base-branch`
-  flags) for scripting and CI
+  flags, plus repair/recovery and feature toggles) for scripting and CI
 - Self-install detection, `[BASE_BRANCH]` and `[REPO_ROOT]` placeholder substitution
-- 730 bats tests across 58 files
+- 853 bats tests across 61 files
 
 ### Project layer (scaffolded into target projects)
 - **Memory system**: `PROGRESS.md` (auto-logged by post-commit hook), `ERRORS.md`, `CONTEXT_SNAPSHOT.md` (written by `/wrap`), `DECISIONS.md`, `RIG_GAPS.md`
-- **Processes**: `NEW_TASK_WORKFLOW.md`, `SHIP_WORKFLOW.md`, `POST_MERGE_WORKFLOW.md`, `DEBUG_WORKFLOW.md`
+- **Processes**: six workflow files plus two process contracts covering task
+  intake, work modes, sprint planning, shipping, debugging, connector
+  preflight, upgrades, and post-merge housekeeping
 - **Command/skill adapters**: Claude slash commands are generated as corresponding Codex `$name` skills from one canonical source
 - **Agent hooks**: canonical Claude handlers plus a Codex hook manifest/adapter enforce the same safety and lifecycle contracts
 - **Git hooks**: `pre-commit` (gitleaks secret scanning), `commit-msg` + `post-commit` (tool footer removal), `post-merge` (post-merge-pending flag)
@@ -72,8 +74,8 @@ components:
   the preferred installer checkout first, then load the latest workflow text
   before mutating project layers.
 - **Manifest provenance**: `base_revision`/`generator`/`provider` fields on every
-  manifest entry, plus future/bogus `base_revision` gating (a claimed revision
-  newer than the running installer is refused, not silently trusted)
+  manifest entry, plus future/bogus `base_revision` gating. `base_revision` is
+  not trusted as a lookup key; matching content hashes prove the historical base.
 - **Fixed stealth-exclusion coverage**: every generated launcher sibling under
   `bin/` is now git-excluded (closes a leak affecting real installed projects)
 - **Complete transaction/backup coverage**: direct-writer mutations (including
@@ -120,7 +122,7 @@ components:
 ## Success metrics
 
 - Upgrade path never breaks an existing install
-- All 730 bats tests pass on every commit through hosted CI, the authoritative
+- All 853 bats tests pass on every commit through hosted CI, the authoritative
   complete-suite gate
 - A new user can install The Rig and complete a first Claude `/task` → `/ship` or Codex `$task` → `$ship` cycle without reading docs
 - Memory survives context compaction — next session picks up exactly where the last one left off

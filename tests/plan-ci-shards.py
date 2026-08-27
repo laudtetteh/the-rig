@@ -16,6 +16,20 @@ def load_weights(path):
     return default, weights
 
 
+def verify_explicit_weights(files, weights):
+    missing = [path for path in files if path not in weights]
+    if not missing:
+        return True
+    print(
+        json.dumps(
+            {"ok": False, "missing_weights": missing},
+            separators=(",", ":"),
+        ),
+        file=sys.stderr,
+    )
+    return False
+
+
 def plan(files, weights, default_weight, shard_count):
     shards = [{"shard": i, "files": [], "weight": 0.0} for i in range(shard_count)]
     weighted_files = sorted(
@@ -65,6 +79,9 @@ def main():
         raise SystemExit("no Bats test files matched")
 
     default_weight, weights = load_weights(args.weights)
+    if not verify_explicit_weights(files, weights):
+        return 1
+
     shard_count = args.shards
     if args.target_seconds:
         total = sum(weights.get(path, default_weight) for path in files)

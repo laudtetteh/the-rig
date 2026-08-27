@@ -20,11 +20,18 @@ The installer is interactive by default; the flags below bypass all prompts.
 | `--preflight` | — | Validate the resolved matrix and prerequisites without writing |
 | `--json` | — | With `--preflight`, emit schema-versioned JSON only |
 | `--target <path>` | absolute path | Project directory to install into |
+| `--base-branch <name>` | branch name | Substitute the project's base branch into templates |
 | `--tracking` | `repo` \| `local` \| `external` \| `stealth` | How `.rig/` is tracked in git |
 | `--strategy` | `merge` \| `upgrade` \| `overwrite` \| `skip` \| `interactive` \| `agent-plan` \| `agent-upgrade` | How to handle existing files |
 | `--rig-dir <path>` | absolute path | Where to put `.rig/` when using external or stealth tracking |
 | `--project-name <name>` | string | Project name substituted into templates |
 | `--skip-git-hooks` | — | Skip writing to `.git/hooks/` (stealth + existing Husky setup) |
+| `--recover` | — | Restore an interrupted transaction without applying a new version |
+| `--repair-stale` | — | Repair stale Rig-owned manifest entries when the on-disk file still matches the running template |
+| `--feature-docs` | — | Install optional feature documentation helpers |
+| `--subagents` | — | Install optional subagent hook support |
+| `--contribute` | — | Enable opt-in contribution helpers |
+| `--notifications` | — | Install optional notification support |
 
 **Tracking modes:**
 
@@ -255,12 +262,13 @@ applying an upgrade, run `agent-plan` first, inspect the JSON, then run
 cd ~/tools/the-rig
 git pull
 
-# 1. Read-only preview — zero writes, prints one JSON document, exits 3 if
-#    anything would need manual review.
+# 1. Read-only preview — zero writes and no upgrade report, prints one JSON
+#    document, exits 3 if anything would need manual review.
 ./install.sh --project-only --target /path/to/project --strategy agent-plan
 
 # 2. If the plan's "status" is "success", apply safe updates plus guarded
-#    convergence and get a JSON result back.
+#    convergence and get a JSON result back. When a durable report is written,
+#    the result includes report_path and rollback_id.
 ./install.sh --project-only --target /path/to/project --strategy agent-upgrade
 ```
 
@@ -271,6 +279,11 @@ each entry has `path`, `reason`, and `repair_guidance` — and present those
 fields verbatim to the user rather than inventing guidance text. Full JSON
 schema, exit-code table, and classification semantics:
 `.rig/processes/UPGRADE_WORKFLOW.md`'s "Agent-driven upgrade contract" section.
+
+When `agent-upgrade` writes a durable report, scripted callers should read
+`report_path` and `rollback_id` from the JSON result. The rollback id is the
+confirmation token for `bin/rig upgrade rollback --id <id> --dry-run` followed
+by `bin/rig upgrade rollback --id <id> --confirm <id>`.
 
 A manifest entry whose `base_revision` claims an installer version newer
 than the one currently running is treated the same way as any other

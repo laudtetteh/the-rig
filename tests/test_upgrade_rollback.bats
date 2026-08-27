@@ -109,6 +109,7 @@ _rollback_id() {
 @test "rollback: is listed in the dispatcher usage" {
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name "TestProject" --tracking repo --strategy upgrade
+  [ "$status" -eq 0 ]
   rig --help
   [[ "$output" == *"upgrade rollback"* ]] || return 1
 }
@@ -116,9 +117,20 @@ _rollback_id() {
 @test "rollback: help distinguishes it from install.sh --recover" {
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name "TestProject" --tracking repo --strategy upgrade
+  [ "$status" -eq 0 ]
   rig upgrade --help
   [[ "$output" == *"--recover"* ]] || return 1
   [[ "$output" == *"interrupted"* ]] || return 1
+}
+
+@test "rollback: subcommand help prints rollback usage" {
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name "TestProject" --tracking repo --strategy upgrade
+  [ "$status" -eq 0 ]
+  rig upgrade rollback --help
+  [ "$status" -eq 0 ]
+  case "$output" in *"Usage: rig upgrade rollback"*) ;; *) return 1 ;; esac
+  case "$output" in *"Exit codes: 0 fully undone, 3 some paths refused, 70 a restore failed."*) ;; *) return 1 ;; esac
 }
 
 @test "rollback: requires --last or --id" {
@@ -402,6 +414,63 @@ print('ok')
 
 _latest_report() {
   ls "$TEST_PROJECT/.rig/upgrade-reports/"[0-9]*.json | tail -1
+}
+
+@test "rollback: refuses a report written for another project target" {
+  _upgraded_project
+  local report id
+  report="$(_latest_report)"
+  id="$(python3 -c "import json; print(json.load(open('$report'))['rollback_id'])")"
+
+  python3 - "$report" "$TEMP_DIR/other-project" <<'PYEOF'
+import json
+import sys
+
+report, other = sys.argv[1:3]
+with open(report) as handle:
+    data = json.load(handle)
+data["target"] = other
+with open(report, "w") as handle:
+    json.dump(data, handle)
+PYEOF
+
+  rig upgrade rollback --id "$id" --dry-run --json
+  [ "$status" -eq 69 ]
+  case "$output" in *"different project target"*) ;; *) return 1 ;; esac
+}
+
+@test "rollback: refuses a stealth report written for another Rig directory" {
+  local rig_ext="$TEMP_DIR/rig-ext"
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name "TestProject" --tracking stealth --rig-dir "$rig_ext" \
+    --project-agent claude --strategy merge
+  [ "$status" -eq 0 ]
+
+  rm -f "$TEST_PROJECT/.claude/commands/wrap.md"
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name "TestProject" --tracking stealth --rig-dir "$rig_ext" \
+    --project-agent claude --strategy agent-upgrade
+  [ "$status" -eq 0 ]
+
+  local report id
+  report="$(ls "$rig_ext/upgrade-reports/"[0-9]*.json | tail -1)"
+  id="$(python3 -c "import json; print(json.load(open('$report'))['rollback_id'])")"
+  python3 - "$report" "$TEMP_DIR/other-rig" <<'PYEOF'
+import json
+import sys
+
+report, other = sys.argv[1:3]
+with open(report) as handle:
+    data = json.load(handle)
+data["rig_dir"] = other
+data["tracking"] = "repo"
+with open(report, "w") as handle:
+    json.dump(data, handle)
+PYEOF
+
+  rig upgrade rollback --id "$id" --dry-run --json
+  [ "$status" -eq 69 ]
+  case "$output" in *"different Rig directory"*) ;; *) return 1 ;; esac
 }
 
 @test "rollback: refuses a change whose storage root is outside the project" {

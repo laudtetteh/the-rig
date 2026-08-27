@@ -305,8 +305,11 @@ snapshot — hooks are a safety net, not a replacement.
 
 **Ship and debug**
 ```
+/code-review   →  review current diff for bugs, regressions, risk, and missing tests
+/connector-preflight → verify connector readiness before MCP/app-dependent work
 /ship         →  pre-commit cleanup + checklist + commit + open or update PR
 /debug        →  hypothesis-first diagnosis, mandatory ERRORS.md entry
+/handoff-checklist → prepare a durable handoff when work transfers sessions or agents
 ```
 
 **Release**
@@ -329,6 +332,7 @@ snapshot — hooks are a safety net, not a replacement.
 /status       →  project dashboard: branch, active tasks, backlog count, recent progress, pending flags
 /doc-list     →  show docs/INDEX.md without loading full doc files
 /rig-help     →  print all Rig commands with descriptions and key flags
+/rig-status   →  provider-neutral health dashboard for hooks, memory, adapters, and flags
 ```
 
 **Governance and housekeeping**
@@ -360,8 +364,8 @@ snapshot — hooks are a safety net, not a replacement.
 | `post-tool.sh` | `PostToolUse` (every tool call) | Auto-stubs `PROGRESS.md` after every commit; clears commit sentinel |
 | `pre-compact.sh` | `PreCompact` | Writes compact checkpoint + `compactionSummary` before context compaction |
 | `post-compact.sh` | `PostCompact` | Injects checkpoint content as `additionalContext` after compaction |
-| `subagent-start.sh` | `SubagentStart` | Injects project name, branch, active task, and key conventions into spawned subagents |
-| `stop.sh` | `Stop` (every agent turn) | Updates `Last updated:` in `CONTEXT_SNAPSHOT.md`; appends session-end boundary to `PROGRESS.md` |
+| `subagent-start.sh` | `SubagentStart` | Optional with `--subagents`; injects project name, branch, active task, and key conventions into spawned subagents |
+| `stop.sh` | `Stop`, `SessionEnd` | Updates `Last updated:` in `CONTEXT_SNAPSHOT.md`; appends session-end boundary to `PROGRESS.md`; handles session-end checkpoint/flag cases |
 
 ### Codex hooks
 

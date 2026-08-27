@@ -152,7 +152,7 @@ Agent is oriented. Hooks are live. Ready to work.
      │  └─ post-compact.sh (PostCompact)
      │       Injects checkpoint as additionalContext; restores working context
      │
-     │  When a subagent spawns:
+     │  When a subagent spawns, if installed with --subagents:
      │  └─ subagent-start.sh (SubagentStart)
      │       Injects project name, branch, active task, key conventions
      │
@@ -237,9 +237,10 @@ Seven files, seven purposes:
 - A JSON companion, `.rig-manifest.json`, carries richer per-artifact
   provenance for every tracked path (not just Rig-owned ones): `owner`,
   `source`, `type`, `mode`, `installer_version`, and (since issue #444 lane
-  444-B) `base_revision`/`generator`/`provider` — the trusted-base and
-  producing-tool metadata a future three-way merge or `bin/rig doctor` gate
-  verifies against. An entry written before lane 444-B simply lacks these
+  444-B) `base_revision`/`generator`/`provider` — provenance metadata used by
+  the historical-base resolver and `bin/rig doctor`. `base_revision` only
+  orders the scan; the merge base is proven by SHA256 equality against rendered
+  release-tagged template content. An entry written before lane 444-B simply lacks these
   three fields (legacy/unknown provenance, not an error). A `base_revision`
   claiming an installer version newer than the one currently running (issue
   #463) is reported as its own `future_revision` finding, distinct from
@@ -253,7 +254,8 @@ Seven files, seven purposes:
 
 ## The process system
 
-Four workflow files that define step-by-step behaviour at each phase:
+Six workflow files and two process contracts define step-by-step behaviour at
+each phase:
 
 ### NEW_TASK_WORKFLOW
 ```
@@ -309,7 +311,9 @@ Step 8: Surface next priority — ask "What's next?"
 
 ### Claude Code hooks (`.claude/`)
 
-Wired via `.claude/settings.json`. Ten hooks covering the full session lifecycle.
+Wired via `.claude/settings.json`. A default install ships nine Claude hooks
+covering the session lifecycle; `subagent-start.sh` is added when `--subagents`
+is enabled.
 
 These are intentionally Claude-specific handlers. Codex events are received by
 `.codex/hooks.json` and normalized by `.codex/hooks/rig-adapter.sh` before they
@@ -387,7 +391,7 @@ After context compaction
 
 When a subagent spawns
      │
-     └─► subagent-start.sh (SubagentStart)
+     └─► subagent-start.sh (SubagentStart, only when installed with --subagents)
            Resolves RIG_DIR
            Injects: project name, current branch, active task slug, key conventions
            (subagents share the same working context as the parent session)
@@ -578,6 +582,9 @@ skills covering the full development lifecycle:
 | Command | Triggers | Key behaviour |
 |---|---|---|
 | `/pre-release-review` | Full review sweep | Covers regressions, test coverage, security, docs accuracy, maintainability, edge cases, and version bump readiness. Outputs a scored Markdown report with a SHIP / HOLD / SHIP WITH FIXES recommendation. |
+| `/code-review` | Rig review workflow | Reviews the current diff for bugs, regressions, risks, and missing tests before summary. |
+| `/connector-preflight` | Connector verification | Checks MCP/app connector readiness before workflows rely on external tool access. |
+| `/handoff-checklist` | Handoff gate | Produces a durable handoff checklist when work must transfer between sessions or agents. |
 
 ### Feature knowledge
 | Command | Triggers | Key behaviour |
@@ -593,6 +600,7 @@ skills covering the full development lifecycle:
 | `/status` | State dashboard | Shows current branch, active tasks (with goals), backlog count, recent PROGRESS entries, and any pending housekeeping flags. Fast alternative to loading full context files. |
 | `/doc-list` | Docs index | Reads `docs/INDEX.md` and displays the table. Use before loading a full doc file to identify which one covers what you need. |
 | `/rig-help` | Command reference | Prints all Rig commands with one-liner descriptions and key flags. Self-contained — no individual command files are loaded. |
+| `/rig-status` | Rig health dashboard | Runs provider-neutral status checks for hooks, memory, adapter wiring, and pending flags. |
 
 ### Governance and housekeeping
 | Command | Triggers | Key behaviour |

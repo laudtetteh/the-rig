@@ -179,7 +179,7 @@ git diff --stat   # count the modified files
 
 | Files changed | Strategy |
 |---|---|
-| 1–3 files | Direct `chore(rig):` commit to `[BASE_BRANCH]` acceptable if `housekeeping: direct-push` |
+| 1–3 files | Direct `chore(rig):` commit to the configured base branch acceptable if `housekeeping: direct-push` |
 | 4+ files | **Branch + PR** — regardless of `housekeeping:` setting |
 
 For any upgrade that modifies 4 or more files (hooks, commands, process files, VERSION):

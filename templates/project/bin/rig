@@ -1907,6 +1907,16 @@ ANCHOR_ROOTS = [
 ]
 
 args = sys.argv[1:]
+if "--help" in args or "-h" in args:
+    print("""Usage: rig upgrade rollback (--last | --id ID) [--dry-run | --confirm ID] [--json]
+
+Undoes one completed upgrade using the report that run wrote.
+Restores only the paths that upgrade changed, and refuses anything
+edited since. For an interrupted upgrade, use install.sh --recover.
+
+Exit codes: 0 fully undone, 3 some paths refused, 70 a restore failed.""")
+    sys.exit(0)
+
 want_last = "--last" in args
 dry_run = "--dry-run" in args
 as_json = "--json" in args
@@ -2031,6 +2041,19 @@ if selected.get("schema_version") != 1:
          % (selected.get("schema_version"),), 69)
 if confirm and confirm != rollback_id:
     fail("confirmation token does not match this report's rollback id (%s)" % rollback_id)
+
+
+def report_path_matches(value, expected):
+    if not isinstance(value, str) or not value:
+        return False
+    return os.path.realpath(value) == os.path.realpath(expected)
+
+
+if not report_path_matches(selected.get("target"), PROJECT_ROOT):
+    fail("upgrade report belongs to a different project target", 69)
+recorded_rig_dir = selected.get("rig_dir")
+if recorded_rig_dir is not None and not report_path_matches(recorded_rig_dir, RIG_DIR):
+    fail("upgrade report belongs to a different Rig directory", 69)
 
 
 def digest(path):

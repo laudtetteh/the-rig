@@ -439,3 +439,27 @@ cost of check quality. The registry is embedded directly as Python data in
 file under `installer/`, since `bin/rig` is a self-contained script with no
 access back to the installer's own source repo once deployed to a target
 project.
+
+---
+
+## 22. Historical merge bases are content-addressed, not version-addressed
+
+**Decided:** The upgrade convergence resolver treats `base_revision` as an
+ordering hint only. A historical merge base is accepted only when rendered
+template content from the checked-out worktree or a reachable release tag hashes
+to the manifest's recorded SHA256 baseline.
+
+**Rejected:** Trusting `base_revision` as the lookup key for the merge base.
+
+**Rationale:** Real downstream evidence showed legacy flat manifests and later
+manifest metadata can name a version that is not the actual template baseline a
+project has on disk. A version-keyed resolver would have resolved zero files in
+that shape, even though matching historical content existed. Content equality is
+the proof that a three-way base is safe; version metadata is useful only for
+scan order and diagnostics.
+
+**Consequences:** Tag reachability is load-bearing. On the reference
+4Culture-shaped blocker, automatic convergence resolves 5 of 16 customized
+Rig-owned files and reports the other 11 as genuine overlapping edits. That
+ceiling is intentional release evidence, not a claim that convergence unblocks
+the rollout by itself.
