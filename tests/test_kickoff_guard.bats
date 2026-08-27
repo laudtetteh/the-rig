@@ -127,3 +127,16 @@ run_probe() {
   run /usr/bin/grep -q 'hand off directly to `/task`' "$KICKOFF"
   [ "$status" -eq 0 ]
 }
+
+@test "kickoff scaffold step surfaces generator refusals and verifies expected files" {
+  run /usr/bin/grep -q 'Scaffold command safety gate' "$KICKOFF"
+  [ "$status" -eq 0 ]
+  run /usr/bin/grep -q 'Capture and inspect the exit status, stdout, and stderr' "$KICKOFF"
+  [ "$status" -eq 0 ]
+  run /usr/bin/grep -q 'non-empty directory' "$KICKOFF"
+  [ "$status" -eq 0 ]
+  run /usr/bin/grep -q 'Verify every expected file or directory' "$KICKOFF"
+  [ "$status" -eq 0 ]
+  run /usr/bin/grep -q 'Do not report kickoff or the scaffold item as' "$KICKOFF"
+  [ "$status" -eq 0 ]
+}

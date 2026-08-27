@@ -16,6 +16,10 @@ project's Rig memory, task files, or session records here. For a combined
 handoff after a merge, run `/post-merge` for the merged project first, then run
 `/wrap` for the current project; each command owns only its own project state.
 
+If the session includes a batch of related merged PRs, process them as a
+batch ledger without weakening per-PR hygiene: verify each PR number, merge SHA,
+closed issue set, and task row separately, then print one batch summary.
+
 ---
 
 ## What this does
@@ -129,6 +133,8 @@ writing memory.
 Gather all findings silently — no output yet:
 
 1. **Merged PR** — title, number, branch name (from context or `git log --oneline -1`)
+   If the user names several merged PRs, collect each PR with its merge SHA and
+   closed issue list.
 2. **"This session" summary** — from conversation context: all PRs merged or opened, tasks completed, issues resolved this session. Conversation context is the primary signal; PROGRESS.md markers are cross-reference only.
 3. **Task file** — which active task file maps to the merged PR (for step 3 of POST_MERGE_WORKFLOW)
 4. **ERRORS.md additions** — infer from session context whether any unexpected behaviors, footguns, or pitfalls should be added
@@ -155,6 +161,7 @@ Print a single structured report before executing POST_MERGE_WORKFLOW:
 **Cross-project work:** [none | other projects mentioned: project-a, project-b — not updated here]
 
 **Merged:** PR #N — type(scope): description
+**Batch ledger:** [single PR | PR #N sha abc123 closes #X | PR #M sha def456 closes #Y,#Z]
 
 **This session:**
 - PR #N merged: type(scope): description
@@ -166,6 +173,7 @@ Print a single structured report before executing POST_MERGE_WORKFLOW:
 **Task file:** [TASK_N_slug.md → moving to done/ | no active task found]
 
 **Session name:** [suggested: "type desc #N | type desc #N" | already set — appending: "..." | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
+**Final session name:** [confirmed final: "..." | suggested final: "..." awaiting confirmation | unresolved — reliable name could not be set | nothing meaningful shipped, skipped]
 ```
 
 If `/post-merge` is skipped, print instead:
@@ -181,9 +189,9 @@ If `/post-merge` is skipped, print instead:
 
 After printing the report, **execute POST_MERGE_WORKFLOW steps 1–8 automatically**:
 
-- Pull latest [BASE_BRANCH] and confirm HEAD
-- Update PROGRESS.md
-- Move task file to done/
+- Pull latest [BASE_BRANCH] and confirm each expected merge SHA
+- Update PROGRESS.md, one entry per PR or an explicit combined batch summary
+- Move task file to done/ only when its batch ledger rows are terminal
 - Write CONTEXT_SNAPSHOT.md
 - Add inferred ERRORS.md entries (if any)
 - Make housekeeping commit
@@ -244,12 +252,15 @@ SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
 SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
 SESSION_UUID=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
 TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); print(d.get("names",{}).get("tentative") or d.get("tentative_name") or "")')
+NAMING_EVIDENCE=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); e=d.get("naming_evidence",{}).get("progress_titles",[]) if isinstance(d.get("naming_evidence",{}),dict) else []; print("\n".join(str(x) for x in e if str(x).strip()))' 2>/dev/null || true)
 ```
 
 ### Step 2 — Collect this session's work
 
 **Conversation context first** — enumerate PRs, tasks, and work you know about.
-The merged PR number is always known at this point. File signals are cross-reference:
+The merged PR number is always known at this point. A tentative name and
+`naming_evidence.progress_titles` in the exact active session file are
+same-session pre-compaction anchors. File signals are cross-reference:
 
 ```bash
 grep "^## .*<!-- sid:${SESSION_UUID} -->" "$RIG_DIR/memory/PROGRESS.md" 2>/dev/null || true
@@ -259,9 +270,12 @@ grep "^## .*<!-- sid:${SESSION_UUID} -->" "$RIG_DIR/memory/PROGRESS.md" 2>/dev/n
 at the end of the line.** Read UUID from the resolver output above.
 
 If tentative_name is set, use it as the base (refine based on actual outcome).
-Never use `CONTEXT_SNAPSHOT.md`, legacy markers, unrelated session files,
-other-session UUID entries, or general project history as naming evidence. An
-unresolved raw launch fails closed before any name is proposed or written.
+For compacted sessions, read only
+`$RIG_DIR/memory/.compact-checkpoint-${SESSION_UUID}.md`, and use its
+`Session naming evidence` only when that file's `Session anchor` equals
+`SESSION_UUID`. Never use `CONTEXT_SNAPSHOT.md`, checkpoints for another anchor,
+legacy markers, unrelated session files, other-session UUID entries, or general
+project history as naming evidence. An unresolved raw launch fails closed before any name is proposed or written.
 
 ### Step 3 — Build the name
 

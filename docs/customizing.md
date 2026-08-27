@@ -561,6 +561,13 @@ default, and choice-driven in non-interactive/CI use (a customized file is
 always skipped and reported, never silently changed). That behavior has not
 changed.
 
+If you want semantic or intelligent convergence during a Rig upgrade, use the
+agent path (`/rig-upgrade --mode=agent`, `$rig-upgrade --mode=agent`, or
+`install.sh --strategy agent-upgrade`). Do not use raw `install.sh --strategy
+upgrade` for that expectation: the raw installer is deliberately conservative
+and treats customized Rig-owned files as manual-review surfaces unless the
+ordinary upgrade path already knows they are safe to update.
+
 Separately, `install.sh` also accepts two more `--strategy` values that exist
 specifically for a calling agent or script: `agent-plan` is read-only and emits
 a JSON plan of what an upgrade would do with zero writes; `agent-upgrade`
@@ -585,6 +592,17 @@ doctor --json` and surfaces any failing gate before the command finishes.
 per-file interactive review flow, unchanged from before agent-driven
 convergence existed. See `templates/project/.claude/commands/rig-upgrade.md`
 for the full Phase 2/2a-agent/2b-agent/3d flow.
+
+Tradeoff summary:
+
+- `--strategy upgrade`: easiest to reason about; never attempts semantic merges
+  for customized surfaces; leaves more manual review when you have local Rig
+  customizations.
+- `--strategy agent-upgrade`: preserves compatible local customizations while
+  applying incoming Rig changes; refuses instead of guessing when convergence is
+  unsafe; requires the caller to inspect JSON conflicts and validate the result.
+- `/rig-upgrade` / `$rig-upgrade`: preferred user-facing flow because it runs
+  the preview, applies the selected mode, and follows with doctor checks.
 
 ### Verifying an upgrade: `bin/rig doctor` gates
 

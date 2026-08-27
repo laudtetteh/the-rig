@@ -24,9 +24,9 @@ teardown() {
 
 @test "README component counts match canonical template inventory" {
   [ "$(find "$REPO_ROOT/templates/global/skills" -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')" -eq 5 ]
-  [ "$(find "$REPO_ROOT/templates/project/.rig/processes" -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')" -eq 8 ]
+  [ "$(find "$REPO_ROOT/templates/project/.rig/processes" -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')" -eq 9 ]
   [ "$(find "$REPO_ROOT/templates/project/.rig/rules" -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 7 ]
-  grep -Fq '| Processes (8) |' "$REPO_ROOT/README.md"
+  grep -Fq '| Processes (9) |' "$REPO_ROOT/README.md"
   grep -Fq '| Rules (7) |' "$REPO_ROOT/README.md"
 }
 

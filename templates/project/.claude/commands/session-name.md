@@ -64,14 +64,16 @@ merged, tasks completed. If called early in the session to set a tentative name,
 the stated intent as the basis.
 
 File signals from the resolved current session are cross-reference only:
+- **`naming_evidence.progress_titles` in the exact active session file** — same-session progress titles recorded by Rig writers before compaction
 - **UUID-tagged PROGRESS entries** — `grep "^## .*<!-- sid:${SESSION_UUID} -->"` to find entries from this session
 - **`tentative_name` in session file** — set pre-compaction; use as the base if context was lost to compaction
+- **Compact checkpoint Session naming evidence** — only from `.compact-checkpoint-${SESSION_UUID}.md`, and only if its `Session anchor` matches `SESSION_UUID`
 
 **If conversation context and file signals conflict, trust the conversation.**
-Never use `CONTEXT_SNAPSHOT.md`, legacy markers, unrelated session files,
-other-session UUID entries, or general project history as naming evidence. If
-resolution failed, use conversation context only. An unresolved raw launch must
-never inherit unrelated prior-session work.
+Never use `CONTEXT_SNAPSHOT.md`, checkpoints for another anchor, legacy markers,
+unrelated session files, other-session UUID entries, or general project history
+as naming evidence. If resolution failed, use conversation context only. An
+unresolved raw launch must never inherit unrelated prior-session work.
 
 ### 2 — Check for an existing tentative name
 

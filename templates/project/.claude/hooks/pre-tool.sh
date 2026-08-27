@@ -31,6 +31,27 @@ else
   RIG_DIR="$REPO/.rig"
 fi
 
+commit_ok_age_seconds() {
+  local file="$1"
+  local now mtime
+
+  now=$(date +%s 2>/dev/null || echo "")
+  if [[ -z "$now" ]]; then
+    return 1
+  fi
+
+  mtime=$(stat -c %Y "$file" 2>/dev/null || stat -f %m "$file" 2>/dev/null || echo "")
+  if [[ -z "$mtime" ]]; then
+    return 1
+  fi
+
+  case "$now:$mtime" in
+    *[!0-9:]*|:*) return 1 ;;
+  esac
+
+  echo $((now - mtime))
+}
+
 # ── Session log ──────────────────────────────────────────────────────────────
 # Logs every tool call with a timestamp. Useful for debugging agent behaviour.
 # Scoped per-project so concurrent sessions on different projects don't
@@ -74,6 +95,7 @@ if [[ "$TOOL" == "Bash" ]]; then
 
   # ── Gate git commit on sentinel file ───────────────────────────────────
   COMMIT_OK="$RIG_DIR/memory/.rig-commit-ok"
+  COMMIT_OK_TTL_SECONDS="${RIG_COMMIT_OK_TTL_SECONDS:-900}"
   if echo "$BASH_CMD" | grep -qE '\bgit\s+commit\b'; then
     if [[ ! -f "$COMMIT_OK" ]]; then
       echo "" >&2
@@ -85,6 +107,42 @@ if [[ "$TOOL" == "Bash" ]]; then
       echo "       I'll create the authorization and immediately commit and push." >&2
       echo "" >&2
       echo "  (Or create it yourself: touch '${COMMIT_OK}')" >&2
+      exit 1
+    fi
+
+    COMMIT_OK_AGE=""
+    if COMMIT_OK_AGE=$(commit_ok_age_seconds "$COMMIT_OK"); then
+      :
+    else
+      rm -f "$COMMIT_OK" 2>/dev/null || true
+      echo "" >&2
+      echo "  Commit blocked by The Rig." >&2
+      echo "" >&2
+      echo "  The commit authorization could not be verified and was cleared." >&2
+      echo "  Ask for commit approval again, then recreate:" >&2
+      echo "    touch '${COMMIT_OK}'" >&2
+      exit 1
+    fi
+
+    case "$COMMIT_OK_TTL_SECONDS:$COMMIT_OK_AGE" in
+      *[!0-9:]*|:*)
+        rm -f "$COMMIT_OK" 2>/dev/null || true
+        echo "" >&2
+        echo "  Commit blocked by The Rig." >&2
+        echo "" >&2
+        echo "  The commit authorization expiry setting is invalid and was cleared." >&2
+        echo "  Set RIG_COMMIT_OK_TTL_SECONDS to a positive number, or unset it." >&2
+        exit 1
+        ;;
+    esac
+
+    if [[ "$COMMIT_OK_AGE" -gt "$COMMIT_OK_TTL_SECONDS" ]]; then
+      rm -f "$COMMIT_OK" 2>/dev/null || true
+      echo "" >&2
+      echo "  Commit blocked by The Rig." >&2
+      echo "" >&2
+      echo "  The commit authorization is stale (${COMMIT_OK_AGE}s old; limit ${COMMIT_OK_TTL_SECONDS}s) and was cleared." >&2
+      echo "  Re-run the ship approval step or ask for commit approval again." >&2
       exit 1
     fi
 

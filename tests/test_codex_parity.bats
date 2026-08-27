@@ -41,6 +41,18 @@ run_claude_pretool() {
     _ "$TEST_PROJECT" "$tool" "$payload"
 }
 
+run_claude_pretool_with_ttl() {
+  local ttl="$1" tool="$2" payload="$3"
+  run env RIG_COMMIT_OK_TTL_SECONDS="$ttl" bash -c 'cd "$1" && printf "%s" "$3" | bash .claude/hooks/pre-tool.sh "$2"' \
+    _ "$TEST_PROJECT" "$tool" "$payload"
+}
+
+run_claude_pretool_with_path() {
+  local path="$1" tool="$2" payload="$3"
+  run env PATH="$path" bash -c 'cd "$1" && printf "%s" "$3" | bash .claude/hooks/pre-tool.sh "$2"' \
+    _ "$TEST_PROJECT" "$tool" "$payload"
+}
+
 run_codex_adapter() {
   local payload="$1"
   run bash -c 'cd "$1" && printf "%s" "$2" | bash .codex/hooks/rig-adapter.sh' \
@@ -58,6 +70,85 @@ run_codex_adapter() {
   codex_status="$status"
 
   [ "$claude_status" -eq "$codex_status" ]
+}
+
+@test "commit sentinel blocks missing authorization through shipped pre-tool hook" {
+  command="git commit -m 'chore(memory): test [#1]'"
+  claude_payload="$(python3 -c 'import json,sys; print(json.dumps({"command":sys.argv[1]}))' "$command")"
+
+  run_claude_pretool Bash "$claude_payload"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Commit blocked by The Rig."* ]] || return 1
+  [[ "$output" == *"go-ahead before I commit"* ]] || return 1
+}
+
+@test "commit sentinel allows fresh authorization through shipped pre-tool hook" {
+  git -C "$TEST_PROJECT" checkout -q -b chore/sentinel-fresh
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  command="git commit -m 'chore(memory): test [#1]'"
+  claude_payload="$(python3 -c 'import json,sys; print(json.dumps({"command":sys.argv[1]}))' "$command")"
+
+  run_claude_pretool Bash "$claude_payload"
+
+  [ "$status" -eq 0 ]
+}
+
+@test "commit sentinel rejects and clears stale authorization" {
+  git -C "$TEST_PROJECT" checkout -q -b chore/sentinel-stale
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  touch -t 200001010000 "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  command="git commit -m 'chore(memory): test [#1]'"
+  claude_payload="$(python3 -c 'import json,sys; print(json.dumps({"command":sys.argv[1]}))' "$command")"
+
+  run_claude_pretool_with_ttl 900 Bash "$claude_payload"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"commit authorization is stale"* ]] || return 1
+  [ ! -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+}
+
+@test "commit sentinel honors external rig directory from .rigpath" {
+  git -C "$TEST_PROJECT" checkout -q -b chore/sentinel-external
+  external_rig="$TEST_ROOT/external-rig"
+  mkdir -p "$external_rig/memory"
+  printf '%s\n' "$external_rig" > "$TEST_PROJECT/.rigpath"
+  touch "$external_rig/memory/.rig-commit-ok"
+  command="git commit -m 'chore(memory): test [#1]'"
+  claude_payload="$(python3 -c 'import json,sys; print(json.dumps({"command":sys.argv[1]}))' "$command")"
+
+  run_claude_pretool Bash "$claude_payload"
+
+  [ "$status" -eq 0 ]
+}
+
+@test "commit sentinel prefers GNU stat mtime before BSD filesystem stat fallback" {
+  git -C "$TEST_PROJECT" checkout -q -b chore/sentinel-gnu-stat
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  fake_bin="$TEST_ROOT/bin"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/stat" <<'EOF'
+#!/bin/sh
+if [ "$1" = "-c" ]; then
+  /bin/date +%s
+  exit 0
+fi
+if [ "$1" = "-f" ]; then
+  printf 'gnu-filesystem-stat-output\n'
+  exit 0
+fi
+exit 1
+EOF
+  chmod +x "$fake_bin/stat"
+  command="git commit -m 'chore(memory): test [#1]'"
+  claude_payload="$(python3 -c 'import json,sys; print(json.dumps({"command":sys.argv[1]}))' "$command")"
+
+  run_claude_pretool_with_path "$fake_bin:$PATH" Bash "$claude_payload"
+
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output"
+    return 1
+  fi
 }
 
 @test "Claude Edit and Codex apply_patch produce the same protected-file outcome" {

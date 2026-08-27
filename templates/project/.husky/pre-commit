@@ -24,21 +24,45 @@ GITLEAKS_BIN=""
 
 if command -v gitleaks >/dev/null 2>&1; then
   GITLEAKS_BIN="gitleaks"
-elif [ -x "/usr/local/bin/gitleaks" ]; then
+elif [ "${RIG_GITLEAKS_PATH_ONLY:-0}" != "1" ] && [ -x "/usr/local/bin/gitleaks" ]; then
   GITLEAKS_BIN="/usr/local/bin/gitleaks"
-elif [ -x "/opt/homebrew/bin/gitleaks" ]; then
+elif [ "${RIG_GITLEAKS_PATH_ONLY:-0}" != "1" ] && [ -x "/opt/homebrew/bin/gitleaks" ]; then
   GITLEAKS_BIN="/opt/homebrew/bin/gitleaks"
 fi
 
 if [ -n "$GITLEAKS_BIN" ]; then
-  "$GITLEAKS_BIN" protect --staged --config .gitleaks.toml --no-banner
-  if [ $? -ne 0 ]; then
+  if [ ! -f ".gitleaks.toml" ]; then
     echo ""
-    echo "gitleaks blocked this commit — secrets detected in staged files."
-    echo "Review the findings above, remove the secret, and re-stage."
-    echo "If it is a known false positive, add it to .gitleaks.toml allowlist."
+    echo "gitleaks configuration error — .gitleaks.toml is missing."
+    echo "Secret scanning is enabled, but the configured file was not found."
+    echo "Restore .gitleaks.toml or update this hook before committing."
     exit 1
   fi
+
+  GITLEAKS_OUTPUT=$(mktemp) || exit 1
+  "$GITLEAKS_BIN" protect --staged --config .gitleaks.toml --no-banner > "$GITLEAKS_OUTPUT" 2>&1
+  GITLEAKS_STATUS=$?
+  if [ "$GITLEAKS_STATUS" -ne 0 ]; then
+    cat "$GITLEAKS_OUTPUT"
+    if grep -qiE '(^|[[:space:]])(Finding:|RuleID:|Secret:|Commit:|Entropy:)' "$GITLEAKS_OUTPUT"; then
+      echo ""
+      echo "gitleaks blocked this commit — secrets detected in staged files."
+      echo "Review the findings above, remove the secret, and re-stage."
+      echo "If it is a known false positive, add it to .gitleaks.toml allowlist."
+    elif grep -qiE 'failed to (load|open|read) config|invalid config|could not .*config|config .*not found|no such file or directory|permission denied|toml:' "$GITLEAKS_OUTPUT"; then
+      echo ""
+      echo "gitleaks configuration error — secret scanning could not run."
+      echo "Review the gitleaks output above, then fix .gitleaks.toml or the gitleaks installation."
+    else
+      echo ""
+      echo "gitleaks blocked this commit — secrets detected in staged files."
+      echo "Review the findings above, remove the secret, and re-stage."
+      echo "If it is a known false positive, add it to .gitleaks.toml allowlist."
+    fi
+    rm -f "$GITLEAKS_OUTPUT"
+    exit 1
+  fi
+  rm -f "$GITLEAKS_OUTPUT"
 else
   echo "WARNING: gitleaks not installed — secret scanning skipped."
   echo "Install it to protect yourself: brew install gitleaks"

@@ -111,3 +111,20 @@ This heading is documentation, not a gap.
   run /usr/bin/grep -F 'Automatic issue creation' "$COMMAND"
   [ "$status" -eq 0 ]
 }
+
+@test "command documents validated triage classifications and privacy boundary" {
+  run /usr/bin/grep -F '## Triage mode (`--triage`)' "$COMMAND"
+  [ "$status" -eq 0 ]
+
+  run /usr/bin/grep -F 'file-new' "$COMMAND"
+  [ "$status" -eq 0 ]
+
+  run /usr/bin/grep -F 'covered-open' "$COMMAND"
+  [ "$status" -eq 0 ]
+
+  run /usr/bin/grep -F 'needs-more-evidence' "$COMMAND"
+  [ "$status" -eq 0 ]
+
+  run /usr/bin/grep -F 'must not mark' "$COMMAND"
+  [ "$status" -eq 0 ]
+}

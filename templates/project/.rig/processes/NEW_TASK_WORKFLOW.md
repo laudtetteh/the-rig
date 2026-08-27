@@ -33,7 +33,8 @@ Also read `issue-creator:` (default: `user`).
   If the user already provided a number, use that instead — skip creation.
 
 **Ticket validation — required before Step 1.** Open the task file and find the
-`**Issue**: [ref]` field. Apply these rules:
+tracker-specific field; for GitHub projects this is `**GitHub issue**: [ref]`.
+Apply these rules:
 - If the field is empty, `N/A`, `TBD`, or absent: **stop. Do not proceed to Step 1.**
   Either run `/task` to create a proper intake, or add the ticket reference manually.
 - If the field contains a valid reference for the configured tracker: proceed.
@@ -42,12 +43,24 @@ This check applies whether the task was opened via `/task`, picked from the back
 or resumed from `.rig/tasks/active/`.
 
 The ticket reference belongs in:
-- The task file's `**Issue**: [ref]` field
+- The task file's tracker field, for GitHub projects `**GitHub issue**: [ref]`
 - Every commit message on this branch (format per tracker):
   - GitHub: `feat(scope): description [#N]`
   - Linear: `feat(scope): description [ENG-123]`
   - Trello: `feat(scope): description [trello:CARD-ID]`
   - GUS: `feat(scope): description [W-1234567]`
+
+### 0a — Multi-issue task intake
+
+A task may intentionally cover multiple tracker issues only when the user names
+that batch explicitly. In that case, record every issue in the same tracker field
+used by the shipped task template, for GitHub projects `**GitHub issue**: #N, #M`,
+and add a `## Batch ledger` section with one row per issue or issue/PR
+relationship. Do not collapse unrelated issues into one task merely because they
+will touch nearby files.
+
+Use `.rig/processes/SPRINT_WORKFLOW.md` for the batch ledger format and keep the
+ledger current as commits and PRs land.
 
 ---
 
