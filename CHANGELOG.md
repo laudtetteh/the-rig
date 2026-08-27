@@ -11,6 +11,29 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.29.1] — 2026-08-27
+
+### Added
+
+- Upgrade reports now persist enough completed-upgrade state to support guarded rollback planning, including report-bound metadata snapshots and explicit rollback ids (#563).
+- The release verification path now covers the downstream upgrade policy matrix and documents the current reference-project convergence measurement in one canonical place (#564, #568).
+
+### Changed
+
+- Agent upgrade can now converge customized Rig-owned files from content-addressed historical bases, using a proven base revision rather than treating every customized file as a permanent conflict (#560, #561).
+- CI now runs Bats across 12 weighted shards, and every Bats file must have an explicit `tests/.ci-shard-weights.json` entry before shard planning succeeds (#570).
+- Repo-internal documentation was refreshed for current upgrade semantics, rollback/recovery behavior, command and hook surfaces, test counts, and release-pilot guidance (#571).
+
+### Fixed
+
+- Rollback now validates that a selected upgrade report belongs to the current project and external Rig directory before planning any restore, and it rejects report-controlled ownership/tracking mismatches (#562, #563, #567).
+- Upgrade reports now normalize recorded ownership roots and keep private sibling metadata snapshots for stealth/external installs (#563, #568).
+- Historical-base reporting no longer counts the checked-out worktree candidate as a scanned tag, and interrupted historical-base resolution cleans up its temporary output file (#568).
+- Shipped upgrade workflow text no longer includes an incidental literal `[BASE_BRANCH]` placeholder (#566).
+- Bats SHA256 helpers now correctly fall back to `shasum -a 256` on hosts without `sha256sum` (#565).
+
+---
+
 ## [1.29.0] — 2026-08-15
 
 ### Added
