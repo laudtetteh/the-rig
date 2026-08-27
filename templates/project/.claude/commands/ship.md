@@ -48,6 +48,9 @@ First, read `issue-tracking:` from `CLAUDE.md`.
 Read the task file's `**GitHub issue**:` field.
 
 - If it contains a real issue number (e.g. `#12`): state it and proceed.
+- If it contains multiple issue numbers (e.g. `#12, #13`): state every issue and
+  treat this as a multi-issue PR candidate. Verify the PR body later closes each
+  intended issue on its own `Closes #N` line.
 - If it is `N/A (issue-tracking: none)`: proceed — the project setting was already applied.
 - If it is empty or a placeholder: **stop.**
   Say: "No GitHub issue linked. Per SHIP_WORKFLOW Step 0, the issue must exist
@@ -440,6 +443,10 @@ type(scope): short description [#N]
 Body: explain WHY, not what. The diff shows what.
 ```
 
+For a multi-issue task, the subject may carry the primary issue, but the body
+must list all linked issues. Example: `Refs #12, #13`; use PR closing keywords
+only in the PR body unless this commit itself is the tracked closure mechanism.
+
 Display it. Then ask:
 > "Commit with this message? [yes / edit]"
 
@@ -494,6 +501,9 @@ In this order:
    Deviations: [any changes from the original issue description, or 'none']"
    ```
    This is required when scope changed; recommended always.
+
+   For multi-issue PRs, repeat the actual-scope comment for every issue closed by
+   this PR. For partial delivery, post a progress comment and leave the issue open.
 
 ---
 
@@ -594,6 +604,17 @@ Closes #N
 
 ## Notes
 ```
+
+For a multi-issue PR, render the `## Closes` section as one closing line per
+issue:
+
+```markdown
+Closes #12
+Closes #13
+```
+
+Do not combine issue numbers on one `Closes` line. If one issue is only partially
+delivered, list it under `Notes` or a progress section instead of `Closes`.
 
 Then create the PR:
 

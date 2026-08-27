@@ -219,6 +219,28 @@ Wait for explicit go-ahead.
 Execute the build plan in order. For each item, confirm completion before moving to
 the next.
 
+#### 5.0. Scaffold command safety gate
+
+Before running any scaffold generator or initializer (for example `npm create`,
+`npx create-*`, `pnpm create`, `yarn create`, `rails new`, `django-admin
+startproject`, `cargo new`, or a framework CLI that creates files), state the exact
+command, target directory, and expected files or directories.
+
+After each scaffold command returns:
+- Capture and inspect the exit status, stdout, and stderr. Treat any non-zero exit
+  or refusal wording (for example "refusing", "refused", "already exists", "not
+  empty", or "non-empty directory") as a blocker, even when the command created
+  some files.
+- Verify every expected file or directory from the scaffold plan exists and has the
+  expected type before marking that scaffold item complete. At minimum verify the
+  project entry point, package or dependency manifest, configuration file, and source
+  directory promised by the plan.
+- If the generator refused, partially completed, or the expected files are missing,
+  surface the exact failure and stop. Do not report kickoff or the scaffold item as
+  complete. Ask whether to adapt the existing directory, choose an empty target, or
+  run the generator with an explicit overwrite/current-directory option when that is
+  supported.
+
 #### 5a. Fill in CLAUDE.md
 
 Replace every placeholder in `CLAUDE.md` with real content from the brief:

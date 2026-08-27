@@ -25,6 +25,62 @@ truth for provider-neutral project conventions.
   `issue-tracking` from `CLAUDE.md`.
 - Codex command parity is delivered through generated `.agents/skills`.
 
+## Provider Load Order Findings
+
+Verified against official Claude Code and OpenAI Codex documentation on
+2026-08-27.
+
+### Claude Code
+
+- Managed policy memory loads broadest, then user instructions such as
+  `~/.claude/CLAUDE.md`, then project instructions such as `./CLAUDE.md` or
+  `./.claude/CLAUDE.md`, then local project-specific instructions.
+- Claude concatenates discovered `CLAUDE.md` files from broader directories to
+  more specific directories; closer files appear later in context and therefore
+  can override earlier guidance by instruction priority, though they are still
+  context rather than enforced configuration.
+- User-level rules in `~/.claude/rules/` apply across projects and load before
+  project rules.
+- Personal skills live under `~/.claude/skills/<skill>/`; project skills live
+  under `.claude/skills/<skill>/`. Skills load on demand or when invoked. A
+  shared machine-wide Rig workflow belongs in the personal/global skill layer
+  only when it is genuinely cross-project and safe outside any one repository.
+
+### Codex
+
+- User-level configuration lives in `~/.codex/config.toml`; trusted projects may
+  also have `.codex/config.toml`, but project config cannot override
+  machine-local provider, auth, profile, notification, telemetry, or model
+  provider keys.
+- Codex instruction discovery starts with `~/.codex/AGENTS.override.md` if it
+  exists, otherwise `~/.codex/AGENTS.md`. It then walks from the project root to
+  the current working directory and includes at most one instruction file per
+  directory, preferring `AGENTS.override.md`, then `AGENTS.md`, then configured
+  fallback filenames such as `CLAUDE.md`.
+- Codex concatenates instruction files from broad to specific. Project and
+  nested instructions appear later than global instructions, so they are the
+  right place for project-specific constraints and overrides.
+- Codex skills are loaded from the configured user/plugin/project skill
+  mechanisms exposed by the Codex runtime. Treat machine-wide skills as
+  cross-project workflow packaging; keep project-specific skills in the project
+  layer so they do not fire in unrelated repositories.
+
+## Interim Placement Guidance
+
+- Machine-wide provider brain entries should hold personal or organization-wide
+  defaults only: working style, broadly applicable safety rules, and workflows
+  that are correct in any repository.
+- Project-level instructions should hold project identity, stack, local commands,
+  repository-specific protected paths, issue-tracking conventions, and overrides
+  to broader defaults.
+- Rig should not move global skills/commands into project templates merely
+  because they are useful. Ship them project-local only when the workflow depends
+  on installed project files such as `$RIG_DIR`, hooks, task cards, or manifest
+  state.
+- For stealth/external installs, docs should say `$RIG_DIR` for Rig memory,
+  tasks, reports, and processes. Use `.rig/` only when describing repo/local
+  tracking or template source paths.
+
 ## Options
 
 ### Option A — Keep `CLAUDE.md` canonical

@@ -56,6 +56,7 @@ For each task, extract:
 - Status
 - Priority (`P0`–`P3`)
 - `## Depends on` (if present)
+- `## Batch ledger` rows (if present)
 - `## Operating mode` autonomy level
 
 Build a work queue: tasks ordered by priority (P0 first), with dependency-blocked
@@ -116,12 +117,38 @@ For each task in the confirmed queue:
 
 3. **Execute according to autonomy level.** See the execution guide below.
 
-4. **After each commit in a multi-batch task:** if the task file has a `## Batches`
+4. **Guard scaffold generators.** If the task requires running a scaffold
+   generator or initializer (for example `npm create`, `npx create-*`, `pnpm
+   create`, `yarn create`, `rails new`, `django-admin startproject`, `cargo
+   new`, or a framework CLI that creates files), do all of the following before
+   reporting success or moving on:
+   - State the exact scaffold command, target directory, and expected files or
+     directories before running it.
+   - Capture the command exit status and read both stdout and stderr. Treat any
+     non-zero exit or refusal wording (for example "refusing", "refused",
+     "already exists", "not empty", or "non-empty directory") as a blocker, even
+     if some files were created.
+   - After the command returns, verify every expected file or directory exists
+     and has the expected type. At minimum verify the project entry point,
+     package or dependency manifest, configuration file, and source directory
+     promised by the scaffold plan.
+   - If the generator refused, partially completed, or the expected files are
+     missing, surface the exact failure and stop. Do not report the scaffold as
+     complete. Ask whether to adapt the existing directory, choose an empty
+     target, or run the generator with an explicit overwrite/current-directory
+     option when that is supported.
+
+5. **After each commit in a multi-batch task:** if the task file has a `## Batches`
    section, fill in the `Commit` column for the batch just completed. Use the short
    hash (`git log -1 --format="%h"`). If this commit closes a PR checkpoint, record
    the PR number too.
 
-5. **Complete the task.** When all acceptance criteria are met:
+   If the task file has a `## Batch ledger`, update the row for the issue/PR
+   relationship just completed. Fill in commit hash, PR number, verification
+   status, and any blocked remaining rows. Do not mark the whole task done until
+   every ledger row is terminal.
+
+6. **Complete the task.** When all acceptance criteria are met:
    - Fill in `## Done notes` in the task file
    - Move the task file from `.rig/tasks/active/` (or `.rig/tasks/backlog/`) to `.rig/tasks/done/`
    - Add an entry to `.rig/memory/PROGRESS.md` immediately after the `## Format`
@@ -129,7 +156,7 @@ For each task in the confirmed queue:
      agent's own prior PROGRESS edit from the same session.
    - Run the pre-ship checklist (`/ship`) before opening any PR
 
-6. **Decide whether to continue.** See chaining rules below.
+7. **Decide whether to continue.** See chaining rules below.
 
 ---
 

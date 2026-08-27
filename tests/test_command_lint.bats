@@ -86,6 +86,13 @@ _fail_with_list() {
   grep -q "Wrap report —" "$COMMAND_DIR/wrap.md"
   grep -Fq 'Codex `$wrap` skill' "$COMMAND_DIR/wrap.md"
   grep -Fq 'Session: unresolved — no final session-file write performed' "$COMMAND_DIR/wrap.md"
+  grep -Fq '**Final session name:**' "$COMMAND_DIR/wrap.md"
+}
+
+@test "wrap.md: combined-task wrap report is final response" {
+  grep -Fq 'multiple actions and wrap in the same turn' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'final assistant response for that turn must be the Wrap report' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'Do not end with an implementation report after a requested wrap' "$COMMAND_DIR/wrap.md"
 }
 
 @test "wrap.md: documents project-only scope and unresolved-session degraded mode" {
@@ -120,6 +127,7 @@ _fail_with_list() {
   grep -q "Post-merge report —" "$COMMAND_DIR/post-merge.md"
   grep -Fq 'Codex `$post-merge` skill' "$COMMAND_DIR/post-merge.md"
   grep -Fq 'Post-merge report — skipped' "$COMMAND_DIR/post-merge.md"
+  grep -Fq '**Final session name:**' "$COMMAND_DIR/post-merge.md"
 }
 
 @test "post-merge.md: documents project-only scope and unresolved-session degraded mode" {
@@ -133,6 +141,18 @@ _fail_with_list() {
 
 @test "post-merge.md: executes POST_MERGE_WORKFLOW automatically after report" {
   grep -q "execute POST_MERGE_WORKFLOW steps" "$COMMAND_DIR/post-merge.md"
+}
+
+@test "session naming commands share compact-safe evidence model" {
+  grep -Fq 'naming_evidence.progress_titles' "$COMMAND_DIR/session-name.md"
+  grep -Fq 'Session naming evidence' "$COMMAND_DIR/session-name.md"
+  grep -Fq 'checkpoints for another anchor' "$COMMAND_DIR/session-name.md"
+  grep -Fq 'naming_evidence.progress_titles' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'Session naming evidence' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'checkpoints for another anchor' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'naming_evidence.progress_titles' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'Session naming evidence' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'checkpoints for another anchor' "$COMMAND_DIR/post-merge.md"
 }
 
 @test "rig-upgrade.md: --version separates installed layers from installer checkout" {
@@ -183,6 +203,43 @@ _fail_with_list() {
   grep -Fq 'memory append-gap' "$COMMAND_DIR/rig-gaps.md"
   grep -Fq -- '--scope "$SCOPE"' "$COMMAND_DIR/rig-gaps.md"
   grep -Fq 'Do not mark the entry' "$COMMAND_DIR/rig-gaps.md"
+}
+
+@test "rig-gaps.md: triage mode delegates to validated workflow" {
+  grep -Fq '/rig-gaps --triage' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq '## Triage mode (`--triage`)' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq '.rig/processes/RIG_GAPS_TRIAGE.md' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq 'file-new' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq 'covered-open' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq 'covered-closed/stale' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq 'project-local' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq 'needs-more-evidence' "$COMMAND_DIR/rig-gaps.md"
+  grep -Fq 'separate explicit mutation approval' "$COMMAND_DIR/rig-gaps.md"
+}
+
+@test "new-task workflow uses shipped GitHub issue field for batches" {
+  local process="$REPO_ROOT/templates/project/.rig/processes/NEW_TASK_WORKFLOW.md"
+  local task="$REPO_ROOT/templates/project/.rig/tasks/backlog/TASK_example.md"
+  grep -Fq '**GitHub issue**: #[N]' "$task"
+  grep -Fq 'for GitHub projects `**GitHub issue**: [ref]`' "$process"
+  grep -Fq 'for GitHub projects `**GitHub issue**: #N, #M`' "$process"
+  if grep -Fq '**Issue**:' "$process"; then return 1; fi
+}
+
+@test "rig-gaps triage process names Claude and Codex collect commands" {
+  local process="$REPO_ROOT/templates/project/.rig/processes/RIG_GAPS_TRIAGE.md"
+  grep -Fq 'Claude `/rig-gaps --collect` or Codex' "$process"
+  grep -Fq '`$rig-gaps --collect`' "$process"
+  if grep -Fq 'Run `/rig-gaps --collect` first' "$process"; then return 1; fi
+}
+
+@test "run.md surfaces scaffold generator refusals and verifies expected files" {
+  grep -Fq "### Step 2 — Execute tasks in queue order" "$COMMAND_DIR/run.md"
+  grep -Fq "Guard scaffold generators" "$COMMAND_DIR/run.md"
+  grep -Fq "Capture the command exit status and read both stdout and stderr" "$COMMAND_DIR/run.md"
+  grep -Fq "non-empty directory" "$COMMAND_DIR/run.md"
+  grep -Fq "verify every expected file or directory exists" "$COMMAND_DIR/run.md"
+  grep -Fq "Do not report the scaffold as" "$COMMAND_DIR/run.md"
 }
 
 @test "docs index convention is wired into feature doc commands" {
@@ -267,6 +324,27 @@ _fail_with_list() {
   grep -Fq "Persistent state" "$process"
   grep -Fq "Validation hooks" "$process"
   grep -Fq "Dependency Surface Audit required by" "$COMMAND_DIR/sprint.md"
+}
+
+@test "sprint workflow codifies multi-issue and multi-PR batch ledger" {
+  local process="$REPO_ROOT/templates/project/.rig/processes/SPRINT_WORKFLOW.md"
+  grep -Fq "N issues mapped to M PRs" "$process"
+  grep -Fq "## Batch ledger" "$process"
+  grep -Fq "| Issue | Task card | Lane | PR | Status | Verification | Post-merge |" "$process"
+  grep -Fq "one closing keyword for every intended GitHub issue" "$process"
+  grep -Fq "batch post-merge" "$process"
+  grep -Fq "summary: one line per PR" "$process"
+  grep -Fq "first-class" "$COMMAND_DIR/sprint.md"
+  grep -Fq "N-issues-to-M-PRs mapping" "$COMMAND_DIR/sprint.md"
+}
+
+@test "ship and post-merge document batch issue and PR handling" {
+  grep -Fq "multi-issue PR candidate" "$COMMAND_DIR/ship.md"
+  grep -Fq "one closing line per" "$COMMAND_DIR/ship.md"
+  grep -Fq "For multi-issue PRs" "$COMMAND_DIR/ship.md"
+  grep -Fq "batch ledger" "$COMMAND_DIR/post-merge.md"
+  grep -Fq "verify each PR number, merge SHA" "$COMMAND_DIR/post-merge.md"
+  grep -Fq "one entry per PR or an explicit combined batch summary" "$COMMAND_DIR/post-merge.md"
 }
 
 @test "delegated validation protocol forbids duplicate detached full-suite runs" {

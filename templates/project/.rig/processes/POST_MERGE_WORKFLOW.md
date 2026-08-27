@@ -52,6 +52,11 @@ Add an entry at the **top** of `.rig/memory/PROGRESS.md` (below the header):
 - PR #N merged — branch: type/description
 ```
 
+For a merged PR that closes multiple issues, include every closed issue in the
+entry and note any related issues that remain open. For a batch of related
+merged PRs, write one entry per PR unless the user explicitly asks for a combined
+summary; a combined summary must still include each PR number and merge SHA.
+
 ---
 
 ## Step 3 — Move the task file
@@ -59,6 +64,10 @@ Add an entry at the **top** of `.rig/memory/PROGRESS.md` (below the header):
 1. Move the completed task file: `.rig/tasks/active/TASK_[name].md` → `.rig/tasks/done/TASK_[name].md`
 2. Update its `**Status**` field to `done`
 3. Verify `.rig/tasks/active/` is clean — only `.gitkeep` should remain if all tasks are done
+
+If a task has a `## Batch ledger`, move it to done only when every row is
+terminal. Rows for follow-up PRs or still-open issues keep the task active; update
+the row for the merged PR with the merge SHA and leave the remaining rows pending.
 
 ---
 
@@ -102,6 +111,11 @@ Include any additions in the Post-merge report (see report step in `/post-merge`
 
 If `.rig/memory/PROGRESS.md` updates and the task file move were not already committed
 as part of the PR, commit them now.
+
+For batch post-merge work, one housekeeping commit may cover several merged PRs
+only after every PR has been verified at HEAD or in merge history and every
+affected task row has exact merge evidence. The commit message must name the PR
+range or list, for example `chore: post-merge housekeeping for PRs #10, #11`.
 
 **First, read the `## Git workflow convention` field from the project `CLAUDE.md`.**
 It will be one of:

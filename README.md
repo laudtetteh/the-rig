@@ -66,7 +66,7 @@ The Rig has two layers that load in sequence at every session start:
 | Skills (5) | `templates/global/skills/` | Reusable prompt scripts for debug, review, refactor, tests, explain |
 | Global upgrade command | `templates/global/commands/rig-upgrade.md` | Global-first bootstrap for `/rig-upgrade`, with generated Codex personal skill parity |
 | Project brain | `templates/project/CLAUDE.md` | Project-specific identity, stack, conventions, off-limits paths |
-| Processes (8) | `templates/project/.rig/processes/` | Step-by-step workflows, including work modes, new-task, ship, debug, post-merge, sprint, connector preflight, and upgrade |
+| Processes (9) | `templates/project/.rig/processes/` | Step-by-step workflows, including work modes, new-task, ship, debug, post-merge, sprint, connector preflight, Rig gaps triage, and upgrade |
 | Rules (7) | `templates/project/.rig/rules/` | Coding, git, security, verification, session identity, session naming, and protected-path contracts |
 | Memory system | `templates/project/.rig/memory/` | PROGRESS log, ERRORS log, DECISIONS log, CONTEXT_SNAPSHOT (session state), RIG_GAPS (self-improvement feedback) |
 | Task lifecycle | `templates/project/.rig/tasks/` | Structured task files through backlog → active → done |
@@ -188,6 +188,16 @@ cd ~/code/my-project
 `--project-only` is a scope flag (skip the global layer). It does not imply non-interactive
 mode on its own — provide `--strategy` and `--tracking` to skip all prompts.
 
+Use the agent upgrade path when you want semantic convergence of customized
+Rig-owned files. Plain `--strategy upgrade` is the conservative installer
+wizard: it updates unmodified Rig files, preserves user-owned files, and reports
+customized Rig-owned files for manual review. Claude `/rig-upgrade --mode=agent`
+and Codex `$rig-upgrade --mode=agent` run `--strategy agent-upgrade`, which adds
+guarded three-way convergence for mergeable customized files and refuses with
+JSON repair guidance when a human decision is still needed. This can preserve
+local customizations while applying incoming Rig changes, but it is intentionally
+stricter and should be reviewed like any other code-changing upgrade.
+
 > **Forgot to pull first?** If you run the installer before pulling, it detects
 > the stale source and offers to pull and re-run automatically — just choose option 1
 > at the prompt. The installer passes all your flags through to the re-run.
@@ -263,12 +273,20 @@ When you open Claude Code or Codex in a project using The Rig, the selected
 provider's hooks establish the same shared lifecycle:
 
 1. **`session-start.sh`** injects `CONTEXT_SNAPSHOT.md`, pending flag warnings, and at most one applicable feature tip as hook context — before the first user turn
-2. Claude loads its global `~/.claude/CLAUDE.md`; Codex loads its supported global instructions and generated personal skills
-3. The agent reads `./CLAUDE.md` through Claude's native loading or Codex's configured fallback (unless a native `AGENTS.md` takes precedence)
-4. The agent reads `./.rig/memory/CONTEXT_SNAPSHOT.md` — **if present, this is sufficient; the agent stops here**
-5. `./.rig/memory/PROGRESS.md` — only loaded if snapshot is absent or stale
-6. `./.rig/memory/ERRORS.md` — what to avoid
-7. `./.rig/tasks/active/` — what's currently in flight
+2. Claude loads machine/user instructions such as `~/.claude/CLAUDE.md` and
+   `~/.claude/rules/`; Codex loads `~/.codex/AGENTS.override.md` or
+   `~/.codex/AGENTS.md` plus supported user config
+3. Project instructions load after global instructions: Claude reads project
+   `CLAUDE.md` / `.claude/CLAUDE.md`; Codex reads project `AGENTS.override.md`,
+   `AGENTS.md`, then configured fallback names such as `CLAUDE.md`
+4. The agent reads `$RIG_DIR/memory/CONTEXT_SNAPSHOT.md` — **if present, this is sufficient; the agent stops here**
+5. `$RIG_DIR/memory/PROGRESS.md` — only loaded if snapshot is absent or stale
+6. `$RIG_DIR/memory/ERRORS.md` — what to avoid
+7. `$RIG_DIR/tasks/active/` — what's currently in flight
+
+`$RIG_DIR` is the effective Rig directory. In repo/local tracking it is the
+project's `.rig/`; in stealth or external tracking it is the path stored in
+`.rigpath`, commonly `~/.rig/projects/<project-name>/`.
 
 On every user prompt, `prompt-submit.sh` re-checks for pending flag warnings and re-injects them if still present. No re-briefing. No repeating context. Every session picks up exactly where the last one left off.
 

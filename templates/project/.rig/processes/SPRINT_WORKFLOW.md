@@ -10,6 +10,29 @@ Follow `inspect -> plan -> approve -> execute -> validate -> ship -> closeout`
 and the statuses in `WORK_MODES.md`. A sprint coordinates task cards; it never
 replaces their checkpoints, operating modes, validation, or shipping gates.
 
+## Batch state model
+
+Sprint state is a batch ledger for **N issues mapped to M PRs**. Record it
+explicitly whenever a sprint spans more than one issue or more than one PR:
+
+```markdown
+## Batch ledger
+
+| Issue | Task card | Lane | PR | Status | Verification | Post-merge |
+|---|---|---|---|---|---|---|
+| #123 | TASK_123_slug.md | workflow-docs | #130 | shipped | focused tests | pending |
+```
+
+Use one row per issue/PR relationship. A single issue split across multiple PRs
+gets multiple rows with the same issue and distinct PRs. A single PR that closes
+multiple issues gets multiple rows with the same PR and distinct issues. Rows
+with no PR yet use `planned`; rows intentionally shipped without tracker closure
+must state the reason in `Status`.
+
+The ledger is coordination evidence, not a substitute for task cards. Each row
+must still point to the task file that owns the acceptance criteria, verification
+evidence, commit reference, and closeout notes.
+
 ## 1. Audit
 
 Collect tracker evidence only through documented public tools and serialize the
@@ -61,6 +84,12 @@ pre-ship evidence line up. The DSA must list:
 If the DSA changes ordering, ownership, shared-file exclusivity, or persistent
 state risk, revise the sprint plan before launch and obtain fresh approval.
 
+For multi-issue or multi-PR work, the approved plan must also name the batch
+lane for each row and declare whether the lane is **exclusive** (one worker owns
+shared files), **parallel-safe** (disjoint files), or **sequenced** (later rows
+depend on earlier rows). Do not rely on branch names, conversation order, or
+implicit "same sprint" assumptions as the batch identity.
+
 ## 3. Launch and execute
 
 Before launch, re-audit actual scopes and dependencies. Drift that changes
@@ -89,6 +118,11 @@ skips/residual risk, and a separate commit approval. Sprint evidence can
 aggregate those cards but never replace them. Hosted CI/security gates and
 merge/release authorization remain task/project gates.
 
+For a PR that closes multiple issues, verify the PR body has one closing keyword for every intended GitHub issue and that each task card's Done notes describe
+the exact scope delivered by that PR. For an issue split across multiple PRs,
+only the final PR should close the issue automatically unless the earlier PR's
+body and issue comment explain why partial closure is correct.
+
 ## 5. Resume and close
 
 Resume only with an explicit sprint ID:
@@ -104,3 +138,8 @@ fresh parity is recorded, and the exact #409 root acknowledges only its own wrap
 obligation and the matching post-merge SHA through the shared obligation API.
 
 No merge or release is automatic.
+
+When several related PRs have merged, close the sprint with a batch post-merge
+summary: one line per PR with merge SHA, closed issues, moved task cards, and
+remaining rows. The summary may aggregate evidence, but `/post-merge` hygiene
+still runs against each merged PR's repository state and exact merge SHA.

@@ -30,6 +30,11 @@ If a PR was merged and the session is also ending, run `/post-merge` first for
 the merged project, then run `/wrap` for this project. Do not combine their
 memory writes under one inferred session identity.
 
+If the user asks for multiple actions and wrap in the same turn, finish all
+non-wrap implementation, verification, and reporting work first. Then run the
+wrap housekeeping. The final assistant response for that turn must be the Wrap report,
+even if internal wrap collection happened earlier. Do not end with an implementation report after a requested wrap.
+
 ## Usage
 
 ```
@@ -170,6 +175,7 @@ Print a single structured report before executing anything:
 **Post-merge:** [skipped — reason and next action | not requested]
 
 **Session:** [anchor: UUID | tentative: "..." | suggested final: "type desc #N | type desc #N" | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
+**Final session name:** [confirmed final: "..." | suggested final: "..." awaiting confirmation | unresolved — reliable name could not be set | nothing meaningful shipped, skipped]
 ```
 
 If `bin/rig session resolve --json` returns `ended_record` and a native session
@@ -481,14 +487,17 @@ SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
 SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
 SESSION_UUID=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
 TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); print(d.get("names",{}).get("tentative") or d.get("tentative_name") or "")')
+NAMING_EVIDENCE=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); e=d.get("naming_evidence",{}).get("progress_titles",[]) if isinstance(d.get("naming_evidence",{}),dict) else []; print("\n".join(str(x) for x in e if str(x).strip()))' 2>/dev/null || true)
 ```
 
 ### Step 2 — Collect this session's work
 
 **Primary signal: your conversation context.** Enumerate directly what was done
 this session — PRs merged or opened, tasks completed, issues resolved. This is
-always the most accurate signal. The tentative name (if set) is a pre-compaction
-anchor from earlier in this session — use it as a starting point if context was lost.
+always the most accurate signal. The tentative name (if set) and
+`naming_evidence.progress_titles` in the exact active session file are
+pre-compaction anchors from earlier in this session — use them as starting points
+if context was lost.
 
 **Every `## ` entry header you write to PROGRESS.md must include `<!-- sid:UUID -->`
 at the end of the line** (read UUID from the resolver output above). This is
@@ -499,10 +508,15 @@ what enables UUID-keyed session attribution.
 grep "^## .*<!-- sid:${SESSION_UUID} -->" "$RIG_DIR/memory/PROGRESS.md" 2>/dev/null || true
 ```
 
+**File signal — compact checkpoint Session naming evidence:** read only
+`$RIG_DIR/memory/.compact-checkpoint-${SESSION_UUID}.md`, and use its
+`Session naming evidence` only when the same file's `Session anchor` equals
+`SESSION_UUID`.
+
 **If conversation context and file signals conflict, trust the conversation.**
-Never use `CONTEXT_SNAPSHOT.md`, legacy markers, unrelated session files,
-other-session UUID entries, or general project history as naming evidence. An
-unresolved raw launch fails closed before any name is proposed or written.
+Never use `CONTEXT_SNAPSHOT.md`, checkpoints for another anchor, legacy markers,
+unrelated session files, other-session UUID entries, or general project history
+as naming evidence. An unresolved raw launch fails closed before any name is proposed or written.
 
 ### Step 3 — Build the name
 

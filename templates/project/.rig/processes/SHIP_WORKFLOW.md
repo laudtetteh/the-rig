@@ -63,6 +63,13 @@ gh issue create --title "..." --body-file /tmp/issue-body.md --label "type: feat
 
 Note the issue number. It goes in every commit on this branch.
 
+If the task file lists multiple GitHub issues, validate every issue number before
+committing. The commit subject may reference the primary issue, but the commit
+body and PR body must list all linked issues. The PR `Closes` section must use
+GitHub closing keywords for every issue that should close when this PR merges.
+If the task is split across several PRs, close only the issues completed by this
+PR and leave partial rows open in the batch ledger.
+
 ---
 
 ## Step 1 — Pre-ship checklist
@@ -275,6 +282,10 @@ In this order:
    This is especially important when scope changed — the issue description captures the original
    intent; the comment captures what was actually delivered.
 
+   For a multi-issue PR, post the same actual-scope comment to every issue the
+   PR closes. For issues partially delivered by this PR, post a progress comment
+   instead and do not use a closing keyword.
+
 ---
 
 ## Step 6 — Open the PR
@@ -312,6 +323,17 @@ Closes #N
 
 ## Notes
 ```
+
+For multi-issue PRs, the `## Closes` section must list each issue on its own
+line with a closing keyword:
+
+```markdown
+Closes #N
+Closes #M
+```
+
+Do not write `Closes #N, #M`; GitHub does not reliably auto-close every issue in
+that form across all repository settings and cross-repository references.
 
 Then create the PR:
 

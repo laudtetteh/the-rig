@@ -51,7 +51,9 @@ PY
     "$TEST_PROJECT/.claude/commands/post-merge.md" \
     "$TEST_PROJECT/.agents/skills/post-merge/references/command.md"; do
     grep -Fq '$RIG_DIR/rules/session-naming.md' "$surface"
-    grep -Fq 'Never use `CONTEXT_SNAPSHOT.md`, legacy markers, unrelated session files' "$surface"
+    grep -Fq 'Never use `CONTEXT_SNAPSHOT.md`' "$surface"
+    grep -Fq 'checkpoints for another anchor' "$surface"
+    grep -Fq 'unrelated session files' "$surface"
   done
 
   grep -Fq 'Codex `$wrap` skill' "$TEST_PROJECT/.agents/skills/wrap/references/command.md"

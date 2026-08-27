@@ -59,3 +59,19 @@ if missing or extra:
     )
 PY
 }
+
+@test "upgrade docs distinguish agent convergence from raw installer upgrade" {
+  grep -Fq 'semantic or intelligent convergence' "$REPO_ROOT/docs/customizing.md"
+  grep -Fq 'install.sh --strategy agent-upgrade' "$REPO_ROOT/docs/customizing.md"
+  grep -Fq 'Do not use raw `install.sh --strategy' "$REPO_ROOT/docs/customizing.md"
+  grep -Fq 'Use the agent upgrade path when you want semantic convergence' "$REPO_ROOT/README.md"
+}
+
+@test "provider brain spike records Claude and Codex load order" {
+  local doc="$REPO_ROOT/docs/provider-neutral-project-brain.md"
+  grep -Fq '## Provider Load Order Findings' "$doc"
+  grep -Fq '~/.claude/CLAUDE.md' "$doc"
+  grep -Fq '~/.codex/AGENTS.override.md' "$doc"
+  grep -Fq 'project config cannot override' "$doc"
+  grep -Fq 'For stealth/external installs, docs should say `$RIG_DIR`' "$doc"
+}

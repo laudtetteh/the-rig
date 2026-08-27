@@ -12,19 +12,26 @@ The Rig itself — for review and optional submission.
 3. Formats a consolidated report with copy-paste instructions
 4. Offers to mark entries as submitted (adds `[submitted]` tag to entry headers)
 5. With `--collect`, scans every Rig project and produces a deduplicated triage report
-6. With `--add`, appends one structured gap without running the full report flow
+6. With `--triage`, validates collected gaps against current Rig source and tracker state
+7. With `--add`, appends one structured gap without running the full report flow
 
 ## Usage
 
 ```
 /rig-gaps
 /rig-gaps --collect
+/rig-gaps --triage
 /rig-gaps --add "short title"
 ```
 
 Use `/rig-gaps --collect` from any project to review unsubmitted gaps across all
 projects registered below `~/.rig/projects/`. Collector mode is read-only: it does
 not modify source logs, mark entries submitted, or create GitHub issues.
+
+Use `/rig-gaps --triage` from a Rig development checkout to turn the collected
+machine-wide candidates into a validated, deduped, prioritized report. Triage
+mode is also read-only by default: it does not create issues or mutate source
+project `RIG_GAPS.md` files without separate explicit approval.
 
 > **RIG_DIR resolution (stealth mode):** Before reading any `.rig/` path, resolve
 > where `.rig/` actually lives. If `.rigpath` exists at the project root, read it —
@@ -194,6 +201,28 @@ keeping equally named project and Rig-core gaps separate. The report includes
 source projects, duplicate count, full representative entry, and an explicit
 triage route. Review `needs-review` entries before acting. Automatic issue creation
 is out of scope; use the separately gated `--submit` flow only after human review.
+
+## Triage mode (`--triage`)
+
+If the user says **"triage"**, **"--triage"**, or **"validate collected gaps"**,
+run this flow instead of normal report, quick-add, collector-only, push, or
+submit mode.
+
+1. Read `.rig/processes/RIG_GAPS_TRIAGE.md` completely and follow it as the
+   canonical workflow.
+2. Run `/rig-gaps --collect` first, or reuse a same-day collector report provided
+   by the user. Do not inspect broad project history or unrelated source files.
+3. Validate each candidate only against the current Rig source surfaces named by
+   the entry or collector report.
+4. Cross-check each validated candidate against open and closed GitHub issues
+   before recommending a new ticket.
+5. Classify every group as exactly one of `file-new`, `covered-open`,
+   `covered-closed/stale`, `project-local`, or `needs-more-evidence`.
+6. Produce the prioritized actionable report required by `RIG_GAPS_TRIAGE.md`.
+
+Triage mode preserves privacy and source-project ownership. It must not mark
+entries `[submitted]`, edit machine-wide gap logs, or create GitHub issues unless
+the user gives a separate explicit mutation approval after reading the report.
 
 ---
 
