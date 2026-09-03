@@ -11,6 +11,29 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.29.2] — 2026-09-03
+
+### Added
+
+- Rig gaps collection now has a validated triage workflow for deduping machine-wide gap entries, classifying tracker coverage, and prioritizing actionable Rig-core tickets (#580, #581).
+- Sprint, ship, post-merge, and task workflows now carry explicit batch ledgers for multi-issue and multi-PR work (#580, #581).
+
+### Changed
+
+- Upgrade docs now distinguish raw installer upgrade behavior from agent-driven semantic convergence, including the customization tradeoffs of each path (#576).
+- Provider brain documentation now records current Claude Code and Codex instruction load-order findings and interim placement guidance for global versus project-level instructions (#578).
+- Wrap, post-merge, and session naming guidance now preserve final session naming evidence across compaction and require the wrap report to be the final response when wrap is requested with other work (#575, #577).
+- Kickoff and run workflows now require scaffold generators to prove expected files were created before reporting completion (#585).
+- README examples now use `$RIG_DIR` for memory, task, report, and process paths that may live outside the repository in stealth or external tracking modes (#584).
+
+### Fixed
+
+- JSON preflight output now annotates existing-but-unwritable project destinations without losing the v1 dependency status contract (#574).
+- Claude pre-tool commit authorization now expires stale `.rig-commit-ok` sentinels and honors external Rig directories from `.rigpath` (#583).
+- Husky pre-commit secret scanning now distinguishes gitleaks configuration failures from real leak findings, including leak paths that mention `config` (#582).
+
+---
+
 ## [1.29.1] — 2026-08-27
 
 ### Added
