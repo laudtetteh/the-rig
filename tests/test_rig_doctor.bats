@@ -5,6 +5,7 @@ setup() {
   export FAKE_BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$CASE_DIR/bin" "$CASE_DIR/.rig/memory" "$CASE_DIR/.claude/commands" "$CASE_DIR/.git/info" "$FAKE_BIN"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   chmod +x "$CASE_DIR/bin/rig"
   printf '{"hooks":{}}\n' > "$CASE_DIR/.claude/settings.json"
   printf 'issue-tracking: none\n' > "$CASE_DIR/CLAUDE.md"

@@ -4,6 +4,7 @@ setup() {
   export CASE_DIR="$BATS_TEST_TMPDIR/project"
   mkdir -p "$CASE_DIR/bin" "$CASE_DIR/.rig/tasks/backlog" "$CASE_DIR/.rig/tasks/active" "$CASE_DIR/.rig/tasks/done"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-sprint" "$CASE_DIR/bin/rig-sprint"
   chmod +x "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-sprint"
   git -C "$CASE_DIR" init -q

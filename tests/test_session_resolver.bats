@@ -15,17 +15,17 @@ setup() {
 @test "macOS Bash 3.2 current without a record reports a reason for JSON and human callers" {
   run env RIG_SESSION_PID=999999 /bin/bash "$CASE_DIR/bin/rig" session current --json
   [ "$status" -eq 1 ]
-  [[ "$output" == *'"reason": "not_found"'* ]]
-  [[ "$output" != *'unbound variable'* ]]
+  [[ "$output" == *'"reason": "not_found"'* ]] || return 1
+  [[ "$output" != *'unbound variable'* ]] || return 1
 
   run env RIG_SESSION_PID=999999 /bin/bash "$CASE_DIR/bin/rig" session current
   [ "$status" -eq 1 ]
-  [[ "$output" == *'session not resolved: not_found'* ]]
-  [[ "$output" != *'unbound variable'* ]]
+  [[ "$output" == *'session not resolved: not_found'* ]] || return 1
+  [[ "$output" != *'unbound variable'* ]] || return 1
 
   run env RIG_SESSION_PID=999999 /bin/bash "$CASE_DIR/bin/rig" session resolve
   [ "$status" -eq 1 ]
-  [[ "$output" == *'session not resolved: not_found'* ]]
+  [[ "$output" == *'session not resolved: not_found'* ]] || return 1
 }
 
 @test "resolver and current exact lookup work in a read-only process sandbox" {
@@ -35,12 +35,12 @@ setup() {
   run /usr/bin/sandbox-exec -p '(version 1) (allow default) (deny file-write*)' \
     env RIG_SESSION_FILE="$session_file" /bin/bash "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"anchor": "exact"'* ]]
+  [[ "$output" == *'"anchor": "exact"'* ]] || return 1
 
   run /usr/bin/sandbox-exec -p '(version 1) (allow default) (deny file-write*)' \
     env RIG_SESSION_FILE="$session_file" /bin/bash "$CASE_DIR/bin/rig" session current --json
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"anchor": "exact"'* ]]
+  [[ "$output" == *'"anchor": "exact"'* ]] || return 1
 }
 
 @test "installer ships and manifests the read-only resolver helper" {
@@ -55,7 +55,7 @@ setup() {
   grep -q 'bin/rig-session-resolve.py' "$external_rig/memory/.rig-manifest"
   run env RIG_SESSION_PID=999999 "$installed/bin/rig" session resolve --json
   [ "$status" -eq 1 ]
-  [[ "$output" == *'"reason": "not_found"'* ]]
+  [[ "$output" == *'"reason": "not_found"'* ]] || return 1
 }
 
 write_session() {
