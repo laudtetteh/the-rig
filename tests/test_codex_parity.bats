@@ -47,6 +47,22 @@ run_claude_pretool_from_settings() {
     _ "$TEST_PROJECT" "$payload"
 }
 
+setup_linked_hook_worktrees() {
+  git -C "$TEST_PROJECT" checkout -q -B main
+  LINKED_FEATURE="$TEST_ROOT/feature-worktree"
+  git -C "$TEST_PROJECT" worktree add -q -b feature/hook-check "$LINKED_FEATURE"
+  mkdir -p "$LINKED_FEATURE/.claude/hooks" "$LINKED_FEATURE/.rig/rules" \
+    "$LINKED_FEATURE/.rig/memory"
+  cp "$TEST_PROJECT/.claude/hooks/pre-tool.sh" "$LINKED_FEATURE/.claude/hooks/pre-tool.sh"
+  cp "$TEST_PROJECT/.rig/rules/protected-paths.txt" "$LINKED_FEATURE/.rig/rules/protected-paths.txt"
+}
+
+run_linked_pretool() {
+  local payload="$1"
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/pre-tool.sh' \
+    _ "$LINKED_FEATURE" "$payload"
+}
+
 @test "normal Claude PreToolUse Edit denies a protected path with blocking exit 2" {
   payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":sys.argv[1],"old_string":"old","new_string":"new"}}))' "$TEST_PROJECT/CLAUDE.md")"
   run_claude_pretool_from_settings "$payload"
@@ -140,6 +156,112 @@ run_claude_pretool_from_settings() {
   run_claude_pretool_from_settings "$payload"
   [ "$status" -eq 2 ]
   [[ "$output" == *"governance file"* ]] || return 1
+}
+
+@test "linked feature hook denies protected Write and Edit in main worktree" {
+  setup_linked_hook_worktrees
+  local tool payload
+  for tool in Write Edit; do
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":sys.argv[1],"cwd":sys.argv[2],"tool_input":{"file_path":sys.argv[3]}}))' "$tool" "$LINKED_FEATURE" "$TEST_PROJECT/CLAUDE.md")"
+    run_linked_pretool "$payload"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"governance file"* ]] || return 1
+  done
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","cwd":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"unsafe"}}))' "$LINKED_FEATURE" "$TEST_PROJECT/.rig/rules/protected-paths.txt")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Edit","cwd":sys.argv[1],"tool_input":{"file_path":"CLAUDE.md","old_string":"old","new_string":"unsafe"}}))' "$TEST_PROJECT")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$TEST_PROJECT/CLAUDE.md"* ]] || return 1
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","cwd":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"safe"}}))' "$LINKED_FEATURE" "$TEST_PROJECT/src/ordinary.txt")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 0 ]
+}
+
+@test "linked feature hook checks main branch for cd and git -C commits" {
+  setup_linked_hook_worktrees
+  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  local command payload
+  for command in \
+    "cd '$TEST_PROJECT' && git commit -m 'fix: blocked'" \
+    "git -C '$TEST_PROJECT' commit -m 'fix: blocked'" \
+    "git -C '../project' commit -m 'fix: blocked'" \
+    "git -C '$TEST_PROJECT' -c core.editor=true commit -m 'fix: blocked'"; do
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
+    run_linked_pretool "$payload"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
+  done
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"bash -c '\''git commit -m fix:blocked'\''"}}))' "$TEST_PROJECT")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"fix: feature work\""}}))' "$LINKED_FEATURE")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 0 ]
+}
+
+@test "linked feature hook blocks a literal nested shell commit to main" {
+  setup_linked_hook_worktrees
+  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  local command payload
+  for command in \
+    "bash -c 'cd \"$TEST_PROJECT\" && git commit -m \"fix: unsafe\"'" \
+    "sh -c 'cd \"$TEST_PROJECT\" && git commit -m \"fix: unsafe\"'" \
+    "bash -c 'git -C \"$TEST_PROJECT\" commit -m \"fix: unsafe\"'"; do
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
+    run_linked_pretool "$payload"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
+  done
+
+  command="$(printf 'bash <<EOF\ngit -C "%s" commit -m "fix: unsafe"\nEOF' "$TEST_PROJECT")"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
+}
+
+@test "nested shell inspection allows ordinary commands and refuses dynamic commit targets" {
+  setup_linked_hook_worktrees
+  local command payload
+  for command in "printf ordinary" "bash -c 'printf ordinary'" "sh -c 'pwd'" \
+    'bash -c "$SCRIPT"' $'cat <<EOF\nunclosed " quote\nEOF' \
+    $'cat <<\x27EOF\x27\nexample: git commit -m "unclosed\nEOF'; do
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
+    run_linked_pretool "$payload"
+    [ "$status" -eq 0 ]
+  done
+
+  command="bash -c 'cd \"\$TARGET\" && git commit -m \"fix: unsafe\"'"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"commit target could not be inspected"* ]] || return 1
+}
+
+@test "linked feature hook respects event cwd and target direct-push policy" {
+  setup_linked_hook_worktrees
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
+  local payload
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"chore(memory): approved\""}}))' "$TEST_PROJECT")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 0 ]
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"fix: blocked\""}}))' "$TEST_PROJECT")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Direct-to-main commit blocked"* ]] || return 1
 }
 
 run_claude_pretool_with_ttl() {

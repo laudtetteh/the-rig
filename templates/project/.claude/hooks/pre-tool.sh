@@ -48,16 +48,38 @@ except (ValueError, TypeError):
 HOOK_ROOT=$(cd "$(dirname "$0")/../.." && pwd -P) || fail_closed "cannot resolve the installed hook root."
 REPO=$(git -C "$HOOK_ROOT" rev-parse --show-toplevel 2>/dev/null) || fail_closed "cannot resolve the installed project root."
 [[ "$REPO" == "$HOOK_ROOT" ]] || fail_closed "hook path is outside its project root."
+COMMON_GIT_DIR=$(git -C "$REPO" rev-parse --git-common-dir 2>/dev/null) || fail_closed "cannot resolve the project Git directory."
+COMMON_GIT_DIR=$(python3 -c 'import os,sys; print(os.path.realpath(os.path.join(sys.argv[1],sys.argv[2])))' "$REPO" "$COMMON_GIT_DIR")
+
+# Return the linked worktree containing a path, including a path whose final
+# directories do not exist yet. A nested, unrelated Git repository is ignored.
+same_project_root_for_path() {
+  local path="$1" directory root common
+  directory=$(python3 -c 'import os,sys; p=os.path.realpath(sys.argv[1]); print(p if os.path.isdir(p) else os.path.dirname(p))' "$path") || return 1
+  while [[ ! -d "$directory" && "$directory" != / ]]; do
+    directory=$(dirname "$directory")
+  done
+  root=$(git -C "$directory" rev-parse --show-toplevel 2>/dev/null) || return 1
+  common=$(git -C "$directory" rev-parse --git-common-dir 2>/dev/null) || return 1
+  common=$(python3 -c 'import os,sys; print(os.path.realpath(os.path.join(sys.argv[1],sys.argv[2])))' "$directory" "$common") || return 1
+  [[ "$common" == "$COMMON_GIT_DIR" ]] || return 1
+  printf '%s\n' "$root"
+}
+
+rig_dir_for_root() {
+  local root="$1"
+  if [[ -f "$root/.rigpath" ]]; then
+    tr -d '[:space:]' < "$root/.rigpath"
+  else
+    printf '%s\n' "$root/.rig"
+  fi
+}
 
 # ── Resolve RIG_DIR ───────────────────────────────────────────────────────────
 # Supports external .rig/ installations (see install.sh --rig-dir).
 # If .rigpath exists in the repo root, it contains the absolute path to the
 # .rig/ directory (which may be outside the repo). Otherwise default to $REPO/.rig.
-if [[ -f "$REPO/.rigpath" ]]; then
-  RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
-else
-  RIG_DIR="$REPO/.rig"
-fi
+RIG_DIR=$(rig_dir_for_root "$REPO")
 
 commit_ok_age_seconds() {
   local file="$1"
@@ -115,10 +137,140 @@ if not isinstance(command, str): raise SystemExit(1)
 print(command, end="")
 ') || fail_closed "Bash tool input has no command."
 
+  # A plain Bash call need not be shell-parsed. In particular, opaque scripts
+  # and heredoc bodies may contain quoting that shlex cannot interpret, while
+  # the old hook allowed them when no Git commit was visible.
+  VISIBLE_COMMIT=$(printf '%s' "$BASH_CMD" | python3 -c '
+import re, sys
+command = sys.stdin.read()
+heredoc = re.compile(r"<<(-?)(?!<)\s*(?:\x27([A-Za-z_][A-Za-z_0-9]*)\x27|\"([A-Za-z_][A-Za-z_0-9]*)\"|([A-Za-z_][A-Za-z_0-9]*))")
+visible = []
+pending = []
+for line in command.splitlines(keepends=True):
+    if pending:
+        delimiter, keep_body, strip_tabs = pending[0]
+        content = line.rstrip("\r\n")
+        if (content.lstrip("\t") if strip_tabs else content) == delimiter:
+            pending.pop(0)
+        elif keep_body:
+            visible.append(line)
+        continue
+    visible.append(line)
+    shell_heredoc = bool(re.search(r"\b(?:bash|sh)\b", line))
+    for match in heredoc.finditer(line):
+        pending.append((next(group for group in match.groups()[1:] if group), shell_heredoc, bool(match.group(1))))
+command = "".join(visible)
+pattern = r"\bgit(?:\s+(?:-C(?:\s+(?:\"[^\"]*\"|\x27[^\x27]*\x27|\S+)|\S+)|-c\s+\S+|--[A-Za-z0-9-]+))*\s+commit\b"
+print(1 if re.search(pattern, command) else 0)
+') || fail_closed "Bash command could not be inspected for commits."
+  COMMIT_TARGETS=""
+  if [[ "$VISIBLE_COMMIT" == 1 ]]; then
+  # Track literal cd and git -C arguments, including scripts passed to
+  # sh/bash -c. The event cwd is used when supplied; the process cwd is the
+  # legacy fallback. Refuse visible commits with an unresolved target.
+  COMMIT_TARGETS=$(printf '%s' "$INPUT" | python3 -c '
+import json, os, shlex, sys
+data = json.load(sys.stdin)
+command = data.get("tool_input", data).get("command", "")
+cwd = data.get("cwd") if isinstance(data.get("cwd"), str) else None
+operators = (";", "&&", "||", "|", "&")
+
+def resolve(base, value):
+    if base is None or "$" in value or "`" in value:
+        return None
+    return os.path.abspath(os.path.join(base, os.path.expanduser(value)))
+
+def inspect(script, current, depth=0):
+    if depth > 8:
+        raise ValueError("nested shell limit exceeded")
+    lexer = shlex.shlex(script, posix=True, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    tokens = list(lexer)
+    targets = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "cd":
+            j = i + 1
+            while j < len(tokens) and tokens[j] in ("-L", "-P", "--"):
+                j += 1
+            if j < len(tokens) and tokens[j] not in operators:
+                current = resolve(current, tokens[j])
+                i = j + 1
+                continue
+            current = os.path.expanduser("~")
+        if os.path.basename(token) in ("sh", "bash"):
+            j = i + 1
+            has_script = False
+            while j < len(tokens) and tokens[j].startswith("-"):
+                flag = tokens[j]
+                if flag == "--":
+                    j += 1
+                    break
+                if not flag.startswith("--") and "c" in flag[1:]:
+                    has_script = True
+                j += 1
+            if has_script:
+                if j >= len(tokens) or tokens[j] in operators:
+                    raise ValueError("shell script is missing")
+                nested = tokens[j]
+                if nested.startswith("$") or "`" in nested:
+                    raise ValueError("shell script is dynamic")
+                targets.extend(inspect(nested, current, depth + 1))
+                i = j + 1
+                continue
+        if token == "git":
+            target = current
+            j = i + 1
+            while j < len(tokens):
+                option = tokens[j]
+                if option == "-C" and j + 1 < len(tokens):
+                    target = resolve(target, tokens[j + 1])
+                    j += 2
+                elif option.startswith("-C") and len(option) > 2:
+                    target = resolve(target, option[2:])
+                    j += 1
+                elif option in ("-c", "--config-env") and j + 1 < len(tokens):
+                    j += 2
+                elif option in ("--no-pager", "--paginate", "--literal-pathspecs"):
+                    j += 1
+                else:
+                    break
+            if j < len(tokens) and tokens[j] == "commit":
+                if target is None:
+                    raise ValueError("commit target is dynamic")
+                targets.append(target)
+            i = j + 1
+            continue
+        i += 1
+    return targets
+
+try:
+    for target in inspect(command, os.path.abspath(cwd or sys.argv[1])):
+        print(target)
+except ValueError:
+    raise SystemExit(1)
+' "$PWD") || fail_closed "Bash commit target could not be inspected."
+  # Retain the old broad guard for nested shell strings such as
+  # bash -c 'git commit ...', whose contents are one shell token here.
+  if [[ -z "$COMMIT_TARGETS" ]] && echo "$BASH_CMD" | grep -qE '\bgit\s+commit\b'; then
+    COMMIT_TARGETS=$(printf '%s' "$INPUT" | python3 -c '
+import json, os, sys
+data = json.load(sys.stdin)
+cwd = data.get("cwd") if isinstance(data.get("cwd"), str) else None
+print(os.path.abspath(cwd or sys.argv[1]))
+' "$PWD") || fail_closed "Bash commit cwd could not be inspected."
+  fi
+  fi
+
   # ── Gate git commit on sentinel file ───────────────────────────────────
-  COMMIT_OK="$RIG_DIR/memory/.rig-commit-ok"
   COMMIT_OK_TTL_SECONDS="${RIG_COMMIT_OK_TTL_SECONDS:-900}"
-  if echo "$BASH_CMD" | grep -qE '\bgit\s+commit\b'; then
+  while IFS= read -r COMMIT_TARGET; do
+    [[ -n "$COMMIT_TARGET" ]] || continue
+    COMMIT_REPO=$(same_project_root_for_path "$COMMIT_TARGET/.") || COMMIT_REPO="$REPO"
+    COMMIT_RIG_DIR=$(rig_dir_for_root "$COMMIT_REPO")
+    COMMIT_OK="$COMMIT_RIG_DIR/memory/.rig-commit-ok"
     if [[ ! -f "$COMMIT_OK" ]]; then
       echo "" >&2
       echo "  Commit blocked by The Rig." >&2
@@ -174,9 +326,9 @@ print(command, end="")
     # housekeeping commits directly to main. Code-change types (feat, fix,
     # refactor, test, perf, devops, style) are always blocked, even with
     # direct-push — they must go through a feature branch and PR.
-    CURRENT_BRANCH=$(git -C "$REPO" branch --show-current 2>/dev/null || echo "")
+    CURRENT_BRANCH=$(git -C "$COMMIT_REPO" branch --show-current 2>/dev/null || echo "")
     if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
-      HOUSEKEEPING=$(grep "^housekeeping:" "$REPO/CLAUDE.md" 2>/dev/null \
+      HOUSEKEEPING=$(grep "^housekeeping:" "$COMMIT_REPO/CLAUDE.md" 2>/dev/null \
         | awk '{print $2}' | tr -d '[:space:]' || echo "")
       if [[ "$HOUSEKEEPING" != "direct-push" ]]; then
         echo "" >&2
@@ -224,7 +376,7 @@ if m:
         exit 2
       fi
     fi
-  fi
+  done <<< "$COMMIT_TARGETS"
 fi
 
 # ── Block writes to protected paths ──────────────────────────────────────────
@@ -238,12 +390,15 @@ if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" || "$TOOL" == "NotebookEdit" ]]; t
   fi
 
   PATH_ARG=$(printf '%s' "$INPUT" | python3 -c '
-import json, sys
+import json, os, sys
 data = json.load(sys.stdin)
 tool_input = data.get("tool_input", data)
 if not isinstance(tool_input, dict): raise SystemExit(1)
 path = tool_input.get("file_path") or tool_input.get("notebook_path")
 if not isinstance(path, str) or not path: raise SystemExit(1)
+if not os.path.isabs(path):
+    cwd = data.get("cwd") if isinstance(data.get("cwd"), str) else None
+    path = os.path.abspath(os.path.join(cwd or os.getcwd(), path))
 print(path, end="")
 ') || fail_closed "write tool input has no file path."
 
@@ -262,6 +417,8 @@ print(match.group(1) + (match.group(2) or "/"), end="")
 ') || fail_closed "worktree write destination could not be resolved."
   fi
   PATH_CANONICAL=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$PATH_ARG") || fail_closed "write path could not be resolved."
+  TARGET_REPO=$(same_project_root_for_path "$PATH_ARG") || TARGET_REPO="$REPO"
+  TARGET_RIG_DIR=$(rig_dir_for_root "$TARGET_REPO")
 
   # ── THE RIG'S OWN GOVERNANCE FILES (self-protection) ─────────────────────
   # The agent must not rewrite the rules it is supposed to follow.
@@ -294,8 +451,14 @@ print(match.group(1) + (match.group(2) or "/"), end="")
     # Allow comments and whitespace-only lines, but keep path fragments literal.
     [[ "$protected" =~ ^[[:space:]]*$ || "$protected" =~ ^[[:space:]]*# ]] && continue
     case "$protected" in
-      '[RIG_DIR]/'*) protected="$RIG_DIR/${protected#\[RIG_DIR\]/}" ;;
-      '[REPO]/'*)    protected="$REPO/${protected#\[REPO\]/}" ;;
+      '[RIG_DIR]/'*)
+        RIG_PROTECTED+=("$RIG_DIR/${protected#\[RIG_DIR\]/}")
+        [[ "$TARGET_RIG_DIR" == "$RIG_DIR" ]] || RIG_PROTECTED+=("$TARGET_RIG_DIR/${protected#\[RIG_DIR\]/}")
+        continue ;;
+      '[REPO]/'*)
+        RIG_PROTECTED+=("$REPO/${protected#\[REPO\]/}")
+        [[ "$TARGET_REPO" == "$REPO" ]] || RIG_PROTECTED+=("$TARGET_REPO/${protected#\[REPO\]/}")
+        continue ;;
       *)
         echo "Blocked: The Rig protected-path policy is malformed:" >&2
         echo "  $PROTECTED_PATH_POLICY" >&2
@@ -303,7 +466,6 @@ print(match.group(1) + (match.group(2) or "/"), end="")
         exit 2
         ;;
     esac
-    RIG_PROTECTED+=("$protected")
   done < "$PROTECTED_PATH_POLICY"
 
   if [[ "${#RIG_PROTECTED[@]}" -eq 0 ]]; then
