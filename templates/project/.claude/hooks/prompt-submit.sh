@@ -19,7 +19,7 @@
 # Output: JSON {"additionalContext": "..."} when there is something to surface.
 # Claude Code receives this as context alongside the user's message.
 
-REPO=$(cd "$(dirname "$0")/../.." && pwd -P)
+REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 [[ -z "$REPO" ]] && exit 0
 
 if [[ -f "$REPO/.rigpath" ]]; then
