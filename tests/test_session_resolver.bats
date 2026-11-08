@@ -269,6 +269,35 @@ json.dump({
   [[ "$output" == *'private-thread'* ]] || return 1
 }
 
+@test "retrofit accepts an exact native ID when an app-server shell has no native ID environment" {
+  run env -u CODEX_THREAD_ID "$CASE_DIR/bin/rig" session retrofit --agent codex --native-session-id app-server-thread --source resume --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"retrofitted": true'* && "$output" != *'app-server-thread'* ]] || return 1
+  local file
+  file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  SESSION_F="$file" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["agent"]=="codex"; assert d["native"]["session_id"]=="app-server-thread"; assert d["native"]["source"]=="resume"'
+
+  run env -u CODEX_THREAD_ID "$CASE_DIR/bin/rig" session retrofit --agent codex --native-session-id app-server-thread --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"retrofitted": false'* ]] || return 1
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -maxdepth 1 -name 'session-*.json' | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+@test "retrofit rejects mixed environment and explicit native ID sources without writing" {
+  run env CODEX_THREAD_ID=ambient-thread "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --native-session-id another-thread --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason":"invalid_input"'* ]] || return 1
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -maxdepth 1 -name 'session-*.json' | wc -l | tr -d ' ')" -eq 0 ]
+}
+
+@test "explicit native ID retrofit continues a completed thread" {
+  write_native_session "$CASE_DIR/.rig/memory/sessions/done/session-ended.json" ended-anchor app-server-ended complete codex
+  run env -u CODEX_THREAD_ID "$CASE_DIR/bin/rig" session retrofit --agent codex --native-session-id app-server-ended --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"retrofitted": true'* && "$output" == *'"kind": "continuation"'* ]] || return 1
+  [[ "$output" == *'"parent_anchor": "ended-anchor"'* && "$output" != *'app-server-ended'* ]] || return 1
+}
+
 @test "naming refuses a stale launcher file when a different native thread is active" {
   first=$("$CASE_DIR/bin/rig" session bind --agent codex --native-session-id thread-a --source startup)
   second=$("$CASE_DIR/bin/rig" session bind --agent codex --native-session-id thread-b --source startup)

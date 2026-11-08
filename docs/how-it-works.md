@@ -326,8 +326,16 @@ Attaching from a hook event does not export that ID to later tool-call shells.
 When a client supplies neither a native ID environment variable nor a launcher
 hint to those shells, a standalone `rig session current` remains unresolved.
 The hook event can still create the exact record; a later caller must supply
-exact identity before naming or completing it. This client behavior requires a
-live app-server reattach check before claiming automatic recovery end to end.
+exact identity before naming or completing it. A direct stdio app-server probe
+with Codex CLI 0.166.0 completed two turns and resumed the loaded thread without
+emitting `SessionStart` or `UserPromptSubmit`, even with those hooks configured
+for the probe; `codex exec` did emit both and bind the session. This observation
+does not establish how every app-server client behaves. An app-server client
+that knows the thread ID can recover explicitly with
+`bin/rig session retrofit --agent codex --native-session-id <thread-id> --source resume --json`.
+Subsequent shell calls must pass the same exact hint, for example
+`bin/rig session current --agent codex --native-session-id <thread-id> --json`.
+Automatic recovery on app-server reattach remains unverified.
 
 The name writer rechecks anchor, project identity, provider, native ID and
 active state after locking the record. Legacy PID records remain readable; a
