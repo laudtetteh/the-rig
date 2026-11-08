@@ -93,8 +93,7 @@ sha256_file() {
 # Rig-owned:   bin/rig, bin/rig-session-resolve.py, bin/rig-snapshot.py, .claude/hooks/,
 #              .claude/commands/, .agents/skills/,
 #              .codex/hooks.json, .codex/hooks/, .rig/processes/,
-#              .rig/rules/protected-paths.txt, .rig/memory/.gitignore,
-#              .husky/, .gitleaks.toml,
+#              .rig/rules/protected-paths.txt, .husky/, .gitleaks.toml,
 #              .git/hooks/ (stealth-mode installed hook scripts only)
 # User-owned:  CLAUDE.md, PROJECT_BRIEF.md, other .rig/rules/, .rig/memory/*.md,
 #              .rig/tasks/, .github/
@@ -110,7 +109,6 @@ is_rig_owned() {
     .codex/hooks.json|\
     .codex/hooks/*|\
     .rig/processes/*|\
-    .rig/memory/.gitignore|\
     .rig/rules/protected-paths.txt|\
     .husky/*|\
     .git/hooks/*|\
