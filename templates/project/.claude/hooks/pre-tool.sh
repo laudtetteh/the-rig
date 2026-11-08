@@ -220,7 +220,7 @@ def inspect(script, current, depth=0):
                 targets.extend(inspect(nested, current, depth + 1))
                 i = j + 1
                 continue
-        if token == "git":
+        if token == "git" or (token.startswith("/") and os.path.basename(token) == "git"):
             target = current
             j = i + 1
             while j < len(tokens):
@@ -438,40 +438,51 @@ print(match.group(1) + (match.group(2) or "/"), end="")
   #
   # Uses absolute paths so the block works whether .rig/ is inside the repo
   # or at an external location (see .rigpath / install.sh --rig-dir).
-  PROTECTED_PATH_POLICY="$RIG_DIR/rules/protected-paths.txt"
-  if [[ ! -r "$PROTECTED_PATH_POLICY" ]]; then
-    echo "Blocked: The Rig protected-path policy is missing or unreadable:" >&2
-    echo "  $PROTECTED_PATH_POLICY" >&2
-    echo "Restore it with The Rig installer before attempting writes." >&2
-    exit 2
-  fi
-
   RIG_PROTECTED=()
-  while IFS= read -r protected || [[ -n "$protected" ]]; do
-    # Allow comments and whitespace-only lines, but keep path fragments literal.
-    [[ "$protected" =~ ^[[:space:]]*$ || "$protected" =~ ^[[:space:]]*# ]] && continue
-    case "$protected" in
-      '[RIG_DIR]/'*)
-        RIG_PROTECTED+=("$RIG_DIR/${protected#\[RIG_DIR\]/}")
-        [[ "$TARGET_RIG_DIR" == "$RIG_DIR" ]] || RIG_PROTECTED+=("$TARGET_RIG_DIR/${protected#\[RIG_DIR\]/}")
-        continue ;;
-      '[REPO]/'*)
-        RIG_PROTECTED+=("$REPO/${protected#\[REPO\]/}")
-        [[ "$TARGET_REPO" == "$REPO" ]] || RIG_PROTECTED+=("$TARGET_REPO/${protected#\[REPO\]/}")
-        continue ;;
-      *)
-        echo "Blocked: The Rig protected-path policy is malformed:" >&2
-        echo "  $PROTECTED_PATH_POLICY" >&2
-        echo "Every path must begin with [RIG_DIR]/ or [REPO]/." >&2
-        exit 2
-        ;;
-    esac
-  done < "$PROTECTED_PATH_POLICY"
+  load_protected_path_policy() {
+    local policy="$1" policy_repo="$2" policy_rig_dir="$3" mirror_repo="$4" mirror_rig_dir="$5" protected
+    local before="${#RIG_PROTECTED[@]}"
+    if [[ ! -f "$policy" || ! -r "$policy" ]]; then
+      echo "Blocked: The Rig protected-path policy is missing or unreadable:" >&2
+      echo "  $policy" >&2
+      echo "Restore it with The Rig installer before attempting writes." >&2
+      exit 2
+    fi
 
-  if [[ "${#RIG_PROTECTED[@]}" -eq 0 ]]; then
-    echo "Blocked: The Rig protected-path policy contains no paths:" >&2
-    echo "  $PROTECTED_PATH_POLICY" >&2
-    exit 2
+    while IFS= read -r protected || [[ -n "$protected" ]]; do
+      # Allow comments and whitespace-only lines, but keep path fragments literal.
+      [[ "$protected" =~ ^[[:space:]]*$ || "$protected" =~ ^[[:space:]]*# ]] && continue
+      case "$protected" in
+        '[RIG_DIR]/'*)
+          RIG_PROTECTED+=("$policy_rig_dir/${protected#\[RIG_DIR\]/}")
+          [[ "$mirror_rig_dir" == "$policy_rig_dir" ]] || RIG_PROTECTED+=("$mirror_rig_dir/${protected#\[RIG_DIR\]/}")
+          ;;
+        '[REPO]/'*)
+          RIG_PROTECTED+=("$policy_repo/${protected#\[REPO\]/}")
+          [[ "$mirror_repo" == "$policy_repo" ]] || RIG_PROTECTED+=("$mirror_repo/${protected#\[REPO\]/}")
+          ;;
+        *)
+          echo "Blocked: The Rig protected-path policy is malformed:" >&2
+          echo "  $policy" >&2
+          echo "Every path must begin with [RIG_DIR]/ or [REPO]/." >&2
+          exit 2
+          ;;
+      esac
+    done < "$policy"
+
+    if [[ "${#RIG_PROTECTED[@]}" -eq "$before" ]]; then
+      echo "Blocked: The Rig protected-path policy contains no paths:" >&2
+      echo "  $policy" >&2
+      exit 2
+    fi
+  }
+
+  # The installed hook keeps its policy across linked worktrees. The target
+  # worktree may have a different policy; read it as well when its Rig
+  # directory differs. Shared external .rigpath locations use one policy.
+  load_protected_path_policy "$RIG_DIR/rules/protected-paths.txt" "$REPO" "$RIG_DIR" "$TARGET_REPO" "$TARGET_RIG_DIR"
+  if [[ "$TARGET_RIG_DIR" != "$RIG_DIR" ]]; then
+    load_protected_path_policy "$TARGET_RIG_DIR/rules/protected-paths.txt" "$TARGET_REPO" "$TARGET_RIG_DIR" "$TARGET_REPO" "$TARGET_RIG_DIR"
   fi
 
   for protected in "${RIG_PROTECTED[@]}"; do

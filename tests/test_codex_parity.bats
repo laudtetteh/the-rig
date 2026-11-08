@@ -183,6 +183,48 @@ run_linked_pretool() {
   [ "$status" -eq 0 ]
 }
 
+@test "linked hook enforces both worktree policies and fails closed on a missing target policy" {
+  setup_linked_hook_worktrees
+  printf '[REPO]/sensitive.txt\n' >> "$TEST_PROJECT/.rig/rules/protected-paths.txt"
+  printf '[REPO]/source-only.txt\n' >> "$LINKED_FEATURE/.rig/rules/protected-paths.txt"
+  local path payload
+
+  for path in "$TEST_PROJECT/sensitive.txt" "$TEST_PROJECT/source-only.txt"; do
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","cwd":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"unsafe"}}))' "$LINKED_FEATURE" "$path")"
+    run_linked_pretool "$payload"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"governance file"* ]] || return 1
+  done
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","cwd":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"safe"}}))' "$LINKED_FEATURE" "$TEST_PROJECT/ordinary.txt")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 0 ]
+
+  rm "$TEST_PROJECT/.rig/rules/protected-paths.txt"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"missing or unreadable"* ]] || return 1
+}
+
+@test "linked hooks resolve a shared external Rig policy against both worktree roots" {
+  setup_linked_hook_worktrees
+  local shared_rig="$TEST_ROOT/shared-rig" payload
+  mkdir -p "$shared_rig/rules"
+  cp "$TEST_PROJECT/.rig/rules/protected-paths.txt" "$shared_rig/rules/protected-paths.txt"
+  printf '[REPO]/sensitive.txt\n' >> "$shared_rig/rules/protected-paths.txt"
+  printf '%s\n' "$shared_rig" > "$TEST_PROJECT/.rigpath"
+  printf '%s\n' "$shared_rig" > "$LINKED_FEATURE/.rigpath"
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","cwd":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"unsafe"}}))' "$LINKED_FEATURE" "$TEST_PROJECT/sensitive.txt")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","cwd":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"safe"}}))' "$LINKED_FEATURE" "$TEST_PROJECT/ordinary.txt")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 0 ]
+}
+
 @test "linked feature hook checks main branch for cd and git -C commits" {
   setup_linked_hook_worktrees
   touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
@@ -190,6 +232,8 @@ run_linked_pretool() {
   local command payload
   for command in \
     "cd '$TEST_PROJECT' && git commit -m 'fix: blocked'" \
+    "cd '$TEST_PROJECT' && /usr/bin/git commit -m 'fix: blocked'" \
+    "/usr/bin/git -C '$TEST_PROJECT' commit -m 'fix: blocked'" \
     "git -C '$TEST_PROJECT' commit -m 'fix: blocked'" \
     "git -C '../project' commit -m 'fix: blocked'" \
     "git -C '$TEST_PROJECT' -c core.editor=true commit -m 'fix: blocked'"; do
