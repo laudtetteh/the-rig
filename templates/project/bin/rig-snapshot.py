@@ -278,6 +278,8 @@ def write_snapshot(memory, rig_dir, sentinel, token, args, new_shared, new_secti
                     done_file.resolve(strict=True).relative_to(done_root)
                 except (OSError, ValueError, RuntimeError):
                     fail("done_task_unverified", task=task)
+                if done_file.stem not in (task, f"TASK_{task}", f"TASK-{task}"):
+                    fail("done_task_mismatch", task=task)
                 if (active_root / done_file.name).exists():
                     fail("task_still_active", task=task)
                 if task in old_sections:

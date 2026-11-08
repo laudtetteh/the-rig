@@ -78,6 +78,11 @@ candidate() {
   [ "$before" = "$(cksum "$snapshot")" ]
   mv "$CASE_DIR/.rig/tasks/active/TASK_task-a.md" "$CASE_DIR/.rig/tasks/done/TASK_task-a.md"
   run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only \
+    --retire-task task-b --done-task-file "$CASE_DIR/.rig/tasks/done/TASK_task-a.md" --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *done_task_mismatch* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
+  run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only \
     --retire-task task-a --done-task-file "$CASE_DIR/.rig/tasks/done/TASK_task-a.md" --json
   [ "$status" -eq 0 ]
   [[ "$output" == *'"retired_tasks":["task-a"]'* ]] || return 1
