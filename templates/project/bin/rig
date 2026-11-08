@@ -99,6 +99,7 @@ worktree_bootstrap() {
 import pathlib, shutil, sys
 source, target = map(pathlib.Path, sys.argv[1:])
 paths = [".rigpath","CLAUDE.md","PROJECT_BRIEF.md",".gitleaks.toml","bin/rig",
+         "bin/rig-session-resolve.py",
          ".claude",".agents",".codex",".mcp.json",".playwright-mcp",".github",
          "docs/INDEX.md","docs/features/README.md"]
 # Linked worktrees live under the primary's own .claude/worktrees/ (see the
@@ -607,7 +608,7 @@ common = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"])
 if common is not None and common.returncode == 0:
     primary = pathlib.Path(common.stdout.strip()).parent
     if primary != root and (primary / ".rigpath").exists():
-        required = [".rigpath", "CLAUDE.md", "bin/rig", ".claude"]
+        required = [".rigpath", "CLAUDE.md", "bin/rig", "bin/rig-session-resolve.py", ".claude"]
         missing = [p for p in required if not (root / p).exists()]
         recovery = f"cd {shlex.quote(str(root))} && {shlex.quote(str(primary / 'bin/rig'))} worktree bootstrap"
         check("worktree_bootstrap", not missing, "complete" if not missing else "missing: " + ", ".join(missing) + "; recover: " + recovery)
