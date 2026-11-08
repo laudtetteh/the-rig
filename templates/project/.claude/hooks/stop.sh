@@ -12,7 +12,8 @@
 #     Source values:
 #       logout / prompt_input_exit — user closed the session
 #           Write .wrap-needed if /wrap hasn't run and the session had meaningful
-#           commits. Write minimal checkpoint. Mark session file ended-no-wrap.
+#           commits. Create a minimal checkpoint only if no snapshot exists.
+#           Mark session file ended-no-wrap.
 #           Clean /tmp UUID sentinel and compact checkpoint.
 #       clear — context was cleared; session continues in a new context window
 #           Log "context cleared". Do NOT set .wrap-needed.
@@ -91,12 +92,15 @@ case "$SOURCE" in
 
     write_minimal_checkpoint() {
       [[ ! -d "$RIG_DIR/memory" ]] && return
+      # A completed wrap or another session may already have written a full
+      # shared view. A SessionEnd hook must never replace that view.
+      [[ -e "$SNAPSHOT" || -L "$SNAPSHOT" ]] && return
       if [[ -f "$SNAP_LOCK" || -f "$RIG_DIR/memory/.memory-workflow-in-progress" ]]; then
         echo "[$(date +%H:%M:%S)] SESSION_END: snapshot write in progress — skipping minimal checkpoint" \
           >> "$SESSION_LOG" 2>/dev/null || true
         return
       fi
-      local branch commit active_task session_anchor=""
+      local branch commit active_task session_anchor="" draft
       branch=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
       commit=$(git -C "$REPO" log -1 --format="%h %s" 2>/dev/null || echo "none")
       active_task=""
@@ -105,6 +109,7 @@ case "$SOURCE" in
           | head -1 | xargs basename 2>/dev/null || true)
       fi
       session_anchor="${RIG_SESSION_ANCHOR:-$(cat "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true)}"
+      draft=$(mktemp "${TMPDIR:-/tmp}/rig-snapshot-stop.XXXXXX") || return
       {
         echo "# Context Snapshot — session-end checkpoint"
         echo ""
@@ -122,9 +127,12 @@ case "$SOURCE" in
         echo "## Status"
         echo ""
         echo "Session ended without running \`/wrap\`. Run \`/wrap\` to capture full context."
-      } > "$SNAPSHOT" 2>/dev/null || true
-      echo "[$(date +%H:%M:%S)] SESSION_END: minimal checkpoint written" \
-        >> "$SESSION_LOG" 2>/dev/null || true
+      } > "$draft" 2>/dev/null || true
+      if [[ -x "$REPO/bin/rig" ]] && "$REPO/bin/rig" memory write-snapshot --file "$draft" --shared-only --if-missing --json >/dev/null 2>&1; then
+        echo "[$(date +%H:%M:%S)] SESSION_END: minimal checkpoint written" \
+          >> "$SESSION_LOG" 2>/dev/null || true
+      fi
+      rm -f "$draft"
     }
 
     NEEDS_WRAP=false

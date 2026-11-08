@@ -82,12 +82,14 @@ Usage: rig memory <validate|repair-markers|append-gap|append-progress|write-snap
 
 Append helpers resolve .rigpath before writing and use atomic file replacement
 where replacement is required.
-write-snapshot accepts --shared-only or repeated --owned-task TASK; owning a
+write-snapshot accepts --shared-only or repeated --owned-task TASK; --if-missing
+creates a shared snapshot only when none exists. Owning a
 legacy handoff requires --adopt-legacy after review. To remove a completed
 handoff, pass --shared-only with matched --retire-task TASK and
 --done-task-file FILE pairs; the writer verifies the done file and backs up
 the prior snapshot. workflow-lock accepts
-acquire or release, with --owner-anchor and --provider-pid for acquisition,
+acquire or release, with --owner-anchor and --provider-pid for acquisition;
+--recover-stale explicitly takes over an aged tool-sourced lock,
 and --token for release. Both commands support --json.
 EOF
       ;;
@@ -520,7 +522,7 @@ PY
 }
 
 memory_write_snapshot() {
-  local from_file="" json=false shared_only=false adopt_legacy=false arg stdin_tmp="" mode=replace resolved status=0
+  local from_file="" json=false shared_only=false adopt_legacy=false if_missing=false arg stdin_tmp="" mode=replace resolved status=0
   local -a owned_tasks=() retire_tasks=() done_files=() helper_args=()
   while [[ "$#" -gt 0 ]]; do
     arg="$1"
@@ -532,6 +534,7 @@ memory_write_snapshot() {
       --retire-task) [[ "$#" -ge 2 ]] || { usage_error "--retire-task requires a value" "$@"; return; }; retire_tasks+=("$2"); shift 2;;
       --done-task-file) [[ "$#" -ge 2 ]] || { usage_error "--done-task-file requires a value" "$@"; return; }; done_files+=("$2"); shift 2;;
       --adopt-legacy) adopt_legacy=true; shift;;
+      --if-missing) if_missing=true; shift;;
       --json) json=true; shift;;
       *) usage_error "unknown memory option: $arg" "$@"; return;;
     esac
@@ -539,6 +542,7 @@ memory_write_snapshot() {
   [[ -n "$from_file" ]] || { usage_error "write-snapshot requires --file FILE or --stdin" "$@"; return; }
   [[ "$shared_only" == false || "${#owned_tasks[@]}" -eq 0 ]] || { usage_error "--shared-only and --owned-task conflict"; return; }
   [[ "$adopt_legacy" == false || "${#owned_tasks[@]}" -gt 0 ]] || { usage_error "--adopt-legacy requires --owned-task"; return; }
+  [[ "$if_missing" == false || ( "$shared_only" == true && "${#retire_tasks[@]}" -eq 0 ) ]] || { usage_error "--if-missing requires --shared-only without retirement"; return; }
   [[ "${#retire_tasks[@]}" -eq "${#done_files[@]}" ]] || { usage_error "--retire-task needs one --done-task-file per task"; return; }
   [[ "${#retire_tasks[@]}" -eq 0 || "$shared_only" == true ]] || { usage_error "--retire-task requires --shared-only"; return; }
   if [[ "${#owned_tasks[@]}" -gt 0 ]]; then mode=owned; elif [[ "$shared_only" == true ]]; then mode=shared; fi
@@ -550,6 +554,7 @@ memory_write_snapshot() {
   helper_args=(--rig-dir "$(rig_dir)" --root "$(rig_root)" --file "$from_file" --mode "$mode")
   [[ "$json" == true ]] && helper_args+=(--json)
   [[ "$adopt_legacy" == true ]] && helper_args+=(--adopt-legacy)
+  [[ "$if_missing" == true ]] && helper_args+=(--if-missing)
   for arg in ${owned_tasks[@]+"${owned_tasks[@]}"}; do helper_args+=(--owned-task "$arg"); done
   for arg in ${retire_tasks[@]+"${retire_tasks[@]}"}; do helper_args+=(--retire-task "$arg"); done
   for arg in ${done_files[@]+"${done_files[@]}"}; do helper_args+=(--done-task-file "$arg"); done

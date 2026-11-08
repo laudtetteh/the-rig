@@ -79,8 +79,10 @@ printf 'Rig workflow lock acquired: %s\n' "$SNAP_LOCK_JSON"
 ```
 
 The lock reports the current owner anchor, PID, and age if another workflow is
-active. A dead provider PID is archived and recovered on the next acquire;
-the 30-minute age fallback applies only when no live provider PID is available.
+active. A dead provider PID is archived and recovered on the next acquire.
+For a tool-sourced lock older than 30 minutes, verify that its workflow has
+stopped, then retry acquire with `--recover-stale`. Age alone does not take over
+the lock; the stale record is archived on explicit recovery.
 Never remove another session's lock by hand as
 part of this command. Keep the exact `token` from the acquire output in your
 working context and reassign `SNAP_LOCK_TOKEN` from that value in later tool-call
@@ -91,6 +93,8 @@ before retrying. This commonly happens when Codex is running in a
 project whose `.rigpath` points outside the workspace writable roots.
 
 The sentinel file is gitignored alongside other `.rig/memory/` runtime files.
+If any step fails after acquire, release the exact token before stopping. Keep
+the snapshot draft and pending obligations for a retry.
 
 ---
 
@@ -472,20 +476,25 @@ updated without an owner. Then run the owner-aware writer:
 
 ```bash
 SNAP_DRAFT="$RIG_DIR/memory/.snapshot-draft-${SNAP_LOCK_TOKEN}.md"
+snapshot_write_failed() {
+  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
+  echo "Snapshot update failed; draft preserved at $SNAP_DRAFT" >&2
+  exit 1
+}
 OWNED_TASKS=()
 while IFS= read -r task; do OWNED_TASKS+=("$task"); done \
   < <(sed -n 's/^## Resuming from: //p' "$SNAP_DRAFT")
 SNAP_ARGS=(--file "$SNAP_DRAFT" --json)
 if [[ "${#OWNED_TASKS[@]}" -eq 0 ]]; then
   SNAP_ARGS+=(--shared-only)
-  "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || exit 1
+  "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || snapshot_write_failed
 else
-  CURRENT_JSON=$("$REPO/bin/rig" session current --json) || exit 1
+  CURRENT_JSON=$("$REPO/bin/rig" session current --json) || snapshot_write_failed
   CURRENT_FILE=$(printf '%s' "$CURRENT_JSON" | \
-    python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")')
-  [[ -n "$CURRENT_FILE" ]] || exit 1
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")') || snapshot_write_failed
+  [[ -n "$CURRENT_FILE" ]] || snapshot_write_failed
   for task in "${OWNED_TASKS[@]}"; do SNAP_ARGS+=(--owned-task "$task"); done
-  RIG_SESSION_FILE="$CURRENT_FILE" "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || exit 1
+  RIG_SESSION_FILE="$CURRENT_FILE" "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || snapshot_write_failed
 fi
 rm -f "$SNAP_DRAFT"
 ```
@@ -514,6 +523,7 @@ REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 if [[ -f "$REPO/.rigpath" ]]; then RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath"); else RIG_DIR="$REPO/.rig"; fi
 SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
   echo "Unable to resolve this session unambiguously; stop before writing snapshot state."
+  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
   exit 1
 }
 SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
@@ -579,10 +589,14 @@ never interpolate it into shell or Python source.
 ```bash
 # Clear only this exact session's wrap obligation while its active record is
 # still resolvable. --adopt-legacy explicitly migrates an older unscoped marker.
-CURRENT_JSON=$("$REPO/bin/rig" session current --json) || exit 1
+CURRENT_JSON=$("$REPO/bin/rig" session current --json) || {
+  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
+  exit 1
+}
 CURRENT_UUID=$(printf '%s' "$CURRENT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
 [[ -n "$SESSION_UUID" && "$CURRENT_UUID" == "$SESSION_UUID" ]] || {
   echo "Session identity changed; stop before clearing or completing it." >&2
+  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
   exit 1
 }
 "$REPO/bin/rig" session obligation clear --kind wrap --adopt-legacy --json

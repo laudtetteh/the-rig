@@ -85,8 +85,10 @@ printf 'Rig workflow lock acquired: %s\n' "$SNAP_LOCK_JSON"
 ```
 
 The lock reports the owner anchor, PID, and age when another workflow is active.
-A dead provider PID is archived and recovered on the next acquire; the
-30-minute age fallback applies only when no live provider PID is available.
+A dead provider PID is archived and recovered on the next acquire. For a
+tool-sourced lock older than 30 minutes, verify that its workflow has stopped,
+then retry acquire with `--recover-stale`. Age alone does not take over the lock;
+the stale record is archived on explicit recovery.
 Keep the exact `token` from the acquire output in your
 working context and reassign `SNAP_LOCK_TOKEN` from that value in later tool-call
 shells; variables do not persist between tool calls. Never read a replacement
@@ -94,6 +96,8 @@ token from the current lock file. Never remove another session's lock manually.
 If acquire fails with `Operation not permitted`, request scoped write approval for $RIG_DIR
 before retrying. This commonly happens when Codex is running in
 a project whose `.rigpath` points outside the workspace writable roots.
+If any step fails after acquire, release the exact token before stopping. Keep
+the snapshot draft and pending merge obligation for a retry.
 
 ---
 
@@ -219,7 +223,11 @@ SNAP_DRAFT="$RIG_DIR/memory/.snapshot-draft-${SNAP_LOCK_TOKEN}.md"
 SNAP_ARGS=(--file "$SNAP_DRAFT" --shared-only --json)
 # Append matched --retire-task TASK --done-task-file FILE pairs for tasks
 # verified as done in Step 3; leave SNAP_ARGS unchanged otherwise.
-"$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || exit 1
+"$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || {
+  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
+  echo "Snapshot update failed; draft preserved at $SNAP_DRAFT" >&2
+  exit 1
+}
 rm -f "$SNAP_DRAFT"
 ```
 
@@ -270,6 +278,7 @@ evidence rules are authoritative for this suggestion.
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
   echo "Unable to resolve this session unambiguously; stop before writing session state."
+  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
   exit 1
 }
 SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
@@ -324,10 +333,14 @@ Use the shared atomic writer, passing the confirmed name as one opaque argument.
 ```bash
 # Acknowledge only the pending merge SHA while this exact active record remains
 # resolvable. A changed SHA fails closed and leaves the reminder visible.
-CURRENT_JSON=$("$REPO/bin/rig" session current --json) || exit 1
+CURRENT_JSON=$("$REPO/bin/rig" session current --json) || {
+  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
+  exit 1
+}
 CURRENT_UUID=$(printf '%s' "$CURRENT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
 [[ -n "$SESSION_UUID" && "$CURRENT_UUID" == "$SESSION_UUID" ]] || {
   echo "Session identity changed; stop before clearing or completing it." >&2
+  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
   exit 1
 }
 PENDING_MERGE_SHA=$(sed -n 's/^merge_sha=//p' "$RIG_DIR/memory/.post-merge-pending" 2>/dev/null | head -1)

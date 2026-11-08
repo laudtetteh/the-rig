@@ -21,6 +21,16 @@ candidate() {
     "$branch" "$task" "$task" > "$path"
 }
 
+snapshot_command_block() {
+  python3 - "$BATS_TEST_DIRNAME/../templates/project/.claude/commands/$1.md" <<'PY'
+import pathlib, sys
+content = pathlib.Path(sys.argv[1]).read_text()
+start = content.index('```bash\nSNAP_DRAFT="$RIG_DIR/memory/.snapshot-draft-${SNAP_LOCK_TOKEN}.md"') + len('```bash\n')
+end = content.index('\n```', start)
+print(content[start:end])
+PY
+}
+
 @test "sequential session snapshots preserve both owned task handoffs" {
   candidate "$BATS_TEST_TMPDIR/a.md" feat/a task-a
   candidate "$BATS_TEST_TMPDIR/b.md" feat/b task-b
@@ -47,6 +57,26 @@ candidate() {
   [ "$before" = "$(cksum "$snapshot")" ]
 }
 
+@test "a new session can update a handoff after its exact owner completes" {
+  candidate "$BATS_TEST_TMPDIR/a.md" feat/a task-a
+  run env RIG_SESSION_FILE="$file_a" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json
+  [ "$status" -eq 0 ]
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  before=$(cksum "$snapshot")
+  FILE_A="$file_a" python3 -c 'import json,os; p=os.environ["FILE_A"]; d=json.load(open(p)); d["lifecycle"]["state"]="complete"; open(p,"w").write(json.dumps(d))'
+  mv "$file_a" "$CASE_DIR/.rig/memory/sessions/done/$(basename "$file_a")"
+  candidate "$BATS_TEST_TMPDIR/b.md" feat/b task-a
+  run env RIG_SESSION_FILE="$file_b" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/b.md" --owned-task task-a --json
+  [ "$status" -eq 0 ]
+  [ "$before" != "$(cksum "$snapshot")" ]
+  grep -Fq '**Next action:** Continue task-a.' "$snapshot"
+  anchor_b=$(printf '%s' "$b" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  grep -Fq "owner=$anchor_b" "$snapshot"
+  backup=$(find "$CASE_DIR/.rig/memory/snapshot-backups" -type f -name 'transferred-*.md' | head -1)
+  [ -n "$backup" ]
+  grep -Fq '## Resuming from: task-a' "$backup"
+}
+
 @test "a shared-header refresh preserves an unowned legacy handoff and backs it up" {
   snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
   printf '# Old context\n\n## Resuming from: legacy-task\n\n**Next action:** Preserve me.\n' > "$snapshot"
@@ -58,6 +88,19 @@ candidate() {
   backup=$(find "$CASE_DIR/.rig/memory/snapshot-backups" -type f -name '*.md' | head -1)
   [ -n "$backup" ]
   grep -Fq '## Resuming from: legacy-task' "$backup"
+}
+
+@test "if-missing never replaces a snapshot created before the writer acquires its lock" {
+  candidate "$BATS_TEST_TMPDIR/a.md" feat/a task-a
+  run env RIG_SESSION_FILE="$file_a" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json
+  [ "$status" -eq 0 ]
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  before=$(cksum "$snapshot")
+  printf '# Session-end checkpoint\n' > "$BATS_TEST_TMPDIR/checkpoint.md"
+  run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/checkpoint.md" --shared-only --if-missing --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"no_write":true'* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
 }
 
 @test "retiring a done handoff preserves other work and backs up the old view" {
@@ -215,21 +258,72 @@ candidate() {
   token=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
   lock="$CASE_DIR/.rig/memory/.memory-workflow-in-progress"
   LOCK_F="$lock" python3 -c 'import json,os,time; p=os.environ["LOCK_F"]; d=json.load(open(p)); d["started_epoch"]=time.time()-4000; open(p,"w").write(json.dumps(d))'
-  run "$rig" memory workflow-lock acquire --owner-anchor other --json
+  run "$rig" memory workflow-lock acquire --owner-anchor other --recover-stale --json
   [ "$status" -eq 3 ]
   OUTPUT="$output" python3 -c 'import json,os; d=json.loads(os.environ["OUTPUT"]); assert d["reason"]=="workflow_busy" and d["owner_anchor"]=="live"'
   run "$rig" memory workflow-lock release --token "$token" --json
   [ "$status" -eq 0 ]
 }
 
-@test "workflow lock uses age fallback when provider PID is unavailable" {
+@test "an aged tool-sourced lock requires explicit recovery" {
   run "$rig" memory workflow-lock acquire --owner-anchor old-tool --json
   [ "$status" -eq 0 ]
+  run "$rig" memory workflow-lock acquire --owner-anchor new-tool --recover-stale --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *workflow_busy* ]] || return 1
   lock="$CASE_DIR/.rig/memory/.memory-workflow-in-progress"
   LOCK_F="$lock" python3 -c 'import json,os,time; p=os.environ["LOCK_F"]; d=json.load(open(p)); d["started_epoch"]=time.time()-4000; open(p,"w").write(json.dumps(d))'
   run "$rig" memory workflow-lock acquire --owner-anchor new-tool --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *workflow_busy* ]] || return 1
+  run "$rig" memory workflow-lock acquire --owner-anchor new-tool --recover-stale --json
   [ "$status" -eq 0 ]
   [[ "$output" == *'"recovered_stale":true'* ]] || return 1
+}
+
+@test "wrap releases its workflow lock when a malformed snapshot blocks the write" {
+  run "$rig" memory workflow-lock acquire --owner-anchor wrap --provider-pid "$$" --json
+  [ "$status" -eq 0 ]
+  token=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  draft="$CASE_DIR/.rig/memory/.snapshot-draft-${token}.md"
+  printf '# New shared context\n' > "$draft"
+  printf '<!-- rig:handoff-start broken -->\n' > "$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  snapshot_command_block wrap > "$BATS_TEST_TMPDIR/wrap-snapshot.sh"
+  run env REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" SNAP_LOCK_TOKEN="$token" bash "$BATS_TEST_TMPDIR/wrap-snapshot.sh"
+  [ "$status" -ne 0 ]
+  [ -f "$draft" ]
+  [ ! -e "$CASE_DIR/.rig/memory/.memory-workflow-in-progress" ]
+  run "$rig" memory workflow-lock acquire --owner-anchor retry --json
+  [ "$status" -eq 0 ]
+}
+
+@test "post-merge releases its workflow lock when a malformed snapshot blocks the write" {
+  run "$rig" memory workflow-lock acquire --owner-anchor merge --provider-pid "$$" --json
+  [ "$status" -eq 0 ]
+  token=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  draft="$CASE_DIR/.rig/memory/.snapshot-draft-${token}.md"
+  printf '# New shared context\n' > "$draft"
+  printf '<!-- rig:handoff-start broken -->\n' > "$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  snapshot_command_block post-merge > "$BATS_TEST_TMPDIR/post-merge-snapshot.sh"
+  run env REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" SNAP_LOCK_TOKEN="$token" bash "$BATS_TEST_TMPDIR/post-merge-snapshot.sh"
+  [ "$status" -ne 0 ]
+  [ -f "$draft" ]
+  [ ! -e "$CASE_DIR/.rig/memory/.memory-workflow-in-progress" ]
+  run "$rig" memory workflow-lock acquire --owner-anchor retry --json
+  [ "$status" -eq 0 ]
+}
+
+@test "a tool-sourced lock remains owned when its age exceeds thirty minutes" {
+  run "$rig" memory workflow-lock acquire --owner-anchor active-tool --json
+  [ "$status" -eq 0 ]
+  token=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  lock="$CASE_DIR/.rig/memory/.memory-workflow-in-progress"
+  LOCK_F="$lock" python3 -c 'import json,os,time; p=os.environ["LOCK_F"]; d=json.load(open(p)); d["started_epoch"]=time.time()-4000; open(p,"w").write(json.dumps(d))'
+  run "$rig" memory workflow-lock acquire --owner-anchor intruder --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *workflow_busy* ]] || return 1
+  run "$rig" memory workflow-lock release --token "$token" --json
+  [ "$status" -eq 0 ]
 }
 
 @test "a crashed short snapshot marker is recovered without losing the old view" {
@@ -259,4 +353,35 @@ candidate() {
     _ "$CASE_DIR" "$BATS_TEST_TMPDIR/session.log"
   [ "$status" -eq 0 ]
   [ "$before" = "$(cksum "$snapshot")" ]
+}
+
+@test "SessionEnd preserves another task handoff after a progress stub" {
+  candidate "$BATS_TEST_TMPDIR/a.md" feat/a task-a
+  candidate "$BATS_TEST_TMPDIR/b.md" feat/b task-b
+  run env RIG_SESSION_FILE="$file_a" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$file_b" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/b.md" --owned-task task-b --json
+  [ "$status" -eq 0 ]
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  before=$(cksum "$snapshot")
+  printf 'Auto-logged by post-tool hook\n' > "$CASE_DIR/.rig/memory/PROGRESS.md"
+  mkdir -p "$CASE_DIR/.claude/hooks"
+  cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/stop.sh" "$CASE_DIR/.claude/hooks/stop.sh"
+  run bash -c 'cd "$1" && printf "%s" "{\"source\":\"logout\"}" | RIG_SESSION_LOG="$2" bash .claude/hooks/stop.sh' \
+    _ "$CASE_DIR" "$BATS_TEST_TMPDIR/session.log"
+  [ "$status" -eq 0 ]
+  [ "$before" = "$(cksum "$snapshot")" ]
+  grep -Fq '## Resuming from: task-a' "$snapshot"
+  grep -Fq '## Resuming from: task-b' "$snapshot"
+  [ -e "$CASE_DIR/.rig/memory/.wrap-needed" ]
+}
+
+@test "SessionEnd creates a minimal snapshot only when none exists" {
+  printf 'Auto-logged by post-tool hook\n' > "$CASE_DIR/.rig/memory/PROGRESS.md"
+  mkdir -p "$CASE_DIR/.claude/hooks"
+  cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/stop.sh" "$CASE_DIR/.claude/hooks/stop.sh"
+  run bash -c 'cd "$1" && printf "%s" "{\"source\":\"logout\"}" | RIG_SESSION_LOG="$2" bash .claude/hooks/stop.sh' \
+    _ "$CASE_DIR" "$BATS_TEST_TMPDIR/session.log"
+  [ "$status" -eq 0 ]
+  grep -Fq 'session-end checkpoint' "$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
 }

@@ -153,6 +153,31 @@ def verify_owner(expected_json, root, rig_dir):
     return record["anchor"]
 
 
+def completed_owner(anchor, root, rig_dir):
+    """Permit a handoff transfer only after its exact prior session ended."""
+    sessions = rig_dir / "memory" / "sessions"
+    matches = []
+    for directory in (sessions, sessions / "done"):
+        if not directory.is_dir() or directory.is_symlink():
+            continue
+        for path in directory.glob("session-*.json"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                record = json.loads(path.read_text())
+            except (OSError, ValueError, TypeError):
+                continue
+            if isinstance(record, dict) and record.get("anchor") == anchor:
+                matches.append(record)
+    if len(matches) != 1 or matches[0].get("schema_version") != 1:
+        return False
+    project = matches[0].get("project")
+    lifecycle = matches[0].get("lifecycle")
+    return (isinstance(project, dict) and project.get("identity") == project_identity(root)
+            and isinstance(lifecycle, dict)
+            and lifecycle.get("state") in ("complete", "inactive", "ended_no_wrap"))
+
+
 def backup_snapshot(memory, content, kind):
     backup_dir = memory / "snapshot-backups"
     if backup_dir.is_symlink():
@@ -181,6 +206,7 @@ def main():
     parser.add_argument("--done-task-file", action="append", default=[])
     parser.add_argument("--expected-session")
     parser.add_argument("--adopt-legacy", action="store_true")
+    parser.add_argument("--if-missing", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     if any(not valid_task(task) for task in args.owned_task) or len(set(args.owned_task)) != len(args.owned_task):
@@ -195,6 +221,8 @@ def main():
         fail("invalid_input")
     if args.retire_task and args.mode != "shared":
         fail("invalid_retirement")
+    if args.if_missing and (args.mode != "shared" or args.retire_task):
+        fail("invalid_input")
     source = pathlib.Path(args.file)
     if source.is_symlink() or not source.is_file():
         fail("source_missing")
@@ -264,6 +292,10 @@ def write_snapshot(memory, rig_dir, sentinel, token, args, new_shared, new_secti
         path = memory / "CONTEXT_SNAPSHOT.md"
         if path.is_symlink():
             fail("invalid_snapshot_path")
+        if args.if_missing and path.exists():
+            return {"ok": True, "file": str(path), "no_write": True,
+                    "preserved_tasks": [], "updated_tasks": [], "retired_tasks": [],
+                    "legacy_backup": None, "recovered_lock": recovered}
         previous = path.read_text() if path.exists() else ""
         old_shared, old_sections, legacy = split_marked(previous)
         retired = []
@@ -297,7 +329,9 @@ def write_snapshot(memory, rig_dir, sentinel, token, args, new_shared, new_secti
                 for task in args.owned_task:
                     current = old_sections.get(task)
                     if current and current["owner"] not in (None, owner):
-                        fail("owner_conflict")
+                        if not completed_owner(current["owner"], pathlib.Path(args.root).resolve(), rig_dir):
+                            fail("owner_conflict")
+                        backup_snapshot(memory, previous, "transferred")
                     if current and current["owner"] is None and not args.adopt_legacy:
                         fail("legacy_adoption_required")
                     old_sections[task] = {"owner": owner, "body": new_sections[task]["body"]}
@@ -323,11 +357,14 @@ def workflow_lock_main(argv):
     parser.add_argument("--owner-anchor")
     parser.add_argument("--provider-pid", type=int)
     parser.add_argument("--token")
+    parser.add_argument("--recover-stale", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.action == "release" and not args.token:
         fail("token_required")
     if args.action == "acquire" and args.token:
+        fail("invalid_input")
+    if args.action == "release" and args.recover_stale:
         fail("invalid_input")
     if args.provider_pid is not None and args.provider_pid <= 0:
         fail("invalid_provider_pid")
@@ -377,9 +414,9 @@ def workflow_lock_main(argv):
                         dead = True
                     except PermissionError:
                         pass
-                # A live provider may legitimately run for hours. The age
-                # fallback applies only when no provider PID can be checked.
-                if not dead and (provider_pid or age <= 1800):
+                # Tool subprocess PIDs cannot prove the provider has stopped.
+                # Their age fallback requires an explicit recovery request.
+                if not dead and (provider_pid or age <= 1800 or not args.recover_stale):
                     fail("workflow_busy", owner_anchor=state.get("owner_anchor"), pid=pid, age_seconds=age)
                 archive = memory / "workflow-lock-archive"
                 if archive.is_symlink():
