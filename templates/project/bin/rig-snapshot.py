@@ -128,34 +128,14 @@ def project_identity(root):
     return hashlib.sha256(str(common).encode()).hexdigest()
 
 
-def verify_owner(expected_json, root, rig_dir):
-    try:
-        expected = json.loads(expected_json)
-        path = pathlib.Path(expected["session_file"])
-        sessions = (rig_dir / "memory" / "sessions").resolve()
-        path.resolve(strict=True).relative_to(sessions)
-        if path.is_symlink() or not path.is_file() or expected.get("confidence") != "exact":
-            fail("unresolved_owner")
-        record = json.loads(path.read_text())
-    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
-        fail("unresolved_owner")
-    if (
-        not isinstance(record, dict)
-        or record.get("schema_version") != 1
-        or record.get("anchor") != expected.get("anchor")
-        or record.get("agent") != expected.get("agent")
-        or record.get("native", {}).get("session_id") != expected.get("native_session_id")
-        or record.get("project", {}).get("identity") != project_identity(root)
-        or record.get("lifecycle", {}).get("state") != "active"
-        or "done" in path.parts
-    ):
-        fail("unresolved_owner")
-    return record["anchor"]
+def legacy_record(record):
+    """Recognize the schema-less session shape written by the old launcher."""
+    return (isinstance(record, dict) and "schema_version" not in record
+            and isinstance(record.get("anchor"), str) and valid_task(record["anchor"])
+            and type(record.get("pid")) is int and record["pid"] > 0)
 
 
-def completed_owner(anchor, root, rig_dir):
-    """Permit a handoff transfer only after its exact prior session ended."""
-    sessions = rig_dir / "memory" / "sessions"
+def anchor_records(anchor, sessions):
     matches = []
     for directory in (sessions, sessions / "done"):
         if not directory.is_dir() or directory.is_symlink():
@@ -168,11 +148,61 @@ def completed_owner(anchor, root, rig_dir):
             except (OSError, ValueError, TypeError):
                 continue
             if isinstance(record, dict) and record.get("anchor") == anchor:
-                matches.append(record)
-    if len(matches) != 1 or matches[0].get("schema_version") != 1:
+                matches.append((path, record))
+    return matches
+
+
+def verify_owner(expected_json, root, rig_dir):
+    try:
+        expected = json.loads(expected_json)
+        path = pathlib.Path(expected["session_file"])
+        sessions = (rig_dir / "memory" / "sessions").resolve()
+        path.resolve(strict=True).relative_to(sessions)
+        if path.is_symlink() or not path.is_file() or expected.get("confidence") != "exact":
+            fail("unresolved_owner")
+        record = json.loads(path.read_text())
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+        fail("unresolved_owner")
+    if (not isinstance(record, dict) or record.get("anchor") != expected.get("anchor")
+            or "done" in path.parts):
+        fail("unresolved_owner")
+    if record.get("schema_version") == 1:
+        if (record.get("agent") != expected.get("agent")
+                or record.get("native", {}).get("session_id") != expected.get("native_session_id")
+                or record.get("project", {}).get("identity") != project_identity(root)
+                or record.get("lifecycle", {}).get("state") != "active"):
+            fail("unresolved_owner")
+    elif legacy_record(record):
+        launcher_file = os.environ.get("RIG_SESSION_FILE")
+        if (expected.get("reason") != "launcher_file" or expected.get("state") != "active"
+                or not launcher_file or pathlib.Path(launcher_file).resolve() != path.resolve()
+                or os.environ.get("RIG_SESSION_ANCHOR") != record["anchor"]
+                or path.name != f"session-{record['pid']}-{record['anchor']}.json"
+                or record.get("status") != "active"
+                or ("project" in record and record["project"] != {"identity": project_identity(root)})
+                or len(anchor_records(record["anchor"], sessions)) != 1):
+            fail("unresolved_owner")
+    else:
+        fail("unresolved_owner")
+    return record["anchor"]
+
+
+def completed_owner(anchor, root, rig_dir):
+    """Permit a handoff transfer only after its exact prior session ended."""
+    sessions = rig_dir / "memory" / "sessions"
+    matches = anchor_records(anchor, sessions)
+    if len(matches) != 1:
         return False
-    project = matches[0].get("project")
-    lifecycle = matches[0].get("lifecycle")
+    path, record = matches[0]
+    if legacy_record(record):
+        return (path.parent == sessions / "done"
+                and re.fullmatch(r"session-\d{8}-" + re.escape(anchor) + r"\.json", path.name) is not None
+                and record.get("status") == "complete"
+                and ("project" not in record or record["project"] == {"identity": project_identity(root)}))
+    if record.get("schema_version") != 1:
+        return False
+    project = record.get("project")
+    lifecycle = record.get("lifecycle")
     return (isinstance(project, dict) and project.get("identity") == project_identity(root)
             and isinstance(lifecycle, dict)
             and lifecycle.get("state") in ("complete", "inactive", "ended_no_wrap"))

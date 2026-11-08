@@ -21,6 +21,18 @@ candidate() {
     "$branch" "$task" "$task" > "$path"
 }
 
+legacy_launcher_session() {
+  legacy_anchor="legacy-a"
+  legacy_file="$CASE_DIR/.rig/memory/sessions/session-778899-${legacy_anchor}.json"
+  LEGACY_FILE="$legacy_file" LEGACY_ANCHOR="$legacy_anchor" python3 - <<'PY'
+import json, os
+with open(os.environ["LEGACY_FILE"], "w") as handle:
+    json.dump({"anchor": os.environ["LEGACY_ANCHOR"], "pid": 778899,
+               "started_at": "2026-09-03T10:00:00", "branch": "main",
+               "tentative_name": None, "final_name": None, "status": "active"}, handle)
+PY
+}
+
 snapshot_command_block() {
   python3 - "$BATS_TEST_DIRNAME/../templates/project/.claude/commands/$1.md" <<'PY'
 import pathlib, sys
@@ -55,6 +67,88 @@ PY
   [ "$status" -ne 0 ]
   [[ "$output" == *owner_conflict* ]] || return 1
   [ "$before" = "$(cksum "$snapshot")" ]
+}
+
+@test "a prior-version launcher record writes an owned handoff alongside a native owner" {
+  legacy_launcher_session
+  candidate "$BATS_TEST_TMPDIR/a.md" feat/a task-a
+  candidate "$BATS_TEST_TMPDIR/b.md" feat/b task-b
+  run env RIG_SESSION_FILE="$legacy_file" RIG_SESSION_ANCHOR="$legacy_anchor" "$rig" session current --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"confidence": "exact"'* && "$output" == *'"reason": "launcher_file"'* ]] || return 1
+  run env RIG_SESSION_FILE="$legacy_file" RIG_SESSION_ANCHOR="$legacy_anchor" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$file_b" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/b.md" --owned-task task-b --json
+  [ "$status" -eq 0 ]
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  grep -Fq "task=task-a owner=$legacy_anchor" "$snapshot"
+  grep -Fq '## Resuming from: task-b' "$snapshot"
+}
+
+@test "legacy owner requires exact launcher anchor and a unique active record" {
+  legacy_launcher_session
+  candidate "$BATS_TEST_TMPDIR/a.md" feat/a task-a
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  run env RIG_SESSION_FILE="$legacy_file" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *unresolved_owner* ]] || return 1
+  [ ! -e "$snapshot" ]
+  run env RIG_SESSION_ANCHOR="$legacy_anchor" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json
+  [ "$status" -ne 0 ]
+  [ ! -e "$snapshot" ]
+  cp "$legacy_file" "$CASE_DIR/.rig/memory/sessions/session-duplicate.json"
+  run env RIG_SESSION_FILE="$legacy_file" RIG_SESSION_ANCHOR="$legacy_anchor" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *unresolved_owner* ]] || return 1
+  [ ! -e "$snapshot" ]
+  rm "$CASE_DIR/.rig/memory/sessions/session-duplicate.json"
+  nonlauncher="$CASE_DIR/.rig/memory/sessions/session-not-launcher.json"
+  mv "$legacy_file" "$nonlauncher"
+  run env RIG_SESSION_FILE="$nonlauncher" RIG_SESSION_ANCHOR="$legacy_anchor" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *unresolved_owner* ]] || return 1
+  [ ! -e "$snapshot" ]
+}
+
+@test "legacy owner refuses foreign project metadata and ended records" {
+  legacy_launcher_session
+  candidate "$BATS_TEST_TMPDIR/a.md" feat/a task-a
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  LEGACY_FILE="$legacy_file" python3 -c 'import json,os; p=os.environ["LEGACY_FILE"]; d=json.load(open(p)); d["project"]={"identity":"foreign"}; json.dump(d,open(p,"w"))'
+  run env RIG_SESSION_FILE="$legacy_file" RIG_SESSION_ANCHOR="$legacy_anchor" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *unresolved_owner* ]] || return 1
+  [ ! -e "$snapshot" ]
+  LEGACY_FILE="$legacy_file" python3 -c 'import json,os; p=os.environ["LEGACY_FILE"]; d=json.load(open(p)); d.pop("project"); d["status"]="ended-no-wrap"; json.dump(d,open(p,"w"))'
+  run env RIG_SESSION_FILE="$legacy_file" RIG_SESSION_ANCHOR="$legacy_anchor" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json
+  [ "$status" -ne 0 ]
+  [ ! -e "$snapshot" ]
+}
+
+@test "a native owner transfers a legacy handoff only after its exact owner completes" {
+  legacy_launcher_session
+  candidate "$BATS_TEST_TMPDIR/a.md" feat/a task-a
+  candidate "$BATS_TEST_TMPDIR/b.md" feat/b task-a
+  run env RIG_SESSION_FILE="$legacy_file" RIG_SESSION_ANCHOR="$legacy_anchor" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json
+  [ "$status" -eq 0 ]
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  before=$(cksum "$snapshot")
+  run env RIG_SESSION_FILE="$file_b" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/b.md" --owned-task task-a --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *owner_conflict* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
+  run env RIG_SESSION_FILE="$legacy_file" RIG_SESSION_ANCHOR="$legacy_anchor" "$rig" session-name set --final --complete --json 'legacy complete'
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$legacy_file" RIG_SESSION_ANCHOR="$legacy_anchor" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json
+  [ "$status" -ne 0 ]
+  [ "$before" = "$(cksum "$snapshot")" ]
+  run env RIG_SESSION_FILE="$file_b" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/b.md" --owned-task task-a --json
+  [ "$status" -eq 0 ]
+  anchor_b=$(printf '%s' "$b" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  grep -Fq "task=task-a owner=$anchor_b" "$snapshot"
+  backup=$(find "$CASE_DIR/.rig/memory/snapshot-backups" -type f -name 'transferred-*.md' | head -1)
+  [ -n "$backup" ]
+  grep -Fq "task=task-a owner=$legacy_anchor" "$backup"
 }
 
 @test "a new session can update a handoff after its exact owner completes" {

@@ -541,7 +541,7 @@ assert 'old-session' not in ctx, 'Got stale checkpoint instead of latest: ' + ct
 
 # ── UUID-based session anchor in write_minimal_checkpoint ────────────────────
 
-@test "stop.sh (SessionEnd): write_minimal_checkpoint omits session name when sentinel absent" {
+@test "stop.sh (SessionEnd): write_minimal_checkpoint preserves an existing sibling snapshot" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
@@ -552,20 +552,21 @@ assert 'old-session' not in ctx, 'Got stale checkpoint instead of latest: ' + ct
   # Snapshot has a name belonging to a sibling session
   printf '**Last updated:** 2026-01-01\n**Session name:** sibling-session-name\n\n---\n' \
     > "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+  local before
+  before=$(cksum "$rig_dir/memory/CONTEXT_SNAPSHOT.md")
   printf '[10:00:00] PROGRESS stub: abc1234 feat(x): first [#1]\n' >> "$session_log"
   printf '[10:01:00] PROGRESS stub: def5678 feat(x): second [#1]\n' >> "$session_log"
   rm -f "$rig_dir/memory/.snapshot-write-in-progress"
 
-  # No UUID sentinel — no anchor should appear
   echo '{"source": "logout"}' \
     | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$stop_hook" )
 
-  # Sibling's session name must NOT appear in the checkpoint
-  run grep "sibling-session-name" "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
-  [ "$status" -ne 0 ]
+  [ "$before" = "$(cksum "$rig_dir/memory/CONTEXT_SNAPSHOT.md")" ]
+  grep -q 'sibling-session-name' "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+  [ -f "$rig_dir/memory/.wrap-needed" ]
 }
 
-@test "stop.sh (SessionEnd): write_minimal_checkpoint writes session anchor from UUID sentinel" {
+@test "stop.sh (SessionEnd): write_minimal_checkpoint leaves an existing snapshot with UUID sentinel" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
@@ -575,6 +576,8 @@ assert 'old-session' not in ctx, 'Got stale checkpoint instead of latest: ' + ct
 
   printf '**Last updated:** 2026-01-01\n\n---\n' \
     > "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+  local before
+  before=$(cksum "$rig_dir/memory/CONTEXT_SNAPSHOT.md")
   printf '[10:00:00] PROGRESS stub: abc1234 feat(x): first [#1]\n' >> "$session_log"
   printf '[10:01:00] PROGRESS stub: def5678 feat(x): second [#1]\n' >> "$session_log"
   rm -f "$rig_dir/memory/.snapshot-write-in-progress"
@@ -589,8 +592,34 @@ assert 'old-session' not in ctx, 'Got stale checkpoint instead of latest: ' + ct
     rm -f \"/tmp/.rig-session-\$\$.uuid\" 2>/dev/null
   "
 
-  # Session anchor must appear in the checkpoint
-  grep -q "anchor-uuid-test" "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+  [ "$before" = "$(cksum "$rig_dir/memory/CONTEXT_SNAPSHOT.md")" ]
+  [ -f "$rig_dir/memory/.wrap-needed" ]
+}
+
+@test "stop.sh (SessionEnd): write_minimal_checkpoint writes session anchor when snapshot is missing" {
+  run_installer --strategy skip
+  [ "$status" -eq 0 ]
+
+  local rig_dir="$TEST_PROJECT/.rig"
+  local stop_hook="$TEST_PROJECT/.claude/hooks/stop.sh"
+  local session_log="$TEMP_DIR/the-rig-session-test.log"
+  rm -f "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+  printf '[10:00:00] PROGRESS stub: abc1234 feat(x): first [#1]\n' >> "$session_log"
+  printf '[10:01:00] PROGRESS stub: def5678 feat(x): second [#1]\n' >> "$session_log"
+
+  local test_project="$TEST_PROJECT"
+  bash -c "
+    printf '%s' 'anchor-uuid-test' > \"/tmp/.rig-session-\$\$.uuid\"
+    cd \"$test_project\"
+    echo '{\"source\": \"logout\"}' \
+      | RIG_SESSION_LOG=\"$session_log\" bash \"$stop_hook\"
+    rm -f \"/tmp/.rig-session-\$\$.uuid\" 2>/dev/null
+  "
+
+  [ -f "$rig_dir/memory/.wrap-needed" ]
+  grep -Fq '# Context Snapshot — session-end checkpoint' "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+  grep -Fq '**Session anchor:** anchor-uuid-test' "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+  if grep -Fq '**Session name:**' "$rig_dir/memory/CONTEXT_SNAPSHOT.md"; then return 1; fi
 }
 
 # ── Command behavior: /rig-upgrade VERSION check ──────────────────────────────

@@ -261,12 +261,26 @@ with open('$TEST_SESSION_FILE', 'w') as f:
   [ ! -f "$TEST_UUID_FILE" ]
 }
 
-@test "session-end: minimal checkpoint has Session anchor field (not Session name)" {
+@test "session-end: existing snapshot survives and wrap is requested" {
+  echo "abc12345" > "$TEST_UUID_FILE"
+  echo "## stub <!-- Auto-logged by post-tool hook -->" > "$RIG_DIR/memory/PROGRESS.md"
+  before=$(cksum "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md")
+
+  run_hook_exec "stop.sh" '{"source":"logout"}'
+
+  [ "$before" = "$(cksum "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md")" ]
+  [ -f "$RIG_DIR/memory/.wrap-needed" ]
+}
+
+@test "session-end: missing snapshot gets minimal checkpoint with Session anchor field" {
+  cp "$(pwd)/templates/project/bin/rig-snapshot.py" "$REPO/bin/rig-snapshot.py"
+  rm "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
   echo "abc12345" > "$TEST_UUID_FILE"
   echo "## stub <!-- Auto-logged by post-tool hook -->" > "$RIG_DIR/memory/PROGRESS.md"
 
   run_hook_exec "stop.sh" '{"source":"logout"}'
 
+  [ -f "$RIG_DIR/memory/.wrap-needed" ]
   grep -q "\*\*Session anchor:\*\*" "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
   if grep -q "\*\*Session name:\*\*" "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"; then
     return 1
