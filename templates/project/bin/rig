@@ -1426,12 +1426,13 @@ PY
 }
 
 session_retrofit() {
-  local agent="" from_env=false source="resume" json=false verbose=false arg native_id env_name resolved status
+  local agent="" from_env=false source="resume" json=false verbose=false arg native_id="" native_arg="" env_name resolved status
   local -a resolve_args bind_args
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
       --agent) [[ "$#" -ge 2 ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }; agent="$2"; shift 2;;
       --from-env) from_env=true; shift;;
+      --native-session-id) [[ "$#" -ge 2 && -n "$2" ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }; native_arg="$2"; shift 2;;
       --source) [[ "$#" -ge 2 ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }; source="$2"; shift 2;;
       --json) json=true; shift;;
       --verbose) verbose=true; shift;;
@@ -1439,11 +1440,16 @@ session_retrofit() {
     esac
   done
   [[ "$agent" == codex || "$agent" == claude ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }
-  [[ "$from_env" == true ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }
-  case "$agent" in
-    codex) env_name=CODEX_THREAD_ID; native_id="${CODEX_THREAD_ID:-}" ;;
-    claude) env_name=CLAUDE_CODE_SESSION_ID; native_id="${CLAUDE_CODE_SESSION_ID:-}" ;;
-  esac
+  if [[ "$from_env" == true ]]; then
+    [[ -z "$native_arg" ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }
+    case "$agent" in
+      codex) env_name=CODEX_THREAD_ID; native_id="${CODEX_THREAD_ID:-}" ;;
+      claude) env_name=CLAUDE_CODE_SESSION_ID; native_id="${CLAUDE_CODE_SESSION_ID:-}" ;;
+    esac
+  else
+    [[ -n "$native_arg" ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }
+    native_id="$native_arg"
+  fi
   if [[ -z "$native_id" ]]; then
     printf '{"ok":false,"reason":"missing_native_env","agent":"%s","env":"%s","no_write":true}\n' "$agent" "$env_name"
     return 3
