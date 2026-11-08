@@ -19,7 +19,7 @@
 # Output: JSON {"additionalContext": "..."} when there is something to surface.
 # Claude Code receives this as context alongside the user's message.
 
-REPO=$(git rev-parse --show-toplevel 2>/dev/null)
+REPO=$(cd "$(dirname "$0")/../.." && pwd -P)
 [[ -z "$REPO" ]] && exit 0
 
 if [[ -f "$REPO/.rigpath" ]]; then
@@ -32,15 +32,53 @@ WRAP_NEEDED="$RIG_DIR/memory/.wrap-needed"
 POST_MERGE_PENDING="$RIG_DIR/memory/.post-merge-pending"
 NUDGE_FLAG="$RIG_DIR/memory/.permission-nudge-offered"
 HANDOFF_SUGGESTED="$RIG_DIR/memory/.handoff-suggested"
+WARNINGS=""
+
+# Some clients resume an already-loaded thread without another SessionStart.
+# UserPromptSubmit still carries the exact native session ID. Attach it once,
+# or start a continuation after a completed wrap, before the flag fast path.
+PROMPT_PAYLOAD=$(cat)
+PROMPT_AGENT="${RIG_AGENT:-claude}"
+if [[ "$PROMPT_AGENT" == codex || "$PROMPT_AGENT" == claude ]]; then
+  PROMPT_NATIVE_ID=$(printf '%s' "$PROMPT_PAYLOAD" | python3 -c '
+import json,sys
+try:
+    event=json.load(sys.stdin)
+    if event.get("hook_event_name",event.get("hookEventName"))!="UserPromptSubmit": raise ValueError()
+    value=event.get("session_id")
+    if not isinstance(value,str) or not value: raise ValueError()
+    print(value)
+except (ValueError,TypeError,AttributeError):
+    pass
+' 2>/dev/null || true)
+  if [[ -n "$PROMPT_NATIVE_ID" && -x "$REPO/bin/rig" ]]; then
+    RESOLVE_STATUS=0
+    RESOLVED=$("$REPO/bin/rig" session resolve --agent "$PROMPT_AGENT" --native-session-id "$PROMPT_NATIVE_ID" --json) || RESOLVE_STATUS=$?
+    if [[ "$RESOLVE_STATUS" -ne 0 ]]; then
+      RESOLVE_REASON=$(printf '%s' "$RESOLVED" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("reason") or "resolver_failed")' 2>/dev/null || printf resolver_failed)
+      if [[ "$RESOLVE_REASON" == not_found || "$RESOLVE_REASON" == ended_record ]]; then
+        BIND_ARGS=(session bind --agent "$PROMPT_AGENT" --native-session-id "$PROMPT_NATIVE_ID" --source prompt_resume --json)
+        [[ "$RESOLVE_REASON" == ended_record ]] && BIND_ARGS+=(--allow-continuation)
+        BIND_STATUS=0
+        BOUND=$(env -u RIG_SESSION_FILE -u RIG_SESSION_ANCHOR "$REPO/bin/rig" "${BIND_ARGS[@]}") || BIND_STATUS=$?
+        if [[ "$BIND_STATUS" -ne 0 ]]; then
+          WARNINGS="Rig could not attach this $PROMPT_AGENT session ($RESOLVE_REASON); run session doctor before naming or wrapping it."
+        fi
+      else
+        WARNINGS="Rig session identity is unresolved ($RESOLVE_REASON); stop before naming or completing a session record."
+      fi
+    fi
+  fi
+fi
 
 # Fast path: no flags AND nudge already evaluated — exit immediately
-if [[ ! -f "$WRAP_NEEDED" && ! -f "$POST_MERGE_PENDING" && -f "$NUDGE_FLAG" && -f "$HANDOFF_SUGGESTED" ]]; then
+if [[ -z "$WARNINGS" && ! -f "$WRAP_NEEDED" && ! -f "$POST_MERGE_PENDING" && -f "$NUDGE_FLAG" && -f "$HANDOFF_SUGGESTED" ]]; then
   exit 0
 fi
 
 # Build warning text for housekeeping flags
-WARNINGS=""
 if [[ -f "$WRAP_NEEDED" ]]; then
+  [[ -n "$WARNINGS" ]] && WARNINGS+=$'\n\n'
   WARNINGS+="⚠️ The last session ended without running /wrap. CONTEXT_SNAPSHOT.md may be stale and PROGRESS.md has unexpanded entries. Run /wrap now to capture session state before starting new work — or say 'skip wrap' to proceed anyway."
 fi
 if [[ -f "$POST_MERGE_PENDING" ]]; then

@@ -57,6 +57,9 @@ def load(path):
     except (OSError, ValueError, TypeError): return None
 def emit(path, data, confidence, reason):
     lifecycle = data.get("lifecycle", {}) if data else {}
+    public_lineage = dict(data.get("lineage") or {}) if data else None
+    if public_lineage and public_lineage.get("parent_native_session_id") and not verbose:
+        public_lineage["parent_native_session_id"] = "<redacted>"
     out = {"ok": confidence == "exact", "schema_version": 1,
            "session_file": str(path) if path else None, "anchor": data.get("anchor") if data else None,
            "agent": data.get("agent") if data else None,
@@ -64,7 +67,14 @@ def emit(path, data, confidence, reason):
            "state": lifecycle.get("state", data.get("status")) if data else None,
            "confidence": confidence, "reason": reason,
            "native_session_id": (data.get("native", {}).get("session_id") if verbose and data else None),
-           "revision": data.get("revision") if data else None, "warnings": []}
+           "revision": data.get("revision") if data else None,
+           "lineage": public_lineage,
+           "parent_anchor": (data.get("lineage") or {}).get("parent_anchor") if data else None,
+           "warnings": []}
+    if reason in ("not_found", "invalid_launcher_file", "ended_record"):
+        recovery_agent = "codex" if os.environ.get("CODEX_THREAD_ID") else "claude" if os.environ.get("CLAUDE_CODE_SESSION_ID") else None
+        if recovery_agent:
+            out["recovery"] = f"bin/rig session retrofit --agent {recovery_agent} --from-env --source resume --json"
     if "--json" in sys.argv[1:]:
         print(json.dumps(out))
     elif path:
@@ -87,6 +97,35 @@ for base in (session_dir, session_dir / "done"):
             if d is None: malformed = True
             elif isinstance(d.get("schema_version"), int) and d["schema_version"] > 1: unsupported = True
             else: records.append((p, d))
+def select_unique_match(matches):
+    if len(matches) <= 1:
+        return matches[0] if matches else None
+    active = [(p, d) for p, d in matches if "done" not in p.parts and d.get("lifecycle", {}).get("state") != "complete"]
+    if len(active) > 1:
+        return None
+    by_anchor = {d.get("anchor"): (p, d) for p, d in matches}
+    if not all(by_anchor) or len(by_anchor) != len(matches):
+        return None
+    roots = [(p, d) for p, d in matches if not (d.get("lineage") or {}).get("parent_anchor")]
+    if len(roots) != 1:
+        return None
+    for _, d in matches:
+        parent = (d.get("lineage") or {}).get("parent_anchor")
+        if parent and (d.get("lineage") or {}).get("kind") != "continuation":
+            return None
+        if parent and parent not in by_anchor:
+            return None
+    parents = {(d.get("lineage") or {}).get("parent_anchor") for _, d in matches}
+    leaves = [(p, d) for p, d in matches if d.get("anchor") not in parents]
+    if len(leaves) != 1 or (active and leaves[0][0] != active[0][0]):
+        return None
+    seen = set()
+    cursor = leaves[0][1]
+    while cursor and cursor.get("anchor") not in seen:
+        seen.add(cursor.get("anchor"))
+        parent = (cursor.get("lineage") or {}).get("parent_anchor")
+        cursor = by_anchor[parent][1] if parent else None
+    return leaves[0] if len(seen) == len(matches) else None
 if native_id:
     if unsafe_path: emit(None, None, "none", "invalid_session_path"); raise SystemExit(4)
     if unsupported: emit(None, None, "none", "unsupported_schema"); raise SystemExit(4)
@@ -95,11 +134,9 @@ if native_id:
                d.get("project", {}).get("identity") == project_id and d.get("agent") == agent and
                d.get("native", {}).get("session_id") == native_id]
     if len(matches) > 1:
-        active_matches = [(p, d) for p, d in matches if "done" not in p.parts and d.get("lifecycle", {}).get("state") != "complete"]
-        if len(active_matches) == 1:
-            matches = active_matches
-        else:
-            emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
+        selected = select_unique_match(matches)
+        if selected: matches = [selected]
+        else: emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
     if len(matches) == 1:
         p,d = matches[0]
         if "done" in p.parts or d.get("lifecycle", {}).get("state") == "complete":
@@ -112,7 +149,16 @@ if "RIG_SESSION_FILE" in os.environ:
     p = confined_session_path(env_file)
     d = load(p) if p else None
     state = d.get("lifecycle", {}).get("state", d.get("status")) if d else None
-    if p and d and state == "active" and "done" not in p.parts: emit(p, d, "exact", "launcher_file"); raise SystemExit(0)
+    if p and d and state == "active" and "done" not in p.parts:
+        expected_anchor = os.environ.get("RIG_SESSION_ANCHOR")
+        if expected_anchor is not None and expected_anchor != d.get("anchor"):
+            emit(None, None, "none", "launcher_anchor_conflict"); raise SystemExit(3)
+        native_agent = "codex" if os.environ.get("CODEX_THREAD_ID") else "claude" if os.environ.get("CLAUDE_CODE_SESSION_ID") else None
+        native_env_id = os.environ.get("CODEX_THREAD_ID") or os.environ.get("CLAUDE_CODE_SESSION_ID")
+        if native_agent and (d.get("schema_version") != 1 or d.get("project", {}).get("identity") != project_id or
+                             d.get("agent") != native_agent or d.get("native", {}).get("session_id") != native_env_id):
+            emit(None, None, "none", "native_conflict"); raise SystemExit(3)
+        emit(p, d, "exact", "launcher_file"); raise SystemExit(0)
     emit(None, None, "none", "invalid_launcher_file"); raise SystemExit(3)
 # Claude Code and Codex both expose native session identity through process
 # environment variables, and every subprocess they spawn (hooks, and every
@@ -137,11 +183,9 @@ for native_env_agent, native_env_id in native_env_signals:
                d.get("project", {}).get("identity") == project_id and d.get("agent") == native_env_agent and
                d.get("native", {}).get("session_id") == native_env_id]
     if len(matches) > 1:
-        active_matches = [(p, d) for p, d in matches if "done" not in p.parts and d.get("lifecycle", {}).get("state") != "complete"]
-        if len(active_matches) == 1:
-            matches = active_matches
-        else:
-            emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
+        selected = select_unique_match(matches)
+        if selected: matches = [selected]
+        else: emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
     if len(matches) == 1:
         p, d = matches[0]
         if "done" in p.parts or d.get("lifecycle", {}).get("state") == "complete":

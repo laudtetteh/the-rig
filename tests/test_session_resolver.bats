@@ -6,6 +6,8 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-tab-title-watch" "$CASE_DIR/bin/rig-tab-title-watch"
+  mkdir -p "$CASE_DIR/.claude/hooks"
+  cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/prompt-submit.sh" "$CASE_DIR/.claude/hooks/prompt-submit.sh"
   chmod +x "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-tab-title-watch"
   git -C "$CASE_DIR" init -q
   git -C "$CASE_DIR" checkout -q -b feat/current
@@ -222,11 +224,120 @@ json.dump({
 
   run env CODEX_THREAD_ID=ended-native-id RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"reason": "native_id"'* && "$output" != *'/done/'* ]] || return 1
+  [[ "$output" == *'"reason": "native_id"'* && "$output" != *'/done/'* && "$output" != *'ended-native-id'* ]] || return 1
+  run env CODEX_THREAD_ID=ended-native-id "$CASE_DIR/bin/rig" session resolve --json --verbose
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["lineage"]["parent_native_session_id"]=="ended-native-id"'
 
   run "$CASE_DIR/bin/rig" session doctor --json
   [ "$status" -eq 0 ]
   [[ "$output" == *'"unique_native_bindings", "ok": true'* || "$output" == *'"name":"unique_native_bindings","ok":true'* ]] || return 1
+}
+
+@test "a native thread can complete and resume more than once with an exact lineage chain" {
+  run "$CASE_DIR/bin/rig" session bind --agent codex --native-session-id repeated-thread --source startup
+  [ "$status" -eq 0 ]
+  first_file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  first_anchor=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  run env RIG_SESSION_FILE="$first_file" "$CASE_DIR/bin/rig" session-name set --final --complete 'first wrap'
+  [ "$status" -eq 0 ]
+
+  run env CODEX_THREAD_ID=repeated-thread "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"kind": "continuation"'* || "$output" == *'"kind":"continuation"'* ]] || return 1
+  [[ "$output" == *"$first_anchor"* ]] || return 1
+  second_file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  second_anchor=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  run env RIG_SESSION_FILE="$second_file" "$CASE_DIR/bin/rig" session-name set --final --complete 'second wrap'
+  [ "$status" -eq 0 ]
+
+  run env CODEX_THREAD_ID=repeated-thread "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$second_anchor"* ]] || return 1
+  [[ "$output" != *"$first_anchor"* ]] || return 1
+  run "$CASE_DIR/bin/rig" session doctor --json
+  [ "$status" -eq 0 ]
+}
+
+@test "retrofit redacts native ID by default and reveals it only with verbose" {
+  run env CODEX_THREAD_ID=private-thread "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"native_session_id": "<redacted>"'* ]] || return 1
+  [[ "$output" != *'private-thread'* ]] || return 1
+  run env CODEX_THREAD_ID=private-thread "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --json --verbose
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'private-thread'* ]] || return 1
+}
+
+@test "naming refuses a stale launcher file when a different native thread is active" {
+  first=$("$CASE_DIR/bin/rig" session bind --agent codex --native-session-id thread-a --source startup)
+  second=$("$CASE_DIR/bin/rig" session bind --agent codex --native-session-id thread-b --source startup)
+  second_file=$(printf '%s' "$second" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  before=$(cksum "$second_file")
+  run env CODEX_THREAD_ID=thread-a RIG_SESSION_FILE="$second_file" "$CASE_DIR/bin/rig" session-name set --final 'wrong target'
+  [ "$status" -ne 0 ]
+  [ "$(cksum "$second_file")" = "$before" ]
+}
+
+@test "not_found names the exact retrofit command when the native env ID is available" {
+  run env CODEX_THREAD_ID=unbound-thread RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"reason": "not_found"'* ]] || return 1
+  [[ "$output" == *'bin/rig session retrofit --agent codex --from-env --source resume --json'* ]] || return 1
+  run env CODEX_THREAD_ID=unbound-thread RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session current
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'Recovery: bin/rig session retrofit --agent codex --from-env --source resume --json'* ]] || return 1
+}
+
+@test "doctor and resolver reject a broken continuation chain" {
+  first=$("$CASE_DIR/bin/rig" session bind --agent codex --native-session-id chain-thread --source startup)
+  first_file=$(printf '%s' "$first" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  run env RIG_SESSION_FILE="$first_file" "$CASE_DIR/bin/rig" session-name set --final --complete 'first wrap'
+  [ "$status" -eq 0 ]
+  second=$(env CODEX_THREAD_ID=chain-thread "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --json)
+  second_file=$(printf '%s' "$second" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  SESSION_F="$second_file" python3 -c 'import json,os; p=os.environ["SESSION_F"]; d=json.load(open(p)); d["lineage"]["parent_anchor"]="unknown-anchor"; json.dump(d,open(p,"w"))'
+  run "$CASE_DIR/bin/rig" session doctor --json
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'"continuation_lineage", "ok": false'* ]] || return 1
+  run "$CASE_DIR/bin/rig" session resolve --agent codex --native-session-id chain-thread --json
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'"reason": "duplicate_native_id"'* ]] || return 1
+}
+
+@test "legacy PID records stay readable but cannot be named without an exact launcher" {
+  file="$CASE_DIR/.rig/memory/sessions/session-778899.json"
+  write_session "$file" legacy-anchor feat/current
+  run env RIG_SESSION_PID=778899 "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"reason": "pid"'* ]] || return 1
+  before=$(cksum "$file")
+  run env RIG_SESSION_PID=778899 "$CASE_DIR/bin/rig" session-name set --final --json 'unsafe name'
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "migration_required"'* ]] || return 1
+  [ "$(cksum "$file")" = "$before" ]
+  run env RIG_SESSION_ANCHOR=legacy-anchor "$CASE_DIR/bin/rig" session-name set --final 'explicit legacy name'
+  [ "$status" -eq 0 ]
+  SESSION_F="$file" python3 -c 'import json,os; assert json.load(open(os.environ["SESSION_F"]))["final_name"]=="explicit legacy name"'
+}
+
+@test "prompt submit binds a resumed Codex thread from its event ID without an env variable" {
+  payload='{"hook_event_name":"UserPromptSubmit","session_id":"prompt-thread","prompt":"continue"}'
+  run bash -c 'cd "$1" && printf "%s" "$2" | RIG_AGENT=codex bash .claude/hooks/prompt-submit.sh' _ "$CASE_DIR" "$payload"
+  [ "$status" -eq 0 ]
+  run "$CASE_DIR/bin/rig" session resolve --agent codex --native-session-id prompt-thread --json
+  [ "$status" -eq 0 ]
+  file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  first_anchor=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session-name set --final --complete 'first wrap'
+  [ "$status" -eq 0 ]
+
+  run bash -c 'cd "$1" && printf "%s" "$2" | RIG_AGENT=codex bash .claude/hooks/prompt-submit.sh' _ "$CASE_DIR" "$payload"
+  [ "$status" -eq 0 ]
+  run "$CASE_DIR/bin/rig" session resolve --agent codex --native-session-id prompt-thread --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"reason": "native_id"'* ]] || return 1
+  [[ "$output" == *"$first_anchor"* ]] || return 1
 }
 
 @test "ended-record continuation refuses same native id bound to another project" {
@@ -312,7 +423,7 @@ json.dump({
   run "$CASE_DIR/bin/rig" session bind --agent codex --native-session-id thread-secret --source startup
   [ "$status" -eq 0 ]
   local file
-  file=$(printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["native_session_id"] is None; print(d["session_file"])')
+  file=$(printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["native_session_id"] == "<redacted>"; print(d["session_file"])')
   SESSION_F="$file" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["schema_version"]==1 and d["agent"]=="codex" and d["native"]["session_id"]=="thread-secret" and d["lifecycle"]["state"]=="active"'
   local before after
   before=$(cksum "$file")
@@ -399,6 +510,21 @@ json.dump({
   run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session-name set --final 'fix exact identity'
   [ "$status" -eq 0 ]
   SESSION_F="$file" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["names"]["final"]=="fix exact identity" and d["revision"]==2 and "final_name" not in d'
+}
+
+@test "session-name reports a destination conflict without completing or overwriting" {
+  run "$CASE_DIR/bin/rig" session bind --agent codex --native-session-id protected-name --source startup
+  [ "$status" -eq 0 ]
+  local file anchor destination
+  file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  anchor=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  destination="$CASE_DIR/.rig/memory/sessions/done/session-$(date +%Y%m%d)-$anchor.json"
+  printf 'keep this file\n' > "$destination"
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session-name set --final --complete --json 'new final name'
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "destination_exists"'* && "$output" != *'"ok":true'* ]] || return 1
+  [ "$(cat "$destination")" = 'keep this file' ]
+  [ -f "$file" ]
 }
 
 @test "concurrent bootstrap for one native ID converges on one record" {

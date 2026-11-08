@@ -8,7 +8,7 @@ setup() {
   chmod +x "$CASE_DIR/bin/rig"
   git -C "$CASE_DIR" init -q
   git -C "$CASE_DIR" checkout -q -b feat/obligations
-  unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID
+  unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID
 }
 
 bind() {

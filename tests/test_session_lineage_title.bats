@@ -10,7 +10,7 @@ setup() {
   git -C "$CASE_DIR" init -q
   git -C "$CASE_DIR" checkout -q -b feat/lineage
   printf '# Snapshot\n' > "$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
-  unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID RIG_AGENT
+  unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID RIG_AGENT CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID
 }
 
 bind_file() {
@@ -73,6 +73,24 @@ run_start() {
   run_start '{"source":"resume","session_id":"claude-title","session_title":"Existing title"}'
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["hookSpecificOutput"]["sessionTitle"]=="Rig display title"'
+}
+
+@test "SessionStart resume creates a continuation after a completed wrap" {
+  first=$("$CASE_DIR/bin/rig" session bind --agent claude --native-session-id resumed-thread --source startup)
+  first_file=$(bind_file "$first")
+  first_anchor=$(SESSION_F="$first_file" python3 -c 'import json,os; print(json.load(open(os.environ["SESSION_F"]))["anchor"])')
+  run env RIG_SESSION_FILE="$first_file" "$CASE_DIR/bin/rig" session-name set --final --complete 'completed work'
+  [ "$status" -eq 0 ]
+  done_file=$(find "$CASE_DIR/.rig/memory/sessions/done" -name 'session-*.json' -print | head -1)
+  run env RIG_SESSION_FILE="$done_file" RIG_SESSION_PID=4242 bash -c \
+    'cd "$1" && printf "%s" "$2" | .claude/hooks/session-start.sh' \
+    _ "$CASE_DIR" '{"source":"resume","session_id":"resumed-thread"}'
+  [ "$status" -eq 0 ]
+  run "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id resumed-thread --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$first_anchor"* ]] || return 1
+  second_file=$(bind_file "$output")
+  SESSION_F="$second_file" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["lineage"]["kind"]=="continuation" and d["names"]["final"] is None'
 }
 
 @test "public title ingestion preserves multiline metacharacters as data" {

@@ -307,6 +307,29 @@ Step 8: Surface next priority — ask "What's next?"
 
 ---
 
+## Session identity and continuation
+
+| Moment | Record state | Naming and obligation rule |
+|---|---|---|
+| Active work | One active record for the exact project, provider and native thread | Names and obligations update only that record. |
+| Memory checkpoint | The same active record | Saving context does not complete or rename the session. |
+| Wrap completed | Record moves to `sessions/done/` with `lifecycle.state: complete` | Its final name stays with that work segment. |
+| Later work in the same native thread | A new active record with `lineage.kind: continuation` and `parent_anchor` | The parent name is not copied. New work can be named and wrapped independently. |
+
+SessionStart binds the native ID when the provider fires it. On a resumed thread
+that skips SessionStart, UserPromptSubmit can bind the exact ID in its event
+payload. If that hook cannot attach, `rig session current --json` reports a
+retrofit command when a native ID environment variable is available. Resolution
+never picks a session from branch name or recent activity alone.
+
+The name writer rechecks anchor, project identity, provider, native ID and
+active state after locking the record. Legacy PID records remain readable; a
+legacy name write requires an exact launcher file or anchor. `session doctor`
+checks that repeated continuations form one unbroken chain with at most one
+active leaf. Native IDs stay redacted unless `--verbose` is requested.
+
+---
+
 ## The hook system
 
 ### Claude Code hooks (`.claude/`)
@@ -332,6 +355,7 @@ Session starts
 User submits a prompt
      │
      └─► prompt-submit.sh (UserPromptSubmit)
+           Attaches an unbound resumed thread from its exact event session_id
            Re-checks .wrap-needed / .post-merge-pending on every prompt
            Re-injects warnings when flags are present
            (ensures flags surface even mid-session without repeating session-start)

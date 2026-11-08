@@ -22,6 +22,7 @@ setup() {
   cp "$(pwd)/templates/project/bin/rig" "$REPO/bin/rig"
   cp "$(pwd)/templates/project/bin/rig-session-resolve.py" "$REPO/bin/rig-session-resolve.py"
   chmod +x "$REPO/bin/rig"
+  unset CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID
 
   HOOK_DIR="$TMPDIR/hooks"
   mkdir -p "$HOOK_DIR"

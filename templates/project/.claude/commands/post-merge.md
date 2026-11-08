@@ -141,10 +141,11 @@ Gather all findings silently — no output yet:
 5. **Feature doc overlaps** — files changed in the merged PR vs. documented feature entry points (see Feature doc freshness step below)
 6. **Session name** — derive suggestion from session file and conversation context
 7. **Session identity** — run `bin/rig session resolve --json`; if it returns
-   `ended_record` and a native session environment variable is present, first run
+   `ended_record` or `not_found` and a native session environment variable is present, first run
    `bin/rig session retrofit --agent codex --from-env --source resume --json` or
    `bin/rig session retrofit --agent claude --from-env --source resume --json`
-   to create an exact active continuation. If it returns `not_found`, or
+   to create an exact active continuation. UserPromptSubmit may already have
+   attached a resumed thread from the hook event ID. If it remains `not_found`, or
    ended-record retrofit cannot create an exact active continuation, collect the
    rest of the report in degraded mode and skip final session-file mutation.
    Stop on ambiguous, duplicate, cross-project, malformed, or unsafe session
@@ -301,11 +302,20 @@ Use the shared atomic writer, passing the confirmed name as one opaque argument.
 ```bash
 # Acknowledge only the pending merge SHA while this exact active record remains
 # resolvable. A changed SHA fails closed and leaves the reminder visible.
+CURRENT_JSON=$("$REPO/bin/rig" session current --json) || exit 1
+CURRENT_UUID=$(printf '%s' "$CURRENT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
+[[ -n "$SESSION_UUID" && "$CURRENT_UUID" == "$SESSION_UUID" ]] || {
+  echo "Session identity changed; stop before clearing or completing it." >&2
+  exit 1
+}
 PENDING_MERGE_SHA=$(sed -n 's/^merge_sha=//p' "$RIG_DIR/memory/.post-merge-pending" 2>/dev/null | head -1)
 [[ -n "$PENDING_MERGE_SHA" ]] && \
   "$REPO/bin/rig" session obligation clear --kind post-merge --merge-sha "$PENDING_MERGE_SHA" --json
 "$REPO/bin/rig" session-name set --final --complete "$CONFIRMED_NAME"
 ```
+
+If this is a continuation after `/wrap`, name only the post-merge work in this
+active record. Preserve the completed parent record and its final name.
 
 **Do NOT write Session name to CONTEXT_SNAPSHOT.md.** Session names live in session files.
 
@@ -345,3 +355,6 @@ concurrent `/wrap` or `/post-merge` waiting to run.
 - **Housekeeping commit convention** is controlled by `## Git workflow convention` in
   the project `CLAUDE.md`. Default is `direct-push` (no branch, no PR). Change to
   `pr-required` for repos that require PRs for all changes to main.
+- At the very end of the response, after every other report or chained command,
+  repeat the session block: anchor, final or suggested name, and whether the
+  record was completed or remains unresolved.
