@@ -2,24 +2,52 @@
 # pre-tool.sh
 #
 # Runs before Claude Code executes any tool.
-# Exit 0 to allow the tool call. Exit 1 to block it (stderr is shown to Claude).
+# Exit 0 to allow the tool call. Exit 2 to block it (stderr is shown to Claude).
 #
 # Claude Code passes:
-#   $1  — tool name (PascalCase: Write, Edit, Bash, Read, Glob, Grep, etc.)
-#   stdin — tool input as JSON
+#   stdin — an event JSON object with tool_name and nested tool_input
+# The Codex adapter also supports its legacy positional tool-name/root-input shape.
 #
 # IMPORTANT: Tool names are PascalCase. Using snake_case (write_file, edit_file)
 # will cause this script to silently never block anything. This was a real bug
 # in production for 30+ PRs before it was caught.
 
-TOOL="$1"
+TOOL="${1:-}"
 INPUT=$(cat)
 
-# ── Repo root — dynamic, never hardcoded ─────────────────────────────────────
-REPO=$(git rev-parse --show-toplevel 2>/dev/null)
-if [[ -z "$REPO" ]]; then
-  exit 0  # Not in a git repo, nothing to do
-fi
+fail_closed() {
+  echo "Blocked: $1" >&2
+  exit 2
+}
+
+command -v python3 >/dev/null 2>&1 || fail_closed "python3 is required to inspect PreToolUse payloads."
+TOOL=$(printf '%s' "$INPUT" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    if not isinstance(data, dict): raise ValueError("event is not an object")
+    positional = sys.argv[1]
+    native = data.get("tool_name", "")
+    if not isinstance(native, str) or (native and positional and native != positional):
+        raise ValueError("tool name mismatch")
+    name = native or positional
+    if not name: raise ValueError("tool name is missing")
+    if not positional and "tool_input" not in data:
+        raise ValueError("tool input is missing")
+    if "tool_input" in data and not isinstance(data["tool_input"], dict):
+        raise ValueError("tool input is not an object")
+    event = data.get("hook_event_name", "PreToolUse")
+    if event != "PreToolUse": raise ValueError("unexpected hook event")
+    print(name)
+except (ValueError, TypeError):
+    raise SystemExit(1)
+' "$TOOL") || fail_closed "PreToolUse payload is malformed or has no trustworthy tool name."
+
+# ── Repo root — derive from the installed hook, not the current directory ───
+# A tool may run after /cd; its cwd must not decide which policy protects it.
+HOOK_ROOT=$(cd "$(dirname "$0")/../.." && pwd -P) || fail_closed "cannot resolve the installed hook root."
+REPO=$(git -C "$HOOK_ROOT" rev-parse --show-toplevel 2>/dev/null) || fail_closed "cannot resolve the installed project root."
+[[ "$REPO" == "$HOOK_ROOT" ]] || fail_closed "hook path is outside its project root."
 
 # ── Resolve RIG_DIR ───────────────────────────────────────────────────────────
 # Supports external .rig/ installations (see install.sh --rig-dir).
@@ -59,13 +87,9 @@ commit_ok_age_seconds() {
 SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session-$(basename "$REPO").log}"
 echo "[$(date +%H:%M:%S)] PRE  $TOOL" >> "$SESSION_LOG"
 
-# ── Guard: git commit and git push ───────────────────────────────────────────
+# ── Guard: git commit ────────────────────────────────────────────────────────
 #
-# Prevents the agent from committing or pushing before the user has tested.
-#
-# git push  — blocked unconditionally. The user pushes from their own terminal
-#             after local testing. This ensures nothing reaches the remote
-#             until the user has validated the change.
+# Prevents the agent from committing before the user has approved the commit.
 #
 # git commit — blocked until a sentinel file exists:
 #              $RIG_DIR/memory/.rig-commit-ok
@@ -82,16 +106,14 @@ echo "[$(date +%H:%M:%S)] PRE  $TOOL" >> "$SESSION_LOG"
 # without the user's explicit go-ahead.
 
 if [[ "$TOOL" == "Bash" ]]; then
-  # Parse the command string from the JSON input.
-  # python3 handles embedded quotes and escapes correctly; falls back to grep
-  # on systems where python3 is absent so the guard is never silently disabled.
-  if command -v python3 >/dev/null 2>&1; then
-    BASH_CMD=$(python3 -c \
-      "import json,sys; print(json.load(sys.stdin).get('command',''))" \
-      <<< "$INPUT" 2>/dev/null || true)
-  else
-    BASH_CMD=$(echo "$INPUT" | grep -o '"command":"[^"]*"' | head -1 | cut -d'"' -f4)
-  fi
+  BASH_CMD=$(printf '%s' "$INPUT" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+tool_input = data.get("tool_input", data)
+command = tool_input.get("command") if isinstance(tool_input, dict) else None
+if not isinstance(command, str): raise SystemExit(1)
+print(command, end="")
+') || fail_closed "Bash tool input has no command."
 
   # ── Gate git commit on sentinel file ───────────────────────────────────
   COMMIT_OK="$RIG_DIR/memory/.rig-commit-ok"
@@ -107,7 +129,7 @@ if [[ "$TOOL" == "Bash" ]]; then
       echo "       I'll create the authorization and immediately commit and push." >&2
       echo "" >&2
       echo "  (Or create it yourself: touch '${COMMIT_OK}')" >&2
-      exit 1
+      exit 2
     fi
 
     COMMIT_OK_AGE=""
@@ -121,7 +143,7 @@ if [[ "$TOOL" == "Bash" ]]; then
       echo "  The commit authorization could not be verified and was cleared." >&2
       echo "  Ask for commit approval again, then recreate:" >&2
       echo "    touch '${COMMIT_OK}'" >&2
-      exit 1
+      exit 2
     fi
 
     case "$COMMIT_OK_TTL_SECONDS:$COMMIT_OK_AGE" in
@@ -132,7 +154,7 @@ if [[ "$TOOL" == "Bash" ]]; then
         echo "" >&2
         echo "  The commit authorization expiry setting is invalid and was cleared." >&2
         echo "  Set RIG_COMMIT_OK_TTL_SECONDS to a positive number, or unset it." >&2
-        exit 1
+        exit 2
         ;;
     esac
 
@@ -143,7 +165,7 @@ if [[ "$TOOL" == "Bash" ]]; then
       echo "" >&2
       echo "  The commit authorization is stale (${COMMIT_OK_AGE}s old; limit ${COMMIT_OK_TTL_SECONDS}s) and was cleared." >&2
       echo "  Re-run the ship approval step or ask for commit approval again." >&2
-      exit 1
+      exit 2
     fi
 
     # ── Guard: block commits directly to main/master ──────────────────────
@@ -152,7 +174,7 @@ if [[ "$TOOL" == "Bash" ]]; then
     # housekeeping commits directly to main. Code-change types (feat, fix,
     # refactor, test, perf, devops, style) are always blocked, even with
     # direct-push — they must go through a feature branch and PR.
-    CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+    CURRENT_BRANCH=$(git -C "$REPO" branch --show-current 2>/dev/null || echo "")
     if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
       HOUSEKEEPING=$(grep "^housekeeping:" "$REPO/CLAUDE.md" 2>/dev/null \
         | awk '{print $2}' | tr -d '[:space:]' || echo "")
@@ -166,7 +188,7 @@ if [[ "$TOOL" == "Bash" ]]; then
         echo "" >&2
         echo "  To allow direct housekeeping commits, set in CLAUDE.md:" >&2
         echo "    housekeeping: direct-push" >&2
-        exit 1
+        exit 2
       fi
 
       # direct-push is set — still restrict to housekeeping commit types.
@@ -199,7 +221,7 @@ if m:
         echo "  'housekeeping: direct-push' only allows chore and docs commits" >&2
         echo "  directly to main. A '$DIRECT_COMMIT_TYPE(...)' commit requires a PR:" >&2
         echo "    git checkout -b $DIRECT_COMMIT_TYPE/your-description" >&2
-        exit 1
+        exit 2
       fi
     fi
   fi
@@ -208,43 +230,38 @@ fi
 # ── Block writes to protected paths ──────────────────────────────────────────
 if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" || "$TOOL" == "NotebookEdit" ]]; then
 
-  # Extract the target file path from the JSON input.
-  # python3 handles embedded quotes and escapes correctly; falls back to grep
-  # on systems where python3 is absent so write protection is never silently disabled.
-  if command -v python3 >/dev/null 2>&1; then
-    PATH_ARG=$(python3 -c \
-      "import json,sys; print(json.load(sys.stdin).get('file_path',''))" \
-      <<< "$INPUT" 2>/dev/null || true)
-  else
-    PATH_ARG=$(echo "$INPUT" | grep -o '"file_path":"[^"]*"' | head -1 | cut -d'"' -f4)
+  # The Codex adapter has already checked every apply_patch target against the
+  # shared protected-path policy. It then passes a command, not a file_path.
+  if [[ "${RIG_CODEX_PATCH_VALIDATED:-0}" == 1 ]]; then
+    [[ "${RIG_AGENT:-}" == codex && "$TOOL" == Write ]] || fail_closed "invalid Codex patch validation context."
+    exit 0
   fi
 
-  # ── Worktree write redirect ───────────────────────────────────────────────
-  # Hard rule #12: never write files inside .claude/worktrees/ — edits there
-  # are invisible to the user's git client. Redirect to the main repo instead.
-  if [[ "$PATH_ARG" == *"/.claude/worktrees/"* ]]; then
-    REDIRECTED_PATH=""
-    if command -v python3 >/dev/null 2>&1; then
-      REDIRECTED_PATH=$(echo "$INPUT" | python3 -c "
-import json, re, sys
+  PATH_ARG=$(printf '%s' "$INPUT" | python3 -c '
+import json, sys
 data = json.load(sys.stdin)
-path = data.get('file_path', '')
-m = re.match(r'^(.*)/\.claude/worktrees/[^/]+(/.*|$)', path)
-if not m:
-    sys.exit(0)
-new_path = m.group(1) + (m.group(2) if m.group(2) else '/')
-data['file_path'] = new_path
-import json as _j
-print(_j.dumps({'updatedToolInput': data}))
-sys.stderr.write('Redirected write from worktree path to main repo: ' + new_path + '\n')
-" 2>/tmp/the-rig-worktree-redirect.tmp || true)
-    fi
-    if [[ -n "$REDIRECTED_PATH" ]]; then
-      echo "$REDIRECTED_PATH"
-      cat /tmp/the-rig-worktree-redirect.tmp >&2 2>/dev/null || true
-      exit 0
-    fi
+tool_input = data.get("tool_input", data)
+if not isinstance(tool_input, dict): raise SystemExit(1)
+path = tool_input.get("file_path") or tool_input.get("notebook_path")
+if not isinstance(path, str) or not path: raise SystemExit(1)
+print(path, end="")
+') || fail_closed "write tool input has no file path."
+
+  # ── Worktree write redirect ───────────────────────────────────────────────
+  # Determine the destination now, but run every path policy against that
+  # destination before returning updatedInput to the provider.
+  REDIRECT_ORIGINAL=""
+  if [[ "$PATH_ARG" == *"/.claude/worktrees/"* ]]; then
+    REDIRECT_ORIGINAL="$PATH_ARG"
+    PATH_ARG=$(printf '%s' "$PATH_ARG" | python3 -c '
+import re, sys
+path = sys.stdin.read()
+match = re.match(r"^(.*)/\.claude/worktrees/[^/]+(/.*|$)", path)
+if not match: raise SystemExit(1)
+print(match.group(1) + (match.group(2) or "/"), end="")
+') || fail_closed "worktree write destination could not be resolved."
   fi
+  PATH_CANONICAL=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$PATH_ARG") || fail_closed "write path could not be resolved."
 
   # ── THE RIG'S OWN GOVERNANCE FILES (self-protection) ─────────────────────
   # The agent must not rewrite the rules it is supposed to follow.
@@ -269,7 +286,7 @@ sys.stderr.write('Redirected write from worktree path to main repo: ' + new_path
     echo "Blocked: The Rig protected-path policy is missing or unreadable:" >&2
     echo "  $PROTECTED_PATH_POLICY" >&2
     echo "Restore it with The Rig installer before attempting writes." >&2
-    exit 1
+    exit 2
   fi
 
   RIG_PROTECTED=()
@@ -283,7 +300,7 @@ sys.stderr.write('Redirected write from worktree path to main repo: ' + new_path
         echo "Blocked: The Rig protected-path policy is malformed:" >&2
         echo "  $PROTECTED_PATH_POLICY" >&2
         echo "Every path must begin with [RIG_DIR]/ or [REPO]/." >&2
-        exit 1
+        exit 2
         ;;
     esac
     RIG_PROTECTED+=("$protected")
@@ -292,15 +309,16 @@ sys.stderr.write('Redirected write from worktree path to main repo: ' + new_path
   if [[ "${#RIG_PROTECTED[@]}" -eq 0 ]]; then
     echo "Blocked: The Rig protected-path policy contains no paths:" >&2
     echo "  $PROTECTED_PATH_POLICY" >&2
-    exit 1
+    exit 2
   fi
 
   for protected in "${RIG_PROTECTED[@]}"; do
-    if [[ "$PATH_ARG" == *"$protected"* ]]; then
+    protected_canonical=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$protected") || fail_closed "protected path could not be resolved."
+    if [[ "$PATH_ARG" == *"$protected"* || "$PATH_CANONICAL" == "$protected_canonical" || "$PATH_CANONICAL" == "$protected_canonical/"* ]]; then
       echo "Blocked: '$PATH_ARG' is a The Rig governance file." >&2
       echo "The agent must not modify its own rules directly." >&2
       echo "Use /rig-propose to stage a change for human review, or edit manually." >&2
-      exit 1
+      exit 2
     fi
   done
 
@@ -318,12 +336,28 @@ sys.stderr.write('Redirected write from worktree path to main repo: ' + new_path
   )
 
   for blocked in "${BLOCKED_PATHS[@]}"; do
-    if [[ "$PATH_ARG" == *"$blocked"* ]]; then
+    if [[ "$PATH_ARG" == *"$blocked"* || "$PATH_CANONICAL" == *"$blocked"* ]]; then
       echo "Blocked: '$PATH_ARG' matches protected path '$blocked'" >&2
       echo "This path is off-limits. Edit it manually if a change is truly needed." >&2
-      exit 1
+      exit 2
     fi
   done
+
+  if [[ -n "$REDIRECT_ORIGINAL" ]]; then
+    REDIRECTED_INPUT=$(printf '%s' "$INPUT" | python3 -c '
+import json,sys
+data=json.load(sys.stdin)
+tool_input=data.get("tool_input",data)
+path_key="file_path" if "file_path" in tool_input else "notebook_path"
+tool_input[path_key]=sys.argv[1]
+if "tool_input" in data:
+    print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":tool_input}}))
+else:
+    print(json.dumps({"updatedToolInput":tool_input}))
+' "$PATH_ARG") || fail_closed "worktree write could not be redirected."
+    printf '%s\n' "$REDIRECTED_INPUT"
+    echo "Redirected write from worktree path to main repo: $PATH_ARG" >&2
+  fi
 fi
 
 exit 0

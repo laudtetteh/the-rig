@@ -41,6 +41,100 @@ run_claude_pretool() {
     _ "$TEST_PROJECT" "$tool" "$payload"
 }
 
+run_claude_pretool_from_settings() {
+  local payload="$1"
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/pre-tool.sh' \
+    _ "$TEST_PROJECT" "$payload"
+}
+
+@test "normal Claude PreToolUse Edit denies a protected path with blocking exit 2" {
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":sys.argv[1],"old_string":"old","new_string":"new"}}))' "$TEST_PROJECT/CLAUDE.md")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+}
+
+@test "normal Claude PreToolUse Bash blocks commit without sentinel" {
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"fix: unsafe\""}}'
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Commit blocked by The Rig."* ]] || return 1
+}
+
+@test "normal Claude PreToolUse rejects malformed payload and allows ordinary read" {
+  run_claude_pretool_from_settings '{broken'
+  [ "$status" -eq 2 ]
+  run_claude_pretool_from_settings '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"/tmp/example"}}'
+  [ "$status" -eq 0 ]
+}
+
+@test "legacy positional payload retains protected block and approved-push behavior" {
+  run_claude_pretool Edit "$(python3 -c 'import json,sys; print(json.dumps({"file_path":sys.argv[1]}))' "$TEST_PROJECT/CLAUDE.md")"
+  [ "$status" -eq 2 ]
+  run_claude_pretool_from_settings '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin current-branch"}}'
+  [ "$status" -eq 0 ]
+}
+
+@test "normal Claude hook denies external Rig governance path and missing policy" {
+  external_rig="$TEST_ROOT/external-rig"
+  mkdir -p "$external_rig/rules"
+  cp "$REPO_ROOT/templates/project/.rig/rules/protected-paths.txt" "$external_rig/rules/protected-paths.txt"
+  printf '%s\n' "$external_rig" > "$TEST_PROJECT/.rigpath"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":sys.argv[1],"content":"unsafe"}}))' "$external_rig/rules/protected-paths.txt")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+  rm "$external_rig/rules/protected-paths.txt"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"missing or unreadable"* ]] || return 1
+}
+
+@test "normal Claude hook uses installed project root after cwd changes" {
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":sys.argv[1]}}))' "$TEST_PROJECT/CLAUDE.md")"
+  run bash -c 'cd "$1" && printf "%s" "$3" | bash "$2/.claude/hooks/pre-tool.sh"' \
+    _ "$TEST_ROOT" "$TEST_PROJECT" "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+}
+
+@test "normal Claude commit gate checks installed project's branch after cwd changes" {
+  git -C "$TEST_PROJECT" checkout -q -B main
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"fix: unsafe\""}}'
+  run bash -c 'cd "$1" && printf "%s" "$3" | bash "$2/.claude/hooks/pre-tool.sh"' \
+    _ "$TEST_ROOT" "$TEST_PROJECT" "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
+}
+
+@test "normal Claude worktree redirect returns documented updatedInput" {
+  target="$TEST_PROJECT/.claude/worktrees/other-session/src/app.py"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":sys.argv[1],"content":"hello"}}))' "$target")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"updatedInput"'* ]] || return 1
+  [[ "$output" == *"$TEST_PROJECT/src/app.py"* ]] || return 1
+}
+
+@test "worktree redirect cannot bypass governance protection at destination" {
+  target="$TEST_PROJECT/.claude/worktrees/other-session/CLAUDE.md"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":sys.argv[1],"content":"unsafe"}}))' "$target")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+  [[ "$output" != *'"updatedInput"'* ]] || return 1
+}
+
+@test "symlink alias to protected governance path is denied" {
+  printf 'governance\n' > "$TEST_PROJECT/CLAUDE.md"
+  ln -s "$TEST_PROJECT/CLAUDE.md" "$TEST_PROJECT/alias.md"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":sys.argv[1]}}))' "$TEST_PROJECT/alias.md")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+}
+
 run_claude_pretool_with_ttl() {
   local ttl="$1" tool="$2" payload="$3"
   run env RIG_COMMIT_OK_TTL_SECONDS="$ttl" bash -c 'cd "$1" && printf "%s" "$3" | bash .claude/hooks/pre-tool.sh "$2"' \
@@ -130,7 +224,7 @@ run_codex_adapter() {
   cat > "$fake_bin/stat" <<'EOF'
 #!/bin/sh
 if [ "$1" = "-c" ]; then
-  /bin/date +%s
+  python3 -c 'import os,sys; print(int(os.stat(sys.argv[1]).st_mtime))' "$3"
   exit 0
 fi
 if [ "$1" = "-f" ]; then
