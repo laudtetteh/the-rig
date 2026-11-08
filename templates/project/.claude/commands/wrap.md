@@ -6,7 +6,7 @@ Trigger this command before ending a session or when approaching a context limit
 
 Performs the session-end housekeeping that prevents state loss between sessions:
 
-1. Writes (overwrites) `.rig/memory/CONTEXT_SNAPSHOT.md` with full current project state
+1. Refreshes `.rig/memory/CONTEXT_SNAPSHOT.md` while preserving other sessions' task handoffs
 2. Ensures `.rig/memory/PROGRESS.md` is up to date — expands any auto-stubbed entries
 3. **Trims `.rig/memory/PROGRESS.md`** if it has grown beyond 20 entries (see Trim step below)
 4. **Prunes stale session-end markers** from `PROGRESS.md` (see Marker prune step below)
@@ -58,39 +58,36 @@ even if internal wrap collection happened earlier. Do not end with an implementa
 
 ## Concurrent session guard — run before anything else
 
-Check for a `.snapshot-write-in-progress` sentinel that would indicate another session is
-already running `/wrap` or `/post-merge`:
+Acquire the owner-recorded memory workflow lock. It serializes wrap and
+post-merge housekeeping; the snapshot writer separately locks its short atomic
+update. Preserve the returned token for the final cleanup step:
 
 ```bash
-SNAP_LOCK="$RIG_DIR/memory/.snapshot-write-in-progress"
-if [[ -f "$SNAP_LOCK" ]]; then
-  LOCK_AGE=$(( $(date +%s) - $(stat -c %Y "$SNAP_LOCK" 2>/dev/null || stat -f %m "$SNAP_LOCK" 2>/dev/null || echo 0) ))
-  if [[ "$LOCK_AGE" -gt 1800 ]]; then
-    echo "⚠️  Stale lock detected (age: ${LOCK_AGE}s). Auto-removing and proceeding."
-    rm -f "$SNAP_LOCK"
-  else
-    echo "⚠️  A snapshot write is already in progress (/wrap or /post-merge in another session, lock age: ${LOCK_AGE}s)."
-    echo "   If the other session is no longer active: rm '$SNAP_LOCK'"
-    exit 1
-  fi
-fi
-if ! touch "$SNAP_LOCK"; then
-  echo "Unable to write Rig memory lock: $SNAP_LOCK"
-  echo "For Codex with an external .rigpath, request scoped write approval for $RIG_DIR and retry /wrap."
-  echo "No further memory writes were attempted."
+LOCK_OWNER=$("$REPO/bin/rig" session current --json 2>/dev/null | \
+  python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")' 2>/dev/null || true)
+LOCK_ARGS=(acquire --json)
+[[ -n "$LOCK_OWNER" ]] && LOCK_ARGS+=(--owner-anchor "$LOCK_OWNER")
+[[ "${RIG_SESSION_PID:-}" =~ ^[0-9]+$ ]] && LOCK_ARGS+=(--provider-pid "$RIG_SESSION_PID")
+SNAP_LOCK_JSON=$("$REPO/bin/rig" memory workflow-lock "${LOCK_ARGS[@]}") || {
+  echo "Unable to write Rig memory lock: $SNAP_LOCK_JSON" >&2
+  echo "No further memory writes were attempted." >&2
   exit 1
-fi
+}
+SNAP_LOCK_TOKEN=$(printf '%s' "$SNAP_LOCK_JSON" | \
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])') || exit 1
+printf 'Rig workflow lock acquired: %s\n' "$SNAP_LOCK_JSON"
 ```
 
-Create the sentinel immediately. Delete it at the very end of `/wrap` (step 12,
-after flag cleanup). Locks older than 30 minutes are automatically expired on the
-next run — they are from crashed sessions. Locks under 30 minutes block and require
-the other session to finish (or the lock deleted manually if that session is gone).
-
-If creating the sentinel fails with `Operation not permitted`, stop immediately.
-This commonly means Codex is running in a project whose `.rigpath` points outside
-the workspace writable roots. Request one scoped approval for the resolved
-`$RIG_DIR` before retrying; do not continue with partial memory writes.
+The lock reports the current owner anchor, PID, and age if another workflow is
+active. A dead provider PID or a lock older than 30 minutes is archived and
+recovered on the next acquire. Never remove another session's lock by hand as
+part of this command. Keep the exact `token` from the acquire output in your
+working context and reassign `SNAP_LOCK_TOKEN` from that value in later tool-call
+shells; shell variables do not persist between tool calls. Never recover a token
+by reading the current lock file, which could belong to a newer session. If
+acquire fails with `Operation not permitted`, request scoped write approval for $RIG_DIR
+before retrying. This commonly happens when Codex is running in a
+project whose `.rigpath` points outside the workspace writable roots.
 
 The sentinel file is gitignored alongside other `.rig/memory/` runtime files.
 
@@ -438,13 +435,15 @@ Never delete entries — only move them. ERRORS.md is always newest-first: add n
 
 ## Active tasks — in-flight state capture
 
-After ERRORS.md cleanup and before session naming, read `.rig/tasks/active/`.
+After ERRORS.md cleanup and before session naming, read `$RIG_DIR/tasks/active/`.
 
 **If empty:** note "No tasks in flight" and continue.
 
-**If non-empty:** for each active task file, write a `## Resuming from` section
-into CONTEXT_SNAPSHOT.md that captures enough state for the next session to
-resume without re-reading the conversation. The section must include:
+**If non-empty:** identify the active tasks this exact session worked on. For
+each of those tasks, write a `## Resuming from` section in a snapshot draft that
+captures enough state for the next session to resume without re-reading the
+conversation. Leave tasks owned by another active session out of this draft;
+the writer preserves their existing sections. Each owned section must include:
 
 ```
 ## Resuming from: [task-slug]
@@ -463,8 +462,38 @@ pick up exactly where you left off from this section alone.
 If the task has a `## Batches` section, include which batches are complete and
 which are pending.
 
-This section is written into CONTEXT_SNAPSHOT.md alongside the rest of the
-snapshot — overwrite the previous version.
+Build a draft under `$RIG_DIR/memory/` containing the current shared project
+header and only this session's `## Resuming from` sections. Use the token from
+the concurrent session guard to name the draft
+`.snapshot-draft-${SNAP_LOCK_TOKEN}.md`. For a session with no exact active
+record, write the shared header only and report that task handoffs could not be
+updated without an owner. Then run the owner-aware writer:
+
+```bash
+SNAP_DRAFT="$RIG_DIR/memory/.snapshot-draft-${SNAP_LOCK_TOKEN}.md"
+OWNED_TASKS=()
+while IFS= read -r task; do OWNED_TASKS+=("$task"); done \
+  < <(sed -n 's/^## Resuming from: //p' "$SNAP_DRAFT")
+SNAP_ARGS=(--file "$SNAP_DRAFT" --json)
+if [[ "${#OWNED_TASKS[@]}" -eq 0 ]]; then
+  SNAP_ARGS+=(--shared-only)
+  "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || exit 1
+else
+  CURRENT_JSON=$("$REPO/bin/rig" session current --json) || exit 1
+  CURRENT_FILE=$(printf '%s' "$CURRENT_JSON" | \
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")')
+  [[ -n "$CURRENT_FILE" ]] || exit 1
+  for task in "${OWNED_TASKS[@]}"; do SNAP_ARGS+=(--owned-task "$task"); done
+  RIG_SESSION_FILE="$CURRENT_FILE" "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || exit 1
+fi
+rm -f "$SNAP_DRAFT"
+```
+
+For a pre-existing unowned section with the same task slug, inspect it first.
+Only after confirming that this session is taking ownership, rerun with
+`--adopt-legacy`. The writer backs up the original snapshot before migration.
+Never edit `CONTEXT_SNAPSHOT.md` directly; the writer preserves foreign sections
+and atomically materializes the shared view.
 
 ---
 
@@ -601,8 +630,8 @@ After suggesting a session name and before asking "What's next?", run both clean
 ```bash
 # The exact wrap obligation was cleared in Step 5 before the record moved to done/.
 
-# Release the concurrent session lock
-rm -f "$RIG_DIR/memory/.snapshot-write-in-progress" 2>/dev/null || true
+# Release only the lock token acquired by this workflow.
+"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
 
 # Clear this session's compact checkpoint — the full snapshot supersedes it
 rm -f "$RIG_DIR/memory/.compact-checkpoint-${PPID}.md" 2>/dev/null || true
@@ -616,7 +645,8 @@ Log: "`.wrap-needed` cleared. Concurrent session lock released. Compact checkpoi
 `.wrap-needed` may contain multiple `anchor=` entries. The exact-session clear
 removes only the current anchor and deletes the reminder only when no scoped or
 unadopted legacy obligation remains.
-`.snapshot-write-in-progress` signals to concurrent sessions that this snapshot write is complete.
+The workflow lock release signals to concurrent sessions that wrap housekeeping
+is complete. The snapshot writer clears its own short-lived write marker.
 `.compact-checkpoint-{PPID}.md` is cleared so the next session reads the authoritative
 `CONTEXT_SNAPSHOT.md` rather than a stale post-compaction checkpoint.
 
@@ -801,7 +831,9 @@ The `/fewer-permission-prompts` skill remains available for one-off manual scans
 
 - `.rig/memory/CONTEXT_SNAPSHOT.md` is gitignored — it lives on disk only, never committed
 - `.rig/memory/PROGRESS_archive.md` and `.rig/memory/ERRORS_archive.md` are gitignored — full history on disk, not in the repo
-- Always **overwrite** the snapshot, never append to it; it represents current state, not history
+- Always use `bin/rig memory write-snapshot` to refresh the shared header and this
+  session's task sections. Never overwrite or append to `CONTEXT_SNAPSHOT.md` by hand;
+  the writer preserves sections owned by other active sessions.
 - History belongs in `.rig/memory/PROGRESS.md` (recent) and `PROGRESS_archive.md` (older); same pattern for `ERRORS.md` / `ERRORS_archive.md`
 - If a task is in progress but not done, use the "Active tasks — in-flight state capture" step above to write a structured `## Resuming from` section into CONTEXT_SNAPSHOT. Vague notes are not sufficient — the next session must be able to resume from the snapshot alone.
 - At the very end of the response, after every other report or chained command,

@@ -7,6 +7,7 @@ setup() {
   TEST_PROJECT="$TEST_ROOT/project"
   mkdir -p "$TEST_PROJECT/bin" "$TEST_PROJECT/.rig/memory"
   cp "$REPO_ROOT/templates/project/bin/rig" "$TEST_PROJECT/bin/rig"
+  cp "$REPO_ROOT/templates/project/bin/rig-snapshot.py" "$TEST_PROJECT/bin/rig-snapshot.py"
   chmod +x "$TEST_PROJECT/bin/rig"
 }
 

@@ -298,7 +298,7 @@ Step 6: Log — ERRORS.md entry, always
 Step 1: Pull latest main
 Step 2: Update PROGRESS.md
 Step 3: Move task file active/ → done/
-Step 4: Overwrite CONTEXT_SNAPSHOT.md
+Step 4: Refresh the shared CONTEXT_SNAPSHOT.md header while preserving task handoffs
 Step 5: Check ERRORS.md and RIG_GAPS.md
 Step 6: Housekeeping commit (if needed)
 Step 7: Suggest session name (derives name from session work)

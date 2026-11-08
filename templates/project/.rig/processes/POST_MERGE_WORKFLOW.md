@@ -71,10 +71,18 @@ the row for the merged PR with the merge SHA and leave the remaining rows pendin
 
 ---
 
-## Step 4 — Overwrite CONTEXT_SNAPSHOT.md
+## Step 4 — Refresh CONTEXT_SNAPSHOT.md
 
-Rewrite `.rig/memory/CONTEXT_SNAPSHOT.md` with the current state of the project.
-**Never delete this file — always overwrite it.**
+Write a draft containing the current shared project state, without any
+`## Resuming from` task sections. Apply it with
+`bin/rig memory write-snapshot --file "$DRAFT" --shared-only --json`.
+The writer preserves existing task handoffs, including those owned by other
+sessions. Resolve `$RIG_DIR` from `.rigpath` when present, and keep the draft
+under `$RIG_DIR/memory/`. Remove the draft after a successful write. Never
+edit or delete `CONTEXT_SNAPSHOT.md` directly.
+For a task moved to `tasks/done/` in Step 3, inspect the snapshot for its
+exact handoff slug and append `--retire-task SLUG --done-task-file FILE` to
+the write command. The writer verifies the done file and saves a backup.
 
 The snapshot must include:
 

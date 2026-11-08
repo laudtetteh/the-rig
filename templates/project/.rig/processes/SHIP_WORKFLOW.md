@@ -266,7 +266,15 @@ In this order:
 3. Update `.rig/memory/PROGRESS.md` — add entry at top with what actually shipped
    (if scope changed from the plan, the PROGRESS entry reflects the actual outcome)
 
-4. Overwrite `.rig/memory/CONTEXT_SNAPSHOT.md` — full current state, never delete
+4. Write a draft containing the shared project state without task sections,
+   then run `bin/rig memory write-snapshot --file "$DRAFT" --shared-only --json`.
+   Resolve `$RIG_DIR` from `.rigpath` and keep the draft under its `memory/`
+   directory. Remove the draft after a successful write. Never edit or delete
+   `CONTEXT_SNAPSHOT.md` directly; the writer preserves other sessions' task
+   handoffs. For the task moved to done in Step 2, inspect the existing
+   snapshot for its exact handoff slug and append `--retire-task SLUG
+   --done-task-file FILE`. The writer verifies the done file and backs up
+   the prior snapshot.
 
 5. If anything surprised you, log it in `.rig/memory/ERRORS.md`
 

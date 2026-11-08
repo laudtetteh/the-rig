@@ -24,7 +24,8 @@ Commands:
   rig memory repair-markers Reposition unambiguous Rig memory markers
   rig memory append-gap     Append one structured Rig gap
   rig memory append-progress Append one dated progress entry
-  rig memory write-snapshot Atomically replace CONTEXT_SNAPSHOT.md
+  rig memory write-snapshot Atomically update CONTEXT_SNAPSHOT.md; preserve owned task handoffs
+  rig memory workflow-lock Acquire or release an owner-recorded memory workflow lock
   rig upgrade rollback      Undo one completed Rig upgrade
   rig codex                 Launch Codex with Rig context
   rig claude                Launch Claude Code with Rig context
@@ -77,10 +78,17 @@ EOF
     session-name) printf 'Usage: rig session-name set [--tentative|--final] [--complete] [--json] <name>\n';;
     sprint) printf 'Usage: rig sprint <audit|plan|status> [options] --json\n';;
     memory) cat <<'EOF'
-Usage: rig memory <validate|repair-markers|append-gap|append-progress|write-snapshot> [options]
+Usage: rig memory <validate|repair-markers|append-gap|append-progress|write-snapshot|workflow-lock> [options]
 
 Append helpers resolve .rigpath before writing and use atomic file replacement
 where replacement is required.
+write-snapshot accepts --shared-only or repeated --owned-task TASK; owning a
+legacy handoff requires --adopt-legacy after review. To remove a completed
+handoff, pass --shared-only with matched --retire-task TASK and
+--done-task-file FILE pairs; the writer verifies the done file and backs up
+the prior snapshot. workflow-lock accepts
+acquire or release, with --owner-anchor and --provider-pid for acquisition,
+and --token for release. Both commands support --json.
 EOF
       ;;
     codex) printf 'Usage: rig codex [-- <codex arguments>]\n';;
@@ -99,6 +107,7 @@ worktree_bootstrap() {
 import pathlib, shutil, sys
 source, target = map(pathlib.Path, sys.argv[1:])
 paths = [".rigpath","CLAUDE.md","PROJECT_BRIEF.md",".gitleaks.toml","bin/rig",
+         "bin/rig-session-resolve.py","bin/rig-snapshot.py",
          ".claude",".agents",".codex",".mcp.json",".playwright-mcp",".github",
          "docs/INDEX.md","docs/features/README.md"]
 # Linked worktrees live under the primary's own .claude/worktrees/ (see the
@@ -511,56 +520,56 @@ PY
 }
 
 memory_write_snapshot() {
-  local from_file="" json=false arg stdin_tmp=""
+  local from_file="" json=false shared_only=false adopt_legacy=false arg stdin_tmp="" mode=replace resolved status=0
+  local -a owned_tasks=() retire_tasks=() done_files=() helper_args=()
   while [[ "$#" -gt 0 ]]; do
     arg="$1"
     case "$arg" in
       --file) [[ "$#" -ge 2 ]] || { usage_error "--file requires a value" "$@"; return; }; from_file="$2"; shift 2;;
       --stdin) from_file="-"; shift;;
+      --shared-only) shared_only=true; shift;;
+      --owned-task) [[ "$#" -ge 2 ]] || { usage_error "--owned-task requires a value" "$@"; return; }; owned_tasks+=("$2"); shift 2;;
+      --retire-task) [[ "$#" -ge 2 ]] || { usage_error "--retire-task requires a value" "$@"; return; }; retire_tasks+=("$2"); shift 2;;
+      --done-task-file) [[ "$#" -ge 2 ]] || { usage_error "--done-task-file requires a value" "$@"; return; }; done_files+=("$2"); shift 2;;
+      --adopt-legacy) adopt_legacy=true; shift;;
       --json) json=true; shift;;
       *) usage_error "unknown memory option: $arg" "$@"; return;;
     esac
   done
   [[ -n "$from_file" ]] || { usage_error "write-snapshot requires --file FILE or --stdin" "$@"; return; }
+  [[ "$shared_only" == false || "${#owned_tasks[@]}" -eq 0 ]] || { usage_error "--shared-only and --owned-task conflict"; return; }
+  [[ "$adopt_legacy" == false || "${#owned_tasks[@]}" -gt 0 ]] || { usage_error "--adopt-legacy requires --owned-task"; return; }
+  [[ "${#retire_tasks[@]}" -eq "${#done_files[@]}" ]] || { usage_error "--retire-task needs one --done-task-file per task"; return; }
+  [[ "${#retire_tasks[@]}" -eq 0 || "$shared_only" == true ]] || { usage_error "--retire-task requires --shared-only"; return; }
+  if [[ "${#owned_tasks[@]}" -gt 0 ]]; then mode=owned; elif [[ "$shared_only" == true ]]; then mode=shared; fi
   if [[ "$from_file" == "-" ]]; then
     stdin_tmp=$(mktemp "${TMPDIR:-/tmp}/rig-snapshot-stdin.XXXXXX") || return 1
     cat > "$stdin_tmp"
     from_file="$stdin_tmp"
   fi
-  RIG_DIR="$(rig_dir)" SNAPSHOT_SOURCE="$from_file" SNAPSHOT_JSON="$json" python3 <<'PY'
-import json, os, pathlib, stat, sys, tempfile
-
-source = os.environ["SNAPSHOT_SOURCE"]
-source_path = pathlib.Path(source)
-if not source_path.is_file():
-    print(json.dumps({"ok": False, "reason": "source_missing"}))
-    raise SystemExit(1)
-content = source_path.read_text()
-memory = pathlib.Path(os.environ["RIG_DIR"]) / "memory"
-memory.mkdir(parents=True, exist_ok=True)
-path = memory / "CONTEXT_SNAPSHOT.md"
-mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
-fd, tmp = tempfile.mkstemp(prefix=".context-snapshot-", suffix=".tmp", dir=str(memory))
-try:
-    with os.fdopen(fd, "w") as handle:
-        handle.write(content)
-        if content and not content.endswith("\n"):
-            handle.write("\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.chmod(tmp, mode)
-    os.replace(tmp, path)
-finally:
-    try:
-        os.unlink(tmp)
-    except FileNotFoundError:
-        pass
-payload = {"ok": True, "file": str(path)}
-print(json.dumps(payload, separators=(",", ":")) if os.environ["SNAPSHOT_JSON"] == "true" else "Wrote CONTEXT_SNAPSHOT.md")
-PY
-  local status=$?
+  helper_args=(--rig-dir "$(rig_dir)" --root "$(rig_root)" --file "$from_file" --mode "$mode")
+  [[ "$json" == true ]] && helper_args+=(--json)
+  [[ "$adopt_legacy" == true ]] && helper_args+=(--adopt-legacy)
+  for arg in ${owned_tasks[@]+"${owned_tasks[@]}"}; do helper_args+=(--owned-task "$arg"); done
+  for arg in ${retire_tasks[@]+"${retire_tasks[@]}"}; do helper_args+=(--retire-task "$arg"); done
+  for arg in ${done_files[@]+"${done_files[@]}"}; do helper_args+=(--done-task-file "$arg"); done
+  if [[ "$mode" == owned ]]; then
+    resolved=$(session_resolve --json --verbose) || status=$?
+    if [[ "$status" -ne 0 ]]; then
+      printf '%s\n' "$resolved"
+      [[ -n "$stdin_tmp" ]] && rm -f "$stdin_tmp"
+      return "$status"
+    fi
+    helper_args+=(--expected-session "$resolved")
+  fi
+  status=0
+  python3 "$(dirname "${BASH_SOURCE[0]}")/rig-snapshot.py" "${helper_args[@]}" || status=$?
   [[ -n "$stdin_tmp" ]] && rm -f "$stdin_tmp"
   return "$status"
+}
+
+memory_workflow_lock() {
+  python3 "$(dirname "${BASH_SOURCE[0]}")/rig-snapshot.py" workflow-lock "$@" --rig-dir "$(rig_dir)"
 }
 
 doctor() {
@@ -2522,7 +2531,7 @@ main() {
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help "$command"; return; fi
       subcommand="${1:-}"; shift || true
-      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
+      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; memory:workflow-lock) memory_workflow_lock "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
     *) shift; usage_error "unknown command: $command" "$@";;
   esac
 }

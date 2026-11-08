@@ -29,7 +29,7 @@ Follows `.rig/processes/POST_MERGE_WORKFLOW.md`:
 1. Pulls latest `main` and confirms the expected commit is at HEAD
 2. Adds an entry at the top of `.rig/memory/PROGRESS.md` for the merged PR
 3. Moves the task file from `.rig/tasks/active/` → `.rig/tasks/done/`; marks `**Status**` as `done`
-4. Overwrites `.rig/memory/CONTEXT_SNAPSHOT.md` with the current project state
+4. Refreshes `.rig/memory/CONTEXT_SNAPSHOT.md` without replacing task handoffs
 5. **Checks feature doc freshness** — detects if merged changes overlap with documented features (see below)
 6. Checks `.rig/memory/ERRORS.md` and `.rig/memory/RIG_GAPS.md` — prompts you to log anything unexpected or any workflow friction observed
 7. Makes a housekeeping commit if memory updates weren't included in the PR
@@ -64,37 +64,35 @@ which PR merged if it's not clear from context.
 
 ## Concurrent session guard — run before anything else
 
-Check for a `.snapshot-write-in-progress` sentinel before touching CONTEXT_SNAPSHOT.
-Both `/wrap` and `/post-merge` write the snapshot; if either is running in another
-session, block rather than silently overwrite:
+Acquire the owner-recorded memory workflow lock before changing memory. Preserve
+its token for the final cleanup step. The snapshot writer separately locks its
+short atomic update:
 
 ```bash
-SNAP_LOCK="$RIG_DIR/memory/.snapshot-write-in-progress"
-if [[ -f "$SNAP_LOCK" ]]; then
-  LOCK_AGE=$(( $(date +%s) - $(stat -c %Y "$SNAP_LOCK" 2>/dev/null || stat -f %m "$SNAP_LOCK" 2>/dev/null || echo 0) ))
-  if [[ "$LOCK_AGE" -gt 1800 ]]; then
-    echo "⚠️  Stale lock detected (age: ${LOCK_AGE}s). Auto-removing and proceeding."
-    rm -f "$SNAP_LOCK"
-  else
-    echo "⚠️  A snapshot write is already in progress (/wrap or /post-merge in another session, lock age: ${LOCK_AGE}s)."
-    echo "   If the other session is no longer active: rm '$SNAP_LOCK'"
-    exit 1
-  fi
-fi
-if ! touch "$SNAP_LOCK"; then
-  echo "Unable to write Rig memory lock: $SNAP_LOCK"
-  echo "For Codex with an external .rigpath, request scoped write approval for $RIG_DIR and retry /post-merge."
-  echo "No further memory writes were attempted."
+LOCK_OWNER=$("$REPO/bin/rig" session current --json 2>/dev/null | \
+  python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")' 2>/dev/null || true)
+LOCK_ARGS=(acquire --json)
+[[ -n "$LOCK_OWNER" ]] && LOCK_ARGS+=(--owner-anchor "$LOCK_OWNER")
+[[ "${RIG_SESSION_PID:-}" =~ ^[0-9]+$ ]] && LOCK_ARGS+=(--provider-pid "$RIG_SESSION_PID")
+SNAP_LOCK_JSON=$("$REPO/bin/rig" memory workflow-lock "${LOCK_ARGS[@]}") || {
+  echo "Unable to write Rig memory lock: $SNAP_LOCK_JSON" >&2
+  echo "No further memory writes were attempted." >&2
   exit 1
-fi
+}
+SNAP_LOCK_TOKEN=$(printf '%s' "$SNAP_LOCK_JSON" | \
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])') || exit 1
+printf 'Rig workflow lock acquired: %s\n' "$SNAP_LOCK_JSON"
 ```
 
-The lock is released in the Flag cleanup step at the very end. Locks older than
-30 minutes are automatically expired — they are from crashed sessions.
-If creating the sentinel fails with `Operation not permitted`, stop immediately.
-This commonly means Codex is running in a project whose `.rigpath` points outside
-the workspace writable roots. Request one scoped approval for the resolved
-`$RIG_DIR` before retrying; do not continue with partial memory writes.
+The lock reports the owner anchor, PID, and age when another workflow is active.
+A dead provider PID or a lock older than 30 minutes is archived and recovered
+on the next acquire. Keep the exact `token` from the acquire output in your
+working context and reassign `SNAP_LOCK_TOKEN` from that value in later tool-call
+shells; variables do not persist between tool calls. Never read a replacement
+token from the current lock file. Never remove another session's lock manually.
+If acquire fails with `Operation not permitted`, request scoped write approval for $RIG_DIR
+before retrying. This commonly happens when Codex is running in
+a project whose `.rigpath` points outside the workspace writable roots.
 
 ---
 
@@ -193,7 +191,7 @@ After printing the report, **execute POST_MERGE_WORKFLOW steps 1–8 automatical
 - Pull latest [BASE_BRANCH] and confirm each expected merge SHA
 - Update PROGRESS.md, one entry per PR or an explicit combined batch summary
 - Move task file to done/ only when its batch ledger rows are terminal
-- Write CONTEXT_SNAPSHOT.md
+- Refresh the shared CONTEXT_SNAPSHOT.md header with `bin/rig memory write-snapshot --shared-only`
 - Add inferred ERRORS.md entries (if any)
 - Make housekeeping commit
 - Apply session name — only if user says "use that" or equivalent
@@ -204,6 +202,29 @@ In degraded mode for `not_found` or `ended_record`, continue project-level
 post-merge housekeeping and write `CONTEXT_SNAPSHOT.md`, but do not fabricate a
 session UUID, do not move any session record to `sessions/done/`, and do not
 clear exact-session obligations that require a resolvable active session.
+
+For the snapshot step, write the current shared project state to
+`$RIG_DIR/memory/.snapshot-draft-${SNAP_LOCK_TOKEN}.md`. Keep every
+`## Resuming from` section out of this draft. The writer retains existing task
+handoffs, including those from other active sessions. If Step 3 moved a task to
+`$RIG_DIR/tasks/done/`, inspect the existing snapshot for its exact
+`## Resuming from: <task-slug>` heading. Add a matched `--retire-task <task-slug>
+--done-task-file "$RIG_DIR/tasks/done/<filename>"` pair for that task only.
+The writer verifies the done file, refuses a matching active file, and saves a
+backup before removing the handoff. Leave every other section intact:
+
+```bash
+SNAP_DRAFT="$RIG_DIR/memory/.snapshot-draft-${SNAP_LOCK_TOKEN}.md"
+SNAP_ARGS=(--file "$SNAP_DRAFT" --shared-only --json)
+# Append matched --retire-task TASK --done-task-file FILE pairs for tasks
+# verified as done in Step 3; leave SNAP_ARGS unchanged otherwise.
+"$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || exit 1
+rm -f "$SNAP_DRAFT"
+```
+
+If the writer reports a malformed section, owner conflict or legacy lock,
+preserve the draft and stop before clearing the merge obligation. Do not write
+`CONTEXT_SNAPSHOT.md` directly.
 
 ---
 
@@ -329,7 +350,7 @@ After step 8 ("What's next?"), run all cleanups:
 
 ```bash
 # Release the concurrent session lock
-rm -f "$RIG_DIR/memory/.snapshot-write-in-progress" 2>/dev/null || true
+"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
 
 # The exact merge acknowledgement was recorded in Step 5 before the session
 # record moved to done/.
@@ -340,7 +361,7 @@ with the triggering merge SHA and timestamp, then detected by freshness hooks.
 Saying “skip for current task” leaves the reminder and its merge metadata intact;
 the exact-session acknowledgement confirms `/post-merge` ran successfully for
 that merge SHA. A mismatch leaves the reminder intact. The
-`.snapshot-write-in-progress` lock is cleared to unblock any
+The owner-recorded workflow lock is released to unblock any
 concurrent `/wrap` or `/post-merge` waiting to run.
 
 ---

@@ -4,8 +4,9 @@
 # Handles two Claude Code hook events in one script:
 #
 #   Stop (fires after every agent turn)
-#     1. Updates the date in the "Last updated:" line in CONTEXT_SNAPSHOT.md
-#     2. Appends a session-end comment to PROGRESS.md (used by /wrap for naming)
+#     Appends a session-end comment to PROGRESS.md (used by /wrap for naming).
+#     The snapshot timestamp belongs to the atomic snapshot writer; Stop must
+#     not rewrite a shared snapshot from a stale read.
 #
 #   SessionEnd (fires once when the session truly terminates)
 #     Source values:
@@ -90,7 +91,7 @@ case "$SOURCE" in
 
     write_minimal_checkpoint() {
       [[ ! -d "$RIG_DIR/memory" ]] && return
-      if [[ -f "$SNAP_LOCK" ]]; then
+      if [[ -f "$SNAP_LOCK" || -f "$RIG_DIR/memory/.memory-workflow-in-progress" ]]; then
         echo "[$(date +%H:%M:%S)] SESSION_END: snapshot write in progress — skipping minimal checkpoint" \
           >> "$SESSION_LOG" 2>/dev/null || true
         return
@@ -188,19 +189,6 @@ except Exception:
 
   # ── Stop: per-turn work (source is empty for Stop events) ──────────────────
   *)
-    # Update Last updated: date in CONTEXT_SNAPSHOT
-    if [[ -f "$SNAPSHOT" ]] && grep -q "^\*\*Last updated:\*\*" "$SNAPSHOT" 2>/dev/null; then
-      DESCRIPTION=$(grep "^\*\*Last updated:\*\*" "$SNAPSHOT" \
-        | sed 's/\*\*Last updated:\*\*[^—]*— //')
-      TMP=$(mktemp)
-      awk -v now="$NOW_FULL" -v desc="$DESCRIPTION" -v em="—" '
-        /^\*\*Last updated:\*\*/ { print "**Last updated:** " now " " em " " desc; next }
-        { print }
-      ' "$SNAPSHOT" > "$TMP" && mv "$TMP" "$SNAPSHOT"
-      echo "[$(date +%H:%M:%S)] STOP: updated Last updated: → $NOW_FULL in CONTEXT_SNAPSHOT" \
-        >> "$SESSION_LOG" 2>/dev/null || true
-    fi
-
     # Append session-end marker to PROGRESS.md
     if [[ -f "$PROGRESS" ]]; then
       SESSION_UUID="${RIG_SESSION_ANCHOR:-$(cat "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true)}"

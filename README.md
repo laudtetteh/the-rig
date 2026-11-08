@@ -383,7 +383,7 @@ snapshot — hooks are a safety net, not a replacement.
 | `pre-compact.sh` | `PreCompact` | Writes compact checkpoint + `compactionSummary` before context compaction |
 | `post-compact.sh` | `PostCompact` | Injects checkpoint content as `additionalContext` after compaction |
 | `subagent-start.sh` | `SubagentStart` | Optional with `--subagents`; injects project name, branch, active task, and key conventions into spawned subagents |
-| `stop.sh` | `Stop`, `SessionEnd` | Updates `Last updated:` in `CONTEXT_SNAPSHOT.md`; appends session-end boundary to `PROGRESS.md`; handles session-end checkpoint/flag cases |
+| `stop.sh` | `Stop`, `SessionEnd` | Appends session-end boundary to `PROGRESS.md` and handles session-end checkpoint/flag cases; snapshot timestamps change only when the snapshot writer updates project state |
 
 ### Codex hooks
 
