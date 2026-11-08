@@ -6,6 +6,7 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/session-start.sh" "$CASE_DIR/.claude/hooks/session-start.sh"
+  cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/prompt-submit.sh" "$CASE_DIR/.claude/hooks/prompt-submit.sh"
   chmod +x "$CASE_DIR/bin/rig" "$CASE_DIR/.claude/hooks/session-start.sh"
   git -C "$CASE_DIR" init -q
   git -C "$CASE_DIR" checkout -q -b feat/lineage
@@ -91,6 +92,50 @@ run_start() {
   [[ "$output" == *"$first_anchor"* ]] || return 1
   second_file=$(bind_file "$output")
   SESSION_F="$second_file" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["lineage"]["kind"]=="continuation" and d["names"]["final"] is None'
+}
+
+@test "inherited original launcher path survives complete resume prompt current and name" {
+  mkdir -p "$BATS_TEST_TMPDIR/fakebin"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n%%s\\n" "$RIG_SESSION_FILE" "$RIG_SESSION_ANCHOR"\n' > "$BATS_TEST_TMPDIR/fakebin/claude"
+  chmod +x "$BATS_TEST_TMPDIR/fakebin/claude"
+  run env PATH="$BATS_TEST_TMPDIR/fakebin:$PATH" "$CASE_DIR/bin/rig" claude
+  [ "$status" -eq 0 ]
+  first_file="${lines[0]}"
+  first_anchor="${lines[1]}"
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" RIG_SESSION_PID=4242 \
+    bash -c 'cd "$1" && printf "%s" "$2" | .claude/hooks/session-start.sh' \
+    _ "$CASE_DIR" '{"source":"startup","session_id":"resumed-launch"}'
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" \
+    "$CASE_DIR/bin/rig" session-name set --final --complete 'first wrap'
+  [ "$status" -eq 0 ]
+  [ ! -e "$first_file" ]
+  # Simulate a record completed before the original path was stored explicitly.
+  done_file=$(find "$CASE_DIR/.rig/memory/sessions/done" -name 'session-*.json' -print | head -1)
+  DONE_F="$done_file" ORIGINAL="$first_file" python3 -c 'import json,os; p=os.environ["DONE_F"]; d=json.load(open(p)); assert d["runtime"].pop("completed_from")==os.environ["ORIGINAL"]; json.dump(d,open(p,"w"))'
+
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" RIG_SESSION_PID=4242 \
+    bash -c 'cd "$1" && printf "%s" "$2" | .claude/hooks/session-start.sh' \
+    _ "$CASE_DIR" '{"source":"resume","session_id":"resumed-launch"}'
+  [ "$status" -eq 0 ]
+  run "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id resumed-launch --json
+  [ "$status" -eq 0 ]
+  second_file=$(bind_file "$output")
+  [ "$second_file" != "$first_file" ]
+  [[ "$second_file" != *'/done/'* ]] || return 1
+
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" \
+    bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/prompt-submit.sh' \
+    _ "$CASE_DIR" '{"hook_event_name":"UserPromptSubmit","session_id":"resumed-launch","prompt":"continue"}'
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$second_file"* ]] || return 1
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" \
+    "$CASE_DIR/bin/rig" session-name set --final 'continued work'
+  [ "$status" -eq 0 ]
+  SESSION_F="$second_file" FIRST_ANCHOR="$first_anchor" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["names"]["final"]=="continued work" and d["lineage"]["parent_anchor"]==os.environ["FIRST_ANCHOR"]'
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -maxdepth 1 -name 'session-*.json' | wc -l | tr -d ' ')" -eq 1 ]
 }
 
 @test "public title ingestion preserves multiline metacharacters as data" {

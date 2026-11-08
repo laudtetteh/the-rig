@@ -621,7 +621,7 @@ common = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"])
 if common is not None and common.returncode == 0:
     primary = pathlib.Path(common.stdout.strip()).parent
     if primary != root and (primary / ".rigpath").exists():
-        required = [".rigpath", "CLAUDE.md", "bin/rig", ".claude"]
+        required = [".rigpath", "CLAUDE.md", "bin/rig", "bin/rig-session-resolve.py", ".claude"]
         missing = [p for p in required if not (root / p).exists()]
         recovery = f"cd {shlex.quote(str(root))} && {shlex.quote(str(primary / 'bin/rig'))} worktree bootstrap"
         check("worktree_bootstrap", not missing, "complete" if not missing else "missing: " + ", ".join(missing) + "; recover: " + recovery)
@@ -1292,6 +1292,18 @@ def read(p):
     try:
         d=json.loads(p.read_text()); return d if isinstance(d,dict) else None
     except (OSError,ValueError,TypeError): return None
+def original_active_path(d):
+    recorded=(d.get("runtime") or {}).get("completed_from")
+    if recorded:
+        if not isinstance(recorded,str): return None
+        return confined_session_path(recorded)
+    # Records completed before completed_from was recorded can still prove the
+    # launcher's original filename from the legacy launcher record it migrated.
+    legacy_pid=(d.get("migration") or {}).get("legacy_pid")
+    anchor=d.get("anchor")
+    if (d.get("native") or {}).get("source")=="launcher_hint" and str(legacy_pid).isdigit() and isinstance(anchor,str):
+        return confined_session_path(str(sessions/("session-"+str(legacy_pid)+"-"+anchor+".json")))
+    return None
 hint=os.environ.get("RIG_SESSION_FILE","")
 hint_path=confined_session_path(hint) if hint else None
 if hint and hint_path is None:
@@ -1316,34 +1328,39 @@ matches=[(p,d) for p,d in records if d.get("schema_version")==1 and d.get("proje
 continuation_from_ended=False
 if len(matches)>1:
     active_matches=[(p,d) for p,d in matches if "done" not in p.parts and d.get("lifecycle",{}).get("state")!="complete"]
-    if len(active_matches)==1:
-        matches=active_matches
-    elif not active_matches and allow_continuation:
-        by_anchor={d.get("anchor"):(p,d) for p,d in matches}
-        if not all(by_anchor) or len(by_anchor)!=len(matches):
-            print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
-        roots=[d for _,d in matches if not (d.get("lineage") or {}).get("parent_anchor")]
-        parents={(d.get("lineage") or {}).get("parent_anchor") for _,d in matches}
-        leaves=[(p,d) for p,d in matches if d.get("anchor") not in parents]
-        if len(roots)!=1 or len(leaves)!=1 or any((d.get("lineage") or {}).get("parent_anchor") not in by_anchor or (d.get("lineage") or {}).get("kind")!="continuation" for _,d in matches if (d.get("lineage") or {}).get("parent_anchor")):
-            print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
-        seen=set(); cursor=leaves[0][1]
-        while cursor and cursor.get("anchor") not in seen:
-            seen.add(cursor.get("anchor")); parent_anchor=(cursor.get("lineage") or {}).get("parent_anchor")
-            cursor=by_anchor[parent_anchor][1] if parent_anchor else None
-        if len(seen)!=len(matches):
-            print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
-        matches=leaves
-    else:
+    by_anchor={d.get("anchor"):(p,d) for p,d in matches}
+    if len(active_matches)>1 or not all(by_anchor) or len(by_anchor)!=len(matches):
         print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
+    roots=[d for _,d in matches if not (d.get("lineage") or {}).get("parent_anchor")]
+    parents={(d.get("lineage") or {}).get("parent_anchor") for _,d in matches}
+    leaves=[(p,d) for p,d in matches if d.get("anchor") not in parents]
+    if len(roots)!=1 or len(leaves)!=1 or (active_matches and leaves[0][0]!=active_matches[0][0]) or any((d.get("lineage") or {}).get("parent_anchor") not in by_anchor or (d.get("lineage") or {}).get("kind")!="continuation" for _,d in matches if (d.get("lineage") or {}).get("parent_anchor")):
+        print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
+    seen=set(); cursor=leaves[0][1]
+    while cursor and cursor.get("anchor") not in seen:
+        seen.add(cursor.get("anchor")); parent_anchor=(cursor.get("lineage") or {}).get("parent_anchor")
+        cursor=by_anchor[parent_anchor][1] if parent_anchor else None
+    if len(seen)!=len(matches):
+        print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
+lineage_records=matches[:]
+if len(matches)>1:
+    matches=leaves
+cross_project=[d for _,d in records if d.get("schema_version")==1 and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id and d.get("project",{}).get("identity")!=project_id]
+if cross_project:
+    print(json.dumps({"ok":False,"reason":"cross_project"})); raise SystemExit(3)
+if hint_path and matches:
+    expected_anchor=os.environ.get("RIG_SESSION_ANCHOR")
+    hint_records=[(p,d) for p,d in lineage_records if hint_path==p.resolve() or (d.get("lifecycle",{}).get("state")=="complete" and hint_path==original_active_path(d))]
+    all_hint_records=[(p,d) for p,d in records if hint_path==p.resolve() or (d.get("lifecycle",{}).get("state")=="complete" and hint_path==original_active_path(d))]
+    if len(all_hint_records)>1:
+        print(json.dumps({"ok":False,"reason":"duplicate_launcher_origin"})); raise SystemExit(2)
+    if len(hint_records)!=1 or (expected_anchor is not None and expected_anchor!=hint_records[0][1].get("anchor")) or (not hint_path.exists() and expected_anchor is None):
+        print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
 if matches:
     p,d=matches[0]
     if "done" in p.parts or d.get("lifecycle",{}).get("state")=="complete":
         if not allow_continuation:
             print(json.dumps({"ok":False,"reason":"ended_record"})); raise SystemExit(3)
-        prior_paths={record_path.resolve() for record_path,record in records if record.get("schema_version")==1 and record.get("project",{}).get("identity")==project_id and record.get("agent")==agent and record.get("native",{}).get("session_id")==native_id}
-        if hint_path and hint_path not in prior_paths:
-            print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
         ended_path, ended_record = p, d
         continuation_from_ended=True
         if not parent:
@@ -1355,9 +1372,9 @@ if matches:
         hint = ""
     elif d.get("lifecycle",{}).get("state") in ("conflict","superseded","repair_pending"):
         print(json.dumps({"ok":False,"reason":"invalid_lifecycle_transition"})); raise SystemExit(3)
-    elif hint_path and hint_path!=p.resolve():
-        print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
 if not matches:
+    if hint_path and not hint_path.exists() and not continuation_from_ended:
+        print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
     cross=[d for _,d in records if d.get("schema_version")==1 and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id]
     cross_project=[d for d in cross if d.get("project",{}).get("identity")!=project_id]
     if cross_project:
@@ -1366,6 +1383,8 @@ if not matches:
         print(json.dumps({"ok":False,"reason":"cross_project"})); raise SystemExit(3)
     p=hint_path
     d=read(p) if p else None
+    if d and "RIG_SESSION_ANCHOR" in os.environ and d.get("anchor")!=os.environ["RIG_SESSION_ANCHOR"]:
+        print(json.dumps({"ok":False,"reason":"launcher_anchor_conflict"})); raise SystemExit(3)
     if d and d.get("schema_version")==1 and d.get("native",{}).get("session_id") not in (None,""):
         print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
     if d and d.get("agent") not in (None,agent):
@@ -1759,7 +1778,9 @@ if d.get("schema_version") == 1:
     else: names["final"] = os.environ["SESSION_NAME"]; names["tentative"] = None
     names["display_title"] = os.environ["SESSION_NAME"]
     names["native_sync"] = "in-sync" if names.get("native_title") == os.environ["SESSION_NAME"] else "suggested"
-    if os.environ["SESSION_COMPLETE"] == "true": d["lifecycle"]["state"] = "complete"
+    if os.environ["SESSION_COMPLETE"] == "true":
+        d["lifecycle"]["state"] = "complete"
+        d.setdefault("runtime", {})["completed_from"] = str(p.resolve())
     d["revision"] = int(d.get("revision", 0)) + 1
 else:
     if os.environ["SESSION_TENTATIVE"] == "true": d["tentative_name"] = os.environ["SESSION_NAME"]
