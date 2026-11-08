@@ -439,8 +439,8 @@ git commit
      │
      ├─► commit-msg
      │     Apply filter-commit-message-inplace.sh to message file
-     │     Strips: Co-authored-by, Signed-off-by, Made-with trailers
-     │     Strips: "Generated with Claude/Cursor/Copilot" footer lines
+     │     Strips: known AI Co-authored-by and tool-generated footer lines
+     │     Preserves: human Co-authored-by and Signed-off-by trailers
      │     Validates Conventional Commits subject-line format
      │       (type(scope): description — skips Merge/Revert/fixup/squash)
      │     Requires tracker-specific issue reference when issue-tracking: is set:
@@ -454,8 +454,9 @@ git commit
      │
      └─► post-commit
            Re-read committed message
-           Re-apply filter (catches clients that re-inject after commit-msg)
-           Amend in-place only if message changed (cmp -s check)
+           Detect late AI footers (clients may inject after commit-msg)
+           Warn without changing the SHA; optional amend for unsigned commits
+             with RIG_POST_COMMIT_AUTO_AMEND=1
 ```
 
 ---

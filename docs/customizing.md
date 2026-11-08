@@ -334,7 +334,7 @@ wire them directly:
 cp .husky/pre-commit .git/hooks/pre-commit
 cp .husky/commit-msg .git/hooks/commit-msg
 cp .husky/post-commit .git/hooks/post-commit
-cp .husky/filter-commit-message-inplace.sh .husky/
+cp .husky/filter-commit-message-inplace.sh .git/hooks/filter-commit-message-inplace.sh
 
 # Set executable bits
 chmod +x .git/hooks/pre-commit .git/hooks/commit-msg .git/hooks/post-commit
@@ -344,6 +344,12 @@ The `.git/hooks/` approach works for any project regardless of language. The dow
 hooks in `.git/hooks/` are not committed to the repo, so teammates must set them up
 manually. Husky solves this by checking in hooks to `.husky/` and auto-installing them
 via `prepare` script in `package.json`.
+
+The `commit-msg` hook requires the filter beside it (or in `.husky/`) and refuses a
+commit if the filter is missing. Human attribution trailers are preserved. If a
+client adds an AI footer after `commit-msg`, `post-commit` reports it without changing
+the commit SHA. Set `RIG_POST_COMMIT_AUTO_AMEND=1` to opt into amending unsigned
+commits automatically; signed commits are never amended by this hook.
 
 ---
 
