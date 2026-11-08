@@ -31,7 +31,7 @@ candidate() {
   snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
   grep -Fq '## Resuming from: task-a' "$snapshot"
   grep -Fq '## Resuming from: task-b' "$snapshot"
-  [ "$(rg -c '^## Resuming from:' "$snapshot")" -eq 2 ]
+  [ "$(grep -c '^## Resuming from:' "$snapshot")" -eq 2 ]
 }
 
 @test "another session cannot overwrite an owned task handoff" {
@@ -120,7 +120,7 @@ candidate() {
   ' _ "$file_a" "$file_b" "$rig" "$BATS_TEST_TMPDIR/a.md" "$BATS_TEST_TMPDIR/b.md"
   [ "$status" -eq 0 ]
   snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
-  [ "$(rg -c '^## Resuming from:' "$snapshot")" -eq 2 ]
+  [ "$(grep -c '^## Resuming from:' "$snapshot")" -eq 2 ]
 }
 
 @test "external stealth storage preserves Claude and Codex handoffs in a dirty checkout" {
@@ -139,7 +139,7 @@ candidate() {
   [ "$status" -eq 0 ]
   [ ! -e "$CASE_DIR/.rig" ]
   [ -f "$CASE_DIR/dirty.txt" ]
-  [ "$(rg -c '^## Resuming from:' "$external/memory/CONTEXT_SNAPSHOT.md")" -eq 2 ]
+  [ "$(grep -c '^## Resuming from:' "$external/memory/CONTEXT_SNAPSHOT.md")" -eq 2 ]
 }
 
 @test "stealth installer ships and manifests the snapshot helper" {
