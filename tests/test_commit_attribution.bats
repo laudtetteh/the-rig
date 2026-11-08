@@ -27,13 +27,13 @@ install_hook_layout() {
 assert_precise_commit_message() {
   local message
   message="$(git -C "$TEST_PROJECT" log -1 --format=%B)"
-  [[ "$message" == *"Co-authored-by: Jane Doe <jane@example.com>"* ]]
-  [[ "$message" == *"Signed-off-by: Jane Doe <jane@example.com>"* ]]
-  [[ "$message" == *"Co-authored-by: Claude <claude@example.com>"* ]]
-  [[ "$message" != *"noreply@anthropic.com"* ]]
-  [[ "$message" != *"noreply@openai.com"* ]]
-  [[ "$message" != *"Generated with"* ]]
-  [[ "$message" != *"Made-with-Claude"* ]]
+  [[ "$message" == *"Co-authored-by: Jane Doe <jane@example.com>"* ]] || return 1
+  [[ "$message" == *"Signed-off-by: Jane Doe <jane@example.com>"* ]] || return 1
+  [[ "$message" == *"Co-authored-by: Claude <claude@example.com>"* ]] || return 1
+  [[ "$message" != *"noreply@anthropic.com"* ]] || return 1
+  [[ "$message" != *"noreply@openai.com"* ]] || return 1
+  [[ "$message" != *"Generated with"* ]] || return 1
+  [[ "$message" != *"Made-with-Claude"* ]] || return 1
 }
 
 commit_with_mixed_trailers() {
@@ -69,7 +69,7 @@ Made-with-Claude: yes'
   printf 'fix: example [#589]\n\nCo-authored-by: Jane <jane@example.com>\n' > "$message_file"
   run sh "$TEST_PROJECT/.git/hooks/commit-msg" "$message_file"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"filter is missing"* ]]
+  [[ "$output" == *"filter is missing"* ]] || return 1
   grep -q 'Co-authored-by: Jane' "$message_file"
 }
 
@@ -80,7 +80,7 @@ Made-with-Claude: yes'
   before="$(git -C "$TEST_PROJECT" rev-parse HEAD)"
   run bash -c 'cd "$1" && .git/hooks/post-commit' _ "$TEST_PROJECT"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"late AI footer"* ]]
+  [[ "$output" == *"late AI footer"* ]] || return 1
   [ "$(git -C "$TEST_PROJECT" rev-parse HEAD)" = "$before" ]
 
   before_tree="$(git -C "$TEST_PROJECT" rev-parse HEAD^{tree})"
@@ -92,7 +92,7 @@ Made-with-Claude: yes'
   [ "$(git -C "$TEST_PROJECT" rev-parse HEAD^{tree})" = "$before_tree" ]
   [ "$(git -C "$TEST_PROJECT" diff --cached --name-only)" = unrelated.txt ]
   message="$(git -C "$TEST_PROJECT" log -1 --format=%B)"
-  [[ "$message" != *"Generated with Codex"* ]]
+  [[ "$message" != *"Generated with Codex"* ]] || return 1
 }
 
 @test "post-commit leaves a signed commit untouched even with amend opt-in" {
@@ -107,7 +107,7 @@ Made-with-Claude: yes'
 
   run env RIG_POST_COMMIT_AUTO_AMEND=1 bash -c 'cd "$1" && .git/hooks/post-commit' _ "$TEST_PROJECT"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"signed commit"* ]]
+  [[ "$output" == *"signed commit"* ]] || return 1
   [ "$(git -C "$TEST_PROJECT" rev-parse HEAD)" = "$signed" ]
 }
 
