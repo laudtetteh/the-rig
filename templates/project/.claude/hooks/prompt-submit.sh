@@ -60,7 +60,7 @@ except (ValueError,TypeError,AttributeError):
         BIND_ARGS=(session bind --agent "$PROMPT_AGENT" --native-session-id "$PROMPT_NATIVE_ID" --source prompt_resume --json)
         [[ "$RESOLVE_REASON" == ended_record ]] && BIND_ARGS+=(--allow-continuation)
         BIND_STATUS=0
-        BOUND=$(env -u RIG_SESSION_FILE -u RIG_SESSION_ANCHOR "$REPO/bin/rig" "${BIND_ARGS[@]}") || BIND_STATUS=$?
+        BOUND=$("$REPO/bin/rig" "${BIND_ARGS[@]}") || BIND_STATUS=$?
         if [[ "$BIND_STATUS" -ne 0 ]]; then
           WARNINGS="Rig could not attach this $PROMPT_AGENT session ($RESOLVE_REASON); run session doctor before naming or wrapping it."
         fi

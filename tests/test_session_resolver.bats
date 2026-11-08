@@ -340,6 +340,75 @@ json.dump({
   [[ "$output" == *"$first_anchor"* ]] || return 1
 }
 
+@test "prompt-only resume honors the inherited original launcher identity" {
+  first=$("$CASE_DIR/bin/rig" session bind --agent claude --native-session-id prompt-launch --source startup)
+  first_file=$(printf '%s' "$first" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  first_anchor=$(printf '%s' "$first" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" \
+    "$CASE_DIR/bin/rig" session-name set --final --complete 'first wrap'
+  [ "$status" -eq 0 ]
+  [ ! -e "$first_file" ]
+
+  stale="$CASE_DIR/.rig/memory/sessions/session-unrelated.json"
+  run env RIG_SESSION_FILE="$stale" RIG_SESSION_ANCHOR="$first_anchor" \
+    "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id prompt-launch --source prompt_resume --allow-continuation
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "native_conflict"'* ]] || return 1
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR=wrong-anchor \
+    "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id prompt-launch --source prompt_resume --allow-continuation
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "native_conflict"'* ]] || return 1
+
+  payload='{"hook_event_name":"UserPromptSubmit","session_id":"prompt-launch","prompt":"continue"}'
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" \
+    bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/prompt-submit.sh' _ "$CASE_DIR" "$payload"
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"reason": "launcher_continuation"'* ]] || return 1
+  run env RIG_SESSION_FILE="$stale" RIG_SESSION_ANCHOR="$first_anchor" "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "invalid_launcher_file"'* ]] || return 1
+  run env -u RIG_SESSION_ANCHOR RIG_SESSION_FILE="$first_file" "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "invalid_launcher_file"'* ]] || return 1
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" CLAUDE_CODE_SESSION_ID=other-native \
+    "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "native_conflict"'* ]] || return 1
+
+  done_file=$(find "$CASE_DIR/.rig/memory/sessions/done" -name 'session-*.json' -print | head -1)
+  DONE_F="$done_file" python3 -c 'import json,os; p=os.environ["DONE_F"]; d=json.load(open(p)); d["project"]["identity"]="foreign-project"; json.dump(d,open(p,"w"))'
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "cross_project"'* ]] || return 1
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" \
+    "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id prompt-launch --source prompt_resume --allow-continuation
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason": "cross_project"'* ]] || return 1
+}
+
+@test "duplicate completed origins cannot redirect an inherited launcher hint" {
+  first=$("$CASE_DIR/bin/rig" session bind --agent claude --native-session-id origin-one --source startup)
+  first_file=$(printf '%s' "$first" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  first_anchor=$(printf '%s' "$first" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  run env RIG_SESSION_FILE="$first_file" "$CASE_DIR/bin/rig" session-name set --final --complete 'first wrap'
+  [ "$status" -eq 0 ]
+  done_file=$(find "$CASE_DIR/.rig/memory/sessions/done" -name 'session-*.json' -print | head -1)
+  duplicate="$CASE_DIR/.rig/memory/sessions/done/session-duplicate.json"
+  cp "$done_file" "$duplicate"
+  DUPLICATE="$duplicate" python3 -c 'import json,os; p=os.environ["DUPLICATE"]; d=json.load(open(p)); d["anchor"]="other-anchor"; d["native"]["session_id"]="origin-two"; json.dump(d,open(p,"w"))'
+
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" \
+    "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id origin-one --source resume --allow-continuation
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'"reason": "duplicate_launcher_origin"'* ]] || return 1
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'"reason": "duplicate_launcher_origin"'* ]] || return 1
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -maxdepth 1 -name 'session-*.json' | wc -l | tr -d ' ')" -eq 0 ]
+}
+
 @test "ended-record continuation refuses same native id bound to another project" {
   write_native_session "$CASE_DIR/.rig/memory/sessions/done/session-ended.json" ended-anchor shared-native complete codex
   write_native_session "$CASE_DIR/.rig/memory/sessions/session-foreign-active.json" foreign-anchor shared-native active codex

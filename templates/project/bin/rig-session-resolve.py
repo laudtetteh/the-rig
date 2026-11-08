@@ -55,6 +55,18 @@ def load(path):
         if not isinstance(data, dict): return None
         return data
     except (OSError, ValueError, TypeError): return None
+def original_active_path(data):
+    recorded = (data.get("runtime") or {}).get("completed_from")
+    if recorded:
+        if not isinstance(recorded, str):
+            return None
+        return confined_session_path(recorded)
+    # Older launcher-bound records retained their initial PID and anchor.
+    legacy_pid = (data.get("migration") or {}).get("legacy_pid")
+    anchor = data.get("anchor")
+    if (data.get("native") or {}).get("source") == "launcher_hint" and str(legacy_pid).isdigit() and isinstance(anchor, str):
+        return confined_session_path(str(session_dir / ("session-" + str(legacy_pid) + "-" + anchor + ".json")))
+    return None
 def emit(path, data, confidence, reason):
     lifecycle = data.get("lifecycle", {}) if data else {}
     public_lineage = dict(data.get("lineage") or {}) if data else None
@@ -153,12 +165,56 @@ if "RIG_SESSION_FILE" in os.environ:
         expected_anchor = os.environ.get("RIG_SESSION_ANCHOR")
         if expected_anchor is not None and expected_anchor != d.get("anchor"):
             emit(None, None, "none", "launcher_anchor_conflict"); raise SystemExit(3)
+        if d.get("schema_version") == 1 and d.get("project", {}).get("identity") != project_id:
+            emit(None, None, "none", "cross_project"); raise SystemExit(3)
         native_agent = "codex" if os.environ.get("CODEX_THREAD_ID") else "claude" if os.environ.get("CLAUDE_CODE_SESSION_ID") else None
         native_env_id = os.environ.get("CODEX_THREAD_ID") or os.environ.get("CLAUDE_CODE_SESSION_ID")
         if native_agent and (d.get("schema_version") != 1 or d.get("project", {}).get("identity") != project_id or
                              d.get("agent") != native_agent or d.get("native", {}).get("session_id") != native_env_id):
             emit(None, None, "none", "native_conflict"); raise SystemExit(3)
         emit(p, d, "exact", "launcher_file"); raise SystemExit(0)
+    # The launcher keeps exporting its original path after --complete moves
+    # that record into done/. Accept that missing path only when its recorded
+    # origin and anchor identify one completed record and a unique active leaf.
+    expected_anchor = os.environ.get("RIG_SESSION_ANCHOR")
+    if p and not p.exists() and expected_anchor:
+        if unsafe_path: emit(None, None, "none", "invalid_session_path"); raise SystemExit(4)
+        if unsupported: emit(None, None, "none", "unsupported_schema"); raise SystemExit(4)
+        if malformed: emit(None, None, "none", "malformed_record"); raise SystemExit(4)
+        origins = [(q, record) for q, record in records if record.get("schema_version") == 1 and
+                   "done" in q.parts and
+                   record.get("lifecycle", {}).get("state") == "complete" and
+                   original_active_path(record) == p]
+        if len(origins) > 1:
+            emit(None, None, "ambiguous", "duplicate_launcher_origin"); raise SystemExit(2)
+        if origins:
+            _, origin = origins[0]
+            if origin.get("anchor") != expected_anchor:
+                emit(None, None, "none", "launcher_anchor_conflict"); raise SystemExit(3)
+            if origin.get("project", {}).get("identity") != project_id:
+                emit(None, None, "none", "cross_project"); raise SystemExit(3)
+            origin_agent = origin.get("agent")
+            origin_native_id = origin.get("native", {}).get("session_id")
+            if not origin_native_id or origin_agent not in ("claude", "codex"):
+                emit(None, None, "none", "invalid_launcher_file"); raise SystemExit(3)
+            native_env_signals = [("codex", os.environ.get("CODEX_THREAD_ID")),
+                                  ("claude", os.environ.get("CLAUDE_CODE_SESSION_ID"))]
+            if any(value and (env_agent != origin_agent or value != origin_native_id)
+                   for env_agent, value in native_env_signals):
+                emit(None, None, "none", "native_conflict"); raise SystemExit(3)
+            same_native = [(q, record) for q, record in records if record.get("schema_version") == 1 and
+                           record.get("agent") == origin_agent and record.get("native", {}).get("session_id") == origin_native_id]
+            if any(record.get("project", {}).get("identity") != project_id for _, record in same_native):
+                emit(None, None, "none", "cross_project"); raise SystemExit(3)
+            selected = select_unique_match(same_native)
+            if not selected:
+                emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
+            active_path, active_record = selected
+            if "done" in active_path.parts or active_record.get("lifecycle", {}).get("state") == "complete":
+                emit(None, None, "none", "ended_record"); raise SystemExit(3)
+            if active_record.get("lifecycle", {}).get("state") != "active":
+                emit(None, None, "none", "invalid_lifecycle_transition"); raise SystemExit(3)
+            emit(active_path, active_record, "exact", "launcher_continuation"); raise SystemExit(0)
     emit(None, None, "none", "invalid_launcher_file"); raise SystemExit(3)
 # Claude Code and Codex both expose native session identity through process
 # environment variables, and every subprocess they spawn (hooks, and every
