@@ -52,6 +52,49 @@ Made-with-Claude: yes'
   assert_precise_commit_message
 }
 
+commit_with_model_and_copilot_trailers() {
+  local layout="$1" hook_dir sha_at_post_commit message
+  if [ "$layout" = native ]; then
+    hook_dir="$TEST_PROJECT/.git/hooks"
+  else
+    hook_dir="$TEST_PROJECT/.husky"
+  fi
+
+  # Observe HEAD before the real post-commit hook can amend it.
+  mv "$hook_dir/post-commit" "$hook_dir/post-commit-real"
+  cat > "$hook_dir/post-commit" <<'EOF'
+#!/bin/sh
+git rev-parse HEAD > "$ATTRIBUTION_TEST_SHA_FILE"
+"$(dirname "$0")/post-commit-real"
+EOF
+  chmod +x "$hook_dir/post-commit"
+  sha_at_post_commit="$BATS_TEST_TMPDIR/sha-at-post-commit"
+
+  run env SKIP_COMMIT_VALIDATION=1 RIG_POST_COMMIT_AUTO_AMEND=1 \
+    ATTRIBUTION_TEST_SHA_FILE="$sha_at_post_commit" \
+    git -C "$TEST_PROJECT" commit --allow-empty \
+    -m 'fix(hooks): model attribution test [#589]' \
+    -m 'Co-authored-by: Jane Doe <jane@example.com>
+Signed-off-by: Jane Doe <jane@example.com>
+Co-authored-by: Claude <claude@example.com>
+Co-authored-by: Claude Sonnet 4.6 <claude@example.com>
+Co-authored-by: Copilot <human@example.com>
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Co-authored-by: Copilot copilot@github.com'
+  [ "$status" -eq 0 ]
+  [ -s "$sha_at_post_commit" ]
+  [ "$(cat "$sha_at_post_commit")" = "$(git -C "$TEST_PROJECT" rev-parse HEAD)" ]
+
+  message="$(git -C "$TEST_PROJECT" log -1 --format=%B)"
+  [[ "$message" == *"Co-authored-by: Jane Doe <jane@example.com>"* ]] || return 1
+  [[ "$message" == *"Signed-off-by: Jane Doe <jane@example.com>"* ]] || return 1
+  [[ "$message" == *"Co-authored-by: Claude <claude@example.com>"* ]] || return 1
+  [[ "$message" == *"Co-authored-by: Claude Sonnet 4.6 <claude@example.com>"* ]] || return 1
+  [[ "$message" == *"Co-authored-by: Copilot <human@example.com>"* ]] || return 1
+  [[ "$message" != *"noreply@anthropic.com"* ]] || return 1
+  [[ "$message" != *"copilot@github.com"* ]] || return 1
+}
+
 @test "native hooks preserve human attribution and remove Claude and Codex footers" {
   install_hook_layout native
   commit_with_mixed_trailers
@@ -60,6 +103,16 @@ Made-with-Claude: yes'
 @test "Husky hooks preserve human attribution and remove Claude and Codex footers" {
   install_hook_layout husky
   commit_with_mixed_trailers
+}
+
+@test "native hooks remove Claude Sonnet and Copilot identities without amending" {
+  install_hook_layout native
+  commit_with_model_and_copilot_trailers native
+}
+
+@test "Husky hooks remove Claude Sonnet and Copilot identities without amending" {
+  install_hook_layout husky
+  commit_with_model_and_copilot_trailers husky
 }
 
 @test "commit-msg refuses a missing filter without stripping human trailers" {
