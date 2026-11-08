@@ -335,6 +335,18 @@ that knows the thread ID can recover explicitly with
 `bin/rig session retrofit --agent codex --native-session-id <thread-id> --source resume --json`.
 Subsequent shell calls must pass the same exact hint, for example
 `bin/rig session current --agent codex --native-session-id <thread-id> --json`.
+For commands such as `session-name set` and the snapshot writer that do not
+accept an explicit native ID, carry both `session_file` and `anchor` from that
+same retrofit JSON result into the command environment:
+
+```bash
+RIG_SESSION_FILE='<session_file from retrofit JSON>' \
+RIG_SESSION_ANCHOR='<anchor from retrofit JSON>' \
+  bin/rig session-name set --final --complete 'Final session name'
+```
+
+Pass both values again in each separate tool-call shell. An explicit retrofit
+refuses an ID that conflicts with a native provider ID already in the shell.
 Automatic recovery on app-server reattach remains unverified.
 
 The name writer rechecks anchor, project identity, provider, native ID and
