@@ -621,7 +621,7 @@ common = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"])
 if common is not None and common.returncode == 0:
     primary = pathlib.Path(common.stdout.strip()).parent
     if primary != root and (primary / ".rigpath").exists():
-        required = [".rigpath", "CLAUDE.md", "bin/rig", "bin/rig-session-resolve.py", ".claude"]
+        required = [".rigpath", "CLAUDE.md", "bin/rig", "bin/rig-session-resolve.py", "bin/rig-snapshot.py", ".claude"]
         missing = [p for p in required if not (root / p).exists()]
         recovery = f"cd {shlex.quote(str(root))} && {shlex.quote(str(primary / 'bin/rig'))} worktree bootstrap"
         check("worktree_bootstrap", not missing, "complete" if not missing else "missing: " + ", ".join(missing) + "; recover: " + recovery)
