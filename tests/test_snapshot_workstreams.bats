@@ -159,6 +159,24 @@ candidate() {
   [ -f "$installed/bin/rig-snapshot.py" ]
 }
 
+@test "in-repo snapshot runtime files leave a clean checkout" {
+  cp "$BATS_TEST_DIRNAME/../templates/project/.rig/memory/.gitignore" "$CASE_DIR/.rig/memory/.gitignore"
+  git -C "$CASE_DIR" add -A
+  git -C "$CASE_DIR" -c user.name=Test -c user.email=test@example.com commit -q -m baseline
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  printf '# Old view\n\n## Resuming from: legacy-task\n\nKeep me.\n' > "$snapshot"
+  draft="$CASE_DIR/.rig/memory/.snapshot-draft-test.md"
+  printf '# New view\n' > "$draft"
+  run "$rig" memory write-snapshot --file "$draft" --shared-only --json
+  [ "$status" -eq 0 ]
+  run "$rig" memory workflow-lock acquire --owner-anchor test --json
+  [ "$status" -eq 0 ]
+  for runtime in .snapshot-write.lock .memory-workflow-gate.lock .memory-workflow-in-progress .snapshot-draft-test.md snapshot-backups/old.md workflow-lock-archive/old.json; do
+    git -C "$CASE_DIR" check-ignore -q ".rig/memory/$runtime" || return 1
+  done
+  [ -z "$(git -C "$CASE_DIR" status --porcelain)" ]
+}
+
 @test "workflow lock records its owner and refuses another live owner" {
   anchor=$(printf '%s' "$a" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
   run "$rig" memory workflow-lock acquire --owner-anchor "$anchor" --provider-pid "$$" --json
