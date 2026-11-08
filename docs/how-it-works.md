@@ -322,6 +322,13 @@ payload. If that hook cannot attach, `rig session current --json` reports a
 retrofit command when a native ID environment variable is available. Resolution
 never picks a session from branch name or recent activity alone.
 
+Attaching from a hook event does not export that ID to later tool-call shells.
+When a client supplies neither a native ID environment variable nor a launcher
+hint to those shells, a standalone `rig session current` remains unresolved.
+The hook event can still create the exact record; a later caller must supply
+exact identity before naming or completing it. This client behavior requires a
+live app-server reattach check before claiming automatic recovery end to end.
+
 The name writer rechecks anchor, project identity, provider, native ID and
 active state after locking the record. Legacy PID records remain readable; a
 legacy name write requires an exact launcher file or anchor. `session doctor`
