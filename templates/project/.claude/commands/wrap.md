@@ -79,8 +79,9 @@ printf 'Rig workflow lock acquired: %s\n' "$SNAP_LOCK_JSON"
 ```
 
 The lock reports the current owner anchor, PID, and age if another workflow is
-active. A dead provider PID or a lock older than 30 minutes is archived and
-recovered on the next acquire. Never remove another session's lock by hand as
+active. A dead provider PID is archived and recovered on the next acquire;
+the 30-minute age fallback applies only when no live provider PID is available.
+Never remove another session's lock by hand as
 part of this command. Keep the exact `token` from the acquire output in your
 working context and reassign `SNAP_LOCK_TOKEN` from that value in later tool-call
 shells; shell variables do not persist between tool calls. Never recover a token

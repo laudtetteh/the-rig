@@ -186,6 +186,29 @@ candidate() {
   [ "$(find "$CASE_DIR/.rig/memory/workflow-lock-archive" -type f -name '*.json' | wc -l | tr -d ' ')" -eq 1 ]
 }
 
+@test "workflow lock keeps a live provider owner beyond the age fallback" {
+  run "$rig" memory workflow-lock acquire --owner-anchor live --provider-pid "$$" --json
+  [ "$status" -eq 0 ]
+  token=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  lock="$CASE_DIR/.rig/memory/.memory-workflow-in-progress"
+  LOCK_F="$lock" python3 -c 'import json,os,time; p=os.environ["LOCK_F"]; d=json.load(open(p)); d["started_epoch"]=time.time()-4000; open(p,"w").write(json.dumps(d))'
+  run "$rig" memory workflow-lock acquire --owner-anchor other --json
+  [ "$status" -eq 3 ]
+  OUTPUT="$output" python3 -c 'import json,os; d=json.loads(os.environ["OUTPUT"]); assert d["reason"]=="workflow_busy" and d["owner_anchor"]=="live"'
+  run "$rig" memory workflow-lock release --token "$token" --json
+  [ "$status" -eq 0 ]
+}
+
+@test "workflow lock uses age fallback when provider PID is unavailable" {
+  run "$rig" memory workflow-lock acquire --owner-anchor old-tool --json
+  [ "$status" -eq 0 ]
+  lock="$CASE_DIR/.rig/memory/.memory-workflow-in-progress"
+  LOCK_F="$lock" python3 -c 'import json,os,time; p=os.environ["LOCK_F"]; d=json.load(open(p)); d["started_epoch"]=time.time()-4000; open(p,"w").write(json.dumps(d))'
+  run "$rig" memory workflow-lock acquire --owner-anchor new-tool --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"recovered_stale":true'* ]] || return 1
+}
+
 @test "a crashed short snapshot marker is recovered without losing the old view" {
   snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
   printf '# Old context\n' > "$snapshot"

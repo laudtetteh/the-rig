@@ -367,14 +367,17 @@ def workflow_lock_main(argv):
                 age = max(0, int(datetime.datetime.now().timestamp() - state["started_epoch"]))
                 pid = state.get("pid")
                 dead = False
-                if state.get("pid_source") == "provider" and isinstance(pid, int) and pid > 0:
+                provider_pid = state.get("pid_source") == "provider" and isinstance(pid, int) and pid > 0
+                if provider_pid:
                     try:
                         os.kill(pid, 0)
                     except ProcessLookupError:
                         dead = True
                     except PermissionError:
                         pass
-                if not dead and age <= 1800:
+                # A live provider may legitimately run for hours. The age
+                # fallback applies only when no provider PID can be checked.
+                if not dead and (provider_pid or age <= 1800):
                     fail("workflow_busy", owner_anchor=state.get("owner_anchor"), pid=pid, age_seconds=age)
                 archive = memory / "workflow-lock-archive"
                 if archive.is_symlink():
