@@ -90,7 +90,8 @@ sha256_file() {
 # strategy applies manifest-aware logic uniformly. is_rig_owned() is used for
 # messaging/warning decisions only, not as a skip gate.
 #
-# Rig-owned:   bin/rig, .claude/hooks/, .claude/commands/, .agents/skills/,
+# Rig-owned:   bin/rig, bin/rig-session-resolve.py, .claude/hooks/,
+#              .claude/commands/, .agents/skills/,
 #              .codex/hooks.json, .codex/hooks/, .rig/processes/,
 #              .rig/rules/protected-paths.txt, .husky/, .gitleaks.toml,
 #              .git/hooks/ (stealth-mode installed hook scripts only)
@@ -100,7 +101,7 @@ sha256_file() {
 is_rig_owned() {
   local rel="$1"
   case "$rel" in
-    bin/rig|\
+    bin/rig|bin/rig-session-resolve.py|\
     .claude/hooks/*|\
     .claude/commands/*|\
     .claude/agents/*|\

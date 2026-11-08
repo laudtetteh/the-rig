@@ -7,6 +7,7 @@ setup() {
   export CASE_DIR="$BATS_TEST_TMPDIR/project"
   mkdir -p "$CASE_DIR/bin" "$CASE_DIR/.rig/memory/sessions/done"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-connector-preflight" "$CASE_DIR/bin/rig-connector-preflight"
   chmod 755 "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-connector-preflight"
   git -C "$CASE_DIR" init -q
