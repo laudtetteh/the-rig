@@ -54,6 +54,13 @@ run_claude_pretool_from_settings() {
   [[ "$output" == *"governance file"* ]] || return 1
 }
 
+@test "normal Claude PreToolUse NotebookEdit checks notebook_path" {
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"NotebookEdit","tool_input":{"notebook_path":sys.argv[1],"cell_number":0,"new_source":"unsafe"}}))' "$TEST_PROJECT/CLAUDE.md")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+}
+
 @test "normal Claude PreToolUse Bash blocks commit without sentinel" {
   payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"fix: unsafe\""}}'
   run_claude_pretool_from_settings "$payload"
