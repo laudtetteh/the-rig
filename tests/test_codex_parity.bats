@@ -42,6 +42,273 @@ run_claude_pretool() {
     _ "$TEST_PROJECT" "$tool" "$payload"
 }
 
+run_claude_pretool_from_settings() {
+  local payload="$1"
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/pre-tool.sh' \
+    _ "$TEST_PROJECT" "$payload"
+}
+
+setup_linked_hook_worktrees() {
+  git -C "$TEST_PROJECT" checkout -q -B main
+  LINKED_FEATURE="$TEST_ROOT/feature-worktree"
+  git -C "$TEST_PROJECT" worktree add -q -b feature/hook-check "$LINKED_FEATURE"
+  mkdir -p "$LINKED_FEATURE/.claude/hooks" "$LINKED_FEATURE/.rig/rules" \
+    "$LINKED_FEATURE/.rig/memory"
+  cp "$TEST_PROJECT/.claude/hooks/pre-tool.sh" "$LINKED_FEATURE/.claude/hooks/pre-tool.sh"
+  cp "$TEST_PROJECT/.rig/rules/protected-paths.txt" "$LINKED_FEATURE/.rig/rules/protected-paths.txt"
+}
+
+run_linked_pretool() {
+  local payload="$1"
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/pre-tool.sh' \
+    _ "$LINKED_FEATURE" "$payload"
+}
+
+@test "normal Claude PreToolUse Edit denies a protected path with blocking exit 2" {
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":sys.argv[1],"old_string":"old","new_string":"new"}}))' "$TEST_PROJECT/CLAUDE.md")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+}
+
+@test "normal Claude PreToolUse NotebookEdit checks notebook_path" {
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"NotebookEdit","tool_input":{"notebook_path":sys.argv[1],"cell_number":0,"new_source":"unsafe"}}))' "$TEST_PROJECT/CLAUDE.md")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+}
+
+@test "normal Claude PreToolUse Bash blocks commit without sentinel" {
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"fix: unsafe\""}}'
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Commit blocked by The Rig."* ]] || return 1
+}
+
+@test "normal Claude PreToolUse rejects malformed payload and allows ordinary read" {
+  run_claude_pretool_from_settings '{broken'
+  [ "$status" -eq 2 ]
+  run_claude_pretool_from_settings '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"/tmp/example"}}'
+  [ "$status" -eq 0 ]
+}
+
+@test "legacy positional payload retains protected block and approved-push behavior" {
+  run_claude_pretool Edit "$(python3 -c 'import json,sys; print(json.dumps({"file_path":sys.argv[1]}))' "$TEST_PROJECT/CLAUDE.md")"
+  [ "$status" -eq 2 ]
+  run_claude_pretool_from_settings '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin current-branch"}}'
+  [ "$status" -eq 0 ]
+}
+
+@test "normal Claude hook denies external Rig governance path and missing policy" {
+  external_rig="$TEST_ROOT/external-rig"
+  mkdir -p "$external_rig/rules"
+  cp "$REPO_ROOT/templates/project/.rig/rules/protected-paths.txt" "$external_rig/rules/protected-paths.txt"
+  printf '%s\n' "$external_rig" > "$TEST_PROJECT/.rigpath"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":sys.argv[1],"content":"unsafe"}}))' "$external_rig/rules/protected-paths.txt")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+  rm "$external_rig/rules/protected-paths.txt"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"missing or unreadable"* ]] || return 1
+}
+
+@test "normal Claude hook uses installed project root after cwd changes" {
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":sys.argv[1]}}))' "$TEST_PROJECT/CLAUDE.md")"
+  run bash -c 'cd "$1" && printf "%s" "$3" | bash "$2/.claude/hooks/pre-tool.sh"' \
+    _ "$TEST_ROOT" "$TEST_PROJECT" "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+}
+
+@test "normal Claude commit gate checks installed project's branch after cwd changes" {
+  git -C "$TEST_PROJECT" checkout -q -B main
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"fix: unsafe\""}}'
+  run bash -c 'cd "$1" && printf "%s" "$3" | bash "$2/.claude/hooks/pre-tool.sh"' \
+    _ "$TEST_ROOT" "$TEST_PROJECT" "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
+}
+
+@test "normal Claude worktree redirect returns documented updatedInput" {
+  target="$TEST_PROJECT/.claude/worktrees/other-session/src/app.py"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":sys.argv[1],"content":"hello"}}))' "$target")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"updatedInput"'* ]] || return 1
+  [[ "$output" == *"$TEST_PROJECT/src/app.py"* ]] || return 1
+}
+
+@test "worktree redirect cannot bypass governance protection at destination" {
+  target="$TEST_PROJECT/.claude/worktrees/other-session/CLAUDE.md"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":sys.argv[1],"content":"unsafe"}}))' "$target")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+  [[ "$output" != *'"updatedInput"'* ]] || return 1
+}
+
+@test "symlink alias to protected governance path is denied" {
+  printf 'governance\n' > "$TEST_PROJECT/CLAUDE.md"
+  ln -s "$TEST_PROJECT/CLAUDE.md" "$TEST_PROJECT/alias.md"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":sys.argv[1]}}))' "$TEST_PROJECT/alias.md")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+}
+
+@test "linked feature hook denies protected Write and Edit in main worktree" {
+  setup_linked_hook_worktrees
+  local tool payload
+  for tool in Write Edit; do
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":sys.argv[1],"cwd":sys.argv[2],"tool_input":{"file_path":sys.argv[3]}}))' "$tool" "$LINKED_FEATURE" "$TEST_PROJECT/CLAUDE.md")"
+    run_linked_pretool "$payload"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"governance file"* ]] || return 1
+  done
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","cwd":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"unsafe"}}))' "$LINKED_FEATURE" "$TEST_PROJECT/.rig/rules/protected-paths.txt")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Edit","cwd":sys.argv[1],"tool_input":{"file_path":"CLAUDE.md","old_string":"old","new_string":"unsafe"}}))' "$TEST_PROJECT")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$TEST_PROJECT/CLAUDE.md"* ]] || return 1
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","cwd":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"safe"}}))' "$LINKED_FEATURE" "$TEST_PROJECT/src/ordinary.txt")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 0 ]
+}
+
+@test "linked hook enforces both worktree policies and fails closed on a missing target policy" {
+  setup_linked_hook_worktrees
+  printf '[REPO]/sensitive.txt\n' >> "$TEST_PROJECT/.rig/rules/protected-paths.txt"
+  printf '[REPO]/source-only.txt\n' >> "$LINKED_FEATURE/.rig/rules/protected-paths.txt"
+  local path payload
+
+  for path in "$TEST_PROJECT/sensitive.txt" "$TEST_PROJECT/source-only.txt"; do
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","cwd":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"unsafe"}}))' "$LINKED_FEATURE" "$path")"
+    run_linked_pretool "$payload"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"governance file"* ]] || return 1
+  done
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","cwd":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"safe"}}))' "$LINKED_FEATURE" "$TEST_PROJECT/ordinary.txt")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 0 ]
+
+  rm "$TEST_PROJECT/.rig/rules/protected-paths.txt"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"missing or unreadable"* ]] || return 1
+}
+
+@test "linked hooks resolve a shared external Rig policy against both worktree roots" {
+  setup_linked_hook_worktrees
+  local shared_rig="$TEST_ROOT/shared-rig" payload
+  mkdir -p "$shared_rig/rules"
+  cp "$TEST_PROJECT/.rig/rules/protected-paths.txt" "$shared_rig/rules/protected-paths.txt"
+  printf '[REPO]/sensitive.txt\n' >> "$shared_rig/rules/protected-paths.txt"
+  printf '%s\n' "$shared_rig" > "$TEST_PROJECT/.rigpath"
+  printf '%s\n' "$shared_rig" > "$LINKED_FEATURE/.rigpath"
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","cwd":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"unsafe"}}))' "$LINKED_FEATURE" "$TEST_PROJECT/sensitive.txt")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","cwd":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"safe"}}))' "$LINKED_FEATURE" "$TEST_PROJECT/ordinary.txt")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 0 ]
+}
+
+@test "linked feature hook checks main branch for cd and git -C commits" {
+  setup_linked_hook_worktrees
+  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  local command payload
+  for command in \
+    "cd '$TEST_PROJECT' && git commit -m 'fix: blocked'" \
+    "cd '$TEST_PROJECT' && /usr/bin/git commit -m 'fix: blocked'" \
+    "/usr/bin/git -C '$TEST_PROJECT' commit -m 'fix: blocked'" \
+    "git -C '$TEST_PROJECT' commit -m 'fix: blocked'" \
+    "git -C '../project' commit -m 'fix: blocked'" \
+    "git -C '$TEST_PROJECT' -c core.editor=true commit -m 'fix: blocked'"; do
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
+    run_linked_pretool "$payload"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
+  done
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"bash -c '\''git commit -m fix:blocked'\''"}}))' "$TEST_PROJECT")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"fix: feature work\""}}))' "$LINKED_FEATURE")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 0 ]
+}
+
+@test "linked feature hook blocks a literal nested shell commit to main" {
+  setup_linked_hook_worktrees
+  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  local command payload
+  for command in \
+    "bash -c 'cd \"$TEST_PROJECT\" && git commit -m \"fix: unsafe\"'" \
+    "sh -c 'cd \"$TEST_PROJECT\" && git commit -m \"fix: unsafe\"'" \
+    "bash -c 'git -C \"$TEST_PROJECT\" commit -m \"fix: unsafe\"'"; do
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
+    run_linked_pretool "$payload"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
+  done
+
+  command="$(printf 'bash <<EOF\ngit -C "%s" commit -m "fix: unsafe"\nEOF' "$TEST_PROJECT")"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
+}
+
+@test "nested shell inspection allows ordinary commands and refuses dynamic commit targets" {
+  setup_linked_hook_worktrees
+  local command payload
+  for command in "printf ordinary" "bash -c 'printf ordinary'" "sh -c 'pwd'" \
+    'bash -c "$SCRIPT"' $'cat <<EOF\nunclosed " quote\nEOF' \
+    $'cat <<\x27EOF\x27\nexample: git commit -m "unclosed\nEOF'; do
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
+    run_linked_pretool "$payload"
+    [ "$status" -eq 0 ]
+  done
+
+  command="bash -c 'cd \"\$TARGET\" && git commit -m \"fix: unsafe\"'"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"commit target could not be inspected"* ]] || return 1
+}
+
+@test "linked feature hook respects event cwd and target direct-push policy" {
+  setup_linked_hook_worktrees
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
+  local payload
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"chore(memory): approved\""}}))' "$TEST_PROJECT")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 0 ]
+
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"fix: blocked\""}}))' "$TEST_PROJECT")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Direct-to-main commit blocked"* ]] || return 1
+}
+
 run_claude_pretool_with_ttl() {
   local ttl="$1" tool="$2" payload="$3"
   run env RIG_COMMIT_OK_TTL_SECONDS="$ttl" bash -c 'cd "$1" && printf "%s" "$3" | bash .claude/hooks/pre-tool.sh "$2"' \
@@ -131,7 +398,7 @@ run_codex_adapter() {
   cat > "$fake_bin/stat" <<'EOF'
 #!/bin/sh
 if [ "$1" = "-c" ]; then
-  /bin/date +%s
+  python3 -c 'import os,sys; print(int(os.stat(sys.argv[1]).st_mtime))' "$3"
   exit 0
 fi
 if [ "$1" = "-f" ]; then

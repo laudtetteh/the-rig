@@ -137,9 +137,8 @@ PAYLOAD=$(normalize_payload) || fail_closed "hook payload could not be normalize
 TOOL=$(printf '%s' "$PAYLOAD" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_name", ""))')
 HOOK_PAYLOAD="$PAYLOAD"
 
-# Claude's PreToolUse hook receives the tool input object directly, while Codex
-# wraps that object in its event envelope. Delegate the equivalent shape so the
-# canonical hook sees the same command/file fields on both agent paths.
+# Keep the adapter's root-shaped input for existing Codex tool mappings. The
+# canonical hook also accepts Claude's native event envelope directly.
 if [[ "$EVENT" == "PreToolUse" ]]; then
   HOOK_PAYLOAD=$(printf '%s' "$PAYLOAD" | python3 -c '
 import json, sys
@@ -153,6 +152,7 @@ fi
 
 if [[ "$EVENT" == "PreToolUse" && "$TOOL" == "apply_patch" ]]; then
   validate_apply_patch
+  RIG_CODEX_PATCH_VALIDATED=1
 fi
 
 HOOK_DIR="$REPO/.claude/hooks"
@@ -180,7 +180,7 @@ esac
 
 [[ -r "$HOOK" ]] || fail_closed "canonical hook is missing or unreadable: $HOOK"
 if [[ "$EVENT" == "PreToolUse" || "$EVENT" == "PostToolUse" ]]; then
-  OUTPUT=$(printf '%s' "$HOOK_PAYLOAD" | RIG_AGENT=codex bash "$HOOK" "$TOOL"); STATUS=$?
+  OUTPUT=$(printf '%s' "$HOOK_PAYLOAD" | RIG_AGENT=codex RIG_CODEX_PATCH_VALIDATED="${RIG_CODEX_PATCH_VALIDATED:-0}" bash "$HOOK" "$TOOL"); STATUS=$?
 else
   OUTPUT=$(printf '%s' "$PAYLOAD" | RIG_AGENT=codex bash "$HOOK"); STATUS=$?
 fi
