@@ -391,6 +391,33 @@ PY
   [ "$status" -eq 0 ]
 }
 
+@test "wrap writes a continuation handoff despite its inherited launcher anchor" {
+  local original_anchor continuation continuation_anchor token draft snapshot
+  original_anchor=$(printf '%s' "$a" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  run env RIG_SESSION_FILE="$file_a" RIG_SESSION_ANCHOR="$original_anchor" \
+    "$rig" session-name set --final --complete 'First segment'
+  [ "$status" -eq 0 ]
+  continuation=$(env RIG_SESSION_FILE="$file_a" RIG_SESSION_ANCHOR="$original_anchor" \
+    "$rig" session bind --agent claude --native-session-id thread-a --source resume --allow-continuation)
+  continuation_anchor=$(printf '%s' "$continuation" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  run env RIG_SESSION_FILE="$file_a" RIG_SESSION_ANCHOR="$original_anchor" "$rig" session current --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$continuation_anchor"* ]] || return 1
+
+  token=$($rig memory workflow-lock acquire --owner-anchor "$continuation_anchor" --json | \
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  draft="$CASE_DIR/.rig/memory/.snapshot-draft-${token}.md"
+  candidate "$draft" feat/continuation task-a
+  snapshot_command_block wrap > "$BATS_TEST_TMPDIR/wrap-continuation.sh"
+  run env RIG_SESSION_FILE="$file_a" RIG_SESSION_ANCHOR="$original_anchor" \
+    REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" SNAP_LOCK_TOKEN="$token" \
+    bash "$BATS_TEST_TMPDIR/wrap-continuation.sh"
+  [ "$status" -eq 0 ]
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  grep -Fq "task=task-a owner=$continuation_anchor" "$snapshot"
+  [ ! -e "$draft" ]
+}
+
 @test "post-merge releases its workflow lock when a malformed snapshot blocks the write" {
   run "$rig" memory workflow-lock acquire --owner-anchor merge --provider-pid "$$" --json
   [ "$status" -eq 0 ]

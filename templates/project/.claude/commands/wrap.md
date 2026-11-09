@@ -492,9 +492,12 @@ else
   CURRENT_JSON=$("$REPO/bin/rig" session current --json) || snapshot_write_failed
   CURRENT_FILE=$(printf '%s' "$CURRENT_JSON" | \
     python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")') || snapshot_write_failed
-  [[ -n "$CURRENT_FILE" ]] || snapshot_write_failed
+  CURRENT_ANCHOR=$(printf '%s' "$CURRENT_JSON" | \
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")') || snapshot_write_failed
+  [[ -n "$CURRENT_FILE" && -n "$CURRENT_ANCHOR" ]] || snapshot_write_failed
   for task in "${OWNED_TASKS[@]}"; do SNAP_ARGS+=(--owned-task "$task"); done
-  RIG_SESSION_FILE="$CURRENT_FILE" "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || snapshot_write_failed
+  RIG_SESSION_FILE="$CURRENT_FILE" RIG_SESSION_ANCHOR="$CURRENT_ANCHOR" \
+    "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || snapshot_write_failed
 fi
 rm -f "$SNAP_DRAFT"
 ```
