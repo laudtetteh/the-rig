@@ -71,7 +71,7 @@ Usage: rig session <resolve|current|list|doctor|repair|retrofit|obligation> [opt
 
 Native IDs are redacted unless --verbose is explicitly supplied.
 Repair is preview-only unless --confirm TOKEN and --reason REASON are supplied.
-Retrofit binds the current native host ID from env with no transcript matching.
+Retrofit binds the native host ID from env or an explicit --native-session-id.
 Content matching is never part of normal resolution.
 EOF
       ;;
@@ -1445,7 +1445,7 @@ session_retrofit() {
     case "$1" in
       --agent) [[ "$#" -ge 2 ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }; agent="$2"; shift 2;;
       --from-env) from_env=true; shift;;
-      --native-session-id) [[ "$#" -ge 2 && -n "$2" ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }; native_arg="$2"; shift 2;;
+      --native-session-id) [[ "$#" -ge 2 && -n "$2" && "$2" != -* && -z "$native_arg" ]] || { printf '{"ok":false,"reason":"invalid_input","no_write":true}\n'; return 3; }; native_arg="$2"; shift 2;;
       --source) [[ "$#" -ge 2 ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }; source="$2"; shift 2;;
       --json) json=true; shift;;
       --verbose) verbose=true; shift;;
@@ -1462,6 +1462,11 @@ session_retrofit() {
   else
     [[ -n "$native_arg" ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }
     native_id="$native_arg"
+    if { [[ -n "${CODEX_THREAD_ID:-}" ]] && { [[ "$agent" != codex ]] || [[ "$CODEX_THREAD_ID" != "$native_id" ]]; }; } ||
+       { [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]] && { [[ "$agent" != claude ]] || [[ "$CLAUDE_CODE_SESSION_ID" != "$native_id" ]]; }; }; then
+      printf '{"ok":false,"reason":"native_conflict","no_write":true}\n'
+      return 3
+    fi
   fi
   if [[ -z "$native_id" ]]; then
     printf '{"ok":false,"reason":"missing_native_env","agent":"%s","env":"%s","no_write":true}\n' "$agent" "$env_name"

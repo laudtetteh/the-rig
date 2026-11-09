@@ -290,6 +290,39 @@ json.dump({
   [ "$(find "$CASE_DIR/.rig/memory/sessions" -maxdepth 1 -name 'session-*.json' | wc -l | tr -d ' ')" -eq 0 ]
 }
 
+@test "explicit retrofit refuses an ambient native identity for another thread or provider" {
+  run env CODEX_THREAD_ID=ambient-thread "$CASE_DIR/bin/rig" session retrofit --agent codex --native-session-id other-thread --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason":"native_conflict"'* ]] || return 1
+  run env CLAUDE_CODE_SESSION_ID=claude-thread "$CASE_DIR/bin/rig" session retrofit --agent codex --native-session-id codex-thread --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason":"native_conflict"'* ]] || return 1
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -maxdepth 1 -name 'session-*.json' | wc -l | tr -d ' ')" -eq 0 ]
+}
+
+@test "explicit retrofit rejects an option token or repeated native ID before binding" {
+  run "$CASE_DIR/bin/rig" session retrofit --agent codex --native-session-id --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason":"invalid_input"'* ]] || return 1
+  run "$CASE_DIR/bin/rig" session retrofit --agent codex --native-session-id first-thread --native-session-id second-thread --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'"reason":"invalid_input"'* ]] || return 1
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -maxdepth 1 -name 'session-*.json' | wc -l | tr -d ' ')" -eq 0 ]
+}
+
+@test "explicit retrofit identity can be carried into an exact name and completion write" {
+  local result file anchor
+  result=$("$CASE_DIR/bin/rig" session retrofit --agent codex --native-session-id app-server-name --json)
+  file=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  anchor=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  run env RIG_SESSION_FILE="$file" RIG_SESSION_ANCHOR="$anchor" "$CASE_DIR/bin/rig" session-name set --final --complete --json 'App server name'
+  [ "$status" -eq 0 ]
+  [ ! -e "$file" ]
+  local done_file
+  done_file=$(find "$CASE_DIR/.rig/memory/sessions/done" -name 'session-*.json' -print | head -1)
+  SESSION_F="$done_file" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["native"]["session_id"]=="app-server-name"; assert d["names"]["final"]=="App server name"; assert d["lifecycle"]["state"]=="complete"'
+}
+
 @test "explicit native ID retrofit continues a completed thread" {
   write_native_session "$CASE_DIR/.rig/memory/sessions/done/session-ended.json" ended-anchor app-server-ended complete codex
   run env -u CODEX_THREAD_ID "$CASE_DIR/bin/rig" session retrofit --agent codex --native-session-id app-server-ended --json
