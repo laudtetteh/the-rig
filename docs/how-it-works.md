@@ -158,13 +158,14 @@ Agent is oriented. Hooks are live. Ready to work.
      │
      │  After the agent's final message each turn:
      │  └─ stop.sh (Stop)
-     │       Updates "Last updated:" date in CONTEXT_SNAPSHOT.md
      │       Appends a UUID-tagged session-end marker to PROGRESS.md
+     │       Leaves an existing shared snapshot unchanged
      │       (lightweight; idempotent — safe to run after every response)
      │
      ▼
 Claude /wrap or Codex $wrap — run manually before closing
-     │  Writes .rig/memory/CONTEXT_SNAPSHOT.md (full current state)
+     │  Refreshes the shared snapshot header and this session's task handoffs
+     │  while preserving other active sessions' handoffs
      │  Expands PROGRESS.md stubs; trims if > 20 entries
      │  Logs ERRORS.md and RIG_GAPS.md entries
      │  Trims ERRORS.md if > 30 entries
@@ -175,9 +176,9 @@ Claude /wrap or Codex $wrap — run manually before closing
 Session ends
      │
      └─ stop.sh (also handles SessionEnd — same script, dispatches on `source` field)
-          On logout/prompt_input_exit: writes .wrap-needed + minimal auto-checkpoint
+          On logout/prompt_input_exit: writes .wrap-needed; creates a minimal checkpoint only if no snapshot exists
           On clear: logs context-cleared; no .wrap-needed
-          On resume / Stop (per-turn): per-turn date update + PROGRESS marker
+          On resume: no action; Stop (per-turn): PROGRESS marker only
 ```
 
 ---
@@ -656,10 +657,10 @@ skills covering the full development lifecycle:
 ### Governance and housekeeping
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/post-merge` | `POST_MERGE_WORKFLOW` | Post-merge hygiene: pull base branch, update PROGRESS, move task file, housekeeping commit, suggest session name, surface next priority |
+| `/post-merge` | `POST_MERGE_WORKFLOW` | Post-merge hygiene: pull base branch, update PROGRESS, move task file, refresh the shared snapshot without removing other task handoffs, housekeeping commit, suggest session name, surface next priority |
 | `/rig-propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
 | `/session-name` | Session naming | Derives a name from current conversation/session evidence only; unrelated snapshots, markers, session records, and project history are rejected |
-| `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, captures in-flight task state, updates PROGRESS, trims PROGRESS/ERRORS, suggests session name, surfaces next priority. Concurrent session guard prevents race conditions on PROGRESS.md. |
+| `/wrap` | Session-end sequence | Refreshes the snapshot header and owned task handoffs, preserves other sessions' handoffs, updates PROGRESS, trims PROGRESS/ERRORS, suggests session name, and surfaces next priority. The owner-aware writer protects snapshot updates. |
 | `/rig-gaps` | Self-improvement | _(Rig contributors)_ Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats report for review and optional submission. `--push` appends directly to the local Rig repo (requires `rig-gaps-push-target:` in `CLAUDE.md`); `--submit` creates public GitHub issues in `laudtetteh/the-rig` (opt-in; requires `.rig-contribute-enabled` sentinel + `gh` auth) |
 | `/rig-upgrade` | Upgrade workflow | Uses a global-first bootstrap when available: refresh the preferred installer checkout, then follow the latest upgrade command from that checkout. Survey phase always runs `--strategy agent-plan` as a read-only JSON preview. `--mode=agent` (also the non-interactive default) runs `install.sh --strategy agent-upgrade`, presents any `conflicts[]` with repair guidance, then runs `bin/rig doctor --json` as a post-upgrade gate. `--mode=classic` runs plain `install.sh --strategy upgrade`, the original per-file interactive review flow. `--version` prints project and global installed layers, preferred installer checkout state, and the latest tagged release from GitHub (via `gh`), warning if any are out of sync. `--scope=project\|global\|both` limits which layers are upgraded. |
 
