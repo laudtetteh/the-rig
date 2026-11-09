@@ -9,6 +9,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Consolidated Rig gaps triage and impact review for the first implementation wave, including in-repo and external Rig installs (#596).
+
+### Changed
+
+- Session snapshots now preserve separate active task handoffs across concurrent wrap, post-merge, and ship workflows, with owner-aware writes and recoverable workflow locks (#598).
+
+### Fixed
+
+- Claude pre-tool policy now enforces protected-file and command checks on real hook payloads (#593).
+- Native Git commit hooks now remove recognized AI attribution while preserving human trailers (#594).
+- Session current and resolve now work with macOS Bash 3.2 and read-only process sandboxes (#595).
+- Session continuations now keep exact provider identity and lineage for naming and explicit app-server retrofit (#597).
+
 ---
 
 ## [1.29.2] — 2026-09-03
