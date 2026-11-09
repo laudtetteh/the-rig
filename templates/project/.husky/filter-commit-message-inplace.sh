@@ -7,7 +7,7 @@
 # Usage: sh .husky/filter-commit-message-inplace.sh <message-file>
 #
 # Strips:
-#   - Co-authored-by: lines that reference AI tools (Claude, Cursor, Copilot, etc.)
+#   - Co-authored-by: known AI tool identities and no-reply addresses
 #     Human co-author attribution is preserved.
 #   - AI tool footer lines: "Generated with Cursor/Claude/Copilot", etc.
 #
@@ -25,11 +25,13 @@ f="$1"
 t=$(mktemp) || exit 1
 
 # Strip Co-authored-by only when the value references a known AI tool or service.
-# Matches: tool names (Claude, Cursor, Copilot) and known AI no-reply addresses.
-grep -viE '^[[:space:]]*co-authored-by[[:space:]]*:.*([Cc]laude|[Cc]ursor|[Cc]opilot|[Gg]it[Hh]ub[[:space:]]+[Cc]opilot|noreply@anthropic\.com|noreply@cursor\.com|noreply@github\.com)' "$f" |
-  grep -viE '^[[:space:]]*([#*>-][[:space:]]*)*[Gg]enerated[[:space:]]+with[[:space:]]+(Cursor|Claude|Copilot|GitHub Copilot)([[:space:]].*)?$' |
-  grep -viE '^[[:space:]]*([#*>-][[:space:]]*)*[Gg]enerated[[:space:]]+by[[:space:]]+(Cursor|Claude|Copilot|GitHub Copilot)([[:space:]].*)?$' |
-  grep -viE '^[[:space:]]*([#*>-][[:space:]]*)*[Cc]ommitted[[:space:]]+with[[:space:]]+(Cursor|Claude|Copilot)([[:space:]].*)?$' |
+# An AI name alone is insufficient: a human named Claude may be a co-author.
+# Copilot also emits its bot address without angle brackets.
+grep -viE '^[[:space:]]*co-authored-by[[:space:]]*:[[:space:]]*(Claude( Code| Sonnet [0-9]+(\.[0-9]+)?)?|Codex|Cursor|Copilot|GitHub Copilot)[[:space:]]*<noreply@(anthropic|openai|cursor|github)\.com>[[:space:]]*$' "$f" |
+  grep -viE '^[[:space:]]*co-authored-by[[:space:]]*:[[:space:]]*Copilot[[:space:]]+(<copilot@github\.com>|copilot@github\.com)[[:space:]]*$' |
+  grep -viE '^[^[:alnum:]]*generated[[:space:]]+(with|by)[[:space:]]+\[?(Claude( Code)?|Codex|Cursor|Copilot|GitHub Copilot)\]?([[:space:]]|\(https?://|[.]|$)' |
+  grep -viE '^[^[:alnum:]]*committed[[:space:]]+with[[:space:]]+\[?(Claude( Code)?|Codex|Cursor|Copilot|GitHub Copilot)\]?([[:space:]]|\(https?://|[.]|$)' |
+  grep -viE '^[^[:alnum:]]*made[-[:space:]]+with[-[:space:]]+(Claude( Code)?|Codex|Cursor|Copilot|GitHub Copilot)([[:space:].:]|$)' |
   sed 's/\r$//' > "$t"
 
 mv "$t" "$f"

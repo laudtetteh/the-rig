@@ -398,7 +398,7 @@ titles, transcripts, or singleton state.
 |---|---|---|
 | `pre-commit` | Before every git commit | Secrets reaching the repository |
 | `commit-msg` | On every git commit | (1) Strips auto-injected tool footers (`Co-Authored-By: Claude`, `Made-with-Claude`, etc.); (2) validates Conventional Commits subject-line format; (3) requires a tracker-specific issue reference (`[#N]` for GitHub, `[TEAM-123]` for Linear, etc.) when `issue-tracking:` is set in `CLAUDE.md` |
-| `post-commit` | After every git commit | Re-applies footer stripping in case the git client re-injected footers after `commit-msg` ran |
+| `post-commit` | After every git commit | Reports late AI footers without changing the commit SHA; optional automatic amend for unsigned commits with `RIG_POST_COMMIT_AUTO_AMEND=1` |
 
 ---
 
