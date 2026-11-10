@@ -168,6 +168,20 @@ Co-authored-by: GitHub Copilot <copilot@github.com>'
   [ "$(git -C "$TEST_PROJECT" rev-parse HEAD)" = "$signed" ]
 }
 
+@test "post-commit does not mistake message body gpgsig text for a signature" {
+  install_hook_layout native
+  git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null commit --allow-empty \
+    -m 'fix: unsigned quoted signature [#589]' \
+    -m $'gpgsig merely quoted in body\nGenerated with Codex.' >/dev/null
+  before="$(git -C "$TEST_PROJECT" rev-parse HEAD)"
+  run env RIG_POST_COMMIT_AUTO_AMEND=1 bash -c 'cd "$1" && .git/hooks/post-commit' _ "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$TEST_PROJECT" rev-parse HEAD)" != "$before" ]
+  message="$(git -C "$TEST_PROJECT" log -1 --format=%B)"
+  [[ "$message" == *'gpgsig merely quoted in body'* ]] || return 1
+  [[ "$message" != *'Generated with Codex.'* ]] || return 1
+}
+
 @test "post-commit warns during a real rebase and preserves replayed history" {
   base_branch="$(git -C "$TEST_PROJECT" branch --show-current)"
   git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null commit --allow-empty \

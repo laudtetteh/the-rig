@@ -28,7 +28,8 @@ if cmp -s "$orig" "$tmp"; then
   exit 0
 fi
 
-if git cat-file -p HEAD | grep -q '^gpgsig '; then
+# A message body may quote "gpgsig "; only commit headers can hold a signature.
+if git cat-file -p HEAD | sed '/^$/,$d' | grep -q '^gpgsig '; then
   echo "WARNING: The Rig found a late AI footer in a signed commit. The footer remains; reword and re-sign the commit manually if needed." >&2
 elif [ -d "$(git rev-parse --git-path rebase-merge)" ] || \
      [ -d "$(git rev-parse --git-path rebase-apply)" ] || \

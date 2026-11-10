@@ -17,7 +17,7 @@ housekeeping: direct-push  # direct-push | pr-required (how /post-merge commits)
 issue-tracking: github     # github | linear | trello | gus | none
 issue-creator: user        # user (default) | agent — GitHub only: agent auto-creates issues
 secret-scanner: gitleaks   # gitleaks | none
-commit-cleanup: yes        # yes | no (strip auto-injected tool footers from commits)
+commit-cleanup: yes        # yes | no (filter known tool footers; warn on late additions)
 rig-gaps-push-target:      # optional: absolute path to RIG_GAPS.md in the local Rig repo
 ```
 
@@ -362,10 +362,10 @@ their SHAs, so coordinate with anyone using that history before updating a remot
 
 ## Keeping tool attribution footers in commits
 
-By default, The Rig strips auto-injected footers (`Co-Authored-By: Claude`,
-`Made-with-Claude`, etc.) from commit messages. These lines are inserted automatically
-by AI coding tools — The Rig removes them so commit messages stay clean and reflect
-what the human author wrote.
+By default, the `commit-msg` hook removes known auto-injected footers
+(`Co-Authored-By: Claude`, `Made-with-Claude`, etc.) before the commit. If a
+client adds a footer after that hook, `post-commit` warns and leaves the SHA
+unchanged. The opt-in amendment and replay limits are described above.
 
 If you want these footers to remain (e.g. your team has a policy of crediting AI tools
 in commit history), comment out or remove the `commit-msg` and `post-commit` hooks
