@@ -45,6 +45,15 @@ commit_count() { git -C "$TEST_PROJECT" rev-list --count HEAD; }
   [[ "$output" == *'Approval is missing'* ]] || return 1
 }
 
+@test "guarded progress stub tags a supplied session anchor for SessionEnd" {
+  approval
+  run env RIG_COMMIT_POLICY=guarded RIG_SESSION_ANCHOR=anchor-a \
+    git -C "$TEST_PROJECT" commit --allow-empty -m 'fix: tagged [#593]'
+  [ "$status" -eq 0 ]
+  hash="$(git -C "$TEST_PROJECT" rev-parse HEAD)"
+  grep -Fq "[$hash] <!-- sid:anchor-a -->" "$TEST_PROJECT/.rig/memory/PROGRESS.md"
+}
+
 @test "generated script and escaped git cannot commit without approval" {
   printf '#!/bin/sh\ngit -C "%s" commit --allow-empty -m "fix: generated [#593]"\n' "$TEST_PROJECT" > "$BATS_TEST_TMPDIR/generated.sh"
   chmod +x "$BATS_TEST_TMPDIR/generated.sh"
@@ -117,6 +126,57 @@ commit_count() { git -C "$TEST_PROJECT" rev-list --count HEAD; }
   hash="$(git -C "$linked" rev-parse HEAD)"
   grep -Fq "$hash" "$linked/.rig/memory/PROGRESS.md"
   if grep -Fq "$hash" "$TEST_PROJECT/.rig/memory/PROGRESS.md"; then return 1; fi
+}
+
+@test "shared external progress lock serializes guarded commits from two worktrees" {
+  local linked external progress ready release locker first_hook second_hook hash_a hash_b i
+  linked="$BATS_TEST_TMPDIR/progress-linked"
+  external="$BATS_TEST_TMPDIR/shared-progress-rig"
+  git -C "$TEST_PROJECT" worktree add -qb fix/progress-linked "$linked"
+  mkdir -p "$external/memory"
+  progress="$external/memory/PROGRESS.md"
+  printf '# Shared progress\n\n---\n' > "$progress"
+  printf '%s\n' "$external" > "$TEST_PROJECT/.rigpath"
+  printf '%s\n' "$external" > "$linked/.rigpath"
+  git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null commit --allow-empty -qm 'fix: primary [#593]'
+  git -C "$linked" -c core.hooksPath=/dev/null commit --allow-empty -qm 'fix: linked [#593]'
+  hash_a="$(git -C "$TEST_PROJECT" rev-parse HEAD)"
+  hash_b="$(git -C "$linked" rev-parse HEAD)"
+  [ "$hash_a" != "$hash_b" ]
+
+  ready="$BATS_TEST_TMPDIR/lock-ready"
+  release="$BATS_TEST_TMPDIR/lock-release"
+  python3 - "$external/memory/.progress.lock" "$ready" "$release" <<'PY' &
+import fcntl, pathlib, sys, time
+lock_path, ready, release = map(pathlib.Path, sys.argv[1:])
+with open(lock_path, "a+") as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    ready.touch()
+    deadline = time.monotonic() + 5
+    while not release.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+PY
+  locker=$!
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    [ -e "$ready" ] && break
+    sleep 0.05
+  done
+  [ -e "$ready" ]
+  (cd "$TEST_PROJECT" && RIG_COMMIT_POLICY=guarded .git/hooks/post-commit) &
+  first_hook=$!
+  (cd "$linked" && RIG_COMMIT_POLICY=guarded "$TEST_PROJECT/.git/hooks/post-commit") &
+  second_hook=$!
+  sleep 0.15
+  if grep -Fq "$hash_a" "$progress" || grep -Fq "$hash_b" "$progress"; then
+    touch "$release"
+    return 1
+  fi
+  touch "$release"
+  wait "$locker"
+  wait "$first_hook"
+  wait "$second_hook"
+  [ "$(grep -Fc "$hash_a" "$progress")" -eq 1 ]
+  [ "$(grep -Fc "$hash_b" "$progress")" -eq 1 ]
 }
 
 @test "stealth .rigpath and Husky layout use the target approval" {
@@ -230,10 +290,11 @@ commit_count() { git -C "$TEST_PROJECT" rev-list --count HEAD; }
   [ "$status" -eq 0 ]
   commit_output="$output"
   post_payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PostToolUse","tool_name":"Bash","tool_use_id":"outside-git","tool_response":{"stdout":sys.argv[1]}}))' "$commit_output")"
-  run bash -c 'cd "$1" && printf "%s" "$2" | bash "$3"' _ "$outside" "$post_payload" "$TEST_PROJECT/.claude/hooks/post-tool.sh"
+  run env RIG_SESSION_ANCHOR=outside-anchor bash -c 'cd "$1" && printf "%s" "$2" | bash "$3"' _ "$outside" "$post_payload" "$TEST_PROJECT/.claude/hooks/post-tool.sh"
   [ "$status" -eq 0 ]
   hash="$(git -C "$TEST_PROJECT" rev-parse HEAD)"
   grep -Fq "$hash" "$TEST_PROJECT/.rig/memory/PROGRESS.md"
+  grep -Fq "<!-- sid:outside-anchor -->" "$TEST_PROJECT/.rig/memory/PROGRESS.md"
 
   warning_payload='{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_response":{"stdout":"Switched to a new branch '\''weird'\''"}}'
   run bash -c 'cd "$1" && printf "%s" "$2" | bash "$3"' _ "$outside" "$warning_payload" "$TEST_PROJECT/.claude/hooks/post-tool.sh"

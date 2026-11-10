@@ -34,17 +34,45 @@ record_progress() {
   [ -f "$PROGRESS" ] || return
   HASH=$(git rev-parse HEAD 2>/dev/null) || return
   [ -n "$HASH" ] || return
-  grep -Fq "$HASH" "$PROGRESS" && return
   SUBJECT=$(git log -1 --format=%s 2>/dev/null) || return
   [ -n "$SUBJECT" ] || return
   DATE=$(date +%Y-%m-%d)
-  STUB="\n## $DATE — $SUBJECT [$HASH]\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n\n---"
-  TMP_PROGRESS=$(mktemp) || return
-  if awk -v stub="$STUB" '/^---$/ && !done { print; printf "%s\n", stub; done=1; next } 1' "$PROGRESS" > "$TMP_PROGRESS"; then
-    mv "$TMP_PROGRESS" "$PROGRESS" || rm -f "$TMP_PROGRESS"
-  else
-    rm -f "$TMP_PROGRESS"
-  fi
+  # Share bin/rig's .progress.lock so two worktrees cannot replace each
+  # other's stubs. The SHA check belongs inside the lock with the write.
+  python3 - "$PROGRESS" "$HASH" "$SUBJECT" "$DATE" <<'PY' || \
+    echo "WARNING: The Rig could not append the guarded commit to PROGRESS.md." >&2
+import fcntl, os, pathlib, re, stat, sys, tempfile
+path = pathlib.Path(sys.argv[1])
+sha, subject, date = sys.argv[2:]
+sid = os.environ.get("RIG_SESSION_ANCHOR", "")
+sid_suffix = f" <!-- sid:{sid} -->" if re.fullmatch(r"[A-Za-z0-9-]+", sid) else ""
+with open(path.parent / ".progress.lock", "a+") as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    if path.is_symlink() or not path.is_file():
+        raise SystemExit(1)
+    original = path.read_text()
+    if sha in original:
+        raise SystemExit(0)
+    lines = original.splitlines(keepends=True)
+    position = next((i for i, line in enumerate(lines) if line.rstrip("\r\n") == "---"), None)
+    if position is None:
+        raise SystemExit(1)
+    if not lines[position].endswith("\n"):
+        lines[position] += "\n"
+    stub = f"\n## {date} — {subject} [{sha}]{sid_suffix}\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n\n---\n"
+    lines.insert(position + 1, stub)
+    fd, temporary = tempfile.mkstemp(prefix=".progress-", suffix=".tmp", dir=str(path.parent))
+    try:
+        os.fchmod(fd, stat.S_IMODE(path.stat().st_mode))
+        with os.fdopen(fd, "w") as handle:
+            handle.write("".join(lines))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+PY
 }
 trap 'record_progress' EXIT
 

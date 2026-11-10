@@ -512,6 +512,8 @@ git commit
            For guarded ordinary and merge commits, auto-stub the actual worktree's
              PROGRESS.md using final HEAD;
              existing SHA entries are not duplicated
+           Hold .progress.lock through the SHA check and atomic replacement,
+             including when worktrees share an external Rig directory
      └─► post-merge
            For a guarded commit created directly by git merge, claim its
              worktree-specific pending marker and reuse post-commit's final-SHA
