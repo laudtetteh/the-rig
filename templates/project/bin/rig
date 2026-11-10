@@ -1312,16 +1312,28 @@ for base in (sessions,sessions/"done"):
 if unsafe_path:
     print(json.dumps({"ok":False,"reason":"invalid_session_path","no_write":True})); raise SystemExit(4)
 matches=[(p,d) for p,d in records if d.get("schema_version")==1 and d.get("project",{}).get("identity")==project_id and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id]
+ended_states=("complete","inactive","ended_no_wrap")
 continuation_from_ended=False
 if len(matches)>1:
-    active_matches=[(p,d) for p,d in matches if "done" not in p.parts and d.get("lifecycle",{}).get("state")!="complete"]
+    active_matches=[(p,d) for p,d in matches if "done" not in p.parts and d.get("lifecycle",{}).get("state")=="active"]
     by_anchor={d.get("anchor"):(p,d) for p,d in matches}
     if len(active_matches)>1 or not all(by_anchor) or len(by_anchor)!=len(matches):
         print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
     roots=[d for _,d in matches if not (d.get("lineage") or {}).get("parent_anchor")]
     parents={(d.get("lineage") or {}).get("parent_anchor") for _,d in matches}
     leaves=[(p,d) for p,d in matches if d.get("anchor") not in parents]
-    if len(roots)!=1 or len(leaves)!=1 or (active_matches and leaves[0][0]!=active_matches[0][0]) or any((d.get("lineage") or {}).get("parent_anchor") not in by_anchor or (d.get("lineage") or {}).get("kind")!="continuation" for _,d in matches if (d.get("lineage") or {}).get("parent_anchor")):
+    invalid_parent=False
+    for _,record in matches:
+        parent_anchor=(record.get("lineage") or {}).get("parent_anchor")
+        if not parent_anchor: continue
+        if (parent_anchor not in by_anchor or (record.get("lineage") or {}).get("kind")!="continuation" or
+            by_anchor[parent_anchor][1].get("lifecycle",{}).get("state") not in ended_states):
+            invalid_parent=True; break
+    if len(roots)!=1 or len(leaves)!=1 or (active_matches and leaves[0][0]!=active_matches[0][0]) or invalid_parent:
+        print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
+    leaf_path,leaf_record=leaves[0]
+    leaf_state=leaf_record.get("lifecycle",{}).get("state")
+    if (leaf_state=="active" and "done" in leaf_path.parts) or leaf_state not in (*ended_states,"active"):
         print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
     seen=set(); cursor=leaves[0][1]
     while cursor and cursor.get("anchor") not in seen:
@@ -1345,7 +1357,8 @@ if hint_path and matches:
         print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
 if matches:
     p,d=matches[0]
-    if "done" in p.parts or d.get("lifecycle",{}).get("state")=="complete":
+    state=d.get("lifecycle",{}).get("state")
+    if state in ended_states:
         if not allow_continuation:
             print(json.dumps({"ok":False,"reason":"ended_record"})); raise SystemExit(3)
         ended_path, ended_record = p, d
@@ -1357,7 +1370,7 @@ if matches:
         d = None
         hint_path = None
         hint = ""
-    elif d.get("lifecycle",{}).get("state") in ("conflict","superseded","repair_pending"):
+    elif "done" in p.parts or state!="active":
         print(json.dumps({"ok":False,"reason":"invalid_lifecycle_transition"})); raise SystemExit(3)
 if not matches:
     if hint_path and not hint_path.exists() and not continuation_from_ended:
@@ -1580,9 +1593,10 @@ if action=="doctor":
         if native: natives.setdefault((d.get("project",{}).get("identity"),d.get("agent"),native),[]).append(p.name)
     dup_a=[k for k,v in anchors.items() if k and len(v)>1]
     def valid_continuation_chain(group):
+        ended_states=("complete","inactive","ended_no_wrap")
         by_anchor={d.get("anchor"):(p,d) for p,d in group}
         if not all(by_anchor) or len(by_anchor)!=len(group): return False
-        active=[(p,d) for p,d in group if "done" not in p.parts and d.get("lifecycle",{}).get("state")!="complete"]
+        active=[(p,d) for p,d in group if "done" not in p.parts and d.get("lifecycle",{}).get("state")=="active"]
         if len(active)>1: return False
         roots=[(p,d) for p,d in group if not (d.get("lineage") or {}).get("parent_anchor")]
         if len(roots)!=1: return False
@@ -1591,11 +1605,14 @@ if action=="doctor":
             parent=(d.get("lineage") or {}).get("parent_anchor")
             if not parent: continue
             if (d.get("lineage") or {}).get("kind")!="continuation" or parent not in by_anchor: return False
-            parent_path,parent_record=by_anchor[parent]
-            if "done" not in parent_path.parts and parent_record.get("lifecycle",{}).get("state")!="complete": return False
+            _,parent_record=by_anchor[parent]
+            if parent_record.get("lifecycle",{}).get("state") not in ended_states: return False
             parents.add(parent)
         leaves=[(p,d) for p,d in group if d.get("anchor") not in parents]
         if len(leaves)!=1 or (active and leaves[0][0]!=active[0][0]): return False
+        leaf_path,leaf_record=leaves[0]
+        leaf_state=leaf_record.get("lifecycle",{}).get("state")
+        if (leaf_state=="active" and "done" in leaf_path.parts) or leaf_state not in (*ended_states,"active"): return False
         seen=set(); cursor=leaves[0][1]
         while cursor and cursor.get("anchor") not in seen:
             seen.add(cursor.get("anchor")); parent=(cursor.get("lineage") or {}).get("parent_anchor")

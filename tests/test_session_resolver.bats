@@ -8,6 +8,7 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-tab-title-watch" "$CASE_DIR/bin/rig-tab-title-watch"
   mkdir -p "$CASE_DIR/.claude/hooks"
   cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/prompt-submit.sh" "$CASE_DIR/.claude/hooks/prompt-submit.sh"
+  cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/stop.sh" "$CASE_DIR/.claude/hooks/stop.sh"
   chmod +x "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-tab-title-watch"
   git -C "$CASE_DIR" init -q
   git -C "$CASE_DIR" checkout -q -b feat/current
@@ -208,6 +209,118 @@ json.dump({
   run env CLAUDE_CODE_SESSION_ID=ended-native-id "$CASE_DIR/bin/rig" session resolve --json
   [ "$status" -eq 3 ]
   [[ "$output" == *'"reason": "ended_record"'* ]] || return 1
+}
+
+@test "an active record in done cannot be a continuation parent" {
+  first=$("$CASE_DIR/bin/rig" session bind --agent claude --native-session-id corrupt-parent --source startup)
+  first_file=$(printf '%s' "$first" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  run env RIG_SESSION_FILE="$first_file" "$CASE_DIR/bin/rig" session-name set --final --complete 'first wrap'
+  [ "$status" -eq 0 ]
+  done_file=$(find "$CASE_DIR/.rig/memory/sessions/done" -name 'session-*.json' -print | head -1)
+  DONE_F="$done_file" python3 -c 'import json,os; p=os.environ["DONE_F"]; d=json.load(open(p)); d["lifecycle"]["state"]="active"; json.dump(d,open(p,"w"))'
+
+  run "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id corrupt-parent --json
+  [ "$status" -eq 3 ]; [[ "$output" == *'"reason": "invalid_lifecycle_transition"'* ]] || return 1
+  run "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id corrupt-parent --source resume --allow-continuation
+  [ "$status" -eq 3 ]; [[ "$output" == *'"reason": "invalid_lifecycle_transition"'* ]] || return 1
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -maxdepth 1 -name 'session-*.json' | wc -l | tr -d ' ')" -eq 0 ]
+
+  DONE_F="$done_file" python3 -c 'import json,os; p=os.environ["DONE_F"]; d=json.load(open(p)); d["lifecycle"]["state"]="complete"; json.dump(d,open(p,"w"))'
+  second=$("$CASE_DIR/bin/rig" session bind --agent claude --native-session-id corrupt-parent --source resume --allow-continuation)
+  second_file=$(printf '%s' "$second" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  DONE_F="$done_file" python3 -c 'import json,os; p=os.environ["DONE_F"]; d=json.load(open(p)); d["lifecycle"]["state"]="active"; json.dump(d,open(p,"w"))'
+  before=$(cksum "$second_file")
+  run "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id corrupt-parent --json
+  [ "$status" -eq 2 ]; [[ "$output" == *'"reason": "duplicate_native_id"'* ]] || return 1
+  run "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id corrupt-parent --source resume --allow-continuation
+  [ "$status" -eq 2 ]; [[ "$output" == *'"reason": "duplicate_native_id"'* ]] || return 1
+  run "$CASE_DIR/bin/rig" session doctor --json
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; checks={c["name"]:c["ok"] for c in json.load(sys.stdin)["checks"]}; assert not checks["continuation_lineage"] and not checks["unique_native_bindings"]'
+  run env CLAUDE_CODE_SESSION_ID=corrupt-parent "$CASE_DIR/bin/rig" session-name set --final --json 'unsafe name'
+  [ "$status" -eq 2 ]; [[ "$output" == *'"reason": "duplicate_native_id"'* ]] || return 1
+  [ "$(cksum "$second_file")" = "$before" ]
+}
+
+@test "SessionEnd inactive record continues on prompt-only resume and keeps exact launcher identity" {
+  first=$("$CASE_DIR/bin/rig" session bind --agent claude --native-session-id prompt-inactive --source startup)
+  first_file=$(printf '%s' "$first" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  first_anchor=$(printf '%s' "$first" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  end_payload='{"source":"logout","session_id":"prompt-inactive"}'
+  run env RIG_SESSION_LOG="$BATS_TEST_TMPDIR/session.log" bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/stop.sh' _ "$CASE_DIR" "$end_payload"
+  [ "$status" -eq 0 ]
+  SESSION_F="$first_file" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["lifecycle"]["state"]=="inactive"'
+  run "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id prompt-inactive --json
+  [ "$status" -eq 3 ]; [[ "$output" == *'"reason": "ended_record"'* ]] || return 1
+
+  wrong_payload='{"hook_event_name":"UserPromptSubmit","session_id":"other-native","prompt":"continue"}'
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" \
+    bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/prompt-submit.sh' _ "$CASE_DIR" "$wrong_payload"
+  [ "$status" -eq 0 ]; [[ "$output" == *'could not attach'* ]] || return 1
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -maxdepth 1 -name 'session-*.json' | wc -l | tr -d ' ')" -eq 1 ]
+
+  payload='{"hook_event_name":"UserPromptSubmit","session_id":"prompt-inactive","prompt":"continue"}'
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" \
+    bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/prompt-submit.sh' _ "$CASE_DIR" "$payload"
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 0 ]; [[ "$output" == *'"reason": "launcher_continuation"'* ]] || return 1
+  second_file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  SESSION_F="$second_file" FIRST_ANCHOR="$first_anchor" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["lifecycle"]["state"]=="active" and d["lineage"]["parent_anchor"]==os.environ["FIRST_ANCHOR"] and d["lineage"]["kind"]=="continuation"'
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" \
+    bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/prompt-submit.sh' _ "$CASE_DIR" "$payload"
+  [ "$status" -eq 0 ]
+  [ "$(find "$CASE_DIR/.rig/memory/sessions" -maxdepth 1 -name 'session-*.json' | wc -l | tr -d ' ')" -eq 2 ]
+  run env -u RIG_SESSION_ANCHOR RIG_SESSION_FILE="$first_file" "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 3 ]; [[ "$output" == *'"reason": "invalid_launcher_file"'* ]] || return 1
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR=wrong-anchor "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 3 ]; [[ "$output" == *'"reason": "launcher_anchor_conflict"'* ]] || return 1
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" CLAUDE_CODE_SESSION_ID=other-native "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 3 ]; [[ "$output" == *'"reason": "native_conflict"'* ]] || return 1
+  run env RIG_SESSION_FILE="$first_file" RIG_SESSION_ANCHOR="$first_anchor" CLAUDE_CODE_SESSION_ID=prompt-inactive \
+    "$CASE_DIR/bin/rig" session-name set --final --json 'resumed name'
+  [ "$status" -eq 0 ]
+  SESSION_F="$second_file" python3 -c 'import json,os; assert json.load(open(os.environ["SESSION_F"]))["names"]["final"]=="resumed name"'
+  run "$CASE_DIR/bin/rig" session doctor --json
+  [ "$status" -eq 0 ]
+}
+
+@test "ended_no_wrap native record continues only from its exact prompt ID" {
+  first=$("$CASE_DIR/bin/rig" session bind --agent claude --native-session-id needs-wrap --source startup)
+  first_file=$(printf '%s' "$first" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  SESSION_F="$first_file" python3 -c 'import json,os; p=os.environ["SESSION_F"]; d=json.load(open(p)); d["flags"]["wrap_needed"]=True; json.dump(d,open(p,"w"))'
+  run env RIG_SESSION_LOG="$BATS_TEST_TMPDIR/session.log" bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/stop.sh' _ "$CASE_DIR" '{"source":"prompt_input_exit","session_id":"needs-wrap"}'
+  [ "$status" -eq 0 ]
+  SESSION_F="$first_file" python3 -c 'import json,os; assert json.load(open(os.environ["SESSION_F"]))["lifecycle"]["state"]=="ended_no_wrap"'
+  run "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id needs-wrap --json
+  [ "$status" -eq 3 ]; [[ "$output" == *'"reason": "ended_record"'* ]] || return 1
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/prompt-submit.sh' _ "$CASE_DIR" \
+    '{"hook_event_name":"UserPromptSubmit","session_id":"needs-wrap","prompt":"continue"}'
+  [ "$status" -eq 0 ]
+  run "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id needs-wrap --json
+  [ "$status" -eq 0 ]; [[ "$output" == *'"state": "active"'* ]] || return 1
+  second_file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  [ "$second_file" != "$first_file" ]
+  run env CLAUDE_CODE_SESSION_ID=needs-wrap "$CASE_DIR/bin/rig" session-name set --final 'continued wrap'
+  [ "$status" -eq 0 ]
+  run "$CASE_DIR/bin/rig" session doctor --json
+  [ "$status" -eq 0 ]
+}
+
+@test "prompt-only legacy launcher migrates to exact native binding" {
+  file="$CASE_DIR/.rig/memory/sessions/session-legacy.json"
+  write_session "$file" legacy-prompt feat/current ended-no-wrap
+  payload='{"hook_event_name":"UserPromptSubmit","session_id":"legacy-prompt-native","prompt":"continue"}'
+  run env RIG_SESSION_FILE="$file" RIG_SESSION_ANCHOR=legacy-prompt \
+    bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/prompt-submit.sh' _ "$CASE_DIR" "$payload"
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$file" RIG_SESSION_ANCHOR=legacy-prompt "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 0 ]; [[ "$output" == *'"reason": "launcher_file"'* && "$output" == *'"state": "active"'* ]] || return 1
+  SESSION_F="$file" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["schema_version"]==1 and d["native"]["session_id"]=="legacy-prompt-native" and d["migration"]["legacy_anchor"]=="legacy-prompt"'
+  run env RIG_SESSION_FILE="$file" RIG_SESSION_ANCHOR=legacy-prompt "$CASE_DIR/bin/rig" session-name set --final 'legacy resumed name'
+  [ "$status" -eq 0 ]
+  run "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id unrelated-native --json
+  [ "$status" -eq 1 ]; [[ "$output" == *'"reason": "not_found"'* ]] || return 1
 }
 
 @test "retrofit mints a continuation record for an ended native session" {
