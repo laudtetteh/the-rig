@@ -775,7 +775,14 @@ if codex_runtime_id:
             for path in base.glob("session-*.json"):
                 try:
                     data = json.loads(read(path))
-                    if isinstance(data, dict):
+                    if isinstance(data, dict) and (data.get("schema_version") != 1 or
+                        (all(isinstance(data.get(key), dict) for key in ("native", "project", "lifecycle")) and
+                         all(key not in data or isinstance(data[key], dict)
+                             for key in ("runtime", "lineage", "migration", "names")) and
+                         all(value is None or isinstance(value, str) for value in
+                             (data.get("anchor"), data.get("agent"), data["native"].get("session_id"),
+                              data["project"].get("identity"), data["lifecycle"].get("state"),
+                              (data.get("lineage") or {}).get("parent_anchor"))))):
                         records.append((path, data))
                     else:
                         session_errors.append(path.name)
@@ -1290,7 +1297,17 @@ except (OSError,subprocess.SubprocessError): common=root
 project_id=hashlib.sha256(str(common).encode()).hexdigest(); now=datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec="seconds")
 def read(p):
     try:
-        d=json.loads(p.read_text()); return d if isinstance(d,dict) else None
+        d=json.loads(p.read_text())
+        if not isinstance(d,dict): return None
+        if d.get("schema_version")==1 and (
+            not all(isinstance(d.get(key),dict) for key in ("native","project","lifecycle")) or
+            not all(key not in d or isinstance(d[key],dict) for key in ("runtime","lineage","migration","names")) or
+            not all(value is None or isinstance(value,str) for value in
+                (d.get("anchor"),d.get("agent"),d["native"].get("session_id"),
+                 d["project"].get("identity"),d["lifecycle"].get("state"),
+                 (d.get("lineage") or {}).get("parent_anchor")))):
+            return None
+        return d
     except (OSError,ValueError,TypeError): return None
 def original_active_path(d):
     recorded=(d.get("runtime") or {}).get("completed_from")
@@ -1573,8 +1590,14 @@ for base in (sessions,sessions/"done"):
         try:
             d=json.loads(p.read_text())
             if not isinstance(d,dict): raise ValueError("not an object")
-            if d.get("schema_version")==1 and "lineage" in d and not isinstance(d["lineage"],dict):
-                raise ValueError("malformed lineage")
+            if d.get("schema_version")==1 and (
+                not all(isinstance(d.get(key),dict) for key in ("native","project","lifecycle")) or
+                not all(key not in d or isinstance(d[key],dict) for key in ("runtime","lineage","migration","names")) or
+                not all(value is None or isinstance(value,str) for value in
+                    (d.get("anchor"),d.get("agent"),d["native"].get("session_id"),
+                     d["project"].get("identity"),d["lifecycle"].get("state"),
+                     (d.get("lineage") or {}).get("parent_anchor")))):
+                raise ValueError("malformed v1 object")
             records.append((p,d))
         except (OSError,ValueError,TypeError): errors.append({"file":p.name,"reason":"malformed_record"})
 def summary(p,d):
@@ -1705,6 +1728,14 @@ for base in (sessions,sessions/"done"):
             emit(False,"invalid_session_path",{"no_write":True},4)
         try: d=json.loads(p.read_text())
         except (OSError,ValueError,TypeError): emit(False,"malformed_record",{"no_write":True},4)
+        if not isinstance(d,dict) or (d.get("schema_version")==1 and (
+            not all(isinstance(d.get(key),dict) for key in ("native","project","lifecycle")) or
+            not all(key not in d or isinstance(d[key],dict) for key in ("runtime","lineage","migration","names")) or
+            not all(value is None or isinstance(value,str) for value in
+                (d.get("anchor"),d.get("agent"),d["native"].get("session_id"),
+                 d["project"].get("identity"),d["lifecycle"].get("state"),
+                 (d.get("lineage") or {}).get("parent_anchor"))))):
+            emit(False,"malformed_record",{"no_write":True},4)
         if isinstance(d.get("schema_version"),int) and d["schema_version"]>1: emit(False,"unsupported_schema",{"no_write":True},4)
         records.append((p,d))
 candidates=[(p,d) for p,d in records if d.get("anchor")==anchor]
@@ -1791,6 +1822,14 @@ try:
 except (OSError,ValueError,TypeError): refuse("record_changed")
 if not isinstance(d,dict) or expected.get("confidence")!="exact" or expected.get("session_file")!=str(p) or d.get("anchor")!=expected.get("anchor"):
     refuse("record_changed")
+if d.get("schema_version")==1 and (
+    not all(isinstance(d.get(key),dict) for key in ("native","project","lifecycle")) or
+    not all(key not in d or isinstance(d[key],dict) for key in ("runtime","lineage","migration","names")) or
+    not all(value is None or isinstance(value,str) for value in
+        (d.get("anchor"),d.get("agent"),d["native"].get("session_id"),
+         d["project"].get("identity"),d["lifecycle"].get("state"),
+         (d.get("lineage") or {}).get("parent_anchor")))):
+    refuse("malformed_record",4)
 if isinstance(d.get("schema_version"),int) and d["schema_version"]>1:
     refuse("unsupported_schema",4)
 if d.get("schema_version") == 1:

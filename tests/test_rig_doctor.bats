@@ -216,6 +216,21 @@ json_assert() {
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert not c["codex_project_target_runtime"]["ok"] and ".codex/hooks.json" in c["codex_project_target_runtime"]["detail"] and "--project-agent both" in c["codex_project_target_runtime"]["detail"]; assert not c["codex_session_runtime"]["ok"] and "session retrofit" in c["codex_session_runtime"]["detail"]'
 }
 
+@test "Codex runtime doctor reports malformed nested v1 records as JSON" {
+  printf '{"schema_version":1,"agents":["claude","codex"]}\n' > "$CASE_DIR/.rig/install-targets.json"
+  mkdir -p "$CASE_DIR/.rig/memory/sessions"
+  printf '{"schema_version":1,"agent":"codex","native":"bad type","project":{"identity":"any"},"lifecycle":{"state":"active"}}\n' \
+    > "$CASE_DIR/.rig/memory/sessions/session-malformed.json"
+  run env CODEX_THREAD_ID=old-thread "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_session_runtime"); assert not c["ok"] and "session-malformed.json" in c["detail"] and "malformed" in c["detail"]'
+  printf '{"schema_version":1,"agent":"codex","native":{"session_id":["bad"]},"project":{"identity":"any"},"lifecycle":{"state":"active"}}\n' \
+    > "$CASE_DIR/.rig/memory/sessions/session-malformed.json"
+  run env CODEX_THREAD_ID=old-thread "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_session_runtime"); assert not c["ok"] and "session-malformed.json" in c["detail"] and "malformed" in c["detail"]'
+}
+
 @test "Codex runtime doctor passes after target infrastructure and current-thread binding exist" {
   printf '{"schema_version":1,"agents":["claude","codex"]}\n' > "$CASE_DIR/.rig/install-targets.json"
   mkdir -p "$CASE_DIR/.codex/hooks" "$CASE_DIR/.agents/skills/task" "$CASE_DIR/.agents/skills/ship"
