@@ -195,13 +195,13 @@ SNAP_LOCK_JSON=$("$REPO/bin/rig" memory workflow-lock "${LOCK_ARGS[@]}") || {
 }
 SNAP_LOCK_TOKEN=$(printf '%s' "$SNAP_LOCK_JSON" | \
   python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])') || exit 1
-WRAP_MARKER_SHA=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "missing")' \
+WRAP_MARKER_TOKEN=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); s=p.stat() if p.exists() else None; print(hashlib.sha256(p.read_bytes()+b"\0"+str(s.st_mtime_ns).encode()+b"\0"+str(s.st_ino).encode()).hexdigest() if s else "missing")' \
   "$RIG_DIR/memory/.wrap-needed") || {
   "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
   exit 1
 }
 printf 'Rig workflow lock acquired: %s\n' "$SNAP_LOCK_JSON"
-printf 'Wrap reminder baseline: %s\n' "$WRAP_MARKER_SHA"
+printf 'Wrap reminder baseline: %s\n' "$WRAP_MARKER_TOKEN"
 ```
 
 The lock reports the current owner anchor, PID, and age if another workflow is
@@ -214,7 +214,7 @@ part of this command. Keep the exact `token` from the acquire output in your
 working context and reassign `SNAP_LOCK_TOKEN` from that value in later tool-call
 shells; shell variables do not persist between tool calls. Never recover a token
 by reading the current lock file, which could belong to a newer session. If
-`WRAP_MARKER_SHA` is lost across tool calls, pass an empty hash at the final
+`WRAP_MARKER_TOKEN` is lost across tool calls, pass an empty token at the final
 clear; that clears only this session's scoped obligation and preserves all
 unscoped reminders. Never re-read the marker to reconstruct the baseline. If
 acquire fails with `Operation not permitted`, request scoped write approval for $RIG_DIR
@@ -627,7 +627,7 @@ CURRENT_UUID=$(printf '%s' "$CURRENT_JSON" | python3 -c 'import json,sys; print(
   exit 1
 }
 WRAP_CLEAR_JSON=$("$REPO/bin/rig" session obligation clear --kind wrap \
-  --adopt-legacy-if-marker-sha "${WRAP_MARKER_SHA:-}" --json) || exit 1
+  --adopt-legacy-if-marker-token "${WRAP_MARKER_TOKEN:-}" --json) || exit 1
 printf '%s\n' "$WRAP_CLEAR_JSON"
 "$REPO/bin/rig" session-name set --final --complete "$CONFIRMED_NAME"
 ```

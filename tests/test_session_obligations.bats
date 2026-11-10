@@ -19,6 +19,10 @@ field() {
   printf '%s' "$1" | python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$2"
 }
 
+marker_token() {
+  python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); s=p.stat() if p.exists() else None; print(hashlib.sha256(p.read_bytes()+b"\0"+str(s.st_mtime_ns).encode()+b"\0"+str(s.st_ino).encode()).hexdigest() if s else "missing")' "$1"
+}
+
 @test "wrap obligations are SID-scoped and one session cannot clear another" {
   local one two file_one file_two anchor_one anchor_two
   one=$(bind native-one); two=$(bind native-two)
@@ -59,9 +63,9 @@ field() {
   [ "$status" -eq 0 ]
   marker="$CASE_DIR/.rig/memory/.wrap-needed"
   printf 'unscoped_progress=before\n' >> "$marker"
-  observed=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "missing")' "$marker")
+  observed=$(marker_token "$marker")
   python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_text(p.read_text().replace("unscoped_progress=before", "unscoped_progress=after"))' "$marker"
-  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-sha "$observed" --json
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-token "$observed" --json
   [ "$status" -eq 0 ]
   [[ "$output" == *'"legacy_preserved": true'* ]] || return 1
   grep -Fxq 'unscoped_progress=after' "$marker"
@@ -74,8 +78,8 @@ field() {
   result=$(bind reviewed-wrap); file=$(field "$result" session_file)
   marker="$CASE_DIR/.rig/memory/.wrap-needed"
   printf 'unscoped_progress=before\n' > "$marker"
-  observed=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "missing")' "$marker")
-  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-sha "$observed" --json
+  observed=$(marker_token "$marker")
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-token "$observed" --json
   [ "$status" -eq 0 ]
   [ ! -e "$marker" ]
 }
@@ -87,8 +91,8 @@ field() {
   printf 'unscoped_progress=before\n' > "$marker"
   printf '## 2026-11-10 — pending [abc123]\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n' \
     > "$CASE_DIR/.rig/memory/PROGRESS.md"
-  observed=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "missing")' "$marker")
-  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-sha "$observed" --json
+  observed=$(marker_token "$marker")
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-token "$observed" --json
   [ "$status" -eq 0 ]
   [[ "$output" == *'"legacy_preserved": true'* ]] || return 1
   grep -Fxq 'unscoped_progress=before' "$marker"
@@ -99,12 +103,40 @@ field() {
   result=$(bind empty-legacy); file=$(field "$result" session_file)
   marker="$CASE_DIR/.rig/memory/.wrap-needed"
   : > "$marker"
-  observed=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "missing")' "$marker")
+  observed=$(marker_token "$marker")
   printf '## 2026-11-10 — pending [abc123]\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n' \
     > "$CASE_DIR/.rig/memory/PROGRESS.md"
-  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-sha "$observed" --json
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-token "$observed" --json
   [ "$status" -eq 0 ]
   [ -e "$marker" ]
+}
+
+@test "guarded wrap clear preserves a legacy marker created after a missing baseline" {
+  local result file marker observed
+  result=$(bind missing-legacy); file=$(field "$result" session_file)
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  observed=$(marker_token "$marker")
+  : > "$marker"
+  printf '## 2026-11-10 — pending [abc123]\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n' \
+    > "$CASE_DIR/.rig/memory/PROGRESS.md"
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-token "$observed" --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"legacy_preserved": true'* ]] || return 1
+  grep -Eq '^unscoped_progress=[0-9a-f]{32}$' "$marker"
+}
+
+@test "guarded wrap clear notices an old hook touching an existing scoped marker" {
+  local result file marker observed
+  result=$(bind touched-legacy); file=$(field "$result" session_file)
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation mark --kind wrap --json
+  [ "$status" -eq 0 ]
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  observed=$(marker_token "$marker")
+  MARKER_F="$marker" python3 -c 'import os; p=os.environ["MARKER_F"]; s=os.stat(p); os.utime(p,ns=(s.st_atime_ns,s.st_mtime_ns+1000000000))'
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-token "$observed" --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"legacy_preserved": true'* ]] || return 1
+  grep -Eq '^unscoped_legacy=[0-9a-f]{32}$' "$marker"
 }
 
 @test "post-merge clear requires the exact pending SHA and records acknowledgement" {
