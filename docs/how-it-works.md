@@ -189,10 +189,13 @@ obligation. A later full wrap can clear that reminder with explicit legacy
 adoption. Legacy sessions retain the unscoped reminder path.
 Wrap records the reminder's content and file metadata token when it acquires
 the workflow lock. At completion it adopts an older unscoped reminder only if
-that token still matches and no unexpanded progress stub remains; another
-session's pending work stays visible. Legacy SessionEnd also refreshes the
-unscoped marker's generation, so an existing empty marker cannot hide a newer
-reminder.
+that token still matches and no unexpanded untagged progress stub remains.
+Another session's pending work stays visible. Legacy SessionEnd refreshes
+the unscoped marker's generation, so an existing empty marker cannot hide a
+newer reminder.
+An older hook that only touches an existing nonempty marker and writes no
+PROGRESS stub leaves no origin to recover if a later scoped writer replaces
+that marker. Upgrade that hook to the generation-writing version.
 
 ---
 

@@ -74,7 +74,7 @@ Repair is preview-only unless --confirm TOKEN and --reason REASON are supplied.
 Retrofit binds the native host ID from env or an explicit --native-session-id.
 Content matching is never part of normal resolution.
 Wrap clear can use --adopt-legacy-if-marker-token TOKEN to adopt only an unchanged
-project reminder with no unexpanded progress stub. Other reminders remain
+project reminder with no unexpanded untagged progress stub. Other reminders remain
 pending while this session clears.
 EOF
       ;;
@@ -191,22 +191,33 @@ if kind=="wrap":
         if line.startswith("anchor="): scoped.append(line[7:])
         elif line.strip(): legacy.append(line)
     if action=="mark":
+        if raw_bytes==b"" and not legacy:
+            # A prior hook's empty marker is an unknown obligation. Keep it
+            # when a new exact session adds its own scoped reminder.
+            legacy.append("unscoped_legacy="+uuid.uuid4().hex)
         if anchor not in scoped: scoped.append(anchor)
     else:
         if anchor not in scoped and (legacy or marker.exists()) and not (adopt or guarded_adopt):
             print(json.dumps({"ok":False,"reason":"legacy_adoption_required","no_write":True})); raise SystemExit(3)
         scoped=[value for value in scoped if value!=anchor]
         reviewed=guarded_adopt and observed_token and observed_token==marker_token
-        pending_stub=False
+        pending_unscoped_stub=False
         if guarded_adopt:
             try:
                 with open(memory/"PROGRESS.md", "r", encoding="utf-8", errors="surrogateescape") as progress:
-                    pending_stub=any(re.search(r"Auto-logged by (post-tool|post-commit) hook", line) for line in progress)
+                    current_sid=None
+                    for line in progress:
+                        if line.startswith("## "):
+                            match=re.search(r"<!-- sid:([A-Za-z0-9-]+) -->", line)
+                            current_sid=match.group(1) if match else None
+                        elif current_sid is None and re.search(r"Auto-logged by (post-tool|post-commit) hook", line):
+                            pending_unscoped_stub=True
+                            break
             except FileNotFoundError:
                 pass
             except OSError:
-                pending_stub=True
-            if pending_stub:
+                pending_unscoped_stub=True
+            if pending_unscoped_stub:
                 reviewed=False
                 if not legacy: legacy.append("unscoped_progress="+uuid.uuid4().hex)
             elif (not reviewed and not legacy and raw_bytes is not None and

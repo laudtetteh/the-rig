@@ -616,7 +616,7 @@ never interpolate it into shell or Python source.
 ```bash
 # Clear only this exact session's wrap obligation while its active record is
 # still resolvable. Adopt an older unscoped marker only if it has not changed
-# since the workflow lock was acquired and no unexpanded progress stub remains;
+# since the workflow lock was acquired and no unexpanded untagged stub remains;
 # another session may add one while this session waits for name confirmation.
 CURRENT_JSON=$("$REPO/bin/rig" session current --json) || {
   exit 1

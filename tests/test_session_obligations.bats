@@ -156,6 +156,52 @@ marker_token() {
   if grep -Eq '^unscoped_' "$marker"; then return 1; fi
 }
 
+@test "guarded wrap clear does not claim another session's tagged progress stub" {
+  local one two file_one file_two anchor_two marker observed
+  one=$(bind tagged-one); two=$(bind tagged-two)
+  file_one=$(field "$one" session_file); file_two=$(field "$two" session_file)
+  anchor_two=$(field "$two" anchor)
+  run env RIG_SESSION_FILE="$file_one" "$CASE_DIR/bin/rig" session obligation mark --kind wrap --json
+  [ "$status" -eq 0 ]
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  observed=$(marker_token "$marker")
+  printf '## 2026-11-10 — tagged [abc123] <!-- sid:%s -->\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n' \
+    "$anchor_two" > "$CASE_DIR/.rig/memory/PROGRESS.md"
+  run env RIG_SESSION_FILE="$file_two" "$CASE_DIR/bin/rig" session obligation mark --kind wrap --json
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$file_one" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-token "$observed" --json
+  [ "$status" -eq 0 ]
+  grep -Fxq "anchor=$anchor_two" "$marker"
+  if grep -Eq '^unscoped_' "$marker"; then return 1; fi
+}
+
+@test "a scoped mark retains an older empty legacy reminder" {
+  local result file anchor marker
+  result=$(bind scoped-after-legacy); file=$(field "$result" session_file); anchor=$(field "$result" anchor)
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  : > "$marker"
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation mark --kind wrap --json
+  [ "$status" -eq 0 ]
+  grep -Fxq "anchor=$anchor" "$marker"
+  grep -Eq '^unscoped_legacy=[0-9a-f]{32}$' "$marker"
+}
+
+@test "an older empty reminder survives a later scoped mark and guarded clear" {
+  local one two file_one file_two anchor_two marker observed
+  one=$(bind mixed-one); two=$(bind mixed-two)
+  file_one=$(field "$one" session_file); file_two=$(field "$two" session_file)
+  anchor_two=$(field "$two" anchor)
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  observed=$(marker_token "$marker")
+  : > "$marker"
+  run env RIG_SESSION_FILE="$file_two" "$CASE_DIR/bin/rig" session obligation mark --kind wrap --json
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$file_one" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-token "$observed" --json
+  [ "$status" -eq 0 ]
+  grep -Fxq "anchor=$anchor_two" "$marker"
+  grep -Eq '^unscoped_legacy=[0-9a-f]{32}$' "$marker"
+}
+
 @test "post-merge clear requires the exact pending SHA and records acknowledgement" {
   local result file before
   result=$(bind merge-session); file=$(field "$result" session_file)
