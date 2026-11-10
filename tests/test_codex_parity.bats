@@ -12,6 +12,8 @@ setup() {
 
   cp "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh" \
     "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  cp "$REPO_ROOT/templates/project/.claude/hooks/post-tool.sh" \
+    "$TEST_PROJECT/.claude/hooks/post-tool.sh"
   cp "$REPO_ROOT/templates/project/.claude/hooks/session-start.sh" \
     "$TEST_PROJECT/.claude/hooks/session-start.sh"
   cp "$REPO_ROOT/templates/project/.codex/hooks/rig-adapter.sh" \
@@ -124,7 +126,7 @@ run_linked_pretool() {
 @test "normal Claude commit gate checks installed project's branch after cwd changes" {
   git -C "$TEST_PROJECT" checkout -q -B main
   touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"fix: unsafe\""}}'
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"fix: unsafe\""}}))' "$TEST_PROJECT")"
   run bash -c 'cd "$1" && printf "%s" "$3" | bash "$2/.claude/hooks/pre-tool.sh"' \
     _ "$TEST_ROOT" "$TEST_PROJECT" "$payload"
   [ "$status" -eq 2 ]
@@ -283,7 +285,7 @@ run_linked_pretool() {
     $'cat <<\x27EOF\x27\nexample: git commit -m "unclosed\nEOF'; do
     payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
     run_linked_pretool "$payload"
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 0 ] || { echo "unexpected block for: $command ($output)" >&3; return 1; }
   done
 
   command="bash -c 'cd \"\$TARGET\" && git commit -m \"fix: unsafe\"'"
@@ -302,13 +304,14 @@ run_linked_pretool() {
   run_linked_pretool "$payload"
   [ "$status" -eq 0 ]
 
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
   payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"fix: blocked\""}}))' "$TEST_PROJECT")"
   run_linked_pretool "$payload"
   [ "$status" -eq 2 ]
   [[ "$output" == *"Direct-to-main commit blocked"* ]] || return 1
 }
 
-@test "direct-push checks each commit subject in a multi-repository Bash command" {
+@test "one approval cannot authorize a multi-repository commit chain" {
   setup_linked_hook_worktrees
   touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok" "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
   printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
@@ -317,7 +320,7 @@ run_linked_pretool() {
   payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
   run_linked_pretool "$payload"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"Direct-to-main commit blocked"* ]] || return 1
+  [[ "$output" == *"one approval permits one commit attempt"* ]] || return 1
 }
 
 @test "commit target does not inherit a subshell or pipeline cwd" {
@@ -347,10 +350,12 @@ run_linked_pretool() {
   for command in \
     "git commit -F '$TEST_ROOT/chore-msg.txt'" \
     "git commit --file='$TEST_ROOT/chore-msg.txt'"; do
+    touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
     payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT" "$command")"
     run_linked_pretool "$payload"
     [ "$status" -eq 0 ]
   done
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
   command="git commit -F '$TEST_ROOT/fix-msg.txt'"
   payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT" "$command")"
   run_linked_pretool "$payload"
@@ -370,6 +375,67 @@ run_linked_pretool() {
   run bash -c 'cd "$1" && printf "%s" "$2" | bash .codex/hooks/rig-adapter.sh' _ "$LINKED_FEATURE" "$payload"
   [ "$status" -eq 2 ]
   [[ "$output" == *"Commit blocked by The Rig."* ]] || return 1
+}
+
+@test "unquoted heredoc command substitution cannot hide a commit" {
+  local command payload
+  command=$'cat <<EOF\n$(git commit -m "fix: hidden")\nEOF'
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "$command")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'Commit blocked by The Rig.'* ]] || return 1
+}
+
+@test "cd dash cannot make a main commit use a feature approval" {
+  setup_linked_hook_worktrees
+  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
+  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
+  local command payload
+  command="cd '$LINKED_FEATURE' && cd - && git commit -m 'fix: unsafe'"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT" "$command")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+}
+
+@test "a commit approval is consumed before execution and cannot authorize two attempts" {
+  git -C "$TEST_PROJECT" checkout -q -b fix/approved
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  local payload
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"fix: approved\""}}'
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"fix: first\"; git commit -m \"fix: second\""}}'
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+}
+
+@test "a project approval cannot authorize a commit in an unrelated repository" {
+  git -C "$TEST_PROJECT" checkout -q -b fix/approved
+  other="$TEST_ROOT/unrelated"
+  mkdir -p "$other"
+  git -C "$other" init -q
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "git -C '$other' commit -m 'fix: foreign'")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'outside the installed project'* ]] || return 1
+  [ -e "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+}
+
+@test "native PostToolUse records a commit and clears a leftover approval" {
+  printf '# Progress\n\n---\n' > "$TEST_PROJECT/.rig/memory/PROGRESS.md"
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  output="$(git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null commit --allow-empty -m 'fix: native post event [#588]')"
+  hash="$(git -C "$TEST_PROJECT" rev-parse --short HEAD)"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"git commit"},"tool_response":{"stdout":sys.argv[1]}}))' "$output")"
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/post-tool.sh' _ "$TEST_PROJECT" "$payload"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+  grep -Fq "$hash" "$TEST_PROJECT/.rig/memory/PROGRESS.md"
 }
 
 @test "commit guard inspects executable eval heredocs but not script file contents" {
@@ -541,6 +607,14 @@ EOF
   codex_payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"command":sys.argv[1]}}))' "$patch")"
   run_codex_adapter "$codex_payload"
   [ "$status" -eq 0 ]
+}
+
+@test "Codex apply_patch resolves relative targets against event cwd" {
+  mkdir -p "$TEST_PROJECT/nested"
+  patch=$'*** Begin Patch\n*** Update File: ../CLAUDE.md\n@@\n-old\n+unsafe\n*** End Patch'
+  codex_payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"apply_patch","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT/nested" "$patch")"
+  run_codex_adapter "$codex_payload"
+  [ "$status" -eq 2 ]
 }
 
 @test "Claude and Codex SessionStart payloads emit equivalent context" {

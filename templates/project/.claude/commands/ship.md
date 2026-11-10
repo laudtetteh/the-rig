@@ -460,20 +460,26 @@ message is explicitly approved.
 The user reviewed the diff and reported validation evidence at Step 5, then
 approved the commit message at Step 6. Do not claim that the user personally ran
 the optional validation card.
-That constitutes explicit go-ahead — create the commit sentinel, then commit:
+That constitutes explicit go-ahead. Create the commit sentinel in one Bash tool
+call, then write the message and commit in a separate Bash tool call. The
+PreToolUse gate checks approval before the command executes and claims it for
+one attempt, so the sentinel must exist before the commit tool call begins.
 
 ```bash
 # Authorise the commit (pre-tool.sh requires this sentinel)
 touch "$(git rev-parse --show-toplevel)/.rig/memory/.rig-commit-ok" 2>/dev/null || \
   touch "${RIG_DIR:-$(git rev-parse --show-toplevel)/.rig}/memory/.rig-commit-ok"
+```
 
+```bash
 cat > /tmp/ship-commit-msg.txt << 'EOF'
 [approved commit message]
 EOF
 git commit -F /tmp/ship-commit-msg.txt
 ```
 
-post-tool.sh deletes the sentinel automatically after the commit lands.
+PreToolUse consumes the sentinel before the commit attempt. If the attempt
+fails, ask for fresh approval before retrying.
 
 Report the commit hash on success.
 

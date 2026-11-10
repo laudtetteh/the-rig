@@ -4,12 +4,24 @@
 # Runs after Claude Code executes any tool.
 # Wired via .claude/settings.json.
 #
-# Claude Code passes:
-#   $1  — tool name (PascalCase: Write, Edit, Bash, Read, Glob, Grep, etc.)
-#   stdin — tool result as JSON
+# Claude Code passes a PostToolUse event JSON with tool_name and tool_response.
+# The Codex adapter may also pass a positional tool name for legacy callers.
 
-TOOL="$1"
+TOOL="${1:-}"
 RESULT=$(cat)
+if [[ -z "$TOOL" ]]; then
+  TOOL=$(printf '%s' "$RESULT" | python3 -c '
+import json, sys
+try:
+    event = json.load(sys.stdin)
+    if event.get("hook_event_name") != "PostToolUse": raise ValueError()
+    name = event.get("tool_name")
+    if not isinstance(name, str) or not name: raise ValueError()
+    print(name)
+except (ValueError, TypeError, AttributeError):
+    raise SystemExit(1)
+') || exit 0
+fi
 
 # ── Repo root — dynamic, never hardcoded ─────────────────────────────────────
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
@@ -42,7 +54,7 @@ echo "[$(date +%H:%M:%S)] POST $TOOL" >> "$SESSION_LOG"
 # e.g. "[feat/auth abc1234] feat(auth): add token validation [#12]"
 if [[ "$TOOL" == "Bash" ]]; then
 
-  if echo "$RESULT" | grep -qE '\[[a-f0-9]{7,}\]'; then
+  if echo "$RESULT" | grep -qE '\[[^]]+[[:space:]][a-f0-9]{7,}\]'; then
     COMMIT_MSG=$(git -C "$REPO" log -1 --format="%s" 2>/dev/null)
     COMMIT_HASH=$(git -C "$REPO" log -1 --format="%h" 2>/dev/null)
     COMMIT_DATE=$(date +%Y-%m-%d)

@@ -117,10 +117,13 @@ import json, os, re, sys
 d = json.load(sys.stdin)
 tool = d.get("tool_input", d.get("toolInput", {}))
 command = tool.get("command", "") if isinstance(tool, dict) else ""
+cwd = d.get("cwd", os.getcwd())
+if not isinstance(cwd, str) or not os.path.isabs(cwd) or not os.path.isdir(cwd):
+    raise SystemExit(1)
 for value in re.findall(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$", command, re.M):
-    path = value if os.path.isabs(value) else os.path.join(sys.argv[1], value)
+    path = value if os.path.isabs(value) else os.path.join(cwd, value)
     print(os.path.realpath(path))
-' "$REPO") || fail_closed "apply_patch payload is malformed."
+') || fail_closed "apply_patch payload is malformed."
   [[ -n "$paths" ]] || fail_closed "apply_patch payload contains no file targets."
   while IFS= read -r path; do
     found=1
