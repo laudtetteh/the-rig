@@ -181,6 +181,12 @@ Session ends
           On resume: no action; Stop (per-turn): PROGRESS marker only
 ```
 
+In a shared Rig directory, an exact native SessionEnd attributes an unexpanded
+auto-logged commit only when its PROGRESS heading carries that session's
+`<!-- sid:... -->` marker. A stub without a session anchor stays in
+PROGRESS for later review; it does not assign another session a wrap obligation.
+Legacy sessions retain the unscoped reminder path.
+
 ---
 
 ## The memory system
@@ -449,15 +455,14 @@ Agent finishes response each turn
              Append <!-- session-end YYYY-MM-DD HH:MM --> boundary marker
              (idempotent: skips if last non-blank line is already a marker)
            Dispatches on `source` field from JSON stdin:
-             Empty source (Stop event): updates CONTEXT_SNAPSHOT date + PROGRESS marker
+             Empty source (Stop event): appends a PROGRESS marker; preserves the shared snapshot
 
 Session ends (logout / clear / quit)
      │
      └─► stop.sh (Stop is registered for SessionEnd too — same script, both events)
            Resolves RIG_DIR
-           On logout/prompt_input_exit: writes .wrap-needed sentinel
-                                        writes a minimal auto-checkpoint to CONTEXT_SNAPSHOT.md
-                                        (current branch + last commit; prevents cold-start next session)
+           On logout/prompt_input_exit: writes an exact wrap obligation for its own work
+                                        writes a minimal auto-checkpoint only when CONTEXT_SNAPSHOT.md is absent
            On clear:                    logs context-cleared; does NOT write .wrap-needed
            On resume / Stop (no src):   per-turn update (date + PROGRESS marker)
 ```
