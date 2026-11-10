@@ -349,7 +349,14 @@ The `commit-msg` hook requires the filter beside it (or in `.husky/`) and refuse
 commit if the filter is missing. Human attribution trailers are preserved. If a
 client adds an AI footer after `commit-msg`, `post-commit` reports it without changing
 the commit SHA. Set `RIG_POST_COMMIT_AUTO_AMEND=1` to opt into amending unsigned
-commits automatically; signed commits are never amended by this hook.
+commits automatically during ordinary commits. Signed commits are never amended by
+this hook. Git refuses `git commit --amend` while rebase, cherry-pick, or revert is
+replaying commits, so the hook leaves those commits intact and warns that the
+footer remains even with auto-amend enabled. Once replay finishes, inspect
+`git log` for affected commits. Use `git commit --amend` if the affected commit
+is HEAD; for older commits, use `git rebase -i` from a base before the oldest
+affected commit and mark each one `reword`. Rewriting published commits changes
+their SHAs, so coordinate with anyone using that history before updating a remote.
 
 ---
 

@@ -168,6 +168,66 @@ Co-authored-by: GitHub Copilot <copilot@github.com>'
   [ "$(git -C "$TEST_PROJECT" rev-parse HEAD)" = "$signed" ]
 }
 
+@test "post-commit warns during a real rebase and preserves replayed history" {
+  base_branch="$(git -C "$TEST_PROJECT" branch --show-current)"
+  git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null commit --allow-empty \
+    -m 'chore: base [#594]' >/dev/null
+  git -C "$TEST_PROJECT" switch -q -c topic
+  printf 'first\n' > "$TEST_PROJECT/first.txt"
+  git -C "$TEST_PROJECT" add first.txt
+  git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null commit \
+    -m 'fix: first topic commit [#594]' -m 'Generated with Codex.' >/dev/null
+  printf 'second\n' > "$TEST_PROJECT/second.txt"
+  git -C "$TEST_PROJECT" add second.txt
+  git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null commit \
+    -m 'fix: second topic commit [#594]' >/dev/null
+  git -C "$TEST_PROJECT" switch -q "$base_branch"
+  printf 'main\n' > "$TEST_PROJECT/main.txt"
+  git -C "$TEST_PROJECT" add main.txt
+  git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null commit \
+    -m 'chore: advance base [#594]' >/dev/null
+  base_tip="$(git -C "$TEST_PROJECT" rev-parse HEAD)"
+  git -C "$TEST_PROJECT" switch -q topic
+  install_hook_layout native
+
+  run env RIG_POST_COMMIT_AUTO_AMEND=1 git -C "$TEST_PROJECT" rebase "$base_branch"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"during a rebase, cherry-pick, or revert"* ]] || return 1
+  [[ "$output" == *"footer remains"* ]] || return 1
+  [ "$(git -C "$TEST_PROJECT" rev-parse HEAD~2)" = "$base_tip" ]
+  [ "$(git -C "$TEST_PROJECT" rev-list --count "$base_branch"..HEAD)" -eq 2 ]
+  [ "$(git -C "$TEST_PROJECT" show HEAD:first.txt)" = first ]
+  [ "$(git -C "$TEST_PROJECT" show HEAD:second.txt)" = second ]
+  [[ "$(git -C "$TEST_PROJECT" log -1 --format=%B HEAD^)" == *"Generated with Codex."* ]] || return 1
+}
+
+@test "post-commit warns during a real cherry-pick and preserves its parent" {
+  base_branch="$(git -C "$TEST_PROJECT" branch --show-current)"
+  git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null commit --allow-empty \
+    -m 'chore: base [#594]' >/dev/null
+  git -C "$TEST_PROJECT" switch -q -c topic
+  printf 'topic\n' > "$TEST_PROJECT/topic.txt"
+  git -C "$TEST_PROJECT" add topic.txt
+  git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null commit \
+    -m 'fix: picked commit [#594]' -m 'Generated with Codex.' >/dev/null
+  source_commit="$(git -C "$TEST_PROJECT" rev-parse HEAD)"
+  git -C "$TEST_PROJECT" switch -q "$base_branch"
+  printf 'main\n' > "$TEST_PROJECT/main.txt"
+  git -C "$TEST_PROJECT" add main.txt
+  git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null commit \
+    -m 'chore: advance base [#594]' >/dev/null
+  base_tip="$(git -C "$TEST_PROJECT" rev-parse HEAD)"
+  install_hook_layout native
+
+  run env RIG_POST_COMMIT_AUTO_AMEND=1 git -C "$TEST_PROJECT" cherry-pick "$source_commit"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"during a rebase, cherry-pick, or revert"* ]] || return 1
+  [[ "$output" == *"footer remains"* ]] || return 1
+  [ "$(git -C "$TEST_PROJECT" rev-parse HEAD^)" = "$base_tip" ]
+  [ "$(git -C "$TEST_PROJECT" show HEAD:topic.txt)" = topic ]
+  [[ "$(git -C "$TEST_PROJECT" log -1 --format=%B)" == *"Generated with Codex."* ]] || return 1
+}
+
 @test "stealth installer and upgrade place the precise filter beside native hooks" {
   external_rig="$BATS_TEST_TMPDIR/rig-external"
   run bash "$REPO_ROOT/install.sh" --project-only --target "$TEST_PROJECT" \

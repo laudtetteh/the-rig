@@ -455,8 +455,10 @@ git commit
      └─► post-commit
            Re-read committed message
            Detect late AI footers (clients may inject after commit-msg)
-           Warn without changing the SHA; optional amend for unsigned commits
-             with RIG_POST_COMMIT_AUTO_AMEND=1
+           Warn without changing the SHA by default; optional amend for
+             ordinary unsigned commits with RIG_POST_COMMIT_AUTO_AMEND=1
+           During rebase/cherry-pick/revert, warn that the footer remains
+             and must be removed after replay
 ```
 
 ---
