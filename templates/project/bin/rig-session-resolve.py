@@ -53,6 +53,9 @@ def load(path):
     try:
         data = json.loads(path.read_text())
         if not isinstance(data, dict): return None
+        # Older sparse v1 records may omit lineage; a present value must be a map.
+        if data.get("schema_version") == 1 and "lineage" in data and not isinstance(data["lineage"], dict):
+            return None
         return data
     except (OSError, ValueError, TypeError): return None
 def original_active_path(data):
@@ -83,8 +86,14 @@ def emit(path, data, confidence, reason):
            "lineage": public_lineage,
            "parent_anchor": (data.get("lineage") or {}).get("parent_anchor") if data else None,
            "warnings": []}
+    if reason == "unsupported_schema":
+        out["no_write"] = True
     if reason in ("not_found", "invalid_launcher_file", "ended_record"):
-        recovery_agent = "codex" if os.environ.get("CODEX_THREAD_ID") else "claude" if os.environ.get("CLAUDE_CODE_SESSION_ID") else None
+        if agent:
+            env_name = "CODEX_THREAD_ID" if agent == "codex" else "CLAUDE_CODE_SESSION_ID"
+            recovery_agent = agent if os.environ.get(env_name) == native_id else None
+        else:
+            recovery_agent = "codex" if os.environ.get("CODEX_THREAD_ID") else "claude" if os.environ.get("CLAUDE_CODE_SESSION_ID") else None
         if recovery_agent:
             out["recovery"] = f"bin/rig session retrofit --agent {recovery_agent} --from-env --source resume --json"
     if "--json" in sys.argv[1:]:
@@ -99,7 +108,7 @@ records = []
 malformed = False
 unsupported = False
 unsafe_path = False
-ended_states = ("complete", "inactive", "ended_no_wrap")
+ended_states = ("complete", "inactive", "ended_no_wrap", "orphaned")
 for base in (session_dir, session_dir / "done"):
     if base.is_dir():
         for p in base.glob("session-*.json"):
@@ -170,6 +179,10 @@ env_file = os.environ.get("RIG_SESSION_FILE")
 if "RIG_SESSION_FILE" in os.environ:
     p = confined_session_path(env_file)
     d = load(p) if p else None
+    if p and p.exists() and d is None:
+        emit(None, None, "none", "malformed_record"); raise SystemExit(4)
+    if d and isinstance(d.get("schema_version"), int) and d["schema_version"] > 1:
+        emit(None, None, "none", "unsupported_schema"); raise SystemExit(4)
     state = d.get("lifecycle", {}).get("state", d.get("status")) if d else None
     if p and d and state == "active" and "done" not in p.parts:
         expected_anchor = os.environ.get("RIG_SESSION_ANCHOR")
@@ -185,16 +198,17 @@ if "RIG_SESSION_FILE" in os.environ:
         emit(p, d, "exact", "launcher_file"); raise SystemExit(0)
     # The launcher can keep exporting an ended record's original path. A
     # completed record moves into done/; SessionEnd leaves an inactive record
-    # at that path. Require the original anchor and one exact active leaf.
+    # at that path, and an orphaned record remains there too. Require the
+    # original anchor and one exact active leaf.
     expected_anchor = os.environ.get("RIG_SESSION_ANCHOR")
-    if p and expected_anchor and (not p.exists() or (d and state in ("inactive", "ended_no_wrap") and "done" not in p.parts)):
+    if p and expected_anchor and (not p.exists() or (d and state in ("inactive", "ended_no_wrap", "orphaned") and "done" not in p.parts)):
         if unsafe_path: emit(None, None, "none", "invalid_session_path"); raise SystemExit(4)
         if unsupported: emit(None, None, "none", "unsupported_schema"); raise SystemExit(4)
         if malformed: emit(None, None, "none", "malformed_record"); raise SystemExit(4)
         origins = [(q, record) for q, record in records if record.get("schema_version") == 1 and
                    (("done" in q.parts and record.get("lifecycle", {}).get("state") == "complete" and
                      original_active_path(record) == p) or
-                    (q.resolve() == p and record.get("lifecycle", {}).get("state") in ("inactive", "ended_no_wrap")))]
+                    (q.resolve() == p and record.get("lifecycle", {}).get("state") in ("inactive", "ended_no_wrap", "orphaned")))]
         if len(origins) > 1:
             emit(None, None, "ambiguous", "duplicate_launcher_origin"); raise SystemExit(2)
         if origins:
@@ -226,6 +240,8 @@ if "RIG_SESSION_FILE" in os.environ:
                 emit(None, None, "none", "invalid_lifecycle_transition"); raise SystemExit(3)
             emit(active_path, active_record, "exact", "launcher_continuation"); raise SystemExit(0)
     emit(None, None, "none", "invalid_launcher_file"); raise SystemExit(3)
+if unsupported: emit(None, None, "none", "unsupported_schema"); raise SystemExit(4)
+if malformed: emit(None, None, "none", "malformed_record"); raise SystemExit(4)
 # Claude Code and Codex both expose native session identity through process
 # environment variables, and every subprocess they spawn (hooks, and every
 # ad-hoc tool-call shell) inherits those values via normal fork/exec — unlike
