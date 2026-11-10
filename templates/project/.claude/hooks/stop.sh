@@ -137,7 +137,7 @@ case "$SOURCE" in
 
     NEEDS_WRAP=false
 
-    if [[ -f "$PROGRESS" ]] && grep -q "Auto-logged by post-tool hook" "$PROGRESS" 2>/dev/null; then
+    if [[ -f "$PROGRESS" ]] && grep -Eq "Auto-logged by (post-tool|post-commit) hook" "$PROGRESS" 2>/dev/null; then
       write_wrap_needed "unexpanded stubs in PROGRESS.md"
       NEEDS_WRAP=true
     fi

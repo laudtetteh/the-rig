@@ -322,7 +322,7 @@ Retain this matrix and reuse it in the pull request **Dependency impact** sectio
 
 Run:
 ```bash
-grep -c "Auto-logged by post-tool hook" "$RIG_DIR/memory/PROGRESS.md" 2>/dev/null || echo 0
+grep -Ec "Auto-logged by (post-tool|post-commit) hook" "$RIG_DIR/memory/PROGRESS.md" 2>/dev/null || echo 0
 ```
 
 If the count is > 0: stop and say:
@@ -460,26 +460,28 @@ message is explicitly approved.
 The user reviewed the diff and reported validation evidence at Step 5, then
 approved the commit message at Step 6. Do not claim that the user personally ran
 the optional validation card.
-That constitutes explicit go-ahead. Create the commit sentinel in one Bash tool
-call, then write the message and commit in a separate Bash tool call. The
-PreToolUse gate checks approval before the command executes and claims it for
-one attempt, so the sentinel must exist before the commit tool call begins.
-
-```bash
-# Authorise the commit (pre-tool.sh requires this sentinel)
-touch "$(git rev-parse --show-toplevel)/.rig/memory/.rig-commit-ok" 2>/dev/null || \
-  touch "${RIG_DIR:-$(git rev-parse --show-toplevel)/.rig}/memory/.rig-commit-ok"
-```
+That constitutes explicit go-ahead. Resolve the current worktree's Rig directory,
+write the approved message, and create the commit sentinel. Run `git commit`
+in a separate Bash tool call. An active Rig `commit-msg` hook checks the prepared
+subject and branch, then consumes the sentinel for one attempt. Without that
+hook, PreToolUse checks the visible command and consumes the sentinel before Git runs.
 
 ```bash
 cat > /tmp/ship-commit-msg.txt << 'EOF'
 [approved commit message]
 EOF
-git commit -F /tmp/ship-commit-msg.txt
+ROOT=$(git rev-parse --show-toplevel)
+RIG_DIR="$ROOT/.rig"
+if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; fi
+touch "$RIG_DIR/memory/.rig-commit-ok"
 ```
 
-PreToolUse consumes the sentinel before the commit attempt. If the attempt
-fails, ask for fresh approval before retrying.
+```bash
+RIG_COMMIT_POLICY=guarded git commit -F /tmp/ship-commit-msg.txt
+```
+
+The active guard consumes the sentinel for one attempt. If the commit fails,
+ask for fresh approval before retrying.
 
 Report the commit hash on success.
 

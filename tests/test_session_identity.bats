@@ -272,6 +272,12 @@ with open('$TEST_SESSION_FILE', 'w') as f:
   [ -f "$RIG_DIR/memory/.wrap-needed" ]
 }
 
+@test "session-end: new post-commit stub requests wrap" {
+  echo "## stub <!-- Auto-logged by post-commit hook -->" > "$RIG_DIR/memory/PROGRESS.md"
+  run_hook_exec "stop.sh" '{"source":"logout"}'
+  [ -f "$RIG_DIR/memory/.wrap-needed" ]
+}
+
 @test "session-end: missing snapshot gets minimal checkpoint with Session anchor field" {
   cp "$(pwd)/templates/project/bin/rig-snapshot.py" "$REPO/bin/rig-snapshot.py"
   rm "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"

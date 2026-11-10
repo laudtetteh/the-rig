@@ -81,25 +81,14 @@ rig_dir_for_root() {
 # .rig/ directory (which may be outside the repo). Otherwise default to $REPO/.rig.
 RIG_DIR=$(rig_dir_for_root "$REPO")
 
+# Only the hookless fallback consumes approval here. Active Rig Git hooks
+# validate expiry and claim approval at commit time instead.
 commit_ok_age_seconds() {
-  local file="$1"
-  local now mtime
-
-  now=$(date +%s 2>/dev/null || echo "")
-  if [[ -z "$now" ]]; then
-    return 1
-  fi
-
-  mtime=$(stat -c %Y "$file" 2>/dev/null || stat -f %m "$file" 2>/dev/null || echo "")
-  if [[ -z "$mtime" ]]; then
-    return 1
-  fi
-
-  case "$now:$mtime" in
-    *[!0-9:]*|:*) return 1 ;;
-  esac
-
-  echo $((now - mtime))
+  local file="$1" now mtime
+  now=$(date +%s 2>/dev/null) || return 1
+  mtime=$(stat -c %Y "$file" 2>/dev/null || stat -f %m "$file" 2>/dev/null) || return 1
+  case "$now:$mtime" in *[!0-9:]*|:*) return 1 ;; esac
+  printf '%s\n' "$((now - mtime))"
 }
 
 # ── Session log ──────────────────────────────────────────────────────────────
@@ -109,24 +98,9 @@ commit_ok_age_seconds() {
 SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session-$(basename "$REPO").log}"
 echo "[$(date +%H:%M:%S)] PRE  $TOOL" >> "$SESSION_LOG"
 
-# ── Guard: git commit ────────────────────────────────────────────────────────
-#
-# Prevents the agent from committing before the user has approved the commit.
-#
-# git commit — blocked until a sentinel file exists:
-#              $RIG_DIR/memory/.rig-commit-ok
-#              The agent creates this file only after the user explicitly
-#              confirms local testing is done (e.g. "ready to commit").
-#              pre-tool.sh claims it atomically before the commit attempt.
-#              The file is gitignored via .rig/memory/.gitignore.
-#
-# In /ship: the agent creates the sentinel as part of Step 7, after the user
-# has already confirmed local testing at Step 5 and approved the commit
-# message at Step 6. The gate is satisfied in the normal /ship flow.
-#
-# Outside /ship: the gate fires whenever the agent tries to commit mid-task
-# without the user's explicit go-ahead.
-
+# The early Bash gate rejects visible unmarked commits before execution. It is
+# a heuristic over shell text; generated scripts and shell escapes can evade it.
+# The Git hook is authoritative for explicitly marked subprocesses.
 if [[ "$TOOL" == "Bash" ]]; then
   BASH_CMD=$(printf '%s' "$INPUT" | python3 -c '
 import json, sys
@@ -164,11 +138,33 @@ for line in command.splitlines(keepends=True):
         # receiving command is cat. Inspect its body conservatively.
         pending.append((next(group for group in match.groups()[1:] if group), shell_heredoc or bool(match.group(4)), bool(match.group(1))))
 command = "".join(visible)
+# Shell backslash escaping can spell the Git binary as g\it.
+command = re.sub(r"\\([A-Za-z])", r"\1", command)
 pattern = r"\bgit(?:\s+(?:-C(?:\s+(?:\"[^\"]*\"|\x27[^\x27]*\x27|\S+)|\S+)|-c\s+\S+|--[A-Za-z0-9-]+))*\s+commit\b"
-print(1 if re.search(pattern, command) else 0)
+matches = list(re.finditer(pattern, command))
+if not matches:
+    print(0)
+elif len(matches) != 1:
+    print(2)
+else:
+    prefix = command[:matches[0].start()]
+    print(1 if re.search(r"RIG_COMMIT_POLICY=guarded[ \t]+$", prefix) else 2)
 ') || fail_closed "Bash command could not be inspected for commits."
-  COMMIT_TARGETS=""
+  if [[ "$VISIBLE_COMMIT" == 2 ]]; then
+    fail_closed "Commit blocked by The Rig. Use one RIG_COMMIT_POLICY=guarded git commit after approval; the active Rig guard consumes the target worktree's one-use approval."
+  fi
   if [[ "$VISIBLE_COMMIT" == 1 ]]; then
+    BASH_CMD_LOWER=$(printf '%s' "$BASH_CMD" | tr '[:upper:]' '[:lower:]') || \
+      fail_closed "Bash command could not be normalized."
+    if [[ "$BASH_CMD" =~ (^|[[:space:]])(--no-verify|-n)([[:space:]]|$) ]] || \
+       [[ "$BASH_CMD_LOWER" == *core.hookspath* || "$BASH_CMD" == *HUSKY=0* || "${HUSKY:-}" == 0 ]]; then
+      fail_closed "Commit blocked by The Rig. This command disables the Git commit-msg hook."
+    fi
+    # Literal environment overrides can redirect Git after a static -C/cd
+    # resolution. Run such commands from the target worktree directly.
+    if [[ "$BASH_CMD" == *GIT_DIR=* || "$BASH_CMD" == *GIT_WORK_TREE=* ]]; then
+      fail_closed "Git environment overrides make the visible commit target uncertain. Run from the target worktree."
+    fi
   # Track literal cd and git -C arguments, including scripts passed to
   # sh/bash -c. The event cwd is used when supplied; the process cwd is the
   # legacy fallback. Refuse visible commits with an unresolved target.
@@ -342,107 +338,81 @@ print(os.path.abspath(cwd or sys.argv[1]) + "\t")
 ' "$PWD") || fail_closed "Bash commit cwd could not be inspected."
   fi
 
-  # ── Gate git commit on sentinel file ───────────────────────────────────
-  COMMIT_COUNT=$(printf '%s\n' "$COMMIT_TARGETS" | awk 'NF {n++} END {print n+0}')
-  [[ "$COMMIT_COUNT" -eq 1 ]] || fail_closed "one approval permits one commit attempt per Bash call."
-  COMMIT_OK_TTL_SECONDS="${RIG_COMMIT_OK_TTL_SECONDS:-900}"
-  while IFS=$'\t' read -r COMMIT_TARGET DIRECT_COMMIT_TYPE; do
-    [[ -n "$COMMIT_TARGET" ]] || continue
-    COMMIT_REPO=$(same_project_root_for_path "$COMMIT_TARGET/.") || \
-      fail_closed "commit target is outside the installed project or cannot be verified."
-    COMMIT_RIG_DIR=$(rig_dir_for_root "$COMMIT_REPO")
-    COMMIT_OK="$COMMIT_RIG_DIR/memory/.rig-commit-ok"
-    if [[ ! -f "$COMMIT_OK" ]]; then
-      echo "" >&2
-      echo "  Commit blocked by The Rig." >&2
-      echo "" >&2
-      echo "  I need your go-ahead before I commit. Here's how it works:" >&2
-      echo "    1. Test the changes in your terminal" >&2
-      echo "    2. Say one of: 'commit approved' · 'ship it' · 'lgtm' · 'go'" >&2
-      echo "       I'll create the authorization and immediately commit and push." >&2
-      echo "" >&2
-      echo "  (Or create it yourself: touch '${COMMIT_OK}')" >&2
-      exit 2
-    fi
+    COMMIT_COUNT=$(printf '%s\n' "$COMMIT_TARGETS" | awk 'NF {n++} END {print n+0}')
+    [[ "$COMMIT_COUNT" -eq 1 ]] || fail_closed "marked commit target could not be verified."
+    while IFS=$'\t' read -r COMMIT_TARGET DIRECT_COMMIT_TYPE; do
+      [[ -n "$COMMIT_TARGET" ]] || continue
+      COMMIT_REPO=$(same_project_root_for_path "$COMMIT_TARGET/.") || \
+        fail_closed "commit target is outside the installed project or cannot be verified."
+      COMMIT_RIG_DIR=$(rig_dir_for_root "$COMMIT_REPO")
+      COMMIT_OK="$COMMIT_RIG_DIR/memory/.rig-commit-ok"
+      [[ -f "$COMMIT_OK" ]] || fail_closed "Commit blocked by The Rig. Approval is missing: $COMMIT_OK"
 
-    COMMIT_OK_AGE=""
-    if COMMIT_OK_AGE=$(commit_ok_age_seconds "$COMMIT_OK"); then
-      :
-    else
-      rm -f "$COMMIT_OK" 2>/dev/null || true
-      echo "" >&2
-      echo "  Commit blocked by The Rig." >&2
-      echo "" >&2
-      echo "  The commit authorization could not be verified and was cleared." >&2
-      echo "  Ask for commit approval again, then recreate:" >&2
-      echo "    touch '${COMMIT_OK}'" >&2
-      exit 2
-    fi
-
-    case "$COMMIT_OK_TTL_SECONDS:$COMMIT_OK_AGE" in
-      *[!0-9:]*|:*)
-        rm -f "$COMMIT_OK" 2>/dev/null || true
-        echo "" >&2
-        echo "  Commit blocked by The Rig." >&2
-        echo "" >&2
-        echo "  The commit authorization expiry setting is invalid and was cleared." >&2
-        echo "  Set RIG_COMMIT_OK_TTL_SECONDS to a positive number, or unset it." >&2
-        exit 2
-        ;;
-    esac
-
-    if [[ "$COMMIT_OK_AGE" -gt "$COMMIT_OK_TTL_SECONDS" ]]; then
-      rm -f "$COMMIT_OK" 2>/dev/null || true
-      echo "" >&2
-      echo "  Commit blocked by The Rig." >&2
-      echo "" >&2
-      echo "  The commit authorization is stale (${COMMIT_OK_AGE}s old; limit ${COMMIT_OK_TTL_SECONDS}s) and was cleared." >&2
-      echo "  Re-run the ship approval step or ask for commit approval again." >&2
-      exit 2
-    fi
-
-    # ── Guard: block commits directly to main/master ──────────────────────
-    # Exception: projects that set 'housekeeping: direct-push' in CLAUDE.md
-    # allow chore(memory), chore(release), chore(post-merge), and similar
-    # housekeeping commits directly to main. Code-change types (feat, fix,
-    # refactor, test, perf, devops, style) are always blocked, even with
-    # direct-push — they must go through a feature branch and PR.
-    CURRENT_BRANCH=$(git -C "$COMMIT_REPO" branch --show-current 2>/dev/null || echo "")
-    if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
-      HOUSEKEEPING=$(grep "^housekeeping:" "$COMMIT_REPO/CLAUDE.md" 2>/dev/null \
-        | awk '{print $2}' | tr -d '[:space:]' || echo "")
-      if [[ "$HOUSEKEEPING" != "direct-push" ]]; then
-        echo "" >&2
-        echo "  Commit to '$CURRENT_BRANCH' blocked by The Rig." >&2
-        echo "" >&2
-        echo "  Committing directly to '$CURRENT_BRANCH' is not allowed." >&2
-        echo "  Create a feature branch first:" >&2
-        echo "    git checkout -b feat/your-description" >&2
-        echo "" >&2
-        echo "  To allow direct housekeeping commits, set in CLAUDE.md:" >&2
-        echo "    housekeeping: direct-push" >&2
-        exit 2
+      HOOKS_PATH=$(git -C "$COMMIT_REPO" config --get core.hooksPath 2>/dev/null || true)
+      if [[ -z "$HOOKS_PATH" ]]; then
+        HOOK_PATH=$(git -C "$COMMIT_REPO" rev-parse --git-path hooks/commit-msg 2>/dev/null) || \
+          fail_closed "cannot resolve the target commit-msg hook."
+      else
+        HOOK_PATH="$HOOKS_PATH/commit-msg"
+      fi
+      if [[ "$HOOK_PATH" != /* ]]; then HOOK_PATH="$COMMIT_REPO/$HOOK_PATH"; fi
+      if [[ -x "$HOOK_PATH" && -f "$HOOK_PATH" ]]; then
+        grep -Fq 'RIG_COMMIT_POLICY' "$HOOK_PATH" || \
+          fail_closed "The target commit-msg hook does not support guarded commits: $HOOK_PATH"
+        continue  # Git will claim approval and log final HEAD.
       fi
 
-      # direct-push is set — still restrict to housekeeping commit types.
-      # Code-change types must go through a branch and PR regardless.
-      if [[ "$DIRECT_COMMIT_TYPE" != chore && "$DIRECT_COMMIT_TYPE" != docs ]]; then
-        echo "" >&2
-        echo "  Direct-to-main commit blocked by The Rig." >&2
-        echo "" >&2
-        echo "  'housekeeping: direct-push' only allows chore and docs commits" >&2
-        echo "  directly to main. A '${DIRECT_COMMIT_TYPE:-unknown}' commit requires a PR:" >&2
-        echo "    git checkout -b ${DIRECT_COMMIT_TYPE:-feat}/your-description" >&2
-        exit 2
+      # Supported --skip-git-hooks installs have no runtime guard. Preserve
+      # the old visible-command gate, including its one-attempt claim. Opaque
+      # scripts remain outside what PreToolUse can establish.
+      COMMIT_OK_AGE=$(commit_ok_age_seconds "$COMMIT_OK") || {
+        rm -f "$COMMIT_OK"
+        fail_closed "commit authorization timestamp could not be verified; approval was cleared."
+      }
+      COMMIT_OK_TTL_SECONDS="${RIG_COMMIT_OK_TTL_SECONDS:-900}"
+      if [[ "$COMMIT_OK_AGE" == -* ]]; then
+        rm -f "$COMMIT_OK"
+        fail_closed "commit authorization is stale; request fresh approval."
       fi
-    fi
+      case "$COMMIT_OK_TTL_SECONDS:$COMMIT_OK_AGE" in
+        *[!0-9:]*|:*)
+          rm -f "$COMMIT_OK"
+          fail_closed "commit authorization expiry setting is invalid; approval was cleared."
+          ;;
+      esac
+      if [[ "$COMMIT_OK_AGE" -gt "$COMMIT_OK_TTL_SECONDS" ]]; then
+        rm -f "$COMMIT_OK"
+        fail_closed "commit authorization is stale; request fresh approval."
+      fi
 
-    # Atomically claim the approval before execution. PostToolUse can be
-    # skipped or interrupted, so it cannot be the only one-shot guard.
-    COMMIT_CLAIM="$COMMIT_OK.claimed-$$-$RANDOM"
-    mv "$COMMIT_OK" "$COMMIT_CLAIM" 2>/dev/null || fail_closed "commit authorization was already claimed; request fresh approval."
-    rm -f "$COMMIT_CLAIM" || fail_closed "claimed commit authorization could not be removed."
-  done <<< "$COMMIT_TARGETS"
+      CURRENT_BRANCH=$(git -C "$COMMIT_REPO" branch --show-current 2>/dev/null) || \
+        fail_closed "commit branch could not be verified."
+      if [[ "$CURRENT_BRANCH" == main || "$CURRENT_BRANCH" == master ]]; then
+        HOUSEKEEPING=$(sed -n 's/^housekeeping:[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$COMMIT_REPO/CLAUDE.md" 2>/dev/null | head -1)
+        [[ "$HOUSEKEEPING" == direct-push ]] || \
+          fail_closed "Commit to '$CURRENT_BRANCH' blocked by The Rig; create a feature branch."
+        [[ "$DIRECT_COMMIT_TYPE" == chore || "$DIRECT_COMMIT_TYPE" == docs ]] || \
+          fail_closed "Direct-to-$CURRENT_BRANCH commit blocked; only chore/docs subjects are allowed."
+      fi
+
+      FALLBACK_ID=$(printf '%s' "$INPUT" | python3 -c '
+import hashlib, json, sys
+data = json.load(sys.stdin)
+value = data.get("tool_use_id")
+print(hashlib.sha256(value.encode()).hexdigest()[:16] if isinstance(value, str) and value else "legacy")
+') || fail_closed "fallback event identity could not be read."
+      FALLBACK_PENDING="$RIG_DIR/memory/.rig-commit-fallback-pending-$FALLBACK_ID"
+      PREVIOUS_HEAD=$(git -C "$COMMIT_REPO" rev-parse HEAD 2>/dev/null || true)
+      COMMIT_CLAIM="$COMMIT_OK.claimed-$$-$RANDOM"
+      mv "$COMMIT_OK" "$COMMIT_CLAIM" 2>/dev/null || \
+        fail_closed "commit authorization was already claimed; request fresh approval."
+      rm -f "$COMMIT_CLAIM" || fail_closed "claimed commit authorization could not be removed."
+      printf '%s\n%s\n%s\n' "$FALLBACK_ID" "$COMMIT_REPO" "$PREVIOUS_HEAD" > "$FALLBACK_PENDING.tmp-$$" || \
+        fail_closed "fallback progress marker could not be written."
+      mv "$FALLBACK_PENDING.tmp-$$" "$FALLBACK_PENDING" || \
+        fail_closed "fallback progress marker could not be installed."
+      echo "WARNING: No active Rig commit-msg hook; PreToolUse used the visible-command fallback." >&2
+    done <<< "$COMMIT_TARGETS"
   fi
 fi
 

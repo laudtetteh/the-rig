@@ -7,14 +7,64 @@
 # 3. Requires an issue/ticket reference in the subject line, format depending on
 #    issue-tracking: in CLAUDE.md (github | linear | trello | gus | none).
 #
-# To disable format validation: set SKIP_COMMIT_VALIDATION=1 before committing.
+# To disable format/ticket validation: set SKIP_COMMIT_VALIDATION=1 before committing.
+# This never bypasses commit approval or the base-branch policy.
 # To disable footer stripping: remove or comment out the filter block below.
 # To skip the issue reference check for a single commit (no ticket exists):
 #   add  # no-issue  as a line in the commit message body.
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 COMMIT_MSG_FILE="$1"
-HOOK_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd -P)" || exit 1
+REPLAY=0
+if [ -d "$(git rev-parse --git-path rebase-merge)" ] || \
+   [ -d "$(git rev-parse --git-path rebase-apply)" ] || \
+   [ -f "$(git rev-parse --git-path CHERRY_PICK_HEAD)" ] || \
+   [ -f "$(git rev-parse --git-path REVERT_HEAD)" ] || \
+   [ -f "$(git rev-parse --git-path MERGE_HEAD)" ] || \
+   [ -d "$(git rev-parse --git-path sequencer)" ]; then
+  REPLAY=1
+fi
+if [ "${RIG_COMMIT_POLICY:-}" = guarded ] && [ "$REPLAY" -eq 0 ]; then
+  RIG_DIR="$ROOT/.rig"
+  if [ -f "$ROOT/.rigpath" ]; then
+    IFS= read -r RIG_DIR < "$ROOT/.rigpath"
+  fi
+  case "$RIG_DIR" in
+    /*) ;;
+    *) echo "ERROR: The Rig .rigpath must contain an absolute directory." >&2; exit 1 ;;
+  esac
+  COMMIT_OK="$RIG_DIR/memory/.rig-commit-ok"
+  TTL="${RIG_COMMIT_OK_TTL_SECONDS:-900}"
+  case "$TTL" in
+    ''|*[!0-9]*) echo "ERROR: Invalid commit approval lifetime." >&2; exit 1 ;;
+  esac
+  if [ ! -f "$COMMIT_OK" ]; then
+    echo "ERROR: Commit blocked by The Rig. Approval is missing: $COMMIT_OK" >&2
+    exit 1
+  fi
+  NOW=$(date +%s) || exit 1
+  MTIME=$(stat -c %Y "$COMMIT_OK" 2>/dev/null || stat -f %m "$COMMIT_OK" 2>/dev/null) || exit 1
+  case "$NOW:$MTIME" in
+    *[!0-9:]*) echo "ERROR: Commit approval timestamp could not be verified." >&2; exit 1 ;;
+  esac
+  AGE=$((NOW - MTIME))
+  if [ "$AGE" -lt 0 ] || [ "$AGE" -gt "$TTL" ]; then
+    rm -f "$COMMIT_OK"
+    echo "ERROR: Commit approval is stale; request fresh approval." >&2
+    exit 1
+  fi
+  # Claim before any message/branch validation. A rejected attempt also spends
+  # approval, and only one concurrent hook can move this source file.
+  CLAIM="$COMMIT_OK.claimed-$$"
+  mv "$COMMIT_OK" "$CLAIM" 2>/dev/null || {
+    echo "ERROR: Commit approval was already claimed." >&2
+    exit 1
+  }
+  rm -f "$CLAIM" || exit 1
+
+fi
+
+HOOK_DIR="$(CDPATH='' cd "$(dirname "$0")" && pwd -P)" || exit 1
 FILTER="$HOOK_DIR/filter-commit-message-inplace.sh"
 [ -f "$FILTER" ] || FILTER="${ROOT}/.husky/filter-commit-message-inplace.sh"
 
@@ -26,10 +76,28 @@ else
   exit 1
 fi
 
-# ── Step 2: Validate Conventional Commits format ─────────────────────────────
-[ "${SKIP_COMMIT_VALIDATION:-0}" = "1" ] && exit 0
-
+# ── Step 2: Guard the actual branch using the prepared subject ──────────────
 SUBJECT=$(head -1 "$COMMIT_MSG_FILE" | sed 's/\r//')
+if [ "${RIG_COMMIT_POLICY:-}" = guarded ] && [ "$REPLAY" -eq 0 ]; then
+  BRANCH=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  case "$BRANCH" in
+    main|master)
+      HOUSEKEEPING=$(sed -n 's/^housekeeping:[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$ROOT/CLAUDE.md" 2>/dev/null | head -1)
+      if [ "$HOUSEKEEPING" != direct-push ]; then
+        echo "ERROR: Commit to '$BRANCH' blocked by The Rig; create a feature branch." >&2
+        exit 1
+      fi
+      if ! printf '%s\n' "$SUBJECT" | grep -Eq '^(chore|docs)(\([^)]*\))?: .+'; then
+        echo "ERROR: Direct-to-$BRANCH commit blocked; only chore/docs subjects are allowed." >&2
+        exit 1
+      fi
+      ;;
+  esac
+
+fi
+
+# ── Step 3: Validate Conventional Commits format ─────────────────────────────
+[ "${SKIP_COMMIT_VALIDATION:-0}" = "1" ] && exit 0
 
 # Skip validation for auto-generated commit types
 case "$SUBJECT" in
@@ -50,7 +118,7 @@ if ! echo "$SUBJECT" | grep -qE "^($VALID_TYPES)(\(.+\))?: .+"; then
   exit 1
 fi
 
-# ── Step 3: Require issue/ticket reference based on issue-tracking setting ───
+# ── Step 4: Require issue/ticket reference based on issue-tracking setting ───
 CLAUDE_MD="${ROOT}/CLAUDE.md"
 ISSUE_TRACKING=""
 if [ -f "$CLAUDE_MD" ]; then

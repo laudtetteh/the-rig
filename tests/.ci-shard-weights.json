@@ -29,6 +29,7 @@
   "tests/test_codex_parity.bats": 5.0,
   "tests/test_command_lint.bats": 5.0,
   "tests/test_commit_attribution.bats": 5.0,
+  "tests/test_commit_policy_runtime.bats": 31.3,
   "tests/test_connector_preflight.bats": 5.0,
   "tests/test_contextual_tips.bats": 5.0,
   "tests/test_decisions_write_path.bats": 5.0,

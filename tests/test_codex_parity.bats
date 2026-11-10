@@ -66,6 +66,30 @@ run_linked_pretool() {
     _ "$LINKED_FEATURE" "$payload"
 }
 
+run_codex_adapter() {
+  local payload="$1"
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .codex/hooks/rig-adapter.sh' \
+    _ "$TEST_PROJECT" "$payload"
+}
+
+install_runtime_git_hook() {
+  local layout="${1:-native}" hook_dir
+  if [ "$layout" = husky ]; then
+    hook_dir="$TEST_PROJECT/.husky"
+    mkdir -p "$hook_dir"
+    git -C "$TEST_PROJECT" config core.hooksPath .husky
+  else
+    hook_dir="$TEST_PROJECT/.git/hooks"
+  fi
+  cp "$REPO_ROOT/templates/project/.husky/commit-msg" "$hook_dir/commit-msg"
+  cp "$REPO_ROOT/templates/project/.husky/filter-commit-message-inplace.sh" "$hook_dir/filter-commit-message-inplace.sh"
+  chmod +x "$hook_dir/commit-msg"
+}
+
+bash_payload() {
+  python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$1" "$2"
+}
+
 @test "normal Claude PreToolUse Edit denies a protected path with blocking exit 2" {
   payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":sys.argv[1],"old_string":"old","new_string":"new"}}))' "$TEST_PROJECT/CLAUDE.md")"
   run_claude_pretool_from_settings "$payload"
@@ -80,11 +104,183 @@ run_linked_pretool() {
   [[ "$output" == *"governance file"* ]] || return 1
 }
 
-@test "normal Claude PreToolUse Bash blocks commit without sentinel" {
-  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"fix: unsafe\""}}'
+@test "native Bash hook blocks plain unmarked commit even with approval" {
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"fix: example\""}}'
   run_claude_pretool_from_settings "$payload"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"Commit blocked by The Rig."* ]] || return 1
+  [[ "$output" == *'Commit blocked by The Rig'* ]]
+  [ -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+  install_runtime_git_hook
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"RIG_COMMIT_POLICY=guarded git commit -m \"fix: example\""}}'
+  mv "$TEST_PROJECT/.rig/memory/.rig-commit-ok" "$TEST_ROOT/approval-held"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'Approval is missing'* ]]
+  mv "$TEST_ROOT/approval-held" "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+}
+
+@test "marked visible commit falls back without a Git hook and rejects an incompatible installed hook" {
+  git -C "$TEST_PROJECT" checkout -qb fix/hookless
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"RIG_COMMIT_POLICY=guarded git commit -m \"fix: skipped\""}}'
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+  [ ! -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  git -C "$REPO_ROOT" show HEAD:templates/project/.husky/commit-msg > "$TEST_PROJECT/.git/hooks/commit-msg"
+  chmod +x "$TEST_PROJECT/.git/hooks/commit-msg"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'does not support guarded commits'* ]]
+}
+
+@test "hookless fallback keeps base-branch chore/docs policy and claims one approval" {
+  git -C "$TEST_PROJECT" checkout -q -B main
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload="$(bash_payload "$TEST_PROJECT" 'RIG_COMMIT_POLICY=guarded git commit -m "docs: allowed [#593]"')"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Commit to 'main' blocked"* ]]
+  [ -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+
+  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
+  payload="$(bash_payload "$TEST_PROJECT" 'RIG_COMMIT_POLICY=guarded git commit -m "fix: blocked [#593]"')"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'Direct-to-main commit blocked'* ]]
+  [ -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+
+  payload="$(bash_payload "$TEST_PROJECT" 'RIG_COMMIT_POLICY=guarded git commit -m "docs: allowed [#593]"')"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+  [ ! -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+  [ -f "$TEST_PROJECT/.rig/memory/.rig-commit-fallback-pending-legacy" ]
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+}
+
+@test "hookless fallback rejects and clears stale approval" {
+  git -C "$TEST_PROJECT" checkout -qb fix/hookless-ttl
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  touch -t 200001010000 "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload="$(bash_payload "$TEST_PROJECT" 'RIG_COMMIT_POLICY=guarded git commit -m "fix: stale [#593]"')"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'stale'* ]]
+  [ ! -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+}
+
+@test "Codex adapter uses the same hookless one-shot fallback" {
+  git -C "$TEST_PROJECT" checkout -qb fix/codex-hookless
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload="$(bash_payload "$TEST_PROJECT" 'RIG_COMMIT_POLICY=guarded git commit -m "fix: codex fallback [#593]"')"
+  run_codex_adapter "$payload"
+  [ "$status" -eq 0 ]
+  [ ! -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+  [ -f "$TEST_PROJECT/.rig/memory/.rig-commit-fallback-pending-legacy" ]
+}
+
+@test "marked visible commit refuses explicit Git and Husky hook bypass flags" {
+  install_runtime_git_hook
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  local command payload
+  for command in \
+    'RIG_COMMIT_POLICY=guarded git commit --no-verify -m example' \
+    'RIG_COMMIT_POLICY=guarded git commit -n -m example' \
+    'RIG_COMMIT_POLICY=guarded git -c core.hooksPath=/dev/null commit -m example' \
+    'HUSKY=0 RIG_COMMIT_POLICY=guarded git commit -m example'; do
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "$command")"
+    run_claude_pretool_from_settings "$payload"
+    [ "$status" -eq 2 ] || { echo "Unexpectedly allowed: $command" >&3; return 1; }
+  done
+}
+
+@test "marked visible commit checks native linked worktree target and Husky path" {
+  setup_linked_hook_worktrees
+  install_runtime_git_hook
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "RIG_COMMIT_POLICY=guarded git -C '$LINKED_FEATURE' commit -m example")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 0 ]
+
+  install_runtime_git_hook husky
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"RIG_COMMIT_POLICY=guarded git commit -m example"}}'
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+  git -C "$TEST_PROJECT" config core.hooksPath /dev/null
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+}
+
+@test "marked visible commit cannot use project approval in an unrelated repository" {
+  install_runtime_git_hook
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  other="$TEST_ROOT/unrelated"
+  mkdir -p "$other"
+  git -C "$other" init -q
+  payload="$(bash_payload "$TEST_PROJECT" "RIG_COMMIT_POLICY=guarded git -C '$other' commit -m example")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'outside the installed project'* ]]
+  [ -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+}
+
+@test "marked commit resolves nested shell, cd dash, subshell and pipeline cwd safely" {
+  setup_linked_hook_worktrees
+  install_runtime_git_hook
+  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
+  local command payload
+  for command in \
+    "bash -c 'cd \"$TEST_PROJECT\" && RIG_COMMIT_POLICY=guarded git commit -m example'" \
+    "cd '$LINKED_FEATURE' && cd - && RIG_COMMIT_POLICY=guarded git commit -m example" \
+    "( cd '$LINKED_FEATURE'; true ); RIG_COMMIT_POLICY=guarded git commit -m example" \
+    "cd '$LINKED_FEATURE' | true; RIG_COMMIT_POLICY=guarded git commit -m example" \
+    "true | cd '$LINKED_FEATURE'; RIG_COMMIT_POLICY=guarded git commit -m example"; do
+    payload="$(bash_payload "$TEST_PROJECT" "$command")"
+    run_claude_pretool_from_settings "$payload"
+    [ "$status" -eq 2 ] || { echo "Unexpectedly allowed: $command" >&3; return 1; }
+  done
+}
+
+@test "marked multi-repository commit chain is blocked before execution" {
+  setup_linked_hook_worktrees
+  install_runtime_git_hook
+  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok" "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload="$(bash_payload "$TEST_PROJECT" "RIG_COMMIT_POLICY=guarded git -C '$LINKED_FEATURE' commit -m first; RIG_COMMIT_POLICY=guarded git -C '$TEST_PROJECT' commit -m second")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [ -f "$LINKED_FEATURE/.rig/memory/.rig-commit-ok" ]
+  [ -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+}
+
+@test "marked visible Git environment override is refused before target inference" {
+  setup_linked_hook_worktrees
+  install_runtime_git_hook
+  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok" "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload="$(bash_payload "$TEST_PROJECT" "GIT_DIR='$TEST_PROJECT/.git' GIT_WORK_TREE='$LINKED_FEATURE' RIG_COMMIT_POLICY=guarded git commit -m example")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'environment overrides'* ]]
+}
+
+@test "early Bash check distinguishes inert script heredoc from executable substitution" {
+  local command payload
+  command=$'cat > example.sh <<\x27EOF\x27\n#!/bin/sh\ngit commit -m "text only"\nEOF'
+  payload="$(bash_payload "$TEST_PROJECT" "$command")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+
+  command=$'cat <<EOF\n$(git commit -m "executed")\nEOF'
+  payload="$(bash_payload "$TEST_PROJECT" "$command")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
 }
 
 @test "normal Claude PreToolUse rejects malformed payload and allows ordinary read" {
@@ -124,14 +320,10 @@ run_linked_pretool() {
   [[ "$output" == *"governance file"* ]] || return 1
 }
 
-@test "normal Claude commit gate checks installed project's branch after cwd changes" {
-  git -C "$TEST_PROJECT" checkout -q -B main
-  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"fix: unsafe\""}}))' "$TEST_PROJECT")"
-  run bash -c 'cd "$1" && printf "%s" "$3" | bash "$2/.claude/hooks/pre-tool.sh"' \
-    _ "$TEST_ROOT" "$TEST_PROJECT" "$payload"
+@test "Bash hook blocks an unmarked visible commit regardless of event cwd" {
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m fix:example"}}))' "$TEST_ROOT")"
+  run_claude_pretool_from_settings "$payload"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
 }
 
 @test "normal Claude worktree redirect returns documented updatedInput" {
@@ -228,338 +420,54 @@ run_linked_pretool() {
   [ "$status" -eq 0 ]
 }
 
-@test "linked feature hook checks main branch for cd and git -C commits" {
-  setup_linked_hook_worktrees
-  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
+@test "Claude and Codex Bash hooks catch escaped g\\it and leave approval for Git" {
   touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  local command payload
-  for command in \
-    "cd '$TEST_PROJECT' && git commit -m 'fix: blocked'" \
-    "cd '$TEST_PROJECT' && /usr/bin/git commit -m 'fix: blocked'" \
-    "/usr/bin/git -C '$TEST_PROJECT' commit -m 'fix: blocked'" \
-    "git -C '$TEST_PROJECT' commit -m 'fix: blocked'" \
-    "git -C '../project' commit -m 'fix: blocked'" \
-    "git -C '$TEST_PROJECT' -c core.editor=true commit -m 'fix: blocked'"; do
-    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
-    run_linked_pretool "$payload"
-    [ "$status" -eq 2 ]
-    [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
-  done
-
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"bash -c '\''git commit -m fix:blocked'\''"}}))' "$TEST_PROJECT")"
-  run_linked_pretool "$payload"
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"g\\it commit -m example"}}'
+  run_claude_pretool_from_settings "$payload"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
+  run_codex_adapter "$payload"
+  [ "$status" -eq 2 ]
+  [ -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+  install_runtime_git_hook
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"RIG_COMMIT_POLICY=guarded g\\it commit -m example"}}'
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+  run_codex_adapter "$payload"
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+}
 
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"fix: feature work\""}}))' "$LINKED_FEATURE")"
-  run_linked_pretool "$payload"
+@test "Codex adapter blocks plain unmarked Bash commit" {
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m example"}}'
+  run_codex_adapter "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'Commit blocked by The Rig'* ]]
+}
+
+@test "PreToolUse rejects a compound call with a second visible commit" {
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"RIG_COMMIT_POLICY=guarded git commit -m first; git commit -m second"}}'
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  run_codex_adapter "$payload"
+  [ "$status" -eq 2 ]
+}
+
+@test "PreToolUse allows a guarded -F commit after creating its message file" {
+  install_runtime_git_hook
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"printf \"docs: approved\\n\" > message.txt; RIG_COMMIT_POLICY=guarded git commit -F message.txt"}}'
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+  run_codex_adapter "$payload"
   [ "$status" -eq 0 ]
 }
 
-@test "linked feature hook blocks a literal nested shell commit to main" {
-  setup_linked_hook_worktrees
-  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
-  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  local command payload
-  for command in \
-    "bash -c 'cd \"$TEST_PROJECT\" && git commit -m \"fix: unsafe\"'" \
-    "sh -c 'cd \"$TEST_PROJECT\" && git commit -m \"fix: unsafe\"'" \
-    "bash -c 'git -C \"$TEST_PROJECT\" commit -m \"fix: unsafe\"'"; do
-    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
-    run_linked_pretool "$payload"
-    [ "$status" -eq 2 ]
-    [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
-  done
-
-  command="$(printf 'bash <<EOF\ngit -C "%s" commit -m "fix: unsafe"\nEOF' "$TEST_PROJECT")"
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
-  run_linked_pretool "$payload"
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"Commit to 'main' blocked"* ]] || return 1
-}
-
-@test "nested shell inspection allows ordinary commands and refuses dynamic commit targets" {
-  setup_linked_hook_worktrees
-  local command payload
-  for command in "printf ordinary" "bash -c 'printf ordinary'" "sh -c 'pwd'" \
-    'bash -c "$SCRIPT"' $'cat <<EOF\nunclosed " quote\nEOF' \
-    $'cat <<\x27EOF\x27\nexample: git commit -m "unclosed\nEOF'; do
-    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
-    run_linked_pretool "$payload"
-    [ "$status" -eq 0 ] || { echo "unexpected block for: $command ($output)" >&3; return 1; }
-  done
-
-  command="bash -c 'cd \"\$TARGET\" && git commit -m \"fix: unsafe\"'"
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
-  run_linked_pretool "$payload"
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"commit target could not be inspected"* ]] || return 1
-}
-
-@test "linked feature hook respects event cwd and target direct-push policy" {
-  setup_linked_hook_worktrees
-  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
-  local payload
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"chore(memory): approved\""}}))' "$TEST_PROJECT")"
-  run_linked_pretool "$payload"
-  [ "$status" -eq 0 ]
-
-  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"fix: blocked\""}}))' "$TEST_PROJECT")"
-  run_linked_pretool "$payload"
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"Direct-to-main commit blocked"* ]] || return 1
-}
-
-@test "one approval cannot authorize a multi-repository commit chain" {
-  setup_linked_hook_worktrees
-  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok" "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
-  local command payload
-  command="git -C '$LINKED_FEATURE' commit -m 'chore: okay'; git -C '$TEST_PROJECT' commit -m 'fix: unsafe'"
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
-  run_linked_pretool "$payload"
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"one approval permits one commit attempt"* ]] || return 1
-}
-
-@test "commit target does not inherit a subshell or pipeline cwd" {
-  setup_linked_hook_worktrees
-  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
-  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
-  local command payload
-  for command in \
-    "( cd '$LINKED_FEATURE'; true ); git commit -m 'fix: unsafe'" \
-    "cd '$LINKED_FEATURE' | true; git commit -m 'fix: unsafe'" \
-    "true | cd '$LINKED_FEATURE'; git commit -m 'fix: unsafe'" \
-    "cd '$LINKED_FEATURE' & git commit -m 'fix: unsafe'"; do
-    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT" "$command")"
-    run_linked_pretool "$payload"
-    [ "$status" -eq 2 ]
-    [[ "$output" == *"Commit blocked by The Rig."* ]] || return 1
-  done
-}
-
-@test "direct-push accepts a chore message file and refuses a fix message file" {
-  setup_linked_hook_worktrees
-  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
-  printf 'chore(memory): approved\n\nDetails\n' > "$TEST_ROOT/chore-msg.txt"
-  printf 'fix: unsafe\n' > "$TEST_ROOT/fix-msg.txt"
-  local command payload
-  for command in \
-    "git commit -F '$TEST_ROOT/chore-msg.txt'" \
-    "git commit --file='$TEST_ROOT/chore-msg.txt'"; do
-    touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT" "$command")"
-    run_linked_pretool "$payload"
-    [ "$status" -eq 0 ]
-  done
-  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  command="git commit -F '$TEST_ROOT/fix-msg.txt'"
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT" "$command")"
-  run_linked_pretool "$payload"
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"Direct-to-main commit blocked"* ]] || return 1
-}
-
-@test "Codex Bash adapter preserves event cwd for main commit policy" {
-  setup_linked_hook_worktrees
-  mkdir -p "$LINKED_FEATURE/.codex/hooks"
-  cp "$TEST_PROJECT/.codex/hooks/rig-adapter.sh" "$LINKED_FEATURE/.codex/hooks/rig-adapter.sh"
-  printf 'abc123  .rig/rules/protected-paths.txt\n' > "$LINKED_FEATURE/.rig/memory/.rig-manifest"
-  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
-  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
-  local payload
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"fix: unsafe\""}}))' "$TEST_PROJECT")"
-  run bash -c 'cd "$1" && printf "%s" "$2" | bash .codex/hooks/rig-adapter.sh' _ "$LINKED_FEATURE" "$payload"
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"Commit blocked by The Rig."* ]] || return 1
-}
-
-@test "unquoted heredoc command substitution cannot hide a commit" {
-  local command payload
-  command=$'cat <<EOF\n$(git commit -m "fix: hidden")\nEOF'
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "$command")"
-  run_claude_pretool_from_settings "$payload"
-  [ "$status" -eq 2 ]
-  [[ "$output" == *'Commit blocked by The Rig.'* ]] || return 1
-}
-
-@test "cd dash cannot make a main commit use a feature approval" {
-  setup_linked_hook_worktrees
-  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
-  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
-  local command payload
-  command="cd '$LINKED_FEATURE' && cd - && git commit -m 'fix: unsafe'"
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT" "$command")"
-  run_linked_pretool "$payload"
-  [ "$status" -eq 2 ]
-}
-
-@test "a commit approval is consumed before execution and cannot authorize two attempts" {
-  git -C "$TEST_PROJECT" checkout -q -b fix/approved
-  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  local payload
-  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"fix: approved\""}}'
-  run_claude_pretool_from_settings "$payload"
-  [ "$status" -eq 0 ]
-  [ ! -e "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
-  run_claude_pretool_from_settings "$payload"
-  [ "$status" -eq 2 ]
-  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"fix: first\"; git commit -m \"fix: second\""}}'
-  run_claude_pretool_from_settings "$payload"
-  [ "$status" -eq 2 ]
-}
-
-@test "a project approval cannot authorize a commit in an unrelated repository" {
-  git -C "$TEST_PROJECT" checkout -q -b fix/approved
-  other="$TEST_ROOT/unrelated"
-  mkdir -p "$other"
-  git -C "$other" init -q
-  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "git -C '$other' commit -m 'fix: foreign'")"
-  run_claude_pretool_from_settings "$payload"
-  [ "$status" -eq 2 ]
-  [[ "$output" == *'outside the installed project'* ]] || return 1
-  [ -e "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
-}
-
-@test "native PostToolUse records a commit and clears a leftover approval" {
+@test "native PostToolUse does not duplicate Git post-commit progress" {
   printf '# Progress\n\n---\n' > "$TEST_PROJECT/.rig/memory/PROGRESS.md"
-  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  output="$(git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null commit --allow-empty -m 'fix: native post event [#588]')"
-  hash="$(git -C "$TEST_PROJECT" rev-parse --short HEAD)"
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"git commit"},"tool_response":{"stdout":sys.argv[1]}}))' "$output")"
+  payload='{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_response":{"stdout":"[fix/example abcdef0] fix: example"}}'
   run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/post-tool.sh' _ "$TEST_PROJECT" "$payload"
   [ "$status" -eq 0 ]
-  [ ! -e "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
-  grep -Fq "$hash" "$TEST_PROJECT/.rig/memory/PROGRESS.md"
-}
-
-@test "commit guard inspects executable eval heredocs but not script file contents" {
-  local command payload
-  command=$'eval "$(cat <<\x27EOF\x27\ngit commit -m "fix: unsafe"\nEOF\n)"'
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "$command")"
-  run_claude_pretool_from_settings "$payload"
-  [ "$status" -eq 2 ]
-
-  command=$'cat > example.sh <<\x27EOF\x27\n#!/bin/sh\ngit commit -m "fix: text only"\nEOF'
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "$command")"
-  run_claude_pretool_from_settings "$payload"
-  [ "$status" -eq 0 ]
-}
-
-run_claude_pretool_with_ttl() {
-  local ttl="$1" tool="$2" payload="$3"
-  run env RIG_COMMIT_OK_TTL_SECONDS="$ttl" bash -c 'cd "$1" && printf "%s" "$3" | bash .claude/hooks/pre-tool.sh "$2"' \
-    _ "$TEST_PROJECT" "$tool" "$payload"
-}
-
-run_claude_pretool_with_path() {
-  local path="$1" tool="$2" payload="$3"
-  run env PATH="$path" bash -c 'cd "$1" && printf "%s" "$3" | bash .claude/hooks/pre-tool.sh "$2"' \
-    _ "$TEST_PROJECT" "$tool" "$payload"
-}
-
-run_codex_adapter() {
-  local payload="$1"
-  run bash -c 'cd "$1" && printf "%s" "$2" | bash .codex/hooks/rig-adapter.sh' \
-    _ "$TEST_PROJECT" "$payload"
-}
-
-@test "Claude and Codex Bash payloads produce the same outcome" {
-  command='git push origin parity'
-  claude_payload="$(python3 -c 'import json,sys; print(json.dumps({"command":sys.argv[1]}))' "$command")"
-  codex_payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "$command")"
-
-  run_claude_pretool Bash "$claude_payload"
-  claude_status="$status"
-  run_codex_adapter "$codex_payload"
-  codex_status="$status"
-
-  [ "$claude_status" -eq "$codex_status" ]
-}
-
-@test "commit sentinel blocks missing authorization through shipped pre-tool hook" {
-  command="git commit -m 'chore(memory): test [#1]'"
-  claude_payload="$(python3 -c 'import json,sys; print(json.dumps({"command":sys.argv[1]}))' "$command")"
-
-  run_claude_pretool Bash "$claude_payload"
-
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"Commit blocked by The Rig."* ]] || return 1
-  [[ "$output" == *"go-ahead before I commit"* ]] || return 1
-}
-
-@test "commit sentinel allows fresh authorization through shipped pre-tool hook" {
-  git -C "$TEST_PROJECT" checkout -q -b chore/sentinel-fresh
-  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  command="git commit -m 'chore(memory): test [#1]'"
-  claude_payload="$(python3 -c 'import json,sys; print(json.dumps({"command":sys.argv[1]}))' "$command")"
-
-  run_claude_pretool Bash "$claude_payload"
-
-  [ "$status" -eq 0 ]
-}
-
-@test "commit sentinel rejects and clears stale authorization" {
-  git -C "$TEST_PROJECT" checkout -q -b chore/sentinel-stale
-  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  touch -t 200001010000 "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  command="git commit -m 'chore(memory): test [#1]'"
-  claude_payload="$(python3 -c 'import json,sys; print(json.dumps({"command":sys.argv[1]}))' "$command")"
-
-  run_claude_pretool_with_ttl 900 Bash "$claude_payload"
-
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"commit authorization is stale"* ]] || return 1
-  [ ! -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
-}
-
-@test "commit sentinel honors external rig directory from .rigpath" {
-  git -C "$TEST_PROJECT" checkout -q -b chore/sentinel-external
-  external_rig="$TEST_ROOT/external-rig"
-  mkdir -p "$external_rig/memory"
-  printf '%s\n' "$external_rig" > "$TEST_PROJECT/.rigpath"
-  touch "$external_rig/memory/.rig-commit-ok"
-  command="git commit -m 'chore(memory): test [#1]'"
-  claude_payload="$(python3 -c 'import json,sys; print(json.dumps({"command":sys.argv[1]}))' "$command")"
-
-  run_claude_pretool Bash "$claude_payload"
-
-  [ "$status" -eq 0 ]
-}
-
-@test "commit sentinel prefers GNU stat mtime before BSD filesystem stat fallback" {
-  git -C "$TEST_PROJECT" checkout -q -b chore/sentinel-gnu-stat
-  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
-  fake_bin="$TEST_ROOT/bin"
-  mkdir -p "$fake_bin"
-  cat > "$fake_bin/stat" <<'EOF'
-#!/bin/sh
-if [ "$1" = "-c" ]; then
-  python3 -c 'import os,sys; print(int(os.stat(sys.argv[1]).st_mtime))' "$3"
-  exit 0
-fi
-if [ "$1" = "-f" ]; then
-  printf 'gnu-filesystem-stat-output\n'
-  exit 0
-fi
-exit 1
-EOF
-  chmod +x "$fake_bin/stat"
-  command="git commit -m 'chore(memory): test [#1]'"
-  claude_payload="$(python3 -c 'import json,sys; print(json.dumps({"command":sys.argv[1]}))' "$command")"
-
-  run_claude_pretool_with_path "$fake_bin:$PATH" Bash "$claude_payload"
-
-  if [ "$status" -ne 0 ]; then
-    printf '%s\n' "$output"
-    return 1
-  fi
+  ! grep -q 'Auto-logged' "$TEST_PROJECT/.rig/memory/PROGRESS.md"
 }
 
 @test "Claude Edit and Codex apply_patch produce the same protected-file outcome" {

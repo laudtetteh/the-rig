@@ -19,7 +19,7 @@ The Rig solves this at three levels:
 
 1. **Memory** — persistent context that survives session resets
 2. **Process** — structured workflows the agent follows step-by-step
-3. **Enforcement** — hooks that make certain failures physically impossible
+3. **Enforcement** — provider and Git hooks that reject covered operations when installed and enabled
 
 ---
 
@@ -142,7 +142,7 @@ Agent is oriented. Hooks are live. Ready to work.
      │
      │  After every tool call:
      │  └─ post-tool.sh (PostToolUse)
-     │       PROGRESS.md auto-stub on commit; sentinel cleanup
+     │       PROGRESS.md fallback stub for approved visible hookless commits
      │
      │  Before context compaction:
      │  └─ pre-compact.sh (PreCompact)
@@ -196,7 +196,7 @@ Seven files, seven purposes:
 
 ### .rig/memory/PROGRESS.md
 - Append-only build log, one entry per meaningful unit of work
-- Auto-stubbed by `post-tool.sh` after every git commit — stub exists even if the agent forgets
+- Auto-stubbed by Git's `post-commit` hook after a guarded agent commit; PostToolUse uses a matching Git result for the hookless visible-command fallback
 - `stop.sh` appends UUID-tagged session-end markers for housekeeping. Naming never uses legacy marker ranges, snapshots, unrelated session files, or project history; current conversation context is authoritative and only the resolved current session's UUID-tagged entries may cross-check it.
 - Most recent entry at the top
 - **Trim convention:** capped at 20 entries. `/wrap` moves older entries to `.rig/memory/PROGRESS_archive.md` (gitignored, disk-only) when the cap is exceeded. Keeps session startup cost low indefinitely.
@@ -278,7 +278,7 @@ Step 1:   Pre-ship checklist (AC, no debug code, no secrets, Docker verification
 Step 2:   Self-review — does this do ONLY what was asked?
 Step 2.4: Derive and run 1–5 task-specific live checks; record results, skips, and risk
 Step 2.5: Show an optional copyable validation card; approval attests to evidence review
-Step 3:   Commit (conventional format, issue reference; sentinel flow via pre-tool.sh)
+Step 3:   Commit (conventional format, issue reference; one-use sentinel via Git hook or visible-command fallback)
 Step 4:   Update memory (verify task file accuracy; move task; PROGRESS; SNAPSHOT; ERRORS;
           RIG_GAPS; close GitHub Issue with actual-scope comment)
 Step 5:   Open PR (body describes what was actually built; read template; labels at creation time)
@@ -406,25 +406,16 @@ Every tool call
      │     Checks RIG_PROTECTED: blocks writes to governance files
      │       (RIG_DIR/processes/, RIG_DIR/rules/, .husky/, CLAUDE.md, .claude/hooks/)
      │     Checks BLOCKED_PATHS: blocks project-specific protected paths
-     │     Gates git commit on $RIG_DIR/memory/.rig-commit-ok sentinel:
-     │       Blocked → agent shows commit message, asks for trigger phrase
-     │       ("commit approved" / "ship it" / "lgtm" / "go")
-     │       Agent creates sentinel → pre-tool.sh atomically claims it for one attempt
-     │     Guards git commit on main/master:
-     │       Blocked unless CLAUDE.md sets housekeeping: direct-push
-     │       Even with direct-push: blocks feat/fix/refactor/test/perf/devops/style types
-     │       Only chore/docs may go directly to main
+     │     Rejects visible unmarked Bash commits; marked visible commits
+     │       require approval. With no active Rig commit-msg hook, checks
+     │       branch/type and consumes approval before the visible call runs
      │     Exit 2 (block) if any check fails
      │
      └─► post-tool.sh (PostToolUse)
-           Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
            Logs completion to session log
-           If tool is Bash:
-             Scan output for git commit hash pattern
-             If commit detected:
-               Read commit message + hash from git log
-               Append dated stub to RIG_DIR/memory/PROGRESS.md (idempotent)
-               Clear a leftover $RIG_DIR/memory/.rig-commit-ok sentinel (legacy auth)
+           For approved visible hookless commits, auto-stubs PROGRESS.md
+             when the Git result contains the matching commit hash
+           For Bash, warn when a new branch name misses the expected prefix
 
 Before context compaction
      │
@@ -491,6 +482,12 @@ git commit
      │
      ├─► commit-msg
      │     Apply filter-commit-message-inplace.sh to message file
+     │     For RIG_COMMIT_POLICY=guarded: resolve actual worktree and .rigpath;
+     │       consume fresh one-use $RIG_DIR/memory/.rig-commit-ok approval
+     │     For guarded commits: block main/master except chore/docs when
+     │       CLAUDE.md sets housekeeping: direct-push
+     │     Exempt Git rebase/cherry-pick/revert/merge replay from the
+     │       one-use approval and branch checks
      │     Strips: known AI Co-authored-by and tool-generated footer lines
      │     Preserves: human Co-authored-by and Signed-off-by trailers
      │     Validates Conventional Commits subject-line format
@@ -501,8 +498,8 @@ git commit
      │       trello → [trello:CARD-ID]
      │       gus    → [W-1234567]
      │       none   → no requirement
-     │     Bypass: `SKIP_COMMIT_VALIDATION=1` env var, or add `# no-issue` trailer
-     │     to the commit body (bypasses tracker ref check for any issue-tracking mode)
+     │     `SKIP_COMMIT_VALIDATION=1` skips format/ticket checks only;
+     │       `# no-issue` skips the tracker ref check only
      │
      └─► post-commit
            Re-read committed message
@@ -511,7 +508,31 @@ git commit
              ordinary unsigned commits with RIG_POST_COMMIT_AUTO_AMEND=1
            During rebase/cherry-pick/revert, warn that the footer remains
              and must be removed after replay
+           For guarded ordinary commits, auto-stub the actual worktree's
+             PROGRESS.md using final HEAD;
+             existing SHA entries are not duplicated
 ```
+
+`RIG_COMMIT_POLICY=guarded` is explicit on agent commit commands; human terminal
+commits without it retain the existing format and ticket checks. Generated
+scripts and compound commands must inherit the marker to be guarded. PreToolUse
+rejects visible unmarked commits, but cannot parse every shell form. Automatic
+tagging with `updatedInput` is unreliable: Claude Code may drop that rewrite
+on an auto-mode retry, as described in its [hook reference](https://code.claude.com/docs/en/hooks#pretooluse-updatedinput-in-auto-mode).
+Git hooks run only when installed and enabled. `--skip-git-hooks` omits native
+`.git/hooks` installation. If an active Rig Husky hook is present, it provides
+the same commit-time guard. Otherwise, PreToolUse retains a visible-command
+fallback: it checks approval age, target worktree, branch, and direct-push
+subject type, then consumes approval before execution. PostToolUse logs a stub
+for the matching successful Git result. Pending markers use the tool event ID
+when supplied; overlapping events without IDs share a legacy marker. The
+fallback cannot inspect opaque generated scripts and may miss progress logging
+for quiet output or a target it cannot resolve. Ordinary human terminal commits
+remain unaffected. Visible commands that explicitly use `--no-verify`,
+`core.hooksPath` overrides, or `HUSKY=0` are blocked early; dynamically
+assembled bypasses remain possible.
+The sentinel is a workflow guard, not a physical guarantee. Replay-generated
+commits are exempt from the Git approval gate and do not consume approval.
 
 ---
 

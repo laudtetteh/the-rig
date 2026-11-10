@@ -5,6 +5,43 @@
 # created commit changes its SHA, so automatic amend requires explicit opt-in.
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+RIG_DIR="$ROOT/.rig"
+if [ -f "$ROOT/.rigpath" ]; then
+  IFS= read -r RIG_DIR < "$ROOT/.rigpath"
+fi
+
+# Git runs this hook after a successful commit. Read HEAD after any opt-in
+# amendment so the progress entry names the final SHA. PostToolUse cannot
+# reliably infer the target worktree from a Bash tool response.
+record_progress() {
+  [ "${RIG_COMMIT_POLICY:-}" = guarded ] || return
+  if [ -d "$(git rev-parse --git-path rebase-merge)" ] || \
+     [ -d "$(git rev-parse --git-path rebase-apply)" ] || \
+     [ -f "$(git rev-parse --git-path CHERRY_PICK_HEAD)" ] || \
+     [ -f "$(git rev-parse --git-path REVERT_HEAD)" ] || \
+     [ -f "$(git rev-parse --git-path MERGE_HEAD)" ] || \
+     [ -d "$(git rev-parse --git-path sequencer)" ]; then
+    return
+  fi
+  case "$RIG_DIR" in /*) ;; *) return ;; esac
+  PROGRESS="$RIG_DIR/memory/PROGRESS.md"
+  [ -f "$PROGRESS" ] || return
+  HASH=$(git rev-parse HEAD 2>/dev/null) || return
+  [ -n "$HASH" ] || return
+  grep -Fq "$HASH" "$PROGRESS" && return
+  SUBJECT=$(git log -1 --format=%s 2>/dev/null) || return
+  [ -n "$SUBJECT" ] || return
+  DATE=$(date +%Y-%m-%d)
+  STUB="\n## $DATE — $SUBJECT [$HASH]\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n\n---"
+  TMP_PROGRESS=$(mktemp) || return
+  if awk -v stub="$STUB" '/^---$/ && !done { print; printf "%s\n", stub; done=1; next } 1' "$PROGRESS" > "$TMP_PROGRESS"; then
+    mv "$TMP_PROGRESS" "$PROGRESS" || rm -f "$TMP_PROGRESS"
+  else
+    rm -f "$TMP_PROGRESS"
+  fi
+}
+trap 'record_progress' EXIT
+
 HOOK_DIR="$(CDPATH='' cd "$(dirname "$0")" && pwd -P)" || exit 0
 FILTER="$HOOK_DIR/filter-commit-message-inplace.sh"
 [ -f "$FILTER" ] || FILTER="${ROOT}/.husky/filter-commit-message-inplace.sh"

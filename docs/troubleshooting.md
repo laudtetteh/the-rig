@@ -48,9 +48,8 @@ Rollback is for completed upgrades that wrote a durable report under
 
 ## 2. Hooks aren't firing
 
-**Symptom:** Claude Code makes writes or runs `git commit` without going through the
-pre-tool or post-tool checks. The commit sentinel flow doesn't trigger. PROGRESS.md
-auto-stubs never appear.
+**Symptom:** Protected structured writes are not blocked, or commits do not
+require approval and never auto-stub PROGRESS.md.
 
 **Causes and fixes:**
 
@@ -88,15 +87,16 @@ If `.claude/settings.json` is missing the hook entries entirely, re-run the inst
 
 ## 3. Commit gate is blocking unexpectedly
 
-**Symptom:** `git commit` is blocked with "waiting for sentinel" even though you
+**Symptom:** A guarded `git commit` reports missing or stale approval even though you
 already said the trigger phrase. Or the sentinel file (`.rig-commit-ok`) exists but
 the commit still fails.
 
 **Causes and fixes:**
 
 ### Stale sentinel from a failed commit
-If a previous commit failed after the sentinel was created but before `post-tool.sh`
-could delete it, the sentinel is stale.
+If a previous commit failed before `commit-msg` ran, the sentinel may remain.
+If `commit-msg` ran, it consumed approval for that attempt. In a hookless
+install, PreToolUse consumes approval before the visible commit runs.
 
 ```bash
 # Check if it exists
@@ -106,17 +106,24 @@ ls .rig/memory/.rig-commit-ok
 rm .rig/memory/.rig-commit-ok
 ```
 
-### post-tool.sh isn't running
-If `post-tool.sh` never fires, the sentinel is never deleted. This causes the
-next commit attempt to find the sentinel already present (which the hook may
-interpret as a double-commit attempt). Fix: ensure hooks are executable and wired
-(see issue #1 above).
+### Git hooks are not installed or enabled
+Check `git config --get core.hooksPath` and the executable `commit-msg` and
+`post-commit` files in the active hook directory. `--skip-git-hooks` omits native
+hook installation. With no active Rig `commit-msg`, a visible guarded agent
+commit uses the limited PreToolUse gate: fresh approval, branch, and direct-push
+type are checked before approval is consumed. PostToolUse stubs progress when
+it sees a matching successful Git result; quiet output or opaque scripts may
+leave no stub. An executable `commit-msg` that lacks Rig's guarded policy is
+treated as incompatible and blocks the visible guarded command. Explicit
+`--no-verify`, `core.hooksPath` overrides, and `HUSKY=0` in visible agent
+commands are blocked by PreToolUse, though dynamically assembled commands can
+still bypass static detection.
 
 ### Running git commit outside Claude Code
-The sentinel flow is enforced by the Claude Code hook. If you run `git commit`
-directly in a terminal (not through Claude Code), the pre-tool hook doesn't run
-and neither does the sentinel check. This is intentional — the gate is for
-agent-initiated commits only.
+Ordinary terminal commits without `RIG_COMMIT_POLICY=guarded` retain format and
+ticket checks but do not require the one-use approval. Agent commit commands
+must set the marker and create fresh approval in the current worktree's
+`.rig/memory` or the directory named by its `.rigpath`.
 
 ### Codex hooks or generated skills are missing
 
@@ -294,7 +301,7 @@ Committing directly to 'main' is not allowed.
 Create a feature branch first: git checkout -b feat/your-description
 ```
 
-**Cause:** The main-branch commit guard in `pre-tool.sh` blocks all direct commits
+**Cause:** The main-branch commit guard in `commit-msg` blocks guarded direct commits
 to `main` or `master` unless the project explicitly allows them.
 
 **Fix for feature branch projects:** this is the correct behavior. Create a branch
