@@ -65,17 +65,51 @@ except (ValueError, TypeError, AttributeError):
             TARGET_RIG_DIR="$TARGET_REPO/.rig"
           fi
           PROGRESS_FILE="$TARGET_RIG_DIR/memory/PROGRESS.md"
-          if [[ -f "$PROGRESS_FILE" ]] && ! grep -Fq "$COMMIT_HASH" "$PROGRESS_FILE"; then
+          if [[ -f "$PROGRESS_FILE" ]]; then
             COMMIT_MSG=$(git -C "$TARGET_REPO" log -1 --format=%s 2>/dev/null || true)
             COMMIT_DATE=$(date +%Y-%m-%d)
-            STUB="\n## $COMMIT_DATE — $COMMIT_MSG [$COMMIT_HASH]\n_Auto-logged by post-tool hook. Expand this entry during wrap-up._\n\n---"
-            TMP_PROGRESS=$(mktemp) || exit 0
-            if awk -v stub="$STUB" '/^---$/ && !done { print; printf "%s\n", stub; done=1; next } 1' \
-              "$PROGRESS_FILE" > "$TMP_PROGRESS"; then
-              mv "$TMP_PROGRESS" "$PROGRESS_FILE" || rm -f "$TMP_PROGRESS"
+            # Coordinate with post-commit and bin/rig memory append-progress
+            # across all worktrees sharing this external Rig directory.
+            STUB_RESULT=$(python3 - "$PROGRESS_FILE" "$COMMIT_HASH" "$COMMIT_MSG" "$COMMIT_DATE" <<'PY'
+import fcntl, os, pathlib, re, stat, sys, tempfile
+path = pathlib.Path(sys.argv[1])
+sha, subject, date = sys.argv[2:]
+sid = os.environ.get("RIG_SESSION_ANCHOR", "")
+sid_suffix = f" <!-- sid:{sid} -->" if re.fullmatch(r"[A-Za-z0-9-]+", sid) else ""
+with open(path.parent / ".progress.lock", "a+") as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    if path.is_symlink() or not path.is_file():
+        raise SystemExit(1)
+    original = path.read_text()
+    if sha in original:
+        raise SystemExit(0)
+    lines = original.splitlines(keepends=True)
+    position = next((i for i, line in enumerate(lines) if line.rstrip("\r\n") == "---"), None)
+    if position is None:
+        raise SystemExit(1)
+    if not lines[position].endswith("\n"):
+        lines[position] += "\n"
+    stub = f"\n## {date} — {subject} [{sha}]{sid_suffix}\n_Auto-logged by post-tool hook. Expand this entry during wrap-up._\n\n---\n"
+    lines.insert(position + 1, stub)
+    fd, temporary = tempfile.mkstemp(prefix=".progress-", suffix=".tmp", dir=str(path.parent))
+    try:
+        os.fchmod(fd, stat.S_IMODE(path.stat().st_mode))
+        with os.fdopen(fd, "w") as handle:
+            handle.write("".join(lines))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    print("inserted")
+PY
+) || {
+              echo "WARNING: The Rig could not append the guarded commit to PROGRESS.md." >&2
+              STUB_RESULT=""
+            }
+            if [[ "$STUB_RESULT" == inserted ]]; then
               echo "[$(date +%H:%M:%S)] PROGRESS fallback stub: $COMMIT_HASH" >> "$SESSION_LOG"
-            else
-              rm -f "$TMP_PROGRESS"
             fi
           fi
         fi
