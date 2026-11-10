@@ -275,6 +275,33 @@ teardown() { rm -rf "$TEST_ROOT"; }
   [[ "$output" == *"Postflight smoke failed"* ]] || return 1
 }
 
+@test "project capability contract detects either missing runtime helper" {
+  manifest="$REPO_ROOT/installer/capabilities.v1.json"
+  checker="$REPO_ROOT/installer/check-capabilities.py"
+  mkdir -p "$TEST_PROJECT/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig" "$TEST_PROJECT/bin/rig"
+  chmod +x "$TEST_PROJECT/bin/rig"
+  cp "$REPO_ROOT/templates/project/bin/rig-session-resolve.py" "$TEST_PROJECT/bin/rig-session-resolve.py"
+  cp "$REPO_ROOT/templates/project/bin/rig-snapshot.py" "$TEST_PROJECT/bin/rig-snapshot.py"
+  python3 - "$manifest" <<'PY'
+import json, sys
+capability = next(c for c in json.load(open(sys.argv[1]))['capabilities'] if c['id'] == 'project-rig-core')
+artifacts = {a['path'] for a in capability['artifacts'] if a['required']}
+assert {'bin/rig-session-resolve.py', 'bin/rig-snapshot.py'} <= artifacts
+PY
+  run python3 "$checker" "$manifest" --layer project --agents none --root "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  rm "$TEST_PROJECT/bin/rig-session-resolve.py"
+  run python3 "$checker" "$manifest" --layer project --agents none --root "$TEST_PROJECT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"id":"rig-session-resolver","type":"exists","target":"bin/rig-session-resolve.py","required":true,"status":"fail"'* ]] || return 1
+  cp "$REPO_ROOT/templates/project/bin/rig-session-resolve.py" "$TEST_PROJECT/bin/rig-session-resolve.py"
+  rm "$TEST_PROJECT/bin/rig-snapshot.py"
+  run python3 "$checker" "$manifest" --layer project --agents none --root "$TEST_PROJECT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"id":"rig-snapshot-writer","type":"exists","target":"bin/rig-snapshot.py","required":true,"status":"fail"'* ]] || return 1
+}
+
 @test "final summary reports matrix degradation smoke and Codex next step" {
   run env HOME="$TEST_HOME" bash "$INSTALLER" --project-only --project-agent codex --target "$TEST_PROJECT" --tracking repo --strategy merge
   [ "$status" -eq 0 ]

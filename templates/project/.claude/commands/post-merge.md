@@ -65,7 +65,7 @@ which PR merged if it's not clear from context.
 ## Concurrent session guard — run before anything else
 
 Acquire the owner-recorded memory workflow lock before changing memory. Preserve
-its token for the final cleanup step. The snapshot writer separately locks its
+its token through the housekeeping commit. The snapshot writer separately locks its
 short atomic update:
 
 ```bash
@@ -264,6 +264,14 @@ that are covered by an existing feature doc.
 
 ## Session naming step
 
+Release the workflow lock after memory housekeeping and the housekeeping commit,
+before presenting a session name for confirmation. Another session can then
+start its own memory housekeeping while the user decides.
+
+```bash
+"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json || exit 1
+```
+
 After the housekeeping commit (step 7), derive a session name suggestion using the
 same logic as `/session-name`. The merged PR number is always known here, which
 makes this the most reliable naming signal in the system. Do **not** apply it
@@ -278,7 +286,6 @@ evidence rules are authoritative for this suggestion.
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
   echo "Unable to resolve this session unambiguously; stop before writing session state."
-  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
   exit 1
 }
 SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
@@ -334,13 +341,11 @@ Use the shared atomic writer, passing the confirmed name as one opaque argument.
 # Acknowledge only the pending merge SHA while this exact active record remains
 # resolvable. A changed SHA fails closed and leaves the reminder visible.
 CURRENT_JSON=$("$REPO/bin/rig" session current --json) || {
-  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
   exit 1
 }
 CURRENT_UUID=$(printf '%s' "$CURRENT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
 [[ -n "$SESSION_UUID" && "$CURRENT_UUID" == "$SESSION_UUID" ]] || {
   echo "Session identity changed; stop before clearing or completing it." >&2
-  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
   exit 1
 }
 PENDING_MERGE_SHA=$(sed -n 's/^merge_sha=//p' "$RIG_DIR/memory/.post-merge-pending" 2>/dev/null | head -1)
@@ -360,22 +365,15 @@ If no meaningful work shipped (pure exploration, no merges), skip this step sile
 
 ## Flag cleanup
 
-After step 8 ("What's next?"), run all cleanups:
-
-```bash
-# Release the concurrent session lock
-"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
-
-# The exact merge acknowledgement was recorded in Step 5 before the session
-# record moved to done/.
-```
+The exact merge acknowledgement is recorded in Step 5 before the session
+record moves to done/. The workflow lock was released before session naming.
 
 The `.post-merge-pending` flag is written by `.husky/post-merge` after every merge
 with the triggering merge SHA and timestamp, then detected by freshness hooks.
 Saying “skip for current task” leaves the reminder and its merge metadata intact;
 the exact-session acknowledgement confirms `/post-merge` ran successfully for
 that merge SHA. A mismatch leaves the reminder intact. The
-The owner-recorded workflow lock is released to unblock any
+owner-recorded workflow lock is released to unblock any
 concurrent `/wrap` or `/post-merge` waiting to run.
 
 ---

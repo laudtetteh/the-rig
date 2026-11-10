@@ -60,7 +60,7 @@ even if internal wrap collection happened earlier. Do not end with an implementa
 
 Acquire the owner-recorded memory workflow lock. It serializes wrap and
 post-merge housekeeping; the snapshot writer separately locks its short atomic
-update. Preserve the returned token for the final cleanup step:
+update. Preserve the returned token through the snapshot update:
 
 ```bash
 LOCK_OWNER=$("$REPO/bin/rig" session current --json 2>/dev/null | \
@@ -508,6 +508,14 @@ Only after confirming that this session is taking ownership, rerun with
 Never edit `CONTEXT_SNAPSHOT.md` directly; the writer preserves foreign sections
 and atomically materializes the shared view.
 
+Release the workflow lock after the snapshot is written and any legacy section
+adoption is complete. Do this before presenting a session name for confirmation;
+another session can then start its own memory housekeeping while the user decides.
+
+```bash
+"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json || exit 1
+```
+
 ---
 
 ## Session naming step
@@ -526,7 +534,6 @@ REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 if [[ -f "$REPO/.rigpath" ]]; then RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath"); else RIG_DIR="$REPO/.rig"; fi
 SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
   echo "Unable to resolve this session unambiguously; stop before writing snapshot state."
-  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
   exit 1
 }
 SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
@@ -593,13 +600,11 @@ never interpolate it into shell or Python source.
 # Clear only this exact session's wrap obligation while its active record is
 # still resolvable. --adopt-legacy explicitly migrates an older unscoped marker.
 CURRENT_JSON=$("$REPO/bin/rig" session current --json) || {
-  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
   exit 1
 }
 CURRENT_UUID=$(printf '%s' "$CURRENT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
 [[ -n "$SESSION_UUID" && "$CURRENT_UUID" == "$SESSION_UUID" ]] || {
   echo "Session identity changed; stop before clearing or completing it." >&2
-  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
   exit 1
 }
 "$REPO/bin/rig" session obligation clear --kind wrap --adopt-legacy --json
@@ -643,13 +648,10 @@ skip the naming step silently but still run the orphan scan.
 
 ## Flag cleanup (step 12)
 
-After suggesting a session name and before asking "What's next?", run both cleanups:
+After suggesting a session name and before asking "What's next?", run checkpoint cleanup:
 
 ```bash
 # The exact wrap obligation was cleared in Step 5 before the record moved to done/.
-
-# Release only the lock token acquired by this workflow.
-"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
 
 # Clear this session's compact checkpoint — the full snapshot supersedes it
 rm -f "$RIG_DIR/memory/.compact-checkpoint-${PPID}.md" 2>/dev/null || true
@@ -658,13 +660,14 @@ rm -f "$RIG_DIR/memory/.compact-checkpoint-${PPID}.md" 2>/dev/null || true
 # The atomic session-name writer removes the matching legacy sentinel on completion.
 ```
 
-Log: "`.wrap-needed` cleared. Concurrent session lock released. Compact checkpoint cleared. UUID sentinel cleared."
+Log: "`.wrap-needed` cleared. Compact checkpoint cleared. UUID sentinel cleared."
 
 `.wrap-needed` may contain multiple `anchor=` entries. The exact-session clear
 removes only the current anchor and deletes the reminder only when no scoped or
 unadopted legacy obligation remains.
-The workflow lock release signals to concurrent sessions that wrap housekeeping
-is complete. The snapshot writer clears its own short-lived write marker.
+The workflow lock release after the snapshot update signals to concurrent
+sessions that wrap memory housekeeping is complete. The snapshot writer clears
+its own short-lived write marker.
 `.compact-checkpoint-{PPID}.md` is cleared so the next session reads the authoritative
 `CONTEXT_SNAPSHOT.md` rather than a stale post-compaction checkpoint.
 

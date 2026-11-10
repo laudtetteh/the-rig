@@ -43,6 +43,39 @@ print(content[start:end])
 PY
 }
 
+workflow_release_block() {
+  python3 - "$BATS_TEST_DIRNAME/../templates/project/.claude/commands/$1.md" <<'PY'
+import pathlib, sys
+content = pathlib.Path(sys.argv[1]).read_text()
+start = content.index('```bash\n"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json || exit 1') + len('```bash\n')
+end = content.index('\n```', start)
+assert end < content.index('> **Suggested session name:**'), "lock release must precede user confirmation"
+print(content[start:end])
+PY
+}
+
+@test "wrap releases the memory lock before waiting for session name confirmation" {
+  run "$rig" memory workflow-lock acquire --owner-anchor wrap --provider-pid "$$" --json
+  [ "$status" -eq 0 ]
+  token=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  workflow_release_block wrap > "$BATS_TEST_TMPDIR/release.sh"
+  run env REPO="$CASE_DIR" SNAP_LOCK_TOKEN="$token" bash "$BATS_TEST_TMPDIR/release.sh"
+  [ "$status" -eq 0 ]
+  run "$rig" memory workflow-lock acquire --owner-anchor next --json
+  [ "$status" -eq 0 ]
+}
+
+@test "post-merge releases the memory lock before waiting for session name confirmation" {
+  run "$rig" memory workflow-lock acquire --owner-anchor merge --provider-pid "$$" --json
+  [ "$status" -eq 0 ]
+  token=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  workflow_release_block post-merge > "$BATS_TEST_TMPDIR/release.sh"
+  run env REPO="$CASE_DIR" SNAP_LOCK_TOKEN="$token" bash "$BATS_TEST_TMPDIR/release.sh"
+  [ "$status" -eq 0 ]
+  run "$rig" memory workflow-lock acquire --owner-anchor next --json
+  [ "$status" -eq 0 ]
+}
+
 @test "sequential session snapshots preserve both owned task handoffs" {
   candidate "$BATS_TEST_TMPDIR/a.md" feat/a task-a
   candidate "$BATS_TEST_TMPDIR/b.md" feat/b task-b
