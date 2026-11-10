@@ -309,6 +309,31 @@ run_linked_pretool() {
   [[ "$output" == *"Direct-to-main commit blocked"* ]] || return 1
 }
 
+@test "direct-push checks each commit subject in a multi-repository Bash command" {
+  setup_linked_hook_worktrees
+  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok" "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
+  local command payload
+  command="git -C '$LINKED_FEATURE' commit -m 'chore: okay'; git -C '$TEST_PROJECT' commit -m 'fix: unsafe'"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$LINKED_FEATURE" "$command")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Direct-to-main commit blocked"* ]] || return 1
+}
+
+@test "commit guard inspects executable eval heredocs but not script file contents" {
+  local command payload
+  command=$'eval "$(cat <<\x27EOF\x27\ngit commit -m "fix: unsafe"\nEOF\n)"'
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "$command")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+
+  command=$'cat > example.sh <<\x27EOF\x27\n#!/bin/sh\ngit commit -m "fix: text only"\nEOF'
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "$command")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+}
+
 run_claude_pretool_with_ttl() {
   local ttl="$1" tool="$2" payload="$3"
   run env RIG_COMMIT_OK_TTL_SECONDS="$ttl" bash -c 'cd "$1" && printf "%s" "$3" | bash .claude/hooks/pre-tool.sh "$2"' \
@@ -437,6 +462,34 @@ EOF
 
   [ "$claude_status" -ne 0 ]
   [ "$codex_status" -ne 0 ]
+}
+
+@test "Codex apply_patch checks project blocked paths and target worktree policy" {
+  local claude_payload codex_payload patch
+  claude_payload="$(python3 -c 'import json,sys; print(json.dumps({"file_path":sys.argv[1]}))' "$TEST_PROJECT/.env.production")"
+  patch=$'*** Begin Patch\n*** Add File: .env.production\n+unsafe\n*** End Patch'
+  codex_payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"command":sys.argv[1]}}))' "$patch")"
+  run_claude_pretool Write "$claude_payload"
+  [ "$status" -eq 2 ]
+  run_codex_adapter "$codex_payload"
+  [ "$status" -eq 2 ]
+
+  patch=$'*** Begin Patch\n*** Add File: ordinary.txt\nsafe\n*** Add File: .env.production\nunsafe\n*** End Patch'
+  codex_payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"command":sys.argv[1]}}))' "$patch")"
+  run_codex_adapter "$codex_payload"
+  [ "$status" -eq 2 ]
+
+  setup_linked_hook_worktrees
+  printf '[REPO]/sensitive.txt\n' >> "$LINKED_FEATURE/.rig/rules/protected-paths.txt"
+  patch="$(printf '*** Begin Patch\n*** Add File: %s\nunsafe\n*** End Patch\n' "$LINKED_FEATURE/sensitive.txt")"
+  codex_payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"command":sys.argv[1]}}))' "$patch")"
+  run_codex_adapter "$codex_payload"
+  [ "$status" -eq 2 ]
+
+  patch=$'*** Begin Patch\n*** Add File: ordinary.txt\nsafe\n*** End Patch'
+  codex_payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"command":sys.argv[1]}}))' "$patch")"
+  run_codex_adapter "$codex_payload"
+  [ "$status" -eq 0 ]
 }
 
 @test "Claude and Codex SessionStart payloads emit equivalent context" {

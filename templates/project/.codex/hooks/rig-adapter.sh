@@ -131,6 +131,7 @@ for value in re.findall(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$"
     done
   done <<< "$paths"
   [[ "$found" -eq 1 ]] || fail_closed "apply_patch payload contains no file targets."
+  PATCH_TARGETS="$paths"
 }
 
 PAYLOAD=$(normalize_payload) || fail_closed "hook payload could not be normalized."
@@ -152,7 +153,7 @@ fi
 
 if [[ "$EVENT" == "PreToolUse" && "$TOOL" == "apply_patch" ]]; then
   validate_apply_patch
-  RIG_CODEX_PATCH_VALIDATED=1
+  PATCH_EVENT=true
 fi
 
 HOOK_DIR="$REPO/.claude/hooks"
@@ -179,8 +180,22 @@ case "$EVENT" in
 esac
 
 [[ -r "$HOOK" ]] || fail_closed "canonical hook is missing or unreadable: $HOOK"
+if [[ "${PATCH_EVENT:-false}" == true ]]; then
+  # The canonical Write guard checks project-specific blocked paths and the
+  # target worktree's policy. Check every patch target, not just the caller's
+  # governance paths. Codex cannot apply a per-target Write redirection to a
+  # patch command, so require the caller to use the canonical destination.
+  while IFS= read -r path; do
+    target_payload=$(python3 -c 'import json,sys; print(json.dumps({"file_path":sys.argv[1]}))' "$path") || \
+      fail_closed "apply_patch target could not be encoded."
+    OUTPUT=$(printf '%s' "$target_payload" | RIG_AGENT=codex bash "$HOOK" Write); STATUS=$?
+    [[ "$STATUS" -eq 0 ]] || exit "$STATUS"
+    [[ -z "$OUTPUT" ]] || fail_closed "apply_patch target requires a redirected write; patch the canonical destination."
+  done <<< "$PATCH_TARGETS"
+  exit 0
+fi
 if [[ "$EVENT" == "PreToolUse" || "$EVENT" == "PostToolUse" ]]; then
-  OUTPUT=$(printf '%s' "$HOOK_PAYLOAD" | RIG_AGENT=codex RIG_CODEX_PATCH_VALIDATED="${RIG_CODEX_PATCH_VALIDATED:-0}" bash "$HOOK" "$TOOL"); STATUS=$?
+  OUTPUT=$(printf '%s' "$HOOK_PAYLOAD" | RIG_AGENT=codex bash "$HOOK" "$TOOL"); STATUS=$?
 else
   OUTPUT=$(printf '%s' "$PAYLOAD" | RIG_AGENT=codex bash "$HOOK"); STATUS=$?
 fi

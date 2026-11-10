@@ -156,7 +156,9 @@ for line in command.splitlines(keepends=True):
             visible.append(line)
         continue
     visible.append(line)
-    shell_heredoc = bool(re.search(r"\b(?:bash|sh)\b", line))
+    # A filename such as example.sh does not execute its heredoc body. A
+    # shell command or eval can, including when it appears after a pipe.
+    shell_heredoc = bool(re.search(r"(?<![A-Za-z0-9_.-])(?:bash|sh|eval)(?=\s|[;<|&()]|$)", line))
     for match in heredoc.finditer(line):
         pending.append((next(group for group in match.groups()[1:] if group), shell_heredoc, bool(match.group(1))))
 command = "".join(visible)
@@ -169,7 +171,7 @@ print(1 if re.search(pattern, command) else 0)
   # sh/bash -c. The event cwd is used when supplied; the process cwd is the
   # legacy fallback. Refuse visible commits with an unresolved target.
   COMMIT_TARGETS=$(printf '%s' "$INPUT" | python3 -c '
-import json, os, shlex, sys
+import json, os, re, shlex, sys
 data = json.load(sys.stdin)
 command = data.get("tool_input", data).get("command", "")
 cwd = data.get("cwd") if isinstance(data.get("cwd"), str) else None
@@ -240,15 +242,31 @@ def inspect(script, current, depth=0):
             if j < len(tokens) and tokens[j] == "commit":
                 if target is None:
                     raise ValueError("commit target is dynamic")
-                targets.append(target)
+                message = ""
+                k = j + 1
+                while k < len(tokens) and tokens[k] not in operators:
+                    option = tokens[k]
+                    if option in ("-m", "--message") and k + 1 < len(tokens):
+                        message = tokens[k + 1]
+                        break
+                    if option.startswith("--message="):
+                        message = option.split("=", 1)[1]
+                        break
+                    if option.startswith("-m") and len(option) > 2:
+                        message = option[2:]
+                        break
+                    k += 1
+                subject = message.splitlines()[0].strip() if message else ""
+                typed = re.match(r"^([a-z]+)(?:\(|:)", subject)
+                targets.append((target, typed.group(1) if typed else ""))
             i = j + 1
             continue
         i += 1
     return targets
 
 try:
-    for target in inspect(command, os.path.abspath(cwd or sys.argv[1])):
-        print(target)
+    for target, commit_type in inspect(command, os.path.abspath(cwd or sys.argv[1])):
+        print(target + "\t" + commit_type)
 except ValueError:
     raise SystemExit(1)
 ' "$PWD") || fail_closed "Bash commit target could not be inspected."
@@ -259,14 +277,14 @@ except ValueError:
 import json, os, sys
 data = json.load(sys.stdin)
 cwd = data.get("cwd") if isinstance(data.get("cwd"), str) else None
-print(os.path.abspath(cwd or sys.argv[1]))
+print(os.path.abspath(cwd or sys.argv[1]) + "\t")
 ' "$PWD") || fail_closed "Bash commit cwd could not be inspected."
   fi
   fi
 
   # ── Gate git commit on sentinel file ───────────────────────────────────
   COMMIT_OK_TTL_SECONDS="${RIG_COMMIT_OK_TTL_SECONDS:-900}"
-  while IFS= read -r COMMIT_TARGET; do
+  while IFS=$'\t' read -r COMMIT_TARGET DIRECT_COMMIT_TYPE; do
     [[ -n "$COMMIT_TARGET" ]] || continue
     COMMIT_REPO=$(same_project_root_for_path "$COMMIT_TARGET/.") || COMMIT_REPO="$REPO"
     COMMIT_RIG_DIR=$(rig_dir_for_root "$COMMIT_REPO")
@@ -345,34 +363,13 @@ print(os.path.abspath(cwd or sys.argv[1]))
 
       # direct-push is set — still restrict to housekeeping commit types.
       # Code-change types must go through a branch and PR regardless.
-      DIRECT_COMMIT_TYPE=""
-      if command -v python3 >/dev/null 2>&1; then
-        DIRECT_COMMIT_TYPE=$(echo "$BASH_CMD" | python3 -c "
-import re, sys
-cmd = sys.stdin.read()
-m = re.search(r\"'EOF'\\s*\\n\\s*(\\S[^\\n]*)\", cmd)
-if not m:
-    m = re.search(r'-m\\s+\"([^\"]+)\"', cmd)
-if not m:
-    m = re.search(r\"-m\\s+'([^']+)'\", cmd)
-if m:
-    first_line = m.group(1).strip()
-    tm = re.match(r'^([a-z]+)[\(:]', first_line)
-    if tm:
-        print(tm.group(1))
-" 2>/dev/null || true)
-      else
-        DIRECT_COMMIT_TYPE=$(echo "$BASH_CMD" | grep -o '"[a-z]*(' | tr -d '"(' | head -1 || true)
-      fi
-
-      CODE_TYPES="^(feat|fix|refactor|test|perf|devops|style)$"
-      if [[ -n "$DIRECT_COMMIT_TYPE" ]] && echo "$DIRECT_COMMIT_TYPE" | grep -qE "$CODE_TYPES"; then
+      if [[ "$DIRECT_COMMIT_TYPE" != chore && "$DIRECT_COMMIT_TYPE" != docs ]]; then
         echo "" >&2
         echo "  Direct-to-main commit blocked by The Rig." >&2
         echo "" >&2
         echo "  'housekeeping: direct-push' only allows chore and docs commits" >&2
-        echo "  directly to main. A '$DIRECT_COMMIT_TYPE(...)' commit requires a PR:" >&2
-        echo "    git checkout -b $DIRECT_COMMIT_TYPE/your-description" >&2
+        echo "  directly to main. A '${DIRECT_COMMIT_TYPE:-unknown}' commit requires a PR:" >&2
+        echo "    git checkout -b ${DIRECT_COMMIT_TYPE:-feat}/your-description" >&2
         exit 2
       fi
     fi
@@ -381,13 +378,6 @@ fi
 
 # ── Block writes to protected paths ──────────────────────────────────────────
 if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" || "$TOOL" == "NotebookEdit" ]]; then
-
-  # The Codex adapter has already checked every apply_patch target against the
-  # shared protected-path policy. It then passes a command, not a file_path.
-  if [[ "${RIG_CODEX_PATCH_VALIDATED:-0}" == 1 ]]; then
-    [[ "${RIG_AGENT:-}" == codex && "$TOOL" == Write ]] || fail_closed "invalid Codex patch validation context."
-    exit 0
-  fi
 
   PATH_ARG=$(printf '%s' "$INPUT" | python3 -c '
 import json, os, sys
