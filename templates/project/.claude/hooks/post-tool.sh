@@ -25,12 +25,13 @@ fi
 
 # Git's post-commit hook logs guarded commits when installed. For a visible
 # commit in a hookless install, PreToolUse leaves one pending attempt here.
-REPO=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+HOOK_ROOT=$(cd "$(dirname "$0")/../.." && pwd -P) || exit 0
+REPO=$(git -C "$HOOK_ROOT" rev-parse --show-toplevel 2>/dev/null) || exit 0
+[[ "$REPO" == "$HOOK_ROOT" ]] || exit 0
 SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session-$(basename "$REPO").log}"
 echo "[$(date +%H:%M:%S)] POST $TOOL" >> "$SESSION_LOG"
 
 if [[ "$TOOL" == "Bash" ]]; then
-  HOOK_ROOT=$(cd "$(dirname "$0")/../.." && pwd -P) || exit 0
   if [[ -f "$HOOK_ROOT/.rigpath" ]]; then
     IFS= read -r RIG_DIR < "$HOOK_ROOT/.rigpath"
   else

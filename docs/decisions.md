@@ -122,7 +122,7 @@ Why The Rig is built the way it is. Each entry covers what was decided, what was
 
 ## 10. Commit hooks and PostToolUse auto-stub PROGRESS.md for guarded agent commits
 
-**Decided:** With active Rig Git hooks, `post-commit` reads final HEAD after any optional late-footer amendment and inserts a dated stub into the actual worktree's progress log for guarded agent commits. In a hookless install, PostToolUse uses the matching pending approval and Git result to stub approved visible commits. Both skip ordinary terminal commits and replay-generated commits.
+**Decided:** With active Rig Git hooks, `post-commit` reads final HEAD after any optional late-footer amendment and inserts a dated stub into the actual worktree's progress log for guarded agent commits. For a generated merge commit, `commit-msg` leaves a worktree-specific pending marker and `post-merge` claims it before reusing the same final-SHA logger. A manually completed merge runs `post-commit`, which clears its marker. In a hookless install, PostToolUse uses the matching pending approval and Git result to stub approved visible commits. These paths skip ordinary terminal commits and rebase/cherry-pick/revert replay commits. A guarded merge commit requires fresh approval even while `MERGE_HEAD` exists.
 
 **Rejected:** Relying solely on the agent to update `PROGRESS.md` during wrap-up.
 

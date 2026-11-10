@@ -401,6 +401,7 @@ titles, transcripts, or singleton state.
 | `pre-commit` | Before every git commit | Secrets reaching the repository |
 | `commit-msg` | On every git commit | Strips tool footers, validates Conventional Commits and tracker references; guarded agent commits additionally consume one-use approval and check the target branch |
 | `post-commit` | After every git commit | Reports late AI footers; optional automatic amend for unsigned commits with `RIG_POST_COMMIT_AUTO_AMEND=1`; guarded agent commits auto-stub progress using final HEAD |
+| `post-merge` | After successful git merge | Writes the merge reminder; for a guarded merge commit created directly by Git, reuses post-commit's final-SHA progress handling |
 
 ---
 

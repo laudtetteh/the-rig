@@ -434,8 +434,9 @@ git commit
      │       consume fresh one-use $RIG_DIR/memory/.rig-commit-ok approval
      │     For guarded commits: block main/master except chore/docs when
      │       CLAUDE.md sets housekeeping: direct-push
-     │     Exempt Git rebase/cherry-pick/revert/merge replay from the
+     │     Exempt Git rebase/cherry-pick/revert replay from the
      │       one-use approval and branch checks
+     │     Guard generated and manually completed merge commits
      │     Strips: known AI Co-authored-by and tool-generated footer lines
      │     Preserves: human Co-authored-by and Signed-off-by trailers
      │     Validates Conventional Commits subject-line format
@@ -456,9 +457,13 @@ git commit
              ordinary unsigned commits with RIG_POST_COMMIT_AUTO_AMEND=1
            During rebase/cherry-pick/revert, warn that the footer remains
              and must be removed after replay
-           For guarded ordinary commits, auto-stub the actual worktree's
+           For guarded ordinary and merge commits, auto-stub the actual worktree's
              PROGRESS.md using final HEAD;
              existing SHA entries are not duplicated
+     └─► post-merge
+           For a guarded commit created directly by git merge, claim its
+             worktree-specific pending marker and reuse post-commit's final-SHA
+             footer/progress handling before writing the merge reminder
 ```
 
 `RIG_COMMIT_POLICY=guarded` is explicit on agent commit commands; human terminal
@@ -467,6 +472,12 @@ scripts and compound commands must inherit the marker to be guarded. PreToolUse
 rejects visible unmarked commits, but cannot parse every shell form. Automatic
 tagging with `updatedInput` is unreliable: Claude Code may drop that rewrite
 on an auto-mode retry, as described in its [hook reference](https://code.claude.com/docs/en/hooks#pretooluse-updatedinput-in-auto-mode).
+For a visible guarded command, PreToolUse calls the active `commit-msg` hook
+with a dedicated `--rig-policy-probe` argument and requires an exact capability
+response from a temporary directory. Older hooks without the probe are blocked.
+Customized wrappers should handle the probe before normal message-file handling.
+This compatibility check does not prove that a custom or hostile hook enforces
+approval during a real commit.
 Git hooks run only when installed and enabled. `--skip-git-hooks` omits native
 `.git/hooks` installation. If an active Rig Husky hook is present, it provides
 the same commit-time guard. Otherwise, PreToolUse retains a visible-command
@@ -479,8 +490,14 @@ for quiet output or a target it cannot resolve. Ordinary human terminal commits
 remain unaffected. Visible commands that explicitly use `--no-verify`,
 `core.hooksPath` overrides, or `HUSKY=0` are blocked early; dynamically
 assembled bypasses remain possible.
-The sentinel is a workflow guard, not a physical guarantee. Replay-generated
-commits are exempt from the Git approval gate and do not consume approval.
+The sentinel is a workflow guard, not a physical guarantee. Rebase, cherry-pick,
+and revert replay commits are exempt from the Git approval gate and do not
+consume approval. Guarded merge commits require fresh approval: this includes
+commits made by `git merge --no-ff` and manual conflict completion. Git runs
+`post-merge` rather than `post-commit` for generated merges, so the former
+reuses the final-SHA logger after the successful guarded merge. If a late AI
+footer appears on a generated merge, Git may refuse an opted-in amend while the
+merge command is still running; the hook warns and logs the unchanged final SHA.
 
 ---
 

@@ -6,8 +6,8 @@
 # Writes .post-merge-pending so the next Claude Code session detects the gap
 # and prompts you to run /post-merge before starting new work.
 #
-# The reminder only shows when a merge commit was brought in (MERGE_HEAD existed),
-# not on fast-forward pulls or regular branch merges.
+# The reminder runs after successful merges. Guarded merge commits created
+# directly by `git merge` also reuse post-commit's progress/footer handling.
 #
 # To silence on a specific pull: git pull --no-verify
 
@@ -26,6 +26,33 @@ echo ""
 # Resolved via .rigpath if present (external .rig/), otherwise defaults to .rig/.
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 if [ -n "$REPO" ]; then
+  # Git does not invoke post-commit for a commit created directly by `git
+  # merge`. A successful guarded commit-msg leaves its parent pair in the
+  # worktree's Git directory. Claim it once, then reuse post-commit's final
+  # SHA/footer handling before writing the post-merge reminder.
+  if [ "${RIG_COMMIT_POLICY:-}" = guarded ] && [ "${1:-0}" = 0 ]; then
+    MERGE_PROGRESS=$(git -C "$REPO" rev-parse --git-path rig-merge-progress-pending 2>/dev/null) || MERGE_PROGRESS=""
+    if [ -n "$MERGE_PROGRESS" ] && [ -f "$MERGE_PROGRESS" ]; then
+      MERGE_CLAIM="${MERGE_PROGRESS}.claimed.$$"
+      if mv "$MERGE_PROGRESS" "$MERGE_CLAIM" 2>/dev/null; then
+        BEFORE_HEAD=$(sed -n '1p' "$MERGE_CLAIM")
+        MERGED_HEAD=$(sed -n '2p' "$MERGE_CLAIM")
+        rm -f "$MERGE_CLAIM"
+        FIRST_PARENT=$(git -C "$REPO" rev-parse 'HEAD^1' 2>/dev/null || true)
+        SECOND_PARENT=$(git -C "$REPO" rev-parse 'HEAD^2' 2>/dev/null || true)
+        if [ -n "$BEFORE_HEAD" ] && [ "$FIRST_PARENT" = "$BEFORE_HEAD" ] &&
+           [ -n "$MERGED_HEAD" ] && [ "$SECOND_PARENT" = "$MERGED_HEAD" ]; then
+          HOOK_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd -P) || HOOK_DIR=""
+          if [ -n "$HOOK_DIR" ] && [ -x "$HOOK_DIR/post-commit" ] && [ -f "$HOOK_DIR/post-commit" ]; then
+            (cd "$REPO" && "$HOOK_DIR/post-commit") ||
+              echo "WARNING: The Rig could not run post-commit after the guarded merge; review PROGRESS.md." >&2
+          else
+            echo "WARNING: The Rig post-commit hook is unavailable after the guarded merge; review PROGRESS.md." >&2
+          fi
+        fi
+      fi
+    fi
+  fi
   if [ -f "$REPO/.rigpath" ]; then
     RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
   else

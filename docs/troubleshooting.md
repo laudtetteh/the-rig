@@ -97,6 +97,9 @@ the commit still fails.
 If a previous commit failed before `commit-msg` ran, the sentinel may remain.
 If `commit-msg` ran, it consumed approval for that attempt. In a hookless
 install, PreToolUse consumes approval before the visible commit runs.
+After resolving merge conflicts, a guarded `git commit` is a new approved
+attempt even while `MERGE_HEAD` exists. A guarded `git merge --no-ff` that
+creates a commit also needs approval before it starts.
 
 ```bash
 # Check if it exists
@@ -114,8 +117,11 @@ commit uses the limited PreToolUse gate: fresh approval, branch, and direct-push
 type are checked before approval is consumed. PostToolUse stubs progress when
 it sees a matching successful Git result; quiet output or opaque scripts may
 leave no stub. An executable `commit-msg` that lacks Rig's guarded policy is
-treated as incompatible and blocks the visible guarded command. Explicit
-`--no-verify`, `core.hooksPath` overrides, and `HUSKY=0` in visible agent
+treated as incompatible and blocks the visible guarded command. PreToolUse
+checks compatibility with a dedicated `--rig-policy-probe` hook argument;
+custom wrappers must handle it without side effects before normal message-file
+handling and delegate the real commit invocation.
+Explicit `--no-verify`, `core.hooksPath` overrides, and `HUSKY=0` in visible agent
 commands are blocked by PreToolUse, though dynamically assembled commands can
 still bypass static detection.
 
