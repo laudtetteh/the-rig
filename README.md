@@ -381,7 +381,7 @@ snapshot — hooks are a safety net, not a replacement.
 | `pre-tool.sh` | `PreToolUse` (every tool call) | Blocks structured writes and visible unmarked Bash commits; checks approval for marked visible commits, consuming it before execution when no Rig `commit-msg` hook is active; redirects worktree writes |
 | `commit-msg` | Guarded Git commit | Consumes one-use approval and checks the prepared subject and target branch |
 | `post-commit` | Guarded Git commit | Auto-stubs the target worktree's `PROGRESS.md` using the final commit SHA |
-| `post-tool.sh` | `PostToolUse` (every tool call) | Logs tool completion, warns about branch naming, and stubs progress for an approved visible commit in a hookless install |
+| `post-tool.sh` | `PostToolUse` (every tool call) | Logs tool completion, warns about branch naming, and backs up visible guarded commit logging when `post-commit` is absent or does not log; final-SHA checks prevent duplicate stubs |
 | `pre-compact.sh` | `PreCompact` | Writes compact checkpoint + `compactionSummary` before context compaction |
 | `post-compact.sh` | `PostCompact` | Injects checkpoint content as `additionalContext` after compaction |
 | `subagent-start.sh` | `SubagentStart` | Optional with `--subagents`; injects project name, branch, active task, and key conventions into spawned subagents |

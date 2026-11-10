@@ -367,10 +367,13 @@ enforces approval.
 checks a visible guarded commit's fresh approval, branch, and direct-push type,
 then consumes approval before execution; PostToolUse attempts a progress stub
 after a successful commit. This fallback cannot inspect generated scripts or
-guarantee a stub when the Git output omits the commit hash. Visible commands
-that explicitly disable hooks are blocked by PreToolUse. Git hooks can still be
-disabled outside its visible-command checks with `--no-verify`, `core.hooksPath`,
-or `HUSKY=0`; this is a workflow guard, not a physical restriction.
+guarantee a stub when the Git output omits the commit hash. A visible command
+with a compatible `commit-msg` hook also leaves a PostToolUse fallback marker;
+it logs when `post-commit` is missing or custom, and skips a SHA already logged.
+Visible commands that explicitly disable hooks are blocked by PreToolUse.
+Git hooks can still be disabled outside its visible-command checks with
+`--no-verify`, `core.hooksPath`, or `HUSKY=0`; this is a workflow guard, not a
+physical restriction.
 
 If a client adds an AI footer after `commit-msg`, `post-commit` reports it without changing
 the commit SHA. Set `RIG_POST_COMMIT_AUTO_AMEND=1` to opt into amending unsigned

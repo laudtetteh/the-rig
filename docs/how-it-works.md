@@ -142,7 +142,7 @@ Agent is oriented. Hooks are live. Ready to work.
      │
      │  After every tool call:
      │  └─ post-tool.sh (PostToolUse)
-     │       PROGRESS.md fallback stub for approved visible hookless commits
+     │       PROGRESS.md fallback stub for approved visible guarded commits
      │
      │  Before context compaction:
      │  └─ pre-compact.sh (PreCompact)
@@ -214,7 +214,7 @@ Seven files, seven purposes:
 
 ### .rig/memory/PROGRESS.md
 - Append-only build log, one entry per meaningful unit of work
-- Auto-stubbed by Git's `post-commit` hook after a guarded agent commit; PostToolUse uses a matching Git result for the hookless visible-command fallback
+- Auto-stubbed by Git's `post-commit` hook after a guarded agent commit; PostToolUse uses a matching Git result as a fallback when that hook does not log
 - `stop.sh` appends UUID-tagged session-end markers for housekeeping. Naming never uses legacy marker ranges, snapshots, unrelated session files, or project history; current conversation context is authoritative and only the resolved current session's UUID-tagged entries may cross-check it.
 - Most recent entry at the top
 - **Trim convention:** capped at 20 entries. `/wrap` moves older entries to `.rig/memory/PROGRESS_archive.md` (gitignored, disk-only) when the cap is exceeded. Keeps session startup cost low indefinitely.
@@ -431,7 +431,7 @@ Every tool call
      │
      └─► post-tool.sh (PostToolUse)
            Logs completion to session log
-           For approved visible hookless commits, auto-stubs PROGRESS.md
+           For approved visible guarded commits, auto-stubs PROGRESS.md
              when the Git result contains the matching commit hash
            For Bash, warn when a new branch name misses the expected prefix
 
@@ -557,7 +557,9 @@ fallback: it checks approval age, target worktree, branch, and direct-push
 subject type, then consumes approval before execution. PostToolUse logs a stub
 for the matching successful Git result. Pending markers use the tool event ID
 when supplied; overlapping events without IDs share a legacy marker. The
-fallback cannot inspect opaque generated scripts and may miss progress logging
+same pending marker backs up a compatible `commit-msg` hook when `post-commit`
+is missing or custom; a final-SHA check avoids duplicate progress entries.
+The fallback cannot inspect opaque generated scripts and may miss progress logging
 for quiet output or a target it cannot resolve. Ordinary human terminal commits
 remain unaffected. Visible commands that explicitly use `--no-verify`,
 `core.hooksPath` overrides, or `HUSKY=0` are blocked early; dynamically

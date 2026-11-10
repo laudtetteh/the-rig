@@ -256,6 +256,52 @@ SH
   if grep -Fq "$hash" "$TEST_PROJECT/.rig/memory/PROGRESS.md"; then return 1; fi
 }
 
+@test "custom commit-msg hook still logs when post-commit is missing" {
+  local hooks command payload commit_output post_payload hash
+  hooks="$TEST_PROJECT/.custom-hooks"
+  mkdir -p "$hooks" "$TEST_PROJECT/.claude/hooks"
+  cp "$REPO_ROOT/templates/project/.husky/commit-msg" "$hooks/commit-msg"
+  cp "$REPO_ROOT/templates/project/.husky/filter-commit-message-inplace.sh" "$hooks/filter-commit-message-inplace.sh"
+  cp "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  cp "$REPO_ROOT/templates/project/.claude/hooks/post-tool.sh" "$TEST_PROJECT/.claude/hooks/post-tool.sh"
+  chmod +x "$hooks/commit-msg"
+  git -C "$TEST_PROJECT" config core.hooksPath .custom-hooks
+  approval
+  command='RIG_COMMIT_POLICY=guarded git commit --allow-empty -m "fix: custom hooks [#593]"'
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"custom-hook-commit","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT" "$command")"
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/pre-tool.sh' _ "$TEST_PROJECT" "$payload"
+  [ "$status" -eq 0 ]
+  run env RIG_COMMIT_POLICY=guarded git -C "$TEST_PROJECT" commit --allow-empty -m 'fix: custom hooks [#593]'
+  [ "$status" -eq 0 ]
+  commit_output="$output"
+  post_payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PostToolUse","tool_name":"Bash","tool_use_id":"custom-hook-commit","tool_response":{"stdout":sys.argv[1]}}))' "$commit_output")"
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/post-tool.sh' _ "$TEST_PROJECT" "$post_payload"
+  [ "$status" -eq 0 ]
+  hash="$(git -C "$TEST_PROJECT" rev-parse HEAD)"
+  grep -Fq "$hash" "$TEST_PROJECT/.rig/memory/PROGRESS.md"
+  [ "$(grep -Fc "$hash" "$TEST_PROJECT/.rig/memory/PROGRESS.md")" -eq 1 ]
+}
+
+@test "PostToolUse fallback does not duplicate an active post-commit stub" {
+  local command payload commit_output post_payload hash
+  mkdir -p "$TEST_PROJECT/.claude/hooks"
+  cp "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  cp "$REPO_ROOT/templates/project/.claude/hooks/post-tool.sh" "$TEST_PROJECT/.claude/hooks/post-tool.sh"
+  approval
+  command='RIG_COMMIT_POLICY=guarded git commit --allow-empty -m "fix: one stub [#593]"'
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"native-hook-commit","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT" "$command")"
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/pre-tool.sh' _ "$TEST_PROJECT" "$payload"
+  [ "$status" -eq 0 ]
+  run env RIG_COMMIT_POLICY=guarded git -C "$TEST_PROJECT" commit --allow-empty -m 'fix: one stub [#593]'
+  [ "$status" -eq 0 ]
+  commit_output="$output"
+  post_payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PostToolUse","tool_name":"Bash","tool_use_id":"native-hook-commit","tool_response":{"stdout":sys.argv[1]}}))' "$commit_output")"
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/post-tool.sh' _ "$TEST_PROJECT" "$post_payload"
+  [ "$status" -eq 0 ]
+  hash="$(git -C "$TEST_PROJECT" rev-parse HEAD)"
+  [ "$(grep -Fc "$hash" "$TEST_PROJECT/.rig/memory/PROGRESS.md")" -eq 1 ]
+}
+
 @test "hookless pending events in an external Rig dir log two worktrees out of order" {
   local linked_a linked_b external command payload_a payload_b output_a output_b post_a post_b id_a id_b
   linked_a="$BATS_TEST_TMPDIR/hookless-a"
