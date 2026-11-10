@@ -80,7 +80,8 @@ with open(path.parent / ".progress.lock", "a+") as lock:
     fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
     if path.is_symlink() or not path.is_file():
         raise SystemExit(1)
-    original = path.read_text()
+    with open(path, "r", encoding="utf-8", errors="surrogateescape", newline="") as source:
+        original = source.read()
     if sha in original:
         raise SystemExit(0)
     lines = original.splitlines(keepends=True)
@@ -94,7 +95,7 @@ with open(path.parent / ".progress.lock", "a+") as lock:
     fd, temporary = tempfile.mkstemp(prefix=".progress-", suffix=".tmp", dir=str(path.parent))
     try:
         os.fchmod(fd, stat.S_IMODE(path.stat().st_mode))
-        with os.fdopen(fd, "w") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape", newline="") as handle:
             handle.write("".join(lines))
             handle.flush()
             os.fsync(handle.fileno())

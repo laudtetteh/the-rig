@@ -128,8 +128,21 @@ commit_count() { git -C "$TEST_PROJECT" rev-list --count HEAD; }
   if grep -Fq "$hash" "$TEST_PROJECT/.rig/memory/PROGRESS.md"; then return 1; fi
 }
 
+@test "guarded stub preserves existing CRLF and UTF-8 text under a C locale" {
+  local progress hash
+  progress="$TEST_PROJECT/.rig/memory/PROGRESS.md"
+  PROGRESS_F="$progress" python3 -c 'import os; open(os.environ["PROGRESS_F"],"wb").write("# Progress — café\r\n\r\n---\r\nTail\r\n".encode("utf-8"))'
+  approval
+  run env LC_ALL=C PYTHONUTF8=0 RIG_COMMIT_POLICY=guarded \
+    git -C "$TEST_PROJECT" commit --allow-empty -m 'fix: locale [#593]'
+  [ "$status" -eq 0 ]
+  hash="$(git -C "$TEST_PROJECT" rev-parse HEAD)"
+  PROGRESS_F="$progress" COMMIT_HASH="$hash" python3 -c 'import os; data=open(os.environ["PROGRESS_F"],"rb").read(); assert "# Progress — café\r\n\r\n---\r\n".encode("utf-8") in data and b"Tail\r\n" in data and os.environ["COMMIT_HASH"].encode() in data'
+}
+
 @test "shared external progress lock serializes guarded commits from two worktrees" {
   local linked external progress ready release locker first_hook second_hook hash_a hash_b i
+  local fakebin real_python ready_a ready_b
   linked="$BATS_TEST_TMPDIR/progress-linked"
   external="$BATS_TEST_TMPDIR/shared-progress-rig"
   git -C "$TEST_PROJECT" worktree add -qb fix/progress-linked "$linked"
@@ -162,11 +175,31 @@ PY
     sleep 0.05
   done
   [ -e "$ready" ]
-  (cd "$TEST_PROJECT" && RIG_COMMIT_POLICY=guarded .git/hooks/post-commit) &
+  fakebin="$BATS_TEST_TMPDIR/python-probe-bin"
+  mkdir -p "$fakebin"
+  real_python="$(command -v python3)"
+  cat > "$fakebin/python3" <<'SH'
+#!/bin/sh
+: > "$RIG_TEST_READY_FILE"
+exec "$RIG_TEST_REAL_PYTHON" "$@"
+SH
+  chmod +x "$fakebin/python3"
+  ready_a="$BATS_TEST_TMPDIR/hook-a-ready"
+  ready_b="$BATS_TEST_TMPDIR/hook-b-ready"
+  (cd "$TEST_PROJECT" && RIG_TEST_READY_FILE="$ready_a" RIG_TEST_REAL_PYTHON="$real_python" \
+    PATH="$fakebin:$PATH" RIG_COMMIT_POLICY=guarded .git/hooks/post-commit) &
   first_hook=$!
-  (cd "$linked" && RIG_COMMIT_POLICY=guarded "$TEST_PROJECT/.git/hooks/post-commit") &
+  (cd "$linked" && RIG_TEST_READY_FILE="$ready_b" RIG_TEST_REAL_PYTHON="$real_python" \
+    PATH="$fakebin:$PATH" RIG_COMMIT_POLICY=guarded "$TEST_PROJECT/.git/hooks/post-commit") &
   second_hook=$!
-  sleep 0.15
+  for i in {1..40}; do
+    [ -e "$ready_a" ] && [ -e "$ready_b" ] && break
+    sleep 0.05
+  done
+  [ -e "$ready_a" ] && [ -e "$ready_b" ]
+  sleep 0.5
+  kill -0 "$first_hook" 2>/dev/null || { touch "$release"; return 1; }
+  kill -0 "$second_hook" 2>/dev/null || { touch "$release"; return 1; }
   if grep -Fq "$hash_a" "$progress" || grep -Fq "$hash_b" "$progress"; then
     touch "$release"
     return 1
@@ -280,6 +313,7 @@ PY
   cp "$REPO_ROOT/templates/project/.claude/hooks/post-tool.sh" "$TEST_PROJECT/.claude/hooks/post-tool.sh"
   mv "$TEST_PROJECT/.git/hooks/commit-msg" "$TEST_PROJECT/.git/hooks/commit-msg.saved"
   mv "$TEST_PROJECT/.git/hooks/post-commit" "$TEST_PROJECT/.git/hooks/post-commit.saved"
+  PROGRESS_F="$TEST_PROJECT/.rig/memory/PROGRESS.md" python3 -c 'import os; open(os.environ["PROGRESS_F"],"wb").write("# Progress — café\r\n\r\n---\r\nTail\r\n".encode("utf-8"))'
   approval
   command="RIG_COMMIT_POLICY=guarded git -C '$TEST_PROJECT' commit --allow-empty -m 'fix: outside [#593]'"
   payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"outside-git","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$outside" "$command")"
@@ -290,11 +324,12 @@ PY
   [ "$status" -eq 0 ]
   commit_output="$output"
   post_payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PostToolUse","tool_name":"Bash","tool_use_id":"outside-git","tool_response":{"stdout":sys.argv[1]}}))' "$commit_output")"
-  run env RIG_SESSION_ANCHOR=outside-anchor bash -c 'cd "$1" && printf "%s" "$2" | bash "$3"' _ "$outside" "$post_payload" "$TEST_PROJECT/.claude/hooks/post-tool.sh"
+  run env LC_ALL=C PYTHONUTF8=0 RIG_SESSION_ANCHOR=outside-anchor bash -c 'cd "$1" && printf "%s" "$2" | bash "$3"' _ "$outside" "$post_payload" "$TEST_PROJECT/.claude/hooks/post-tool.sh"
   [ "$status" -eq 0 ]
   hash="$(git -C "$TEST_PROJECT" rev-parse HEAD)"
   grep -Fq "$hash" "$TEST_PROJECT/.rig/memory/PROGRESS.md"
   grep -Fq "<!-- sid:outside-anchor -->" "$TEST_PROJECT/.rig/memory/PROGRESS.md"
+  PROGRESS_F="$TEST_PROJECT/.rig/memory/PROGRESS.md" python3 -c 'import os; data=open(os.environ["PROGRESS_F"],"rb").read(); assert "# Progress — café\r\n\r\n---\r\n".encode("utf-8") in data and b"Tail\r\n" in data'
 
   warning_payload='{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_response":{"stdout":"Switched to a new branch '\''weird'\''"}}'
   run bash -c 'cd "$1" && printf "%s" "$2" | bash "$3"' _ "$outside" "$warning_payload" "$TEST_PROJECT/.claude/hooks/post-tool.sh"
