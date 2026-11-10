@@ -1420,6 +1420,8 @@ if not matches:
         if len(parent_matches)>1:
             print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
         parent_anchor=parent_matches[0].get("anchor") if len(parent_matches)==1 else None
+        if allow_continuation and parent_anchor and parent_matches[0].get("lifecycle",{}).get("state") not in continuation_states:
+            print(json.dumps({"ok":False,"reason":"invalid_continuation_lineage","no_write":True})); raise SystemExit(3)
     lineage_kind="continuation" if allow_continuation and parent_anchor else ("fork" if source=="fork" or parent else "root")
     d={"schema_version":1,"anchor":anchor,"agent":agent,
        "native":{"session_id":native_id,"root_session_id":root_native,"bound_at":now,"source":"launcher_hint" if hint else source},
@@ -1570,13 +1572,17 @@ def project_identity():
         common=pathlib.Path(common if os.path.isabs(common) else root/common).resolve()
     except (OSError,subprocess.SubprocessError): common=root
     return hashlib.sha256(str(common).encode()).hexdigest()
-project_id=project_identity(); records=[]; errors=[]
+project_id=project_identity(); records=[]; errors=[]; future=[]
 for base in (sessions,sessions/"done"):
     if not base.is_dir(): continue
     for p in sorted(base.glob("session-*.json")):
         try:
             d=json.loads(p.read_text())
             if not isinstance(d,dict): raise ValueError("not an object")
+            if isinstance(d.get("schema_version"),int) and d["schema_version"]>1:
+                future.append(p.name)
+                errors.append({"file":p.name,"reason":"unsupported_schema"})
+                continue
             if d.get("schema_version")==1 and (
                 not all(isinstance(d.get(key),dict) for key in ("native","project","lifecycle")) or
                 not all(key not in d or isinstance(d[key],dict) for key in ("runtime","lineage","migration","names")) or
@@ -1605,8 +1611,8 @@ if action=="list":
 if action=="doctor":
     checks=[]
     def check(name,ok,detail): checks.append({"name":name,"ok":bool(ok),"detail":detail})
-    check("record_syntax",not errors,"valid" if not errors else "%d malformed"%len(errors))
-    future=[p.name for p,d in records if isinstance(d.get("schema_version"),int) and d["schema_version"]>1]
+    malformed=[error for error in errors if error["reason"]=="malformed_record"]
+    check("record_syntax",not malformed,"valid" if not malformed else "%d malformed"%len(malformed))
     check("schema_support",not future,"supported" if not future else "%d future schema"%len(future))
     invalid=[]
     for p,d in records:
@@ -1651,7 +1657,26 @@ if action=="doctor":
         if len(group)>1 and not valid_continuation_chain(group): dup_n.append(key)
     check("unique_anchors",not dup_a,"unique" if not dup_a else "%d duplicates"%len(dup_a))
     check("unique_native_bindings",not dup_n,"unique" if not dup_n else "%d duplicates"%len(dup_n))
-    check("continuation_lineage",not dup_n,"valid" if not dup_n else "%d invalid chains"%len(dup_n))
+    by_anchor={}
+    for p,d in records:
+        if d.get("schema_version")==1 and d.get("anchor"):
+            by_anchor.setdefault(d["anchor"],[]).append((p,d))
+    invalid_lineage=[]
+    ended_states=("complete","inactive","ended_no_wrap","orphaned")
+    for p,d in records:
+        if d.get("schema_version")!=1 or (d.get("lineage") or {}).get("kind")!="continuation": continue
+        lineage=d.get("lineage") or {}
+        parents=by_anchor.get(lineage.get("parent_anchor"),[])
+        if len(parents)!=1:
+            invalid_lineage.append(p.name); continue
+        parent_path,parent=parents[0]
+        if (parent_path==p or parent.get("lifecycle",{}).get("state") not in ended_states or
+            parent.get("project",{}).get("identity")!=d.get("project",{}).get("identity") or
+            parent.get("agent")!=d.get("agent") or
+            parent.get("native",{}).get("session_id")!=lineage.get("parent_native_session_id")):
+            invalid_lineage.append(p.name)
+    lineage_ok=not dup_n and not invalid_lineage
+    check("continuation_lineage",lineage_ok,"valid" if lineage_ok else "%d invalid chains"%(len(dup_n)+len(invalid_lineage)))
     audit=sessions/"repair-audit.jsonl"; audit_ok=True; audit_detail="absent"
     if audit.exists():
         audit_detail="valid"
@@ -1827,6 +1852,7 @@ if d.get("schema_version") == 1:
     except (OSError,subprocess.SubprocessError): common=root.resolve()
     project_id=hashlib.sha256(str(common).encode()).hexdigest()
     if d.get("project",{}).get("identity")!=project_id: refuse("cross_project")
+    if not d.get("native",{}).get("session_id"): refuse("invalid_native_binding")
     if d.get("agent")!=expected.get("agent") or d.get("native",{}).get("session_id")!=expected.get("native_session_id"):
         refuse("native_conflict")
     if d.get("lifecycle",{}).get("state")!="active": refuse("ended_record")
@@ -1872,7 +1898,8 @@ launch_claude() {
   local resolved watcher session_dir session_file session_anchor branch started
   # The launcher is the authority for a new Claude process. Create its identity
   # before the SessionStart hook so the watcher and hook share the exact file.
-  export RIG_SESSION_PID="${RIG_SESSION_PID:-$$}"
+  unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID
+  export RIG_SESSION_PID="$$"
   local resolve_status=0
   resolved=$(session_resolve --json) || resolve_status=$?
   if [[ "$resolve_status" -ne 0 ]]; then
@@ -1903,7 +1930,8 @@ PY
 }
 
 launch_codex() {
-  export RIG_SESSION_PID="${RIG_SESSION_PID:-$$}"
+  unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID
+  export RIG_SESSION_PID="$$"
   [[ "${1:-}" == -- ]] && shift
   exec codex "$@"
 }

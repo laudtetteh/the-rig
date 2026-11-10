@@ -94,7 +94,7 @@ def emit(path, data, confidence, reason):
            "lineage": public_lineage,
            "parent_anchor": (data.get("lineage") or {}).get("parent_anchor") if data else None,
            "warnings": []}
-    if reason == "unsupported_schema":
+    if reason in ("unsupported_schema", "invalid_native_binding", "ambiguous_native_provider"):
         out["no_write"] = True
     if reason in ("not_found", "invalid_launcher_file", "ended_record"):
         if agent:
@@ -191,6 +191,9 @@ if "RIG_SESSION_FILE" in os.environ:
         emit(None, None, "none", "malformed_record"); raise SystemExit(4)
     if d and isinstance(d.get("schema_version"), int) and d["schema_version"] > 1:
         emit(None, None, "none", "unsupported_schema"); raise SystemExit(4)
+    # A raw child can inherit its parent's launcher path and native ID.
+    if os.environ.get("CODEX_THREAD_ID") and os.environ.get("CLAUDE_CODE_SESSION_ID"):
+        emit(None, None, "ambiguous", "ambiguous_native_provider"); raise SystemExit(2)
     state = d.get("lifecycle", {}).get("state", d.get("status")) if d else None
     if p and d and state == "active" and "done" not in p.parts:
         expected_anchor = os.environ.get("RIG_SESSION_ANCHOR")
@@ -198,6 +201,8 @@ if "RIG_SESSION_FILE" in os.environ:
             emit(None, None, "none", "launcher_anchor_conflict"); raise SystemExit(3)
         if d.get("schema_version") == 1 and d.get("project", {}).get("identity") != project_id:
             emit(None, None, "none", "cross_project"); raise SystemExit(3)
+        if d.get("schema_version") == 1 and not d.get("native", {}).get("session_id"):
+            emit(None, None, "none", "invalid_native_binding"); raise SystemExit(3)
         native_agent = "codex" if os.environ.get("CODEX_THREAD_ID") else "claude" if os.environ.get("CLAUDE_CODE_SESSION_ID") else None
         native_env_id = os.environ.get("CODEX_THREAD_ID") or os.environ.get("CLAUDE_CODE_SESSION_ID")
         if native_agent and (d.get("schema_version") != 1 or d.get("project", {}).get("identity") != project_id or
@@ -268,6 +273,10 @@ if os.environ.get("CODEX_THREAD_ID"):
     native_env_signals.append(("codex", os.environ.get("CODEX_THREAD_ID")))
 if os.environ.get("CLAUDE_CODE_SESSION_ID"):
     native_env_signals.append(("claude", os.environ.get("CLAUDE_CODE_SESSION_ID")))
+# With no exact provider/ID or launcher file, two ambient IDs cannot identify
+# which host owns this process.
+if len(native_env_signals) > 1:
+    emit(None, None, "ambiguous", "ambiguous_native_provider"); raise SystemExit(2)
 def fallback_native_conflict(data):
     return (data.get("schema_version") == 1 and native_env_signals and
             (data["project"].get("identity") != project_id or
