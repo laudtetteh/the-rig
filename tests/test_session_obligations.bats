@@ -20,7 +20,7 @@ field() {
 }
 
 marker_token() {
-  python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); s=p.stat() if p.exists() else None; print(hashlib.sha256(p.read_bytes()+b"\0"+str(s.st_mtime_ns).encode()+b"\0"+str(s.st_ino).encode()).hexdigest() if s else "missing")' "$1"
+  python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); s=p.stat() if p.exists() else None; print(hashlib.sha256(p.read_bytes()).hexdigest()+":"+str(s.st_mtime_ns)+":"+str(s.st_ino) if s else "missing")' "$1"
 }
 
 @test "wrap obligations are SID-scoped and one session cannot clear another" {
@@ -137,6 +137,23 @@ marker_token() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'"legacy_preserved": true'* ]] || return 1
   grep -Eq '^unscoped_legacy=[0-9a-f]{32}$' "$marker"
+}
+
+@test "guarded wrap clear does not invent an unscoped reminder for another scoped session" {
+  local one two file_one file_two anchor_two marker observed
+  one=$(bind scoped-one); two=$(bind scoped-two)
+  file_one=$(field "$one" session_file); file_two=$(field "$two" session_file)
+  anchor_two=$(field "$two" anchor)
+  run env RIG_SESSION_FILE="$file_one" "$CASE_DIR/bin/rig" session obligation mark --kind wrap --json
+  [ "$status" -eq 0 ]
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  observed=$(marker_token "$marker")
+  run env RIG_SESSION_FILE="$file_two" "$CASE_DIR/bin/rig" session obligation mark --kind wrap --json
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$file_one" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-token "$observed" --json
+  [ "$status" -eq 0 ]
+  grep -Fxq "anchor=$anchor_two" "$marker"
+  if grep -Eq '^unscoped_' "$marker"; then return 1; fi
 }
 
 @test "post-merge clear requires the exact pending SHA and records acknowledgement" {

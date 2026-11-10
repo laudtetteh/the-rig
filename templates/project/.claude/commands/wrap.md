@@ -195,7 +195,7 @@ SNAP_LOCK_JSON=$("$REPO/bin/rig" memory workflow-lock "${LOCK_ARGS[@]}") || {
 }
 SNAP_LOCK_TOKEN=$(printf '%s' "$SNAP_LOCK_JSON" | \
   python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])') || exit 1
-WRAP_MARKER_TOKEN=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); s=p.stat() if p.exists() else None; print(hashlib.sha256(p.read_bytes()+b"\0"+str(s.st_mtime_ns).encode()+b"\0"+str(s.st_ino).encode()).hexdigest() if s else "missing")' \
+WRAP_MARKER_TOKEN=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); s=p.stat() if p.exists() else None; print(hashlib.sha256(p.read_bytes()).hexdigest()+":"+str(s.st_mtime_ns)+":"+str(s.st_ino) if s else "missing")' \
   "$RIG_DIR/memory/.wrap-needed") || {
   "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
   exit 1

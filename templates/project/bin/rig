@@ -180,7 +180,8 @@ now=datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec
 marker_stat=marker.stat() if marker.exists() else None
 raw_bytes=marker.read_bytes() if marker_stat is not None else None
 raw=raw_bytes.decode("utf-8","surrogateescape") if raw_bytes is not None else ""
-marker_token=(hashlib.sha256(raw_bytes+b"\0"+str(marker_stat.st_mtime_ns).encode()+b"\0"+str(marker_stat.st_ino).encode()).hexdigest()
+marker_content_hash=hashlib.sha256(raw_bytes).hexdigest() if raw_bytes is not None else ""
+marker_token=(marker_content_hash+":"+str(marker_stat.st_mtime_ns)+":"+str(marker_stat.st_ino)
               if marker_stat is not None else "missing")
 cleared_global=False
 legacy_preserved=False
@@ -208,9 +209,12 @@ if kind=="wrap":
             if pending_stub:
                 reviewed=False
                 if not legacy: legacy.append("unscoped_progress="+uuid.uuid4().hex)
-            elif not reviewed and not legacy and raw_bytes is not None:
-                # An older hook may have touched a marker without changing its
-                # content. Its mtime makes the token stale; keep a reminder.
+            elif (not reviewed and not legacy and raw_bytes is not None and
+                  ((observed_token not in ("", "missing") and observed_token.split(":",1)[0]==marker_content_hash) or
+                   (observed_token=="missing" and not scoped))):
+                # An older hook can touch an unchanged marker or create an
+                # empty one. A new scoped anchor changes content and has its
+                # own reminder, so it needs no extra unscoped warning.
                 legacy.append("unscoped_legacy="+uuid.uuid4().hex)
         if adopt or reviewed: legacy=[]
         elif guarded_adopt: legacy_preserved=bool(legacy)

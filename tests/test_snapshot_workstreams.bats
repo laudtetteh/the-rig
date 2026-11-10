@@ -684,7 +684,7 @@ PY
     > "$CASE_DIR/.rig/memory/PROGRESS.md"
   marker="$CASE_DIR/.rig/memory/.wrap-needed"
   printf 'anchor=%s\n' "$anchor_a" > "$marker"
-  observed=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); s=p.stat() if p.exists() else None; print(hashlib.sha256(p.read_bytes()+b"\0"+str(s.st_mtime_ns).encode()+b"\0"+str(s.st_ino).encode()).hexdigest() if s else "missing")' "$marker")
+  observed=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); s=p.stat() if p.exists() else None; print(hashlib.sha256(p.read_bytes()).hexdigest()+":"+str(s.st_mtime_ns)+":"+str(s.st_ino) if s else "missing")' "$marker")
   mkdir -p "$CASE_DIR/.claude/hooks"
   cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/stop.sh" "$CASE_DIR/.claude/hooks/stop.sh"
   run env RIG_AGENT=codex RIG_SESSION_FILE="$file_b" RIG_SESSION_LOG="$BATS_TEST_TMPDIR/b.log" \
