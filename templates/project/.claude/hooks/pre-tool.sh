@@ -357,7 +357,17 @@ print(os.path.abspath(cwd or sys.argv[1]) + "\t")
       fi
       if [[ "$HOOK_PATH" != /* ]]; then HOOK_PATH="$COMMIT_REPO/$HOOK_PATH"; fi
       if [[ -x "$HOOK_PATH" && -f "$HOOK_PATH" ]]; then
-        grep -Fq 'RIG_COMMIT_POLICY' "$HOOK_PATH" || \
+        # Run the capability argument in an isolated temporary cwd. A Git
+        # commit supplies a prepared message file, never this argument. A
+        # customized wrapper may still write to its cwd before delegating.
+        PROBE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rig-policy-probe.XXXXXX") || \
+          fail_closed "cannot create a temporary directory for the commit hook probe."
+        HOOK_CAPABILITY=$(cd "$PROBE_DIR" && "$HOOK_PATH" --rig-policy-probe 2>/dev/null)
+        PROBE_STATUS=$?
+        rm -rf -- "$PROBE_DIR" || fail_closed "cannot clean up the commit hook probe."
+        [[ "$PROBE_STATUS" -eq 0 ]] || \
+          fail_closed "The target commit-msg hook does not support guarded commits: $HOOK_PATH"
+        [[ "$HOOK_CAPABILITY" == rig-commit-policy-v1 ]] || \
           fail_closed "The target commit-msg hook does not support guarded commits: $HOOK_PATH"
         continue  # Git will claim approval and log final HEAD.
       fi

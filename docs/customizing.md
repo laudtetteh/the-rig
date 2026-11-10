@@ -351,6 +351,17 @@ agent commit needs approval, create `.rig/memory/.rig-commit-ok` in the target
 worktree (or use its `.rigpath` directory) and run with
 `RIG_COMMIT_POLICY=guarded`. Ordinary terminal commits keep the existing format
 checks. `SKIP_COMMIT_VALIDATION=1` only skips format and ticket checks.
+Guarded merge commits also require fresh approval, whether Git creates the
+commit with `git merge --no-ff` or the agent finishes it after resolving conflicts.
+For a generated merge, `post-merge` reuses the final-SHA logger. If Git refuses
+an opted-in late-footer amend during that hook, it warns and logs the unchanged
+commit SHA.
+PreToolUse checks an active Rig `commit-msg` hook by invoking its dedicated
+`--rig-policy-probe` argument from a temporary directory. Customized hook
+wrappers must handle that argument without side effects before their normal
+message-file handling, and delegate the real prepared-message invocation. The
+probe is a compatibility check, not proof that arbitrary custom hook code
+enforces approval.
 `--skip-git-hooks` leaves native Git hooks uninstalled. An active Rig Husky
 `commit-msg` hook provides the commit-time gate instead. Without one, PreToolUse
 checks a visible guarded commit's fresh approval, branch, and direct-push type,

@@ -10,6 +10,13 @@ if [ -f "$ROOT/.rigpath" ]; then
   IFS= read -r RIG_DIR < "$ROOT/.rigpath"
 fi
 
+# A manually completed merge runs post-commit. Its pending marker is only for
+# generated `git merge` commits, which reach the same logger via post-merge.
+if [ "${RIG_COMMIT_POLICY:-}" = guarded ]; then
+  MERGE_PENDING=$(git rev-parse --git-path rig-merge-progress-pending 2>/dev/null) || MERGE_PENDING=""
+  [ -z "$MERGE_PENDING" ] || rm -f "$MERGE_PENDING"
+fi
+
 # Git runs this hook after a successful commit. Read HEAD after any opt-in
 # amendment so the progress entry names the final SHA. PostToolUse cannot
 # reliably infer the target worktree from a Bash tool response.
@@ -19,7 +26,6 @@ record_progress() {
      [ -d "$(git rev-parse --git-path rebase-apply)" ] || \
      [ -f "$(git rev-parse --git-path CHERRY_PICK_HEAD)" ] || \
      [ -f "$(git rev-parse --git-path REVERT_HEAD)" ] || \
-     [ -f "$(git rev-parse --git-path MERGE_HEAD)" ] || \
      [ -d "$(git rev-parse --git-path sequencer)" ]; then
     return
   fi

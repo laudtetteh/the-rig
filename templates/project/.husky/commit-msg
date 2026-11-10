@@ -13,6 +13,13 @@
 # To skip the issue reference check for a single commit (no ticket exists):
 #   add  # no-issue  as a line in the commit message body.
 
+# PreToolUse invokes this with a dedicated argument to check compatibility.
+# Git passes the prepared message file as $1 during a real commit.
+if [ "${1:-}" = --rig-policy-probe ]; then
+  printf '%s\n' 'rig-commit-policy-v1'
+  exit 0
+fi
+
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 COMMIT_MSG_FILE="$1"
 REPLAY=0
@@ -20,11 +27,12 @@ if [ -d "$(git rev-parse --git-path rebase-merge)" ] || \
    [ -d "$(git rev-parse --git-path rebase-apply)" ] || \
    [ -f "$(git rev-parse --git-path CHERRY_PICK_HEAD)" ] || \
    [ -f "$(git rev-parse --git-path REVERT_HEAD)" ] || \
-   [ -f "$(git rev-parse --git-path MERGE_HEAD)" ] || \
    [ -d "$(git rev-parse --git-path sequencer)" ]; then
   REPLAY=1
 fi
 if [ "${RIG_COMMIT_POLICY:-}" = guarded ] && [ "$REPLAY" -eq 0 ]; then
+  MERGE_PENDING=$(git rev-parse --git-path rig-merge-progress-pending) || exit 1
+  rm -f "$MERGE_PENDING" || exit 1
   RIG_DIR="$ROOT/.rig"
   if [ -f "$ROOT/.rigpath" ]; then
     IFS= read -r RIG_DIR < "$ROOT/.rigpath"
@@ -64,6 +72,28 @@ if [ "${RIG_COMMIT_POLICY:-}" = guarded ] && [ "$REPLAY" -eq 0 ]; then
 
 fi
 
+# A generated `git merge` runs commit-msg and post-merge, but not post-commit.
+# Leave a worktree-specific marker only after this hook has accepted the merge.
+# Manual conflict completion runs post-commit, which clears the marker itself.
+accept_commit() {
+  if [ "${RIG_COMMIT_POLICY:-}" = guarded ] && [ "$REPLAY" -eq 0 ]; then
+    MERGE_HEAD_PATH=$(git rev-parse --git-path MERGE_HEAD) || exit 1
+    if [ -f "$MERGE_HEAD_PATH" ]; then
+      BEFORE_HEAD=$(git rev-parse HEAD) || exit 1
+      IFS= read -r MERGED_HEAD < "$MERGE_HEAD_PATH" || exit 1
+      [ -n "$MERGED_HEAD" ] || exit 1
+      PENDING_TMP="${MERGE_PENDING}.tmp.$$"
+      if ! printf '%s\n%s\n' "$BEFORE_HEAD" "$MERGED_HEAD" > "$PENDING_TMP" ||
+         ! mv "$PENDING_TMP" "$MERGE_PENDING"; then
+        rm -f "$PENDING_TMP"
+        echo "ERROR: The Rig could not record the guarded merge for progress logging." >&2
+        exit 1
+      fi
+    fi
+  fi
+  exit 0
+}
+
 HOOK_DIR="$(CDPATH='' cd "$(dirname "$0")" && pwd -P)" || exit 1
 FILTER="$HOOK_DIR/filter-commit-message-inplace.sh"
 [ -f "$FILTER" ] || FILTER="${ROOT}/.husky/filter-commit-message-inplace.sh"
@@ -97,12 +127,12 @@ if [ "${RIG_COMMIT_POLICY:-}" = guarded ] && [ "$REPLAY" -eq 0 ]; then
 fi
 
 # ── Step 3: Validate Conventional Commits format ─────────────────────────────
-[ "${SKIP_COMMIT_VALIDATION:-0}" = "1" ] && exit 0
+[ "${SKIP_COMMIT_VALIDATION:-0}" = "1" ] && accept_commit
 
 # Skip validation for auto-generated commit types
 case "$SUBJECT" in
   "Merge "* | "Revert "* | "fixup! "* | "squash! "* | "Initial commit"*)
-    exit 0 ;;
+    accept_commit ;;
 esac
 
 VALID_TYPES="feat|fix|chore|refactor|docs|test|perf|devops|style"
@@ -132,7 +162,7 @@ fi
 # chores on personal projects with issue-tracking: github but no issue worth
 # opening). Add  # no-issue  as a standalone line in the commit body.
 if grep -q "^# no-issue" "$COMMIT_MSG_FILE" 2>/dev/null; then
-  exit 0
+  accept_commit
 fi
 
 case "$ISSUE_TRACKING" in
@@ -195,4 +225,4 @@ case "$ISSUE_TRACKING" in
     ;;
 esac
 
-exit 0
+accept_commit
