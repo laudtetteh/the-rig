@@ -99,6 +99,7 @@ records = []
 malformed = False
 unsupported = False
 unsafe_path = False
+ended_states = ("complete", "inactive", "ended_no_wrap")
 for base in (session_dir, session_dir / "done"):
     if base.is_dir():
         for p in base.glob("session-*.json"):
@@ -112,7 +113,7 @@ for base in (session_dir, session_dir / "done"):
 def select_unique_match(matches):
     if len(matches) <= 1:
         return matches[0] if matches else None
-    active = [(p, d) for p, d in matches if "done" not in p.parts and d.get("lifecycle", {}).get("state") != "complete"]
+    active = [(p, d) for p, d in matches if "done" not in p.parts and d.get("lifecycle", {}).get("state") == "active"]
     if len(active) > 1:
         return None
     by_anchor = {d.get("anchor"): (p, d) for p, d in matches}
@@ -127,9 +128,15 @@ def select_unique_match(matches):
             return None
         if parent and parent not in by_anchor:
             return None
+        if parent and by_anchor[parent][1].get("lifecycle", {}).get("state") not in ended_states:
+            return None
     parents = {(d.get("lineage") or {}).get("parent_anchor") for _, d in matches}
     leaves = [(p, d) for p, d in matches if d.get("anchor") not in parents]
     if len(leaves) != 1 or (active and leaves[0][0] != active[0][0]):
+        return None
+    leaf_path, leaf_record = leaves[0]
+    leaf_state = leaf_record.get("lifecycle", {}).get("state")
+    if (leaf_state == "active" and "done" in leaf_path.parts) or leaf_state not in (*ended_states, "active"):
         return None
     seen = set()
     cursor = leaves[0][1]
@@ -151,8 +158,11 @@ if native_id:
         else: emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
     if len(matches) == 1:
         p,d = matches[0]
-        if "done" in p.parts or d.get("lifecycle", {}).get("state") == "complete":
+        state = d.get("lifecycle", {}).get("state")
+        if state in ended_states:
             emit(None, None, "none", "ended_record"); raise SystemExit(3)
+        if "done" in p.parts or state != "active":
+            emit(None, None, "none", "invalid_lifecycle_transition"); raise SystemExit(3)
         emit(p,d,"exact","native_id"); raise SystemExit(0)
     cross = [(p,d) for p,d in records if d.get("schema_version") == 1 and d.get("agent") == agent and d.get("native", {}).get("session_id") == native_id]
     emit(None, None, "none", "cross_project" if cross else "not_found"); raise SystemExit(3 if cross else 1)
@@ -173,18 +183,18 @@ if "RIG_SESSION_FILE" in os.environ:
                              d.get("agent") != native_agent or d.get("native", {}).get("session_id") != native_env_id):
             emit(None, None, "none", "native_conflict"); raise SystemExit(3)
         emit(p, d, "exact", "launcher_file"); raise SystemExit(0)
-    # The launcher keeps exporting its original path after --complete moves
-    # that record into done/. Accept that missing path only when its recorded
-    # origin and anchor identify one completed record and a unique active leaf.
+    # The launcher can keep exporting an ended record's original path. A
+    # completed record moves into done/; SessionEnd leaves an inactive record
+    # at that path. Require the original anchor and one exact active leaf.
     expected_anchor = os.environ.get("RIG_SESSION_ANCHOR")
-    if p and not p.exists() and expected_anchor:
+    if p and expected_anchor and (not p.exists() or (d and state in ("inactive", "ended_no_wrap") and "done" not in p.parts)):
         if unsafe_path: emit(None, None, "none", "invalid_session_path"); raise SystemExit(4)
         if unsupported: emit(None, None, "none", "unsupported_schema"); raise SystemExit(4)
         if malformed: emit(None, None, "none", "malformed_record"); raise SystemExit(4)
         origins = [(q, record) for q, record in records if record.get("schema_version") == 1 and
-                   "done" in q.parts and
-                   record.get("lifecycle", {}).get("state") == "complete" and
-                   original_active_path(record) == p]
+                   (("done" in q.parts and record.get("lifecycle", {}).get("state") == "complete" and
+                     original_active_path(record) == p) or
+                    (q.resolve() == p and record.get("lifecycle", {}).get("state") in ("inactive", "ended_no_wrap")))]
         if len(origins) > 1:
             emit(None, None, "ambiguous", "duplicate_launcher_origin"); raise SystemExit(2)
         if origins:
@@ -210,9 +220,9 @@ if "RIG_SESSION_FILE" in os.environ:
             if not selected:
                 emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
             active_path, active_record = selected
-            if "done" in active_path.parts or active_record.get("lifecycle", {}).get("state") == "complete":
+            if active_record.get("lifecycle", {}).get("state") in ended_states:
                 emit(None, None, "none", "ended_record"); raise SystemExit(3)
-            if active_record.get("lifecycle", {}).get("state") != "active":
+            if "done" in active_path.parts or active_record.get("lifecycle", {}).get("state") != "active":
                 emit(None, None, "none", "invalid_lifecycle_transition"); raise SystemExit(3)
             emit(active_path, active_record, "exact", "launcher_continuation"); raise SystemExit(0)
     emit(None, None, "none", "invalid_launcher_file"); raise SystemExit(3)
@@ -244,8 +254,11 @@ for native_env_agent, native_env_id in native_env_signals:
         else: emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
     if len(matches) == 1:
         p, d = matches[0]
-        if "done" in p.parts or d.get("lifecycle", {}).get("state") == "complete":
+        state = d.get("lifecycle", {}).get("state")
+        if state in ended_states:
             emit(None, None, "none", "ended_record"); raise SystemExit(3)
+        if "done" in p.parts or state != "active":
+            emit(None, None, "none", "invalid_lifecycle_transition"); raise SystemExit(3)
         emit(p, d, "exact", "native_id"); raise SystemExit(0)
     cross = [(p, d) for p, d in records if d.get("schema_version") == 1 and d.get("agent") == native_env_agent and d.get("native", {}).get("session_id") == native_env_id]
     if cross: emit(None, None, "none", "cross_project"); raise SystemExit(3)
