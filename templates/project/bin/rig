@@ -73,6 +73,9 @@ Native IDs are redacted unless --verbose is explicitly supplied.
 Repair is preview-only unless --confirm TOKEN and --reason REASON are supplied.
 Retrofit binds the native host ID from env or an explicit --native-session-id.
 Content matching is never part of normal resolution.
+Wrap clear can use --adopt-legacy-if-marker-sha SHA to adopt only an unchanged
+project reminder with no unexpanded progress stub. Other reminders remain
+pending while this session clears.
 EOF
       ;;
     session-name) printf 'Usage: rig session-name set [--tentative|--final] [--complete] [--json] <name>\n';;
@@ -139,7 +142,7 @@ PY
 }
 
 session_obligation() {
-  local action="${1:-}" kind="" merge_sha="" adopt=false json=false arg resolved file anchor
+  local action="${1:-}" kind="" merge_sha="" adopt=false guarded_adopt=false marker_sha="" json=false arg resolved file anchor
   shift || true
   while [[ "$#" -gt 0 ]]; do
     arg="$1"
@@ -147,6 +150,7 @@ session_obligation() {
       --kind) [[ "$#" -ge 2 ]] || { usage_error "--kind requires a value" "$@"; return; }; kind="$2"; shift 2;;
       --merge-sha) [[ "$#" -ge 2 ]] || { usage_error "--merge-sha requires a value" "$@"; return; }; merge_sha="$2"; shift 2;;
       --adopt-legacy) adopt=true; shift;;
+      --adopt-legacy-if-marker-sha) [[ "$#" -ge 2 ]] || { usage_error "--adopt-legacy-if-marker-sha requires a value" "$@"; return; }; guarded_adopt=true; marker_sha="$2"; shift 2;;
       --json) json=true; shift;;
       *) usage_error "unknown obligation option: $arg" "$@"; return;;
     esac
@@ -154,16 +158,18 @@ session_obligation() {
   [[ "$action" == mark || "$action" == clear ]] || { usage_error "obligation action must be mark or clear"; return; }
   [[ "$kind" == wrap || "$kind" == post-merge ]] || { usage_error "obligation kind must be wrap or post-merge"; return; }
   [[ "$kind" != post-merge || -n "$merge_sha" ]] || { usage_error "post-merge obligation requires --merge-sha"; return; }
+  [[ "$guarded_adopt" == false || ( "$action" == clear && "$kind" == wrap && "$adopt" == false ) ]] || { usage_error "guarded legacy adoption requires wrap clear without --adopt-legacy"; return; }
   resolved=$(session_resolve --json) || return $?
   file=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")')
   anchor=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
   [[ -n "$file" && -n "$anchor" ]] || return "$RIG_EXIT_UNAVAILABLE"
-  RIG_DIR="$(rig_dir)" SESSION_F="$file" SESSION_ANCHOR="$anchor" OBLIGATION_ACTION="$action" OBLIGATION_KIND="$kind" MERGE_SHA="$merge_sha" ADOPT_LEGACY="$adopt" python3 <<'PY'
-import datetime, fcntl, json, os, pathlib, tempfile
+  RIG_DIR="$(rig_dir)" SESSION_F="$file" SESSION_ANCHOR="$anchor" OBLIGATION_ACTION="$action" OBLIGATION_KIND="$kind" MERGE_SHA="$merge_sha" ADOPT_LEGACY="$adopt" GUARDED_ADOPT="$guarded_adopt" OBSERVED_MARKER_SHA="$marker_sha" python3 <<'PY'
+import datetime, fcntl, hashlib, json, os, pathlib, re, tempfile
 rig=pathlib.Path(os.environ["RIG_DIR"]); memory=rig/"memory"; memory.mkdir(parents=True,exist_ok=True)
 p=pathlib.Path(os.environ["SESSION_F"]); anchor=os.environ["SESSION_ANCHOR"]
 action=os.environ["OBLIGATION_ACTION"]; kind=os.environ["OBLIGATION_KIND"]
 merge_sha=os.environ.get("MERGE_SHA",""); adopt=os.environ.get("ADOPT_LEGACY")=="true"
+guarded_adopt=os.environ.get("GUARDED_ADOPT")=="true"; observed_sha=os.environ.get("OBSERVED_MARKER_SHA","")
 marker=memory/(".wrap-needed" if kind=="wrap" else ".post-merge-pending")
 global_lock=open(memory/".session-obligations.lock","a+"); fcntl.flock(global_lock.fileno(),fcntl.LOCK_EX)
 record_lock=open(str(p)+".lock","a+"); fcntl.flock(record_lock.fileno(),fcntl.LOCK_EX)
@@ -171,8 +177,11 @@ with open(p) as f: d=json.load(f)
 if d.get("schema_version")!=1 or d.get("anchor")!=anchor:
     print(json.dumps({"ok":False,"reason":"record_changed","no_write":True})); raise SystemExit(3)
 now=datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec="seconds")
-raw=marker.read_text() if marker.exists() else ""
+raw_bytes=marker.read_bytes() if marker.exists() else None
+raw=raw_bytes.decode("utf-8","surrogateescape") if raw_bytes is not None else ""
+marker_sha=hashlib.sha256(raw_bytes).hexdigest() if raw_bytes is not None else "missing"
 cleared_global=False
+legacy_preserved=False
 if kind=="wrap":
     scoped=[]; legacy=[]
     for line in raw.splitlines():
@@ -181,10 +190,20 @@ if kind=="wrap":
     if action=="mark":
         if anchor not in scoped: scoped.append(anchor)
     else:
-        if anchor not in scoped and (legacy or marker.exists()) and not adopt:
+        if anchor not in scoped and (legacy or marker.exists()) and not (adopt or guarded_adopt):
             print(json.dumps({"ok":False,"reason":"legacy_adoption_required","no_write":True})); raise SystemExit(3)
         scoped=[value for value in scoped if value!=anchor]
-        if adopt: legacy=[]
+        reviewed=guarded_adopt and observed_sha and observed_sha==marker_sha
+        if reviewed and any(line.startswith("unscoped_progress=") for line in legacy):
+            try:
+                with open(memory/"PROGRESS.md", "r", encoding="utf-8", errors="surrogateescape") as progress:
+                    reviewed=not any(re.search(r"Auto-logged by (post-tool|post-commit) hook", line) for line in progress)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                reviewed=False
+        if adopt or reviewed: legacy=[]
+        elif guarded_adopt: legacy_preserved=bool(legacy)
     content="".join("anchor="+value+"\n" for value in scoped)+"".join(value+"\n" for value in legacy)
 else:
     values={}
@@ -222,7 +241,7 @@ fd,tmp=tempfile.mkstemp(prefix=".session-",suffix=".tmp",dir=str(p.parent))
 with os.fdopen(fd,"w") as f: json.dump(d,f,indent=2); f.write("\n"); f.flush(); os.fsync(f.fileno())
 os.replace(tmp,p)
 if action=="clear": write_marker()
-print(json.dumps({"ok":True,"anchor":anchor,"kind":kind,"action":action,"cleared_global":cleared_global,"revision":d["revision"]}))
+print(json.dumps({"ok":True,"anchor":anchor,"kind":kind,"action":action,"cleared_global":cleared_global,"legacy_preserved":legacy_preserved,"revision":d["revision"]}))
 PY
 }
 unavailable() { local command="$1"; shift; if json_requested "$@"; then printf '{"ok":false,"command":"%s","error":"not_implemented"}\n' "$command"; else printf 'rig: %s is not implemented in this version\n' "$command" >&2; fi; return "$RIG_EXIT_UNAVAILABLE"; }

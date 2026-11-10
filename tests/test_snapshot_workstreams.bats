@@ -62,11 +62,13 @@ git = s.index('## Git state check')
 dirty = s.index('Wait for the answer before continuing.')
 report = s.index('## Wrap report step')
 acquire = s.index('## Concurrent session guard')
+baseline = s.index('WRAP_MARKER_SHA=$(python3')
 first_write = s.index('## Trim step — PROGRESS.md')
 release = s.index('"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json || exit 1')
+guarded_clear = s.index('--adopt-legacy-if-marker-sha "${WRAP_MARKER_SHA:-}"')
 pr_prompt = s.index('Update PR description? [yes / no]')
 name_prompt = s.index('### Step 4 — Present and confirm')
-assert git < dirty < report < acquire < first_write < release < pr_prompt < name_prompt
+assert git < dirty < report < acquire < baseline < first_write < release < pr_prompt < name_prompt < guarded_clear
 assert 'After printing the Wrap report' in s[acquire:first_write]
 PY
   [ "$status" -eq 0 ]
@@ -673,7 +675,7 @@ PY
 }
 
 @test "native SessionEnd keeps an untagged commit as a project reminder without claiming it" {
-  local anchor_a anchor_b marker
+  local anchor_a anchor_b marker observed first_generation third file_third
   anchor_a=$(printf '%s' "$a" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
   anchor_b=$(printf '%s' "$b" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
   printf '# Current snapshot\n' > "$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
@@ -681,16 +683,31 @@ PY
     > "$CASE_DIR/.rig/memory/PROGRESS.md"
   marker="$CASE_DIR/.rig/memory/.wrap-needed"
   printf 'anchor=%s\n' "$anchor_a" > "$marker"
+  observed=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "missing")' "$marker")
   mkdir -p "$CASE_DIR/.claude/hooks"
   cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/stop.sh" "$CASE_DIR/.claude/hooks/stop.sh"
   run env RIG_AGENT=codex RIG_SESSION_FILE="$file_b" RIG_SESSION_LOG="$BATS_TEST_TMPDIR/b.log" \
     bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/stop.sh' _ "$CASE_DIR" \
     '{"source":"logout","session_id":"thread-b"}'
   [ "$status" -eq 0 ]
-  grep -Fq 'unscoped_progress=present' "$marker"
+  grep -Eq '^unscoped_progress=[0-9a-f]{32}$' "$marker"
   grep -Fq "anchor=$anchor_a" "$marker"
   if grep -Fq "anchor=$anchor_b" "$marker"; then return 1; fi
   SESSION_F="$file_b" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["flags"]["wrap_needed"] is False and d["lifecycle"]["state"]=="inactive"'
+  first_generation=$(grep '^unscoped_progress=' "$marker")
+  third=$("$rig" session bind --agent codex --native-session-id thread-c --source startup)
+  file_third=$(printf '%s' "$third" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  run env RIG_AGENT=codex RIG_SESSION_FILE="$file_third" RIG_SESSION_LOG="$BATS_TEST_TMPDIR/c.log" \
+    bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/stop.sh' _ "$CASE_DIR" \
+    '{"source":"logout","session_id":"thread-c"}'
+  [ "$status" -eq 0 ]
+  [ "$first_generation" != "$(grep '^unscoped_progress=' "$marker")" ]
+  run env RIG_SESSION_FILE="$file_a" "$rig" session obligation clear --kind wrap \
+    --adopt-legacy-if-marker-sha "$observed" --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"legacy_preserved": true'* ]] || return 1
+  grep -Eq '^unscoped_progress=[0-9a-f]{32}$' "$marker"
+  if grep -Fq "anchor=$anchor_a" "$marker"; then return 1; fi
 }
 
 @test "native SessionEnd reads a tagged UTF-8 stub under a C locale" {

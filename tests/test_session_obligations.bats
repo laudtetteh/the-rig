@@ -52,6 +52,48 @@ field() {
   [ "$status" -eq 0 ]; [ ! -e "$CASE_DIR/.rig/memory/.wrap-needed" ]
 }
 
+@test "guarded wrap clear preserves a newer unscoped reminder while clearing its own anchor" {
+  local result file anchor marker observed
+  result=$(bind guarded-wrap); file=$(field "$result" session_file); anchor=$(field "$result" anchor)
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation mark --kind wrap --json
+  [ "$status" -eq 0 ]
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  printf 'unscoped_progress=before\n' >> "$marker"
+  observed=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "missing")' "$marker")
+  python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_text(p.read_text().replace("unscoped_progress=before", "unscoped_progress=after"))' "$marker"
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-sha "$observed" --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"legacy_preserved": true'* ]] || return 1
+  grep -Fxq 'unscoped_progress=after' "$marker"
+  if grep -Fq "anchor=$anchor" "$marker"; then return 1; fi
+  SESSION_F="$file" python3 -c 'import json,os; assert json.load(open(os.environ["SESSION_F"]))["flags"]["wrap_needed"] is False'
+}
+
+@test "guarded wrap clear adopts a reviewed reminder when it has not changed" {
+  local result file marker observed
+  result=$(bind reviewed-wrap); file=$(field "$result" session_file)
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  printf 'unscoped_progress=before\n' > "$marker"
+  observed=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "missing")' "$marker")
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-sha "$observed" --json
+  [ "$status" -eq 0 ]
+  [ ! -e "$marker" ]
+}
+
+@test "guarded wrap clear keeps an unchanged reminder while its progress stub is unexpanded" {
+  local result file marker observed
+  result=$(bind pending-progress); file=$(field "$result" session_file)
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  printf 'unscoped_progress=before\n' > "$marker"
+  printf '## 2026-11-10 — pending [abc123]\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n' \
+    > "$CASE_DIR/.rig/memory/PROGRESS.md"
+  observed=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "missing")' "$marker")
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-sha "$observed" --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"legacy_preserved": true'* ]] || return 1
+  grep -Fxq 'unscoped_progress=before' "$marker"
+}
+
 @test "post-merge clear requires the exact pending SHA and records acknowledgement" {
   local result file before
   result=$(bind merge-session); file=$(field "$result" session_file)

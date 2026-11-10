@@ -187,6 +187,10 @@ auto-logged commit only when its PROGRESS heading carries that session's
 `.wrap-needed` reminder for review; it does not assign another session a wrap
 obligation. A later full wrap can clear that reminder with explicit legacy
 adoption. Legacy sessions retain the unscoped reminder path.
+Wrap records the reminder's content hash when it acquires the workflow lock.
+At completion it adopts an older unscoped reminder only if that hash still
+matches and no unexpanded progress stub remains; another session's pending
+work stays visible.
 
 ---
 

@@ -195,7 +195,13 @@ SNAP_LOCK_JSON=$("$REPO/bin/rig" memory workflow-lock "${LOCK_ARGS[@]}") || {
 }
 SNAP_LOCK_TOKEN=$(printf '%s' "$SNAP_LOCK_JSON" | \
   python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])') || exit 1
+WRAP_MARKER_SHA=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "missing")' \
+  "$RIG_DIR/memory/.wrap-needed") || {
+  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
+  exit 1
+}
 printf 'Rig workflow lock acquired: %s\n' "$SNAP_LOCK_JSON"
+printf 'Wrap reminder baseline: %s\n' "$WRAP_MARKER_SHA"
 ```
 
 The lock reports the current owner anchor, PID, and age if another workflow is
@@ -208,6 +214,9 @@ part of this command. Keep the exact `token` from the acquire output in your
 working context and reassign `SNAP_LOCK_TOKEN` from that value in later tool-call
 shells; shell variables do not persist between tool calls. Never recover a token
 by reading the current lock file, which could belong to a newer session. If
+`WRAP_MARKER_SHA` is lost across tool calls, pass an empty hash at the final
+clear; that clears only this session's scoped obligation and preserves all
+unscoped reminders. Never re-read the marker to reconstruct the baseline. If
 acquire fails with `Operation not permitted`, request scoped write approval for $RIG_DIR
 before retrying. This commonly happens when Codex is running in a
 project whose `.rigpath` points outside the workspace writable roots.
@@ -606,7 +615,9 @@ never interpolate it into shell or Python source.
 
 ```bash
 # Clear only this exact session's wrap obligation while its active record is
-# still resolvable. --adopt-legacy explicitly migrates an older unscoped marker.
+# still resolvable. Adopt an older unscoped marker only if it has not changed
+# since the workflow lock was acquired and no unexpanded progress stub remains;
+# another session may add one while this session waits for name confirmation.
 CURRENT_JSON=$("$REPO/bin/rig" session current --json) || {
   exit 1
 }
@@ -615,9 +626,14 @@ CURRENT_UUID=$(printf '%s' "$CURRENT_JSON" | python3 -c 'import json,sys; print(
   echo "Session identity changed; stop before clearing or completing it." >&2
   exit 1
 }
-"$REPO/bin/rig" session obligation clear --kind wrap --adopt-legacy --json
+WRAP_CLEAR_JSON=$("$REPO/bin/rig" session obligation clear --kind wrap \
+  --adopt-legacy-if-marker-sha "${WRAP_MARKER_SHA:-}" --json) || exit 1
+printf '%s\n' "$WRAP_CLEAR_JSON"
 "$REPO/bin/rig" session-name set --final --complete "$CONFIRMED_NAME"
 ```
+
+If `WRAP_CLEAR_JSON` reports `"legacy_preserved": true`, state that another
+project reminder remains pending. Do not report that `.wrap-needed` was cleared.
 
 If this is a continuation after an earlier wrap, name only work done since
 that wrap. Preserve the completed parent record and its final name.
@@ -668,7 +684,9 @@ rm -f "$RIG_DIR/memory/.compact-checkpoint-${PPID}.md" 2>/dev/null || true
 # The atomic session-name writer removes the matching legacy sentinel on completion.
 ```
 
-Log: "`.wrap-needed` cleared. Compact checkpoint cleared. UUID sentinel cleared."
+Log the exact scoped wrap obligation as cleared. Report `.wrap-needed` as
+cleared only when the marker is gone; otherwise report the remaining project
+or other-session reminder. Log the compact checkpoint and UUID sentinel cleanup.
 
 `.wrap-needed` may contain multiple `anchor=` entries. The exact-session clear
 removes only the current anchor and deletes the reminder only when no scoped or
