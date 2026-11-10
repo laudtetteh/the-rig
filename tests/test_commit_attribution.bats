@@ -78,9 +78,12 @@ EOF
 Signed-off-by: Jane Doe <jane@example.com>
 Co-authored-by: Claude <claude@example.com>
 Co-authored-by: Claude Sonnet 4.6 <claude@example.com>
+Co-authored-by: Claude Opus 4.6 <claude@example.com>
 Co-authored-by: Copilot <human@example.com>
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-Co-authored-by: Copilot copilot@github.com'
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+Co-authored-by: Copilot copilot@github.com
+Co-authored-by: GitHub Copilot <copilot@github.com>'
   [ "$status" -eq 0 ]
   [ -s "$sha_at_post_commit" ]
   [ "$(cat "$sha_at_post_commit")" = "$(git -C "$TEST_PROJECT" rev-parse HEAD)" ]
@@ -90,6 +93,7 @@ Co-authored-by: Copilot copilot@github.com'
   [[ "$message" == *"Signed-off-by: Jane Doe <jane@example.com>"* ]] || return 1
   [[ "$message" == *"Co-authored-by: Claude <claude@example.com>"* ]] || return 1
   [[ "$message" == *"Co-authored-by: Claude Sonnet 4.6 <claude@example.com>"* ]] || return 1
+  [[ "$message" == *"Co-authored-by: Claude Opus 4.6 <claude@example.com>"* ]] || return 1
   [[ "$message" == *"Co-authored-by: Copilot <human@example.com>"* ]] || return 1
   [[ "$message" != *"noreply@anthropic.com"* ]] || return 1
   [[ "$message" != *"copilot@github.com"* ]] || return 1
