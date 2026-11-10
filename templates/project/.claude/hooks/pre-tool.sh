@@ -117,7 +117,7 @@ echo "[$(date +%H:%M:%S)] PRE  $TOOL" >> "$SESSION_LOG"
 #              $RIG_DIR/memory/.rig-commit-ok
 #              The agent creates this file only after the user explicitly
 #              confirms local testing is done (e.g. "ready to commit").
-#              post-tool.sh deletes it automatically after the commit lands.
+#              pre-tool.sh claims it atomically before the commit attempt.
 #              The file is gitignored via .rig/memory/.gitignore.
 #
 # In /ship: the agent creates the sentinel as part of Step 7, after the user
@@ -160,7 +160,9 @@ for line in command.splitlines(keepends=True):
     # shell command or eval can, including when it appears after a pipe.
     shell_heredoc = bool(re.search(r"(?<![A-Za-z0-9_.-])(?:bash|sh|eval)(?=\s|[;<|&()]|$)", line))
     for match in heredoc.finditer(line):
-        pending.append((next(group for group in match.groups()[1:] if group), shell_heredoc, bool(match.group(1))))
+        # An unquoted heredoc expands command substitutions even when the
+        # receiving command is cat. Inspect its body conservatively.
+        pending.append((next(group for group in match.groups()[1:] if group), shell_heredoc or bool(match.group(4)), bool(match.group(1))))
 command = "".join(visible)
 pattern = r"\bgit(?:\s+(?:-C(?:\s+(?:\"[^\"]*\"|\x27[^\x27]*\x27|\S+)|\S+)|-c\s+\S+|--[A-Za-z0-9-]+))*\s+commit\b"
 print(1 if re.search(pattern, command) else 0)
@@ -246,7 +248,8 @@ def inspect(script, current, depth=0):
             while j < len(tokens) and tokens[j] in ("-L", "-P", "--"):
                 j += 1
             if j < len(tokens) and tokens[j] not in operators:
-                current = resolve(current, tokens[j])
+                # cd - depends on OLDPWD and may return to another worktree.
+                current = None if tokens[j] == "-" else resolve(current, tokens[j])
                 i = j + 1
                 continue
             current = os.path.expanduser("~")
@@ -338,13 +341,15 @@ cwd = data.get("cwd") if isinstance(data.get("cwd"), str) else None
 print(os.path.abspath(cwd or sys.argv[1]) + "\t")
 ' "$PWD") || fail_closed "Bash commit cwd could not be inspected."
   fi
-  fi
 
   # ── Gate git commit on sentinel file ───────────────────────────────────
+  COMMIT_COUNT=$(printf '%s\n' "$COMMIT_TARGETS" | awk 'NF {n++} END {print n+0}')
+  [[ "$COMMIT_COUNT" -eq 1 ]] || fail_closed "one approval permits one commit attempt per Bash call."
   COMMIT_OK_TTL_SECONDS="${RIG_COMMIT_OK_TTL_SECONDS:-900}"
   while IFS=$'\t' read -r COMMIT_TARGET DIRECT_COMMIT_TYPE; do
     [[ -n "$COMMIT_TARGET" ]] || continue
-    COMMIT_REPO=$(same_project_root_for_path "$COMMIT_TARGET/.") || COMMIT_REPO="$REPO"
+    COMMIT_REPO=$(same_project_root_for_path "$COMMIT_TARGET/.") || \
+      fail_closed "commit target is outside the installed project or cannot be verified."
     COMMIT_RIG_DIR=$(rig_dir_for_root "$COMMIT_REPO")
     COMMIT_OK="$COMMIT_RIG_DIR/memory/.rig-commit-ok"
     if [[ ! -f "$COMMIT_OK" ]]; then
@@ -431,7 +436,14 @@ print(os.path.abspath(cwd or sys.argv[1]) + "\t")
         exit 2
       fi
     fi
+
+    # Atomically claim the approval before execution. PostToolUse can be
+    # skipped or interrupted, so it cannot be the only one-shot guard.
+    COMMIT_CLAIM="$COMMIT_OK.claimed-$$-$RANDOM"
+    mv "$COMMIT_OK" "$COMMIT_CLAIM" 2>/dev/null || fail_closed "commit authorization was already claimed; request fresh approval."
+    rm -f "$COMMIT_CLAIM" || fail_closed "claimed commit authorization could not be removed."
   done <<< "$COMMIT_TARGETS"
+  fi
 fi
 
 # ── Block writes to protected paths ──────────────────────────────────────────

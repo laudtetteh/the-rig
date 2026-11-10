@@ -409,7 +409,7 @@ Every tool call
      │     Gates git commit on $RIG_DIR/memory/.rig-commit-ok sentinel:
      │       Blocked → agent shows commit message, asks for trigger phrase
      │       ("commit approved" / "ship it" / "lgtm" / "go")
-     │       Agent creates sentinel → commit succeeds → post-tool.sh deletes it
+     │       Agent creates sentinel → pre-tool.sh atomically claims it for one attempt
      │     Guards git commit on main/master:
      │       Blocked unless CLAUDE.md sets housekeeping: direct-push
      │       Even with direct-push: blocks feat/fix/refactor/test/perf/devops/style types
@@ -424,7 +424,7 @@ Every tool call
              If commit detected:
                Read commit message + hash from git log
                Append dated stub to RIG_DIR/memory/PROGRESS.md (idempotent)
-               Delete $RIG_DIR/memory/.rig-commit-ok sentinel (one-shot auth)
+               Clear a leftover $RIG_DIR/memory/.rig-commit-ok sentinel (legacy auth)
 
 Before context compaction
      │
