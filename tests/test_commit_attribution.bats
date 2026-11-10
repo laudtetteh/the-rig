@@ -82,8 +82,11 @@ Co-authored-by: Claude Opus 4.6 <claude@example.com>
 Co-authored-by: Copilot <human@example.com>
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 Co-authored-by: Copilot copilot@github.com
-Co-authored-by: GitHub Copilot <copilot@github.com>'
+Co-authored-by: GitHub Copilot <copilot@github.com>
+Co-authored-by: Cursor
+Made-with: Cursor'
   [ "$status" -eq 0 ]
   [ -s "$sha_at_post_commit" ]
   [ "$(cat "$sha_at_post_commit")" = "$(git -C "$TEST_PROJECT" rev-parse HEAD)" ]
@@ -97,6 +100,9 @@ Co-authored-by: GitHub Copilot <copilot@github.com>'
   [[ "$message" == *"Co-authored-by: Copilot <human@example.com>"* ]] || return 1
   [[ "$message" != *"noreply@anthropic.com"* ]] || return 1
   [[ "$message" != *"copilot@github.com"* ]] || return 1
+  [[ "$message" != *"Claude Opus 4.7 (1M context)"* ]] || return 1
+  [[ "$message" != *"Co-authored-by: Cursor"* ]] || return 1
+  [[ "$message" != *"Made-with: Cursor"* ]] || return 1
 }
 
 @test "native hooks preserve human attribution and remove Claude and Codex footers" {
@@ -166,6 +172,28 @@ Co-authored-by: GitHub Copilot <copilot@github.com>'
   [ "$status" -eq 0 ]
   [[ "$output" == *"signed commit"* ]] || return 1
   [ "$(git -C "$TEST_PROJECT" rev-parse HEAD)" = "$signed" ]
+}
+
+@test "post-commit preserves a real SHA-256 SSH signed commit with a late footer" {
+  TEST_PROJECT="$BATS_TEST_TMPDIR/sha256-project"
+  mkdir -p "$TEST_PROJECT"
+  git -C "$TEST_PROJECT" init --object-format=sha256 -q
+  git -C "$TEST_PROJECT" config user.name 'Test User'
+  git -C "$TEST_PROJECT" config user.email 'test@example.com'
+  key="$BATS_TEST_TMPDIR/signing-key"
+  ssh-keygen -q -t ed25519 -N '' -f "$key"
+  install_hook_layout native
+  git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null -c gpg.format=ssh \
+    -c user.signingkey="$key" -c commit.gpgsign=true commit --allow-empty \
+    -m 'fix: signed sha256 footer [#589]' -m 'Generated with Codex.' >/dev/null
+  before="$(git -C "$TEST_PROJECT" rev-parse HEAD)"
+  git -C "$TEST_PROJECT" cat-file -p HEAD | grep -q '^gpgsig-sha256 '
+
+  run env RIG_POST_COMMIT_AUTO_AMEND=1 bash -c 'cd "$1" && .git/hooks/post-commit' _ "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"signed commit"* ]] || return 1
+  [ "$(git -C "$TEST_PROJECT" rev-parse HEAD)" = "$before" ]
+  git -C "$TEST_PROJECT" cat-file -p HEAD | grep -q '^gpgsig-sha256 '
 }
 
 @test "post-commit does not mistake message body gpgsig text for a signature" {
