@@ -38,6 +38,8 @@ teardown() { rm -rf "$TEMP_DIR"; }
   [ -d "$snap_dir/.claude" ]
   [ -d "$snap_dir/.rig" ]
   [ -f "$snap_dir/.rig/VERSION" ]
+  [ -f "$snap_dir/bin/rig-session-resolve.py" ]
+  cmp -s "$TEST_PROJECT/bin/rig-session-resolve.py" "$snap_dir/bin/rig-session-resolve.py"
   # /rig-surface-review finding on PR #480: .git/hooks/ is documented
   # (install.sh's own footprint comment) as part of what Rig manages, and
   # is exactly the path lesson #15's original bug (a symlinked git hook
@@ -93,6 +95,8 @@ teardown() { rm -rf "$TEMP_DIR"; }
   [ -f "$snap_dir/CLAUDE.md" ]
   [ -d "$snap_dir/.rig" ]
   [ -f "$snap_dir/.rig/VERSION" ]
+  [ -f "$snap_dir/bin/rig-session-resolve.py" ]
+  cmp -s "$TEST_PROJECT/bin/rig-session-resolve.py" "$snap_dir/bin/rig-session-resolve.py"
   # The external .rig/ dir is this snapshot's own ancestor directory (both
   # preflight-snapshots/ and any .rig-backup/ transaction dirs live inside
   # it) -- neither may appear nested inside the snapshot's own .rig/ copy,

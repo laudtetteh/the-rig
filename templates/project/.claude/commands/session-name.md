@@ -58,10 +58,22 @@ fi
 
 If `SESSION_JSON` reports `ended_record` or `not_found` and includes a `recovery`
 command, run that exact `bin/rig session retrofit ... --from-env --json` command,
-then re-run `session current --json`. A resumed client may already have attached
-its native ID through UserPromptSubmit. Do not infer an ID from another session
-file or provider history. If there is still no exact active record, you may
-suggest a name from this conversation, but do not write or complete a record.
+then refresh every captured identity field before collecting evidence or
+reaching the write guard. A resumed client may already have attached its native
+ID through UserPromptSubmit.
+
+```bash
+SESSION_JSON=$("$REPO/bin/rig" session current --json) || exit 1
+SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")')
+SESSION_UUID=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
+[[ -n "$SESSION_FILE" && -n "$SESSION_UUID" ]] || exit 1
+TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); print(d.get("names",{}).get("tentative") or d.get("tentative_name") or "")')
+```
+
+Do not keep the empty or completed anchor captured before retrofit. Do not infer
+an ID from another session file or provider history. If there is still no exact
+active record, you may suggest a name from this conversation, but do not write
+or complete a record.
 
 ### 1 — Determine what happened this session
 

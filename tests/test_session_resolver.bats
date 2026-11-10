@@ -351,6 +351,33 @@ json.dump({
   [[ "$output" == *'Recovery: bin/rig session retrofit --agent codex --from-env --source resume --json'* ]] || return 1
 }
 
+@test "session-name recovery refreshes the anchor used by its final write guard" {
+  local snippet="$BATS_TEST_TMPDIR/session-name-recovery.sh" session_file
+  run env CODEX_THREAD_ID=recovered-name RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 1 ]
+  run env CODEX_THREAD_ID=recovered-name "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --source resume --json
+  [ "$status" -eq 0 ]
+  session_file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  python3 - "$BATS_TEST_DIRNAME/../templates/project/.claude/commands/session-name.md" > "$snippet" <<'PY'
+import pathlib, sys
+content = pathlib.Path(sys.argv[1]).read_text()
+start = content.index("then refresh every captured identity field")
+start = content.index("```bash\n", start) + len("```bash\n")
+end = content.index("\n```", start)
+print(content[start:end])
+PY
+  cat >> "$snippet" <<'SH'
+CURRENT_JSON=$("$REPO/bin/rig" session current --json) || exit 1
+CURRENT_UUID=$(printf '%s' "$CURRENT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
+[[ -n "$SESSION_UUID" && "$CURRENT_UUID" == "$SESSION_UUID" ]] || exit 1
+"$REPO/bin/rig" session-name set --final --json 'Recovered exact name'
+SH
+  run env CODEX_THREAD_ID=recovered-name RIG_SESSION_PID=999999 REPO="$CASE_DIR" \
+    /bin/bash "$snippet"
+  [ "$status" -eq 0 ]
+  SESSION_F="$session_file" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["names"]["final"]=="Recovered exact name"'
+}
+
 @test "doctor and resolver reject a broken continuation chain" {
   first=$("$CASE_DIR/bin/rig" session bind --agent codex --native-session-id chain-thread --source startup)
   first_file=$(printf '%s' "$first" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
