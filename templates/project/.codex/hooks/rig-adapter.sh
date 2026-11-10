@@ -138,8 +138,9 @@ PAYLOAD=$(normalize_payload) || fail_closed "hook payload could not be normalize
 TOOL=$(printf '%s' "$PAYLOAD" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_name", ""))')
 HOOK_PAYLOAD="$PAYLOAD"
 
-# Keep the adapter's root-shaped input for existing Codex tool mappings. The
-# canonical hook also accepts Claude's native event envelope directly.
+# Preserve the event cwd for the canonical PreToolUse guard. In linked
+# worktrees, dropping it can make a main-branch commit appear to target the
+# adapter's feature worktree instead.
 if [[ "$EVENT" == "PreToolUse" ]]; then
   HOOK_PAYLOAD=$(printf '%s' "$PAYLOAD" | python3 -c '
 import json, sys
@@ -147,7 +148,7 @@ data = json.load(sys.stdin)
 tool_input = data.get("tool_input", {})
 if not isinstance(tool_input, dict):
     raise SystemExit(1)
-print(json.dumps(tool_input))
+print(json.dumps(data))
 ') || fail_closed "PreToolUse payload has invalid tool input."
 fi
 

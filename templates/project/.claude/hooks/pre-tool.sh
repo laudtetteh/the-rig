@@ -175,24 +175,72 @@ import json, os, re, shlex, sys
 data = json.load(sys.stdin)
 command = data.get("tool_input", data).get("command", "")
 cwd = data.get("cwd") if isinstance(data.get("cwd"), str) else None
-operators = (";", "&&", "||", "|", "&")
+operators = (";", "&&", "||", "|", "&", "(", ")")
 
 def resolve(base, value):
     if base is None or "$" in value or "`" in value:
         return None
     return os.path.abspath(os.path.join(base, os.path.expanduser(value)))
 
+def subject_from_file(base, value):
+    path = resolve(base, value)
+    if path is None:
+        return ""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.readline().strip()
+    except (OSError, UnicodeError):
+        return ""
+
 def inspect(script, current, depth=0):
     if depth > 8:
         raise ValueError("nested shell limit exceeded")
-    lexer = shlex.shlex(script, posix=True, punctuation_chars=";&|")
+    lexer = shlex.shlex(script, posix=True, punctuation_chars=";&|()")
     lexer.whitespace_split = True
     lexer.commenters = ""
-    tokens = list(lexer)
+    # shlex groups adjacent punctuation (for example ");"). Split it into
+    # shell operators so a subshell cannot leak its cd into the parent.
+    tokens = []
+    for token in lexer:
+        tokens.extend(re.findall(r"&&|\|\||[;&|()]", token) if re.fullmatch(r"[;&|()]+", token) else [token])
     targets = []
+    scopes = []
+    command_base = current
+    pipeline_base = None
     i = 0
     while i < len(tokens):
         token = tokens[i]
+        if token == "(":
+            scopes.append((current, command_base, pipeline_base))
+            command_base = current
+            pipeline_base = None
+            i += 1
+            continue
+        if token == ")":
+            if not scopes:
+                raise ValueError("unbalanced subshell")
+            current, command_base, pipeline_base = scopes.pop()
+            i += 1
+            continue
+        if token == "|":
+            if pipeline_base is None:
+                pipeline_base = command_base
+            current = pipeline_base
+            command_base = current
+            i += 1
+            continue
+        if token in (";", "&&", "||", "&"):
+            if pipeline_base is not None:
+                current = pipeline_base
+                pipeline_base = None
+            elif token == "&":
+                current = command_base
+            elif token == "||" and current != command_base:
+                # The fallback runs only when the preceding cd failed.
+                current = None
+            command_base = current
+            i += 1
+            continue
         if token == "cd":
             j = i + 1
             while j < len(tokens) and tokens[j] in ("-L", "-P", "--"):
@@ -242,26 +290,36 @@ def inspect(script, current, depth=0):
             if j < len(tokens) and tokens[j] == "commit":
                 if target is None:
                     raise ValueError("commit target is dynamic")
-                message = ""
+                subject = ""
                 k = j + 1
                 while k < len(tokens) and tokens[k] not in operators:
                     option = tokens[k]
                     if option in ("-m", "--message") and k + 1 < len(tokens):
-                        message = tokens[k + 1]
+                        subject = tokens[k + 1].splitlines()[0].strip()
                         break
                     if option.startswith("--message="):
-                        message = option.split("=", 1)[1]
+                        subject = option.split("=", 1)[1].splitlines()[0].strip()
                         break
                     if option.startswith("-m") and len(option) > 2:
-                        message = option[2:]
+                        subject = option[2:].splitlines()[0].strip()
+                        break
+                    if option in ("-F", "--file") and k + 1 < len(tokens):
+                        subject = subject_from_file(target, tokens[k + 1])
+                        break
+                    if option.startswith("--file="):
+                        subject = subject_from_file(target, option.split("=", 1)[1])
+                        break
+                    if option.startswith("-F") and len(option) > 2:
+                        subject = subject_from_file(target, option[2:])
                         break
                     k += 1
-                subject = message.splitlines()[0].strip() if message else ""
                 typed = re.match(r"^([a-z]+)(?:\(|:)", subject)
                 targets.append((target, typed.group(1) if typed else ""))
             i = j + 1
             continue
         i += 1
+    if scopes:
+        raise ValueError("unbalanced subshell")
     return targets
 
 try:
