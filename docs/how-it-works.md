@@ -183,9 +183,10 @@ Session ends
 
 In a shared Rig directory, an exact native SessionEnd attributes an unexpanded
 auto-logged commit only when its PROGRESS heading carries that session's
-`<!-- sid:... -->` marker. A stub without a session anchor stays in
-PROGRESS for later review; it does not assign another session a wrap obligation.
-Legacy sessions retain the unscoped reminder path.
+`<!-- sid:... -->` marker. A stub without a session anchor leaves a project-wide
+`.wrap-needed` reminder for review; it does not assign another session a wrap
+obligation. A later full wrap can clear that reminder with explicit legacy
+adoption. Legacy sessions retain the unscoped reminder path.
 
 ---
 
@@ -461,7 +462,8 @@ Session ends (logout / clear / quit)
      │
      └─► stop.sh (Stop is registered for SessionEnd too — same script, both events)
            Resolves RIG_DIR
-           On logout/prompt_input_exit: writes an exact wrap obligation for its own work
+           On logout/prompt_input_exit: writes an exact wrap obligation for tagged work;
+                                        preserves untagged stubs as a project reminder
                                         writes a minimal auto-checkpoint only when CONTEXT_SNAPSHOT.md is absent
            On clear:                    logs context-cleared; does NOT write .wrap-needed
            On resume / Stop (no src):   per-turn update (date + PROGRESS marker)

@@ -672,6 +672,44 @@ PY
   SESSION_F="$file_a" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["flags"]["wrap_needed"] is True and d["lifecycle"]["state"]=="ended_no_wrap"'
 }
 
+@test "native SessionEnd keeps an untagged commit as a project reminder without claiming it" {
+  local anchor_a anchor_b marker
+  anchor_a=$(printf '%s' "$a" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  anchor_b=$(printf '%s' "$b" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  printf '# Current snapshot\n' > "$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  printf '# Progress\n\n---\n\n## 2026-11-10 — fix: untagged [abc123]\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n\n---\n' \
+    > "$CASE_DIR/.rig/memory/PROGRESS.md"
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  printf 'anchor=%s\n' "$anchor_a" > "$marker"
+  mkdir -p "$CASE_DIR/.claude/hooks"
+  cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/stop.sh" "$CASE_DIR/.claude/hooks/stop.sh"
+  run env RIG_AGENT=codex RIG_SESSION_FILE="$file_b" RIG_SESSION_LOG="$BATS_TEST_TMPDIR/b.log" \
+    bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/stop.sh' _ "$CASE_DIR" \
+    '{"source":"logout","session_id":"thread-b"}'
+  [ "$status" -eq 0 ]
+  grep -Fq 'unscoped_progress=present' "$marker"
+  grep -Fq "anchor=$anchor_a" "$marker"
+  if grep -Fq "anchor=$anchor_b" "$marker"; then return 1; fi
+  SESSION_F="$file_b" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["flags"]["wrap_needed"] is False and d["lifecycle"]["state"]=="inactive"'
+}
+
+@test "native SessionEnd reads a tagged UTF-8 stub under a C locale" {
+  local anchor_b marker
+  anchor_b=$(printf '%s' "$b" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  printf '# Current snapshot\n' > "$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  printf '# Progress — café\n\n---\n\n## 2026-11-10 — fix: C locale [abc123] <!-- sid:%s -->\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n\n---\n' \
+    "$anchor_b" > "$CASE_DIR/.rig/memory/PROGRESS.md"
+  mkdir -p "$CASE_DIR/.claude/hooks"
+  cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/stop.sh" "$CASE_DIR/.claude/hooks/stop.sh"
+  run env LC_ALL=C PYTHONUTF8=0 RIG_AGENT=codex RIG_SESSION_FILE="$file_b" RIG_SESSION_LOG="$BATS_TEST_TMPDIR/b.log" \
+    bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/stop.sh' _ "$CASE_DIR" \
+    '{"source":"logout","session_id":"thread-b"}'
+  [ "$status" -eq 0 ]
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  grep -Fq "anchor=$anchor_b" "$marker"
+  SESSION_F="$file_b" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["flags"]["wrap_needed"] is True and d["lifecycle"]["state"]=="ended_no_wrap"'
+}
+
 @test "SessionEnd creates a minimal snapshot only when none exists" {
   printf 'Auto-logged by post-tool hook\n' > "$CASE_DIR/.rig/memory/PROGRESS.md"
   mkdir -p "$CASE_DIR/.claude/hooks"

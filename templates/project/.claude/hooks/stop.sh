@@ -90,6 +90,33 @@ case "$SOURCE" in
         >> "$SESSION_LOG" 2>/dev/null || true
     }
 
+    write_unscoped_wrap_needed() {
+      # A normal Codex launcher leaves commit stubs without a session anchor.
+      # Keep their reminder without assigning the work to the exiting session.
+      [[ -d "$RIG_DIR/memory" ]] || return
+      WRAP_F="$WRAP_NEEDED" OBLIGATION_LOCK="$RIG_DIR/memory/.session-obligations.lock" python3 - 2>/dev/null <<'PY'
+import fcntl, os, pathlib, tempfile
+marker = pathlib.Path(os.environ["WRAP_F"])
+with open(os.environ["OBLIGATION_LOCK"], "a+") as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    raw = marker.read_text(encoding="utf-8", errors="surrogateescape") if marker.exists() else ""
+    if "unscoped_progress=present" not in raw.splitlines():
+        content = raw + ("\n" if raw and not raw.endswith("\n") else "") + "unscoped_progress=present\n"
+        fd, temp = tempfile.mkstemp(prefix=marker.name + ".tmp.", dir=str(marker.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as out:
+                out.write(content)
+                out.flush()
+                os.fsync(out.fileno())
+            os.replace(temp, marker)
+        finally:
+            if os.path.exists(temp):
+                os.unlink(temp)
+PY
+      echo "[$(date +%H:%M:%S)] SESSION_END: unscoped PROGRESS reminder retained" \
+        >> "$SESSION_LOG" 2>/dev/null || true
+    }
+
     write_minimal_checkpoint() {
       [[ ! -d "$RIG_DIR/memory" ]] && return
       # A completed wrap or another session may already have written a full
@@ -139,29 +166,37 @@ case "$SOURCE" in
 
     # Shared PROGRESS.md can contain another session's unexpanded stub. An
     # exact native session may claim only a stub tagged with its own anchor.
+    # Untagged stubs retain a project reminder without claiming this session.
     # Legacy sessions retain the prior unscoped reminder behavior.
     OWN_STUB=false
+    UNSCOPED_STUB=false
     if [[ -f "$PROGRESS" ]]; then
       if [[ -n "$NATIVE_SESSION_ID" && -n "${RIG_SESSION_ANCHOR:-}" ]]; then
-        if PROGRESS_FILE="$PROGRESS" SESSION_ANCHOR="$RIG_SESSION_ANCHOR" python3 - 2>/dev/null <<'PY'
-import os, pathlib, re
+        STUB_SCOPE=$(PROGRESS_FILE="$PROGRESS" SESSION_ANCHOR="$RIG_SESSION_ANCHOR" python3 - 2>/dev/null <<'PY'
+import os, re
 anchor = os.environ["SESSION_ANCHOR"]
 current = None
-for line in pathlib.Path(os.environ["PROGRESS_FILE"]).read_text().splitlines():
-    if line.startswith("## "):
-        match = re.search(r"<!-- sid:([A-Za-z0-9-]+) -->", line)
-        current = match.group(1) if match else None
-    elif current == anchor and re.search(r"Auto-logged by (post-tool|post-commit) hook", line):
-        raise SystemExit(0)
-raise SystemExit(1)
+scopes = set()
+with open(os.environ["PROGRESS_FILE"], "r", encoding="utf-8", errors="surrogateescape", newline="") as progress:
+    for line in progress:
+        if line.startswith("## "):
+            match = re.search(r"<!-- sid:([A-Za-z0-9-]+) -->", line)
+            current = match.group(1) if match else None
+        elif re.search(r"Auto-logged by (post-tool|post-commit) hook", line):
+            if current == anchor:
+                scopes.add("own")
+            elif current is None:
+                scopes.add("unscoped")
+print(" ".join(sorted(scopes)))
 PY
-        then
-          OWN_STUB=true
-        fi
+        ) || STUB_SCOPE=""
+        [[ " $STUB_SCOPE " == *" own "* ]] && OWN_STUB=true
+        [[ " $STUB_SCOPE " == *" unscoped "* ]] && UNSCOPED_STUB=true
       elif grep -Eq "Auto-logged by (post-tool|post-commit) hook" "$PROGRESS" 2>/dev/null; then
         OWN_STUB=true
       fi
     fi
+    [[ "$UNSCOPED_STUB" == true ]] && write_unscoped_wrap_needed
     if [[ "$OWN_STUB" == true ]]; then
       write_wrap_needed "unexpanded stubs in PROGRESS.md"
       NEEDS_WRAP=true
