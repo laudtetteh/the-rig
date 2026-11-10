@@ -1267,7 +1267,11 @@ If `$TRACKING == repo` and `$TOTAL_CHANGED` > 3:
 > ```bash
 > git checkout -b chore/rig-upgrade-$EXPECTED_VERSION
 > git add -f .claude/ .husky/ .rig/processes/ .rig/rules/ .rig/VERSION
-> git commit -m "chore(rig): upgrade to The Rig $EXPECTED_VERSION [#N]"
+> ROOT=$(git rev-parse --show-toplevel)
+> RIG_DIR="$ROOT/.rig"
+> if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; fi
+> touch "$RIG_DIR/memory/.rig-commit-ok"  # after user approval
+> RIG_COMMIT_POLICY=guarded git commit -m "chore(rig): upgrade to The Rig $EXPECTED_VERSION [#N]"
 > gh pr create --title "chore(rig): upgrade to $EXPECTED_VERSION" ...
 > ```
 >

@@ -419,6 +419,29 @@ print(len(s.get('permissions', {}).get('deny', [])))
   [ "$status" -eq 0 ]
   [ ! -f "$TEST_PROJECT/.git/hooks/commit-msg" ]
   [[ "$output" == *"--skip-git-hooks set"* ]] || return 1
+  git -C "$TEST_PROJECT" switch -qc fix/hookless-fallback
+  local rig_dir payload commit_output post_payload pending_id
+  rig_dir="$(cat "$TEST_PROJECT/.rigpath")"
+  pending_id="$(python3 -c 'import hashlib; print(hashlib.sha256(b"hookless-1").hexdigest()[:16])')"
+  touch "$rig_dir/memory/.rig-commit-ok"
+  payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"hookless-1","tool_input":{"command":"RIG_COMMIT_POLICY=guarded git commit --allow-empty -m \"fix: hookless [#593]\""}}'
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/pre-tool.sh' _ "$TEST_PROJECT" "$payload"
+  [ "$status" -eq 0 ]
+  [ ! -f "$rig_dir/memory/.rig-commit-ok" ]
+  [ -f "$rig_dir/memory/.rig-commit-fallback-pending-$pending_id" ]
+
+  run env RIG_COMMIT_POLICY=guarded git -C "$TEST_PROJECT" commit --allow-empty -m 'fix: hookless [#593]'
+  [ "$status" -eq 0 ]
+  commit_output="$output"
+  post_payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PostToolUse","tool_name":"Bash","tool_use_id":"hookless-1","tool_response":{"stdout":sys.argv[1]}}))' "$commit_output")"
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/post-tool.sh' _ "$TEST_PROJECT" "$post_payload"
+  [ "$status" -eq 0 ]
+  [ ! -f "$rig_dir/memory/.rig-commit-fallback-pending-$pending_id" ]
+  grep -Fq "$(git -C "$TEST_PROJECT" rev-parse HEAD)" "$rig_dir/memory/PROGRESS.md"
+  [ "$(grep -c 'Auto-logged by post-tool hook' "$rig_dir/memory/PROGRESS.md")" -eq 1 ]
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/post-tool.sh' _ "$TEST_PROJECT" "$post_payload"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'Auto-logged by post-tool hook' "$rig_dir/memory/PROGRESS.md")" -eq 1 ]
 }
 
 # ── pre-commit: .rig-debug-scan-exclude path exclusions ──────────────────────

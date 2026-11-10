@@ -239,7 +239,8 @@ Body: explain WHY, not what. The diff shows what.
 
 Valid types: `feat` | `fix` | `refactor` | `test` | `docs` | `chore` | `style` | `perf` | `devops`
 
-Write the commit message to a temp file to avoid shell quoting issues:
+Write the approved commit message and create approval in the target worktree's
+Rig directory. Do this before the separate `git commit` call:
 
 ```bash
 cat > /tmp/commit-msg.txt << 'EOF'
@@ -247,8 +248,19 @@ feat(scope): description [#N]
 
 Body explaining the why.
 EOF
-git commit -F /tmp/commit-msg.txt
+ROOT=$(git rev-parse --show-toplevel)
+RIG_DIR="$ROOT/.rig"
+if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; fi
+touch "$RIG_DIR/memory/.rig-commit-ok"
 ```
+
+```bash
+RIG_COMMIT_POLICY=guarded git commit -F /tmp/commit-msg.txt
+```
+
+An active Rig `commit-msg` hook consumes approval for one attempt. Without it,
+PreToolUse consumes approval before the visible command runs. Obtain fresh
+approval before retrying a failed commit.
 
 ---
 
@@ -354,11 +366,19 @@ gh pr create --title "..." --body-file /tmp/pr-body.md --base [BASE_BRANCH] \
 ## Step 7 — Housekeeping commit (if needed)
 
 If the memory updates and task file move were not included in the implementation commit,
-make a follow-up housekeeping commit on the same branch:
+make a follow-up housekeeping commit on the same branch. Obtain fresh user
+approval for this separate attempt, then prepare its one-use authorization:
+
+```bash
+ROOT=$(git rev-parse --show-toplevel)
+RIG_DIR="$ROOT/.rig"
+if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; fi
+touch "$RIG_DIR/memory/.rig-commit-ok"
+```
 
 ```bash
 git add .rig/memory/PROGRESS.md .rig/tasks/done/TASK_[name].md
-git commit -m "chore: post-task housekeeping [#N]"
+RIG_COMMIT_POLICY=guarded git commit -m "chore: post-task housekeeping [#N]"
 ```
 
 This commit goes on the same PR branch before the PR is merged.

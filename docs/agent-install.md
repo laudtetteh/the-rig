@@ -25,7 +25,7 @@ The installer is interactive by default; the flags below bypass all prompts.
 | `--strategy` | `merge` \| `upgrade` \| `overwrite` \| `skip` \| `interactive` \| `agent-plan` \| `agent-upgrade` | How to handle existing files |
 | `--rig-dir <path>` | absolute path | Where to put `.rig/` when using external or stealth tracking |
 | `--project-name <name>` | string | Project name substituted into templates |
-| `--skip-git-hooks` | — | Skip writing to `.git/hooks/` (stealth + existing Husky setup) |
+| `--skip-git-hooks` | — | Skip writing to `.git/hooks/` (stealth + existing Husky setup); without an active Rig `commit-msg` hook, visible guarded agent commits use the limited PreToolUse approval gate |
 | `--recover` | — | Restore an interrupted transaction without applying a new version |
 | `--repair-stale` | — | Repair stale Rig-owned manifest entries when the on-disk file still matches the running template |
 | `--feature-docs` | — | Install optional feature documentation helpers |

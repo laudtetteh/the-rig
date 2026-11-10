@@ -184,11 +184,20 @@ git diff --stat   # count the modified files
 
 For any upgrade that modifies 4 or more files (hooks, commands, process files, VERSION):
 
+After user approval, prepare the current worktree's one-use approval:
+
+```bash
+ROOT=$(git rev-parse --show-toplevel)
+RIG_DIR="$ROOT/.rig"
+if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; fi
+touch "$RIG_DIR/memory/.rig-commit-ok"
+```
+
 ```bash
 # Replace X.Y.Z with the new version
 git checkout -b chore/rig-upgrade-vX.Y.Z
 git add -f .claude/ .agents/skills/ .codex/ .husky/ .rig/processes/ .rig/rules/ .rig/VERSION
-git commit -m "chore(rig): upgrade to The Rig vX.Y.Z [#N]"
+RIG_COMMIT_POLICY=guarded git commit -m "chore(rig): upgrade to The Rig vX.Y.Z [#N]"
 gh pr create --title "chore(rig): upgrade to vX.Y.Z" \
   --body "Upgrades The Rig from vOLD to vNEW. See CHANGELOG for details."
 ```

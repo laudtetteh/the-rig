@@ -378,8 +378,10 @@ snapshot — hooks are a safety net, not a replacement.
 | `session-start.sh` | `SessionStart` | Injects `CONTEXT_SNAPSHOT.md` and pending flag warnings before the first user turn |
 | `prompt-submit.sh` | `UserPromptSubmit` | Re-checks `.wrap-needed`/`.post-merge-pending` on every prompt; re-injects warnings when present |
 | `permission-request.sh` | `PermissionRequest` | Auto-approves safe read-only tool patterns to reduce permission-prompt noise |
-| `pre-tool.sh` | `PreToolUse` (every tool call) | Blocks writes to protected paths; gates `git commit` on user go-ahead sentinel; blocks direct commits to `main`/`master` unless `housekeeping: direct-push`; redirects worktree writes to main-repo path |
-| `post-tool.sh` | `PostToolUse` (every tool call) | Auto-stubs `PROGRESS.md` after every commit; clears commit sentinel |
+| `pre-tool.sh` | `PreToolUse` (every tool call) | Blocks structured writes and visible unmarked Bash commits; checks approval for marked visible commits, consuming it before execution when no Rig `commit-msg` hook is active; redirects worktree writes |
+| `commit-msg` | Guarded Git commit | Consumes one-use approval and checks the prepared subject and target branch |
+| `post-commit` | Guarded Git commit | Auto-stubs the target worktree's `PROGRESS.md` using the final commit SHA |
+| `post-tool.sh` | `PostToolUse` (every tool call) | Logs tool completion, warns about branch naming, and stubs progress for an approved visible commit in a hookless install |
 | `pre-compact.sh` | `PreCompact` | Writes compact checkpoint + `compactionSummary` before context compaction |
 | `post-compact.sh` | `PostCompact` | Injects checkpoint content as `additionalContext` after compaction |
 | `subagent-start.sh` | `SubagentStart` | Optional with `--subagents`; injects project name, branch, active task, and key conventions into spawned subagents |
@@ -397,8 +399,8 @@ titles, transcripts, or singleton state.
 | Hook | Trigger | What it prevents |
 |---|---|---|
 | `pre-commit` | Before every git commit | Secrets reaching the repository |
-| `commit-msg` | On every git commit | (1) Strips auto-injected tool footers (`Co-Authored-By: Claude`, `Made-with-Claude`, etc.); (2) validates Conventional Commits subject-line format; (3) requires a tracker-specific issue reference (`[#N]` for GitHub, `[TEAM-123]` for Linear, etc.) when `issue-tracking:` is set in `CLAUDE.md` |
-| `post-commit` | After every git commit | Reports late AI footers without changing the commit SHA; optional automatic amend for unsigned commits with `RIG_POST_COMMIT_AUTO_AMEND=1` |
+| `commit-msg` | On every git commit | Strips tool footers, validates Conventional Commits and tracker references; guarded agent commits additionally consume one-use approval and check the target branch |
+| `post-commit` | After every git commit | Reports late AI footers; optional automatic amend for unsigned commits with `RIG_POST_COMMIT_AUTO_AMEND=1`; guarded agent commits auto-stub progress using final HEAD |
 
 ---
 

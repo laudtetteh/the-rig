@@ -116,9 +116,17 @@ Do not summarise these back to me unless asked.
     (b) Show the proposed commit message, then pause and say:
     > "Ready to commit. Test locally, then say **'commit approved'** (or 'ship it',
     > 'lgtm', 'go') and I'll commit and push immediately."
-    When the user says one of those trigger phrases, create `$RIG_DIR/memory/.rig-commit-ok`,
-    run `git commit`, then run `git push`. The sentinel is auto-deleted by post-tool.sh after
-    the commit lands. This pause is non-negotiable regardless of autonomy level.
+    When the user says one of those trigger phrases, resolve the target worktree's
+    `$RIG_DIR` from `.rigpath` or `.rig`, create `$RIG_DIR/memory/.rig-commit-ok`,
+    and run `RIG_COMMIT_POLICY=guarded git commit` (including any `-F` command).
+    An active Rig Git `commit-msg` hook consumes approval for one attempt.
+    Without that hook, PreToolUse consumes it before a visible commit runs.
+    Then run `git push`.
+    Invoke any generated script that might commit with the marker in its
+    environment (`RIG_COMMIT_POLICY=guarded sh script.sh`). Limit each Bash
+    call to one visible, explicitly marked `git commit`. Use the
+    marker for every agent commit; ordinary terminal commits do
+    not use this opt-in gate. This pause is non-negotiable regardless of autonomy level.
 12. **Always work in the main repo, not the worktree.** Claude Code sessions run inside
     `.claude/worktrees/<name>/`. File edits made there are invisible to the user's git
     client. At the start of every session, identify the main repo root with

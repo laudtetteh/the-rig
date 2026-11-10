@@ -346,8 +346,22 @@ manually. Husky solves this by checking in hooks to `.husky/` and auto-installin
 via `prepare` script in `package.json`.
 
 The `commit-msg` hook requires the filter beside it (or in `.husky/`) and refuses a
-commit if the filter is missing. Human attribution trailers are preserved. If a
-client adds an AI footer after `commit-msg`, `post-commit` reports it without changing
+commit if the filter is missing. Human attribution trailers are preserved. If an
+agent commit needs approval, create `.rig/memory/.rig-commit-ok` in the target
+worktree (or use its `.rigpath` directory) and run with
+`RIG_COMMIT_POLICY=guarded`. Ordinary terminal commits keep the existing format
+checks. `SKIP_COMMIT_VALIDATION=1` only skips format and ticket checks.
+`--skip-git-hooks` leaves native Git hooks uninstalled. An active Rig Husky
+`commit-msg` hook provides the commit-time gate instead. Without one, PreToolUse
+checks a visible guarded commit's fresh approval, branch, and direct-push type,
+then consumes approval before execution; PostToolUse attempts a progress stub
+after a successful commit. This fallback cannot inspect generated scripts or
+guarantee a stub when the Git output omits the commit hash. Visible commands
+that explicitly disable hooks are blocked by PreToolUse. Git hooks can still be
+disabled outside its visible-command checks with `--no-verify`, `core.hooksPath`,
+or `HUSKY=0`; this is a workflow guard, not a physical restriction.
+
+If a client adds an AI footer after `commit-msg`, `post-commit` reports it without changing
 the commit SHA. Set `RIG_POST_COMMIT_AUTO_AMEND=1` to opt into amending unsigned
 commits automatically during ordinary commits. Signed commits are never amended by
 this hook. Git refuses `git commit --amend` while rebase, cherry-pick, or revert is

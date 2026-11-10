@@ -22,9 +22,12 @@ ERRORS_archive.md
 
 # .rig-commit-ok is a one-shot sentinel that authorises a single git commit.
 # Created by the agent when the user gives explicit go-ahead ("commit approved", etc.).
-# Claimed by pre-tool.sh before one commit attempt. Never committed.
+# Claimed by commit-msg when active, or pre-tool.sh for a visible hookless
+# fallback attempt. Never committed.
 .rig-commit-ok
 .rig-commit-ok.claimed-*
+# Hookless PostToolUse markers are keyed by tool_use_id when available.
+.rig-commit-fallback-pending-*
 
 # .wrap-needed is written by stop.sh when unexpanded PROGRESS.md auto-stubs exist,
 # signalling that /wrap should be run before the next session starts.

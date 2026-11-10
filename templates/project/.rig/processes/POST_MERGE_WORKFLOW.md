@@ -123,11 +123,21 @@ It will be one of:
 - `housekeeping: direct-push` — commit and push directly to `[BASE_BRANCH]` (default)
 - `housekeeping: pr-required` — create a short-lived branch and open a PR
 
+The user's request to run post-merge authorizes its housekeeping commit. Before
+either commit, create one-use approval in the current worktree's Rig directory:
+
+```bash
+ROOT=$(git rev-parse --show-toplevel)
+RIG_DIR="$ROOT/.rig"
+if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; fi
+touch "$RIG_DIR/memory/.rig-commit-ok"
+```
+
 ### If `direct-push` (default)
 
 ```bash
 git add .rig/memory/PROGRESS.md .rig/tasks/done/TASK_[name].md
-git commit -m "chore: post-merge housekeeping for PR #N"
+RIG_COMMIT_POLICY=guarded git commit -m "chore: post-merge housekeeping for PR #N"
 git push origin [BASE_BRANCH]
 ```
 
@@ -138,7 +148,7 @@ No branch, no PR. Done.
 ```bash
 git checkout -b chore/post-merge-[N]
 git add .rig/memory/PROGRESS.md .rig/tasks/done/TASK_[name].md
-git commit -m "chore: post-merge housekeeping for PR #N"
+RIG_COMMIT_POLICY=guarded git commit -m "chore: post-merge housekeeping for PR #N"
 git push -u origin chore/post-merge-[N]
 gh pr create --title "chore: post-merge housekeeping for PR #N" \
   --body "Memory updates and task file move for merged PR #N." \

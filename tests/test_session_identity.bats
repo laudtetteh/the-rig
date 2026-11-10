@@ -259,6 +259,12 @@ with open('$TEST_SESSION_FILE', 'w') as f:
   [ ! -f "$TEST_UUID_FILE" ]
 }
 
+@test "session-end: new post-commit stub requests wrap" {
+  echo "## stub <!-- Auto-logged by post-commit hook -->" > "$RIG_DIR/memory/PROGRESS.md"
+  run_hook_exec "stop.sh" '{"source":"logout"}'
+  [ -f "$RIG_DIR/memory/.wrap-needed" ]
+}
+
 @test "session-end: minimal checkpoint has Session anchor field (not Session name)" {
   echo "abc12345" > "$TEST_UUID_FILE"
   echo "## stub <!-- Auto-logged by post-tool hook -->" > "$RIG_DIR/memory/PROGRESS.md"
