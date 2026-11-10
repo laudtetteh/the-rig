@@ -637,6 +637,7 @@ PY
   snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
   before=$(cksum "$snapshot")
   printf 'Auto-logged by post-tool hook\n' > "$CASE_DIR/.rig/memory/PROGRESS.md"
+  : > "$CASE_DIR/.rig/memory/.wrap-needed"
   mkdir -p "$CASE_DIR/.claude/hooks"
   cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/stop.sh" "$CASE_DIR/.claude/hooks/stop.sh"
   run bash -c 'cd "$1" && printf "%s" "{\"source\":\"logout\"}" | RIG_SESSION_LOG="$2" bash .claude/hooks/stop.sh' \
@@ -645,7 +646,7 @@ PY
   [ "$before" = "$(cksum "$snapshot")" ]
   grep -Fq '## Resuming from: task-a' "$snapshot"
   grep -Fq '## Resuming from: task-b' "$snapshot"
-  [ -e "$CASE_DIR/.rig/memory/.wrap-needed" ]
+  grep -Eq '^unscoped_legacy=[0-9a-f]{32}$' "$CASE_DIR/.rig/memory/.wrap-needed"
 }
 
 @test "native SessionEnd attributes an unexpanded stub only to its exact session" {

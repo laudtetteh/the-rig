@@ -94,6 +94,19 @@ field() {
   grep -Fxq 'unscoped_progress=before' "$marker"
 }
 
+@test "guarded wrap clear preserves an empty legacy marker when a new stub appears" {
+  local result file marker observed
+  result=$(bind empty-legacy); file=$(field "$result" session_file)
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  : > "$marker"
+  observed=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "missing")' "$marker")
+  printf '## 2026-11-10 — pending [abc123]\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n' \
+    > "$CASE_DIR/.rig/memory/PROGRESS.md"
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-sha "$observed" --json
+  [ "$status" -eq 0 ]
+  [ -e "$marker" ]
+}
+
 @test "post-merge clear requires the exact pending SHA and records acknowledgement" {
   local result file before
   result=$(bind merge-session); file=$(field "$result" session_file)

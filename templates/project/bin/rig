@@ -164,7 +164,7 @@ session_obligation() {
   anchor=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
   [[ -n "$file" && -n "$anchor" ]] || return "$RIG_EXIT_UNAVAILABLE"
   RIG_DIR="$(rig_dir)" SESSION_F="$file" SESSION_ANCHOR="$anchor" OBLIGATION_ACTION="$action" OBLIGATION_KIND="$kind" MERGE_SHA="$merge_sha" ADOPT_LEGACY="$adopt" GUARDED_ADOPT="$guarded_adopt" OBSERVED_MARKER_SHA="$marker_sha" python3 <<'PY'
-import datetime, fcntl, hashlib, json, os, pathlib, re, tempfile
+import datetime, fcntl, hashlib, json, os, pathlib, re, tempfile, uuid
 rig=pathlib.Path(os.environ["RIG_DIR"]); memory=rig/"memory"; memory.mkdir(parents=True,exist_ok=True)
 p=pathlib.Path(os.environ["SESSION_F"]); anchor=os.environ["SESSION_ANCHOR"]
 action=os.environ["OBLIGATION_ACTION"]; kind=os.environ["OBLIGATION_KIND"]
@@ -194,7 +194,7 @@ if kind=="wrap":
             print(json.dumps({"ok":False,"reason":"legacy_adoption_required","no_write":True})); raise SystemExit(3)
         scoped=[value for value in scoped if value!=anchor]
         reviewed=guarded_adopt and observed_sha and observed_sha==marker_sha
-        if reviewed and any(line.startswith("unscoped_progress=") for line in legacy):
+        if reviewed:
             try:
                 with open(memory/"PROGRESS.md", "r", encoding="utf-8", errors="surrogateescape") as progress:
                     reviewed=not any(re.search(r"Auto-logged by (post-tool|post-commit) hook", line) for line in progress)
@@ -202,6 +202,10 @@ if kind=="wrap":
                 pass
             except OSError:
                 reviewed=False
+            if not reviewed and not legacy:
+                # Older hooks could touch an empty marker without changing its
+                # hash. Keep the pending progress visible after clearing self.
+                legacy.append("unscoped_progress="+uuid.uuid4().hex)
         if adopt or reviewed: legacy=[]
         elif guarded_adopt: legacy_preserved=bool(legacy)
     content="".join("anchor="+value+"\n" for value in scoped)+"".join(value+"\n" for value in legacy)

@@ -84,28 +84,30 @@ case "$SOURCE" in
       else
         # Legacy sessions have no exact native binding. Preserve the unscoped
         # reminder for explicit migration/adoption by a later /wrap.
-        touch "$WRAP_NEEDED" 2>/dev/null || true
+        write_unscoped_wrap_needed legacy
       fi
       echo "[$(date +%H:%M:%S)] SESSION_END: .wrap-needed written (${reason})" \
         >> "$SESSION_LOG" 2>/dev/null || true
     }
 
     write_unscoped_wrap_needed() {
+      local kind="${1:-progress}"
       # A normal Codex launcher leaves commit stubs without a session anchor.
       # Keep their reminder without assigning the work to the exiting session.
       [[ -d "$RIG_DIR/memory" ]] || return
-      WRAP_F="$WRAP_NEEDED" OBLIGATION_LOCK="$RIG_DIR/memory/.session-obligations.lock" python3 - 2>/dev/null <<'PY'
+      WRAP_F="$WRAP_NEEDED" OBLIGATION_LOCK="$RIG_DIR/memory/.session-obligations.lock" REMINDER_KIND="$kind" python3 - 2>/dev/null <<'PY'
 import fcntl, os, pathlib, tempfile, uuid
 marker = pathlib.Path(os.environ["WRAP_F"])
+key = "unscoped_" + os.environ["REMINDER_KIND"]
 with open(os.environ["OBLIGATION_LOCK"], "a+") as lock:
     fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
     raw = marker.read_text(encoding="utf-8", errors="surrogateescape") if marker.exists() else ""
     # A fresh generation makes a concurrent wrap's observed marker hash stale,
     # even when an earlier unscoped reminder already existed.
     content = "".join(line for line in raw.splitlines(keepends=True)
-                      if not line.startswith("unscoped_progress="))
+                      if not line.startswith(key + "="))
     content += ("\n" if content and not content.endswith("\n") else "")
-    content += "unscoped_progress=" + uuid.uuid4().hex + "\n"
+    content += key + "=" + uuid.uuid4().hex + "\n"
     fd, temp = tempfile.mkstemp(prefix=marker.name + ".tmp.", dir=str(marker.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as out:
@@ -117,7 +119,7 @@ with open(os.environ["OBLIGATION_LOCK"], "a+") as lock:
         if os.path.exists(temp):
             os.unlink(temp)
 PY
-      echo "[$(date +%H:%M:%S)] SESSION_END: unscoped PROGRESS reminder retained" \
+      echo "[$(date +%H:%M:%S)] SESSION_END: unscoped ${kind} reminder retained" \
         >> "$SESSION_LOG" 2>/dev/null || true
     }
 
