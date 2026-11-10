@@ -464,6 +464,110 @@ json.dump({
   [[ "$output" == *'Recovery: bin/rig session retrofit --agent codex --from-env --source resume --json'* ]] || return 1
 }
 
+@test "explicit native lookup offers recovery only for its matching provider environment" {
+  run env CODEX_THREAD_ID=ambient-codex RIG_SESSION_PID=999999 \
+    "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id wanted-claude --json
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="not_found" and "recovery" not in d and "wanted-claude" not in str(d)'
+
+  run env CODEX_THREAD_ID=ambient-codex CLAUDE_CODE_SESSION_ID=other-claude RIG_SESSION_PID=999999 \
+    "$CASE_DIR/bin/rig" session current --agent claude --native-session-id wanted-claude --json
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="not_found" and "recovery" not in d'
+
+  run env CODEX_THREAD_ID=ambient-codex CLAUDE_CODE_SESSION_ID=wanted-claude RIG_SESSION_PID=999999 \
+    "$CASE_DIR/bin/rig" session current --agent claude --native-session-id wanted-claude --json
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["recovery"]=="bin/rig session retrofit --agent claude --from-env --source resume --json" and "wanted-claude" not in str(d)'
+  run env CODEX_THREAD_ID=ambient-codex CLAUDE_CODE_SESSION_ID=wanted-claude \
+    "$CASE_DIR/bin/rig" session retrofit --agent claude --from-env --source resume --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"retrofitted": true'* ]] || return 1
+  run env CODEX_THREAD_ID=ambient-codex CLAUDE_CODE_SESSION_ID=wanted-claude \
+    "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id wanted-claude --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"agent": "claude"'* && "$output" == *'"reason": "native_id"'* ]] || return 1
+}
+
+@test "explicit Codex lookup ignores an ambient Claude ID for recovery" {
+  run env CLAUDE_CODE_SESSION_ID=ambient-claude RIG_SESSION_PID=999999 \
+    "$CASE_DIR/bin/rig" session current --agent codex --native-session-id wanted-codex --json
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="not_found" and "recovery" not in d'
+}
+
+@test "ended explicit Claude lookup never recommends an ambient Codex retrofit" {
+  write_native_session "$CASE_DIR/.rig/memory/sessions/done/session-ended.json" ended-anchor ended-claude complete claude
+  run env CODEX_THREAD_ID=ambient-codex \
+    "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id ended-claude --json
+  [ "$status" -eq 3 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="ended_record" and "recovery" not in d'
+
+  run env CODEX_THREAD_ID=ambient-codex CLAUDE_CODE_SESSION_ID=ended-claude \
+    "$CASE_DIR/bin/rig" session current --agent claude --native-session-id ended-claude --json
+  [ "$status" -eq 3 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="ended_record" and d["recovery"]=="bin/rig session retrofit --agent claude --from-env --source resume --json"'
+}
+
+@test "orphaned exact native record resumes through a separate continuation" {
+  local result file anchor child before
+  result=$("$CASE_DIR/bin/rig" session bind --agent claude --native-session-id orphan-thread --source startup)
+  file=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  anchor=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  SESSION_F="$file" python3 -c 'import json,os; p=os.environ["SESSION_F"]; d=json.load(open(p)); d["lifecycle"]["state"]="orphaned"; json.dump(d,open(p,"w"))'
+  before=$(cksum "$file")
+
+  run "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id orphan-thread --json
+  [ "$status" -eq 3 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="ended_record" and d["session_file"] is None'
+
+  run "$CASE_DIR/bin/rig" session retrofit --agent claude --native-session-id orphan-thread --source resume --json
+  [ "$status" -eq 0 ]
+  child=$(printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["retrofitted"] and d["lineage"]["kind"]=="continuation"; print(d["session_file"])')
+  [ "$child" != "$file" ]
+  [ "$(cksum "$file")" = "$before" ]
+  CHILD_F="$child" PARENT_ANCHOR="$anchor" python3 -c 'import json,os; d=json.load(open(os.environ["CHILD_F"])); assert d["lineage"]["parent_anchor"]==os.environ["PARENT_ANCHOR"] and d["lifecycle"]["state"]=="active"'
+
+  run "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id orphan-thread --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$child"* ]] || return 1
+  run env RIG_SESSION_FILE="$file" RIG_SESSION_ANCHOR="$anchor" "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"reason": "launcher_continuation"'* && "$output" == *"$child"* ]] || return 1
+  run "$CASE_DIR/bin/rig" session doctor --json
+  [ "$status" -eq 0 ]
+}
+
+@test "future schema launcher cannot be named or completed" {
+  local file="$CASE_DIR/.rig/memory/sessions/session-future.json" before
+  write_session "$file" future-anchor feat/current
+  SESSION_F="$file" python3 -c 'import json,os; p=os.environ["SESSION_F"]; d=json.load(open(p)); d["schema_version"]=2; json.dump(d,open(p,"w"))'
+  before=$(cksum "$file")
+
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="unsupported_schema" and d["no_write"] is True and d["session_file"] is None'
+
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session-name set --final --complete --json 'unsafe future name'
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="unsupported_schema" and d["no_write"] is True'
+  [ "$(cksum "$file")" = "$before" ]
+  [ "$(find "$CASE_DIR/.rig/memory/sessions/done" -name 'session-*.json' | wc -l | tr -d ' ')" -eq 0 ]
+
+  # Simulate a record changing to a future schema after an exact launcher lookup.
+  cat > "$CASE_DIR/bin/rig-session-resolve.py" <<'PY'
+#!/usr/bin/env python3
+import json, os
+print(json.dumps({"ok": True, "confidence": "exact", "reason": "launcher_file",
+                  "session_file": os.environ["RIG_SESSION_FILE"], "anchor": "future-anchor"}))
+PY
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session-name set --final --complete --json 'stale resolver result'
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="unsupported_schema" and d["no_write"] is True'
+  [ "$(cksum "$file")" = "$before" ]
+  [ "$(find "$CASE_DIR/.rig/memory/sessions/done" -name 'session-*.json' | wc -l | tr -d ' ')" -eq 0 ]
+}
+
 @test "session-name recovery refreshes the anchor used by its final write guard" {
   local snippet="$BATS_TEST_TMPDIR/session-name-recovery.sh" session_file
   run env CODEX_THREAD_ID=recovered-name RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session current --json
@@ -771,6 +875,36 @@ SH
   run "$CASE_DIR/bin/rig" session resolve --agent codex --native-session-id missing --json
   [ "$status" -eq 4 ]; [[ "$output" == *'"reason": "malformed_record"'* ]] || return 1
   after=$(cksum "$bad"); [ "$before" = "$after" ]
+}
+
+@test "malformed v1 lineage fails closed in resolver current doctor and naming" {
+  local file before
+  run "$CASE_DIR/bin/rig" session bind --agent claude --native-session-id malformed-lineage --source startup
+  [ "$status" -eq 0 ]
+  file=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  SESSION_F="$file" python3 -c 'import json,os; p=os.environ["SESSION_F"]; d=json.load(open(p)); d["lineage"]="broken"; json.dump(d,open(p,"w"))'
+  before=$(cksum "$file")
+
+  run "$CASE_DIR/bin/rig" session resolve --agent claude --native-session-id malformed-lineage --json
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert not d["ok"] and d["reason"]=="malformed_record" and d["session_file"] is None'
+
+  run "$CASE_DIR/bin/rig" session current --agent claude --native-session-id malformed-lineage --json
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert not d["ok"] and d["reason"]=="malformed_record"'
+
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="malformed_record"'
+
+  run "$CASE_DIR/bin/rig" session doctor --json
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert not d["ok"] and {"file","reason"} <= set(d["errors"][0]) and d["errors"][0]["reason"]=="malformed_record" and not next(c for c in d["checks"] if c["name"]=="record_syntax")["ok"]'
+
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session-name set --final --json 'unsafe name'
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert not d["ok"] and d["reason"]=="malformed_record"'
+  [ "$(cksum "$file")" = "$before" ]
 }
 
 @test "session-name mutates v1 names and revision through exact launcher record" {
