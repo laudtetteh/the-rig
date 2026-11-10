@@ -350,7 +350,7 @@ Every tool call
      │     Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
      │     Logs call to /tmp/the-rig-session.log
      │     Worktree redirect: Write/Edit/NotebookEdit targeting .claude/worktrees/
-     │       → rewrites path to main-repo equivalent via updatedToolInput
+     │       → rewrites path to main-repo equivalent via hookSpecificOutput.updatedInput
      │     Checks RIG_PROTECTED: blocks writes to governance files
      │       (RIG_DIR/processes/, RIG_DIR/rules/, .husky/, CLAUDE.md, .claude/hooks/)
      │     Checks BLOCKED_PATHS: blocks project-specific protected paths
@@ -362,7 +362,7 @@ Every tool call
      │       Blocked unless CLAUDE.md sets housekeeping: direct-push
      │       Even with direct-push: blocks feat/fix/refactor/test/perf/devops/style types
      │       Only chore/docs may go directly to main
-     │     Exit 1 (block) if any check fails
+     │     Exit 2 (block) if any check fails
      │
      └─► post-tool.sh (PostToolUse)
            Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
