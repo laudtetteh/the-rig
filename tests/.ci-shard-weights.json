@@ -46,6 +46,7 @@
   "tests/test_same_run_creation_tracking.bats": 5.0,
   "tests/test_security_recovery_gates.bats": 5.0,
   "tests/test_session_diagnostics.bats": 5.0,
+  "tests/test_session_final_head_review.bats": 60.0,
   "tests/test_session_identity.bats": 5.0,
   "tests/test_session_lineage_title.bats": 5.0,
   "tests/test_session_naming_parity.bats": 5.0,

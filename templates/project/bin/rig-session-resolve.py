@@ -94,7 +94,9 @@ def emit(path, data, confidence, reason):
            "lineage": public_lineage,
            "parent_anchor": (data.get("lineage") or {}).get("parent_anchor") if data else None,
            "warnings": []}
-    if reason in ("unsupported_schema", "invalid_native_binding", "ambiguous_native_provider"):
+    if reason in ("unsupported_schema", "invalid_native_binding", "ambiguous_native_provider",
+                  "invalid_continuation_lineage", "duplicate_native_id", "invalid_lifecycle_transition",
+                  "invalid_session_anchor"):
         out["no_write"] = True
     if reason in ("not_found", "invalid_launcher_file", "ended_record"):
         if agent:
@@ -127,41 +129,138 @@ for base in (session_dir, session_dir / "done"):
             if d is None: malformed = True
             elif isinstance(d.get("schema_version"), int) and d["schema_version"] > 1: unsupported = True
             else: records.append((p, d))
+def lineage_graph(items):
+    nodes = [(p, d) for p, d in items if d.get("schema_version") == 1 and isinstance(d.get("anchor"), str) and d.get("anchor")]
+    by_anchor = {}
+    for p, d in nodes:
+        by_anchor.setdefault(d["anchor"], []).append((p, d))
+    invalid = {anchor for anchor, values in by_anchor.items() if len(values) != 1}
+    invalid_lifecycle = {d["anchor"] for p, d in nodes
+                         if d.get("lifecycle", {}).get("state") not in (*ended_states, "active") or
+                         (p.parent == session_dir / "done" and d.get("lifecycle", {}).get("state") == "active")}
+    invalid.update(invalid_lifecycle)
+    invalid.update(d["anchor"] for _, d in nodes if not d.get("native", {}).get("session_id"))
+    parents, children = {}, {}
+    for _, d in nodes:
+        anchor = d["anchor"]
+        lineage = d.get("lineage") or {}
+        kind = lineage.get("kind") or "root"
+        if kind == "root":
+            if lineage.get("parent_anchor") or lineage.get("parent_native_session_id"):
+                invalid.add(anchor)
+                if lineage.get("parent_anchor") in by_anchor:
+                    invalid.add(lineage["parent_anchor"])
+            continue
+        if kind == "fork":
+            fork_parent = lineage.get("parent_anchor")
+            if fork_parent:
+                parent_entries = by_anchor.get(fork_parent, [])
+                if (len(parent_entries) != 1 or
+                    parent_entries[0][1].get("native", {}).get("session_id") != lineage.get("parent_native_session_id") or
+                    parent_entries[0][1].get("project", {}).get("identity") != d.get("project", {}).get("identity") or
+                    parent_entries[0][1].get("agent") != d.get("agent")):
+                    invalid.add(anchor)
+            continue
+        if kind != "continuation":
+            invalid.add(anchor)
+            continue
+        parent_anchor = lineage.get("parent_anchor")
+        parent_entries = by_anchor.get(parent_anchor, [])
+        if len(parent_entries) != 1:
+            invalid.add(anchor)
+            continue
+        parent = parent_entries[0][1]
+        parents[anchor] = parent_anchor
+        children.setdefault(parent_anchor, []).append(anchor)
+        if (not parent.get("native", {}).get("session_id") or
+                parent.get("lifecycle", {}).get("state") not in ended_states or
+                parent.get("project", {}).get("identity") != d.get("project", {}).get("identity") or
+                parent.get("agent") != d.get("agent") or
+                parent.get("native", {}).get("session_id") != lineage.get("parent_native_session_id")):
+            invalid.add(anchor)
+    for parent_anchor, child_anchors in children.items():
+        if len(child_anchors) > 1:
+            invalid.update([parent_anchor, *child_anchors])
+    roots, depths = {}, {}
+    for anchor in by_anchor:
+        visited = []
+        cursor = anchor
+        while cursor in parents and cursor not in visited:
+            visited.append(cursor)
+            cursor = parents[cursor]
+        if cursor in visited:
+            invalid.update(visited)
+            cursor = min(visited)
+        roots[anchor] = cursor
+        depths[anchor] = len(visited)
+    components = {}
+    for anchor, root_anchor in roots.items():
+        components.setdefault(root_anchor, []).append(anchor)
+    leaves = {}
+    for root_anchor, members in components.items():
+        if invalid.intersection(members) or sum(
+                by_anchor[anchor][0][1].get("lifecycle", {}).get("state") == "active"
+                for anchor in members) > 1:
+            invalid.update(members)
+        leaf_members = [anchor for anchor in members if not children.get(anchor)]
+        if len(leaf_members) == 1:
+            leaves[root_anchor] = leaf_members[0]
+        else:
+            invalid.update(members)
+    native_groups = {}
+    for _, d in nodes:
+        native_id = d.get("native", {}).get("session_id")
+        if native_id:
+            key = (d.get("project", {}).get("identity"), d.get("agent"), native_id)
+            native_groups.setdefault(key, []).append(d["anchor"])
+    duplicate_native = set()
+    for anchors in native_groups.values():
+        if len(anchors) > 1 and len({roots.get(anchor) for anchor in anchors}) != 1:
+            duplicate_native.update(anchors)
+    return {"invalid_anchors": sorted(invalid), "invalid_lifecycle_anchors": sorted(invalid_lifecycle),
+            "duplicate_native_anchors": sorted(duplicate_native),
+            "roots": roots, "depths": depths, "leaves": leaves}
+if "--graph-check" in args:
+    if unsafe_path or unsupported or malformed:
+        reason = "invalid_session_path" if unsafe_path else "unsupported_schema" if unsupported else "malformed_record"
+        print(json.dumps({"ok": False, "reason": reason, "no_write": True})); raise SystemExit(4)
+    candidate_path = option("--candidate-path")
+    if candidate_path:
+        try:
+            candidate = json.load(sys.stdin)
+            if not isinstance(candidate, dict): raise ValueError("candidate is not an object")
+        except (ValueError, TypeError):
+            print(json.dumps({"ok": False, "reason": "invalid_input", "no_write": True})); raise SystemExit(3)
+        records = [(p, d) for p, d in records if str(p) != candidate_path]
+        records.append((pathlib.Path(candidate_path), candidate))
+    analysis = lineage_graph(records)
+    analysis["ok"] = not analysis["invalid_anchors"] and not analysis["duplicate_native_anchors"]
+    print(json.dumps(analysis))
+    raise SystemExit(0 if analysis["ok"] else 2)
+graph = lineage_graph(records)
+def graph_conflict(matches):
+    anchors = [d.get("anchor") for _, d in matches]
+    if len(matches) > 1 and (any(anchor in graph["invalid_anchors"] or anchor in graph["duplicate_native_anchors"]
+                                 for anchor in anchors) or len({graph["roots"].get(anchor) for anchor in anchors}) > 1):
+        return "duplicate_native_id"
+    if any(anchor in graph["invalid_lifecycle_anchors"] for anchor in anchors):
+        return "invalid_lifecycle_transition"
+    if any(anchor in graph["invalid_anchors"] for anchor in anchors):
+        return "invalid_continuation_lineage"
+    if any(anchor in graph["duplicate_native_anchors"] for anchor in anchors):
+        return "duplicate_native_id"
+    return None
+def require_valid_graph(matches):
+    if any(d.get("schema_version") == 1 and not d.get("anchor") for _, d in matches):
+        emit(None, None, "none", "invalid_session_anchor"); raise SystemExit(3)
+    reason = graph_conflict(matches)
+    if reason:
+        emit(None, None, "ambiguous" if reason != "invalid_lifecycle_transition" else "none", reason)
+        raise SystemExit(3 if reason == "invalid_lifecycle_transition" else 2)
 def select_unique_match(matches):
-    if len(matches) <= 1:
-        return matches[0] if matches else None
-    active = [(p, d) for p, d in matches if "done" not in p.parts and d.get("lifecycle", {}).get("state") == "active"]
-    if len(active) > 1:
+    if not matches or graph_conflict(matches):
         return None
-    by_anchor = {d.get("anchor"): (p, d) for p, d in matches}
-    if not all(by_anchor) or len(by_anchor) != len(matches):
-        return None
-    roots = [(p, d) for p, d in matches if not (d.get("lineage") or {}).get("parent_anchor")]
-    if len(roots) != 1:
-        return None
-    for _, d in matches:
-        parent = (d.get("lineage") or {}).get("parent_anchor")
-        if parent and (d.get("lineage") or {}).get("kind") != "continuation":
-            return None
-        if parent and parent not in by_anchor:
-            return None
-        if parent and by_anchor[parent][1].get("lifecycle", {}).get("state") not in ended_states:
-            return None
-    parents = {(d.get("lineage") or {}).get("parent_anchor") for _, d in matches}
-    leaves = [(p, d) for p, d in matches if d.get("anchor") not in parents]
-    if len(leaves) != 1 or (active and leaves[0][0] != active[0][0]):
-        return None
-    leaf_path, leaf_record = leaves[0]
-    leaf_state = leaf_record.get("lifecycle", {}).get("state")
-    if (leaf_state == "active" and "done" in leaf_path.parts) or leaf_state not in (*ended_states, "active"):
-        return None
-    seen = set()
-    cursor = leaves[0][1]
-    while cursor and cursor.get("anchor") not in seen:
-        seen.add(cursor.get("anchor"))
-        parent = (cursor.get("lineage") or {}).get("parent_anchor")
-        cursor = by_anchor[parent][1] if parent else None
-    return leaves[0] if len(seen) == len(matches) else None
+    return max(matches, key=lambda item: graph["depths"].get(item[1].get("anchor"), 0))
 if native_id:
     if unsafe_path: emit(None, None, "none", "invalid_session_path"); raise SystemExit(4)
     if unsupported: emit(None, None, "none", "unsupported_schema"); raise SystemExit(4)
@@ -169,6 +268,7 @@ if native_id:
     matches = [(p,d) for p,d in records if d.get("schema_version") == 1 and
                d.get("project", {}).get("identity") == project_id and d.get("agent") == agent and
                d.get("native", {}).get("session_id") == native_id]
+    if matches: require_valid_graph(matches)
     if len(matches) > 1:
         selected = select_unique_match(matches)
         if selected: matches = [selected]
@@ -203,6 +303,7 @@ if "RIG_SESSION_FILE" in os.environ:
             emit(None, None, "none", "cross_project"); raise SystemExit(3)
         if d.get("schema_version") == 1 and not d.get("native", {}).get("session_id"):
             emit(None, None, "none", "invalid_native_binding"); raise SystemExit(3)
+        if d.get("schema_version") == 1: require_valid_graph([(p, d)])
         native_agent = "codex" if os.environ.get("CODEX_THREAD_ID") else "claude" if os.environ.get("CLAUDE_CODE_SESSION_ID") else None
         native_env_id = os.environ.get("CODEX_THREAD_ID") or os.environ.get("CLAUDE_CODE_SESSION_ID")
         if native_agent and (d.get("schema_version") != 1 or d.get("project", {}).get("identity") != project_id or
@@ -243,6 +344,7 @@ if "RIG_SESSION_FILE" in os.environ:
                            record.get("agent") == origin_agent and record.get("native", {}).get("session_id") == origin_native_id]
             if any(record.get("project", {}).get("identity") != project_id for _, record in same_native):
                 emit(None, None, "none", "cross_project"); raise SystemExit(3)
+            require_valid_graph(same_native)
             selected = select_unique_match(same_native)
             if not selected:
                 emit(None, None, "ambiguous", "duplicate_native_id"); raise SystemExit(2)
@@ -286,6 +388,7 @@ for native_env_agent, native_env_id in native_env_signals:
     matches = [(p, d) for p, d in records if d.get("schema_version") == 1 and
                d.get("project", {}).get("identity") == project_id and d.get("agent") == native_env_agent and
                d.get("native", {}).get("session_id") == native_env_id]
+    if matches: require_valid_graph(matches)
     if len(matches) > 1:
         selected = select_unique_match(matches)
         if selected: matches = [selected]
@@ -312,6 +415,7 @@ if anchor:
     if len(matches) == 1:
         p,d = matches[0]
         if fallback_native_conflict(d): emit(None, None, "none", "native_conflict"); raise SystemExit(3)
+        if d.get("schema_version") == 1: require_valid_graph(matches)
         emit(p,d,"exact","anchor"); raise SystemExit(0)
     if len(matches) > 1: emit(None, None, "ambiguous", "duplicate_anchor"); raise SystemExit(2)
     if explicit_anchor: emit(None, None, "none", "launcher_anchor_not_found"); raise SystemExit(3)
@@ -321,5 +425,6 @@ if pid_text.isdigit():
     direct = session_dir / ("session-" + pid_text + ".json"); d = load(direct)
     if d:
         if fallback_native_conflict(d): emit(None, None, "none", "native_conflict"); raise SystemExit(3)
+        if d.get("schema_version") == 1: require_valid_graph([(direct, d)])
         emit(direct, d, "exact", "pid"); raise SystemExit(0)
 emit(None, None, "none", "not_found"); raise SystemExit(1)
