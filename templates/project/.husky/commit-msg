@@ -14,16 +14,16 @@
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 COMMIT_MSG_FILE="$1"
-FILTER="${ROOT}/.husky/filter-commit-message-inplace.sh"
+HOOK_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd -P)" || exit 1
+FILTER="$HOOK_DIR/filter-commit-message-inplace.sh"
+[ -f "$FILTER" ] || FILTER="${ROOT}/.husky/filter-commit-message-inplace.sh"
 
 # ── Step 1: Strip tool-injected footers ──────────────────────────────────────
 if [ -f "$FILTER" ]; then
-  sh "$FILTER" "$COMMIT_MSG_FILE"
+  sh "$FILTER" "$COMMIT_MSG_FILE" || exit 1
 else
-  tmp=$(mktemp) || exit 1
-  grep -viE '^[[:space:]]*(co-authored-by|signed-off-by|reviewed-by|acked-by|tested-by|helped-by|on-behalf-of|made-with)[[:space:]]*:' "$COMMIT_MSG_FILE" \
-    | sed 's/\r$//' > "$tmp"
-  mv "$tmp" "$COMMIT_MSG_FILE"
+  echo "ERROR: The Rig commit-message filter is missing: $FILTER" >&2
+  exit 1
 fi
 
 # ── Step 2: Validate Conventional Commits format ─────────────────────────────
