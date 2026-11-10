@@ -634,6 +634,9 @@ printf '%s\n' "$WRAP_CLEAR_JSON"
 
 If `WRAP_CLEAR_JSON` reports `"legacy_preserved": true`, state that another
 project reminder remains pending. Do not report that `.wrap-needed` was cleared.
+If clear returns `owned_progress_unexpanded`, keep the session active and its
+name unfinalized. Expand the new SID-tagged stub, refresh the snapshot under a
+new workflow lock, and retry with that lock's reminder baseline.
 
 If this is a continuation after an earlier wrap, name only work done since
 that wrap. Preserve the completed parent record and its final name.

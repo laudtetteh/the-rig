@@ -175,6 +175,23 @@ marker_token() {
   if grep -Eq '^unscoped_' "$marker"; then return 1; fi
 }
 
+@test "guarded wrap clear refuses a new tagged stub owned by the current session" {
+  local result file anchor marker observed before
+  result=$(bind tagged-current); file=$(field "$result" session_file); anchor=$(field "$result" anchor)
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation mark --kind wrap --json
+  [ "$status" -eq 0 ]
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  observed=$(marker_token "$marker")
+  before=$(cksum "$file")
+  printf '## 2026-11-10 — new commit [abc123] <!-- sid:%s -->\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n' \
+    "$anchor" > "$CASE_DIR/.rig/memory/PROGRESS.md"
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session obligation clear --kind wrap --adopt-legacy-if-marker-token "$observed" --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *owned_progress_unexpanded* ]] || return 1
+  grep -Fxq "anchor=$anchor" "$marker"
+  [ "$before" = "$(cksum "$file")" ]
+}
+
 @test "a scoped mark retains an older empty legacy reminder" {
   local result file anchor marker
   result=$(bind scoped-after-legacy); file=$(field "$result" session_file); anchor=$(field "$result" anchor)

@@ -75,7 +75,7 @@ Retrofit binds the native host ID from env or an explicit --native-session-id.
 Content matching is never part of normal resolution.
 Wrap clear can use --adopt-legacy-if-marker-token TOKEN to adopt only an unchanged
 project reminder with no unexpanded untagged progress stub. Other reminders remain
-pending while this session clears.
+pending while this session clears. A current-session tagged stub blocks clear.
 EOF
       ;;
     session-name) printf 'Usage: rig session-name set [--tentative|--final] [--complete] [--json] <name>\n';;
@@ -202,6 +202,7 @@ if kind=="wrap":
         scoped=[value for value in scoped if value!=anchor]
         reviewed=guarded_adopt and observed_token and observed_token==marker_token
         pending_unscoped_stub=False
+        pending_owned_stub=False
         if guarded_adopt:
             try:
                 with open(memory/"PROGRESS.md", "r", encoding="utf-8", errors="surrogateescape") as progress:
@@ -210,13 +211,15 @@ if kind=="wrap":
                         if line.startswith("## "):
                             match=re.search(r"<!-- sid:([A-Za-z0-9-]+) -->", line)
                             current_sid=match.group(1) if match else None
-                        elif current_sid is None and re.search(r"Auto-logged by (post-tool|post-commit) hook", line):
-                            pending_unscoped_stub=True
-                            break
+                        elif re.search(r"Auto-logged by (post-tool|post-commit) hook", line):
+                            if current_sid==anchor: pending_owned_stub=True
+                            elif current_sid is None: pending_unscoped_stub=True
             except FileNotFoundError:
                 pass
             except OSError:
-                pending_unscoped_stub=True
+                print(json.dumps({"ok":False,"reason":"progress_unreadable","no_write":True})); raise SystemExit(3)
+            if pending_owned_stub:
+                print(json.dumps({"ok":False,"reason":"owned_progress_unexpanded","no_write":True})); raise SystemExit(3)
             if pending_unscoped_stub:
                 reviewed=False
                 if not legacy: legacy.append("unscoped_progress="+uuid.uuid4().hex)

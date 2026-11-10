@@ -190,6 +190,8 @@ adoption. Legacy sessions retain the unscoped reminder path.
 Wrap records the reminder's content and file metadata token when it acquires
 the workflow lock. At completion it adopts an older unscoped reminder only if
 that token still matches and no unexpanded untagged progress stub remains.
+An unexpanded stub tagged to the current session blocks finalization until
+that new work is captured in the wrap.
 Another session's pending work stays visible. Legacy SessionEnd refreshes
 the unscoped marker's generation, so an existing empty marker cannot hide a
 newer reminder.
