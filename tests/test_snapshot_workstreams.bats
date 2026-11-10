@@ -356,6 +356,12 @@ PY
     --retire-task task-a --done-task-file "$CASE_DIR/.rig/tasks/done/TASK_task-a.md" --json
   [ "$status" -eq 3 ]
   [ "$before" = "$(cksum "$snapshot")" ]
+  printf '# Old done copy\n' > "$CASE_DIR/.rig/tasks/done/task-a.md"
+  run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only \
+    --retire-task task-a --done-task-file "$CASE_DIR/.rig/tasks/done/task-a.md" --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *task_still_active* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
   mv "$CASE_DIR/.rig/tasks/active/TASK_task-a.md" "$CASE_DIR/.rig/tasks/done/TASK_task-a.md"
   run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only \
     --retire-task task-b --done-task-file "$CASE_DIR/.rig/tasks/done/TASK_task-a.md" --json
@@ -638,6 +644,32 @@ PY
   grep -Fq '## Resuming from: task-a' "$snapshot"
   grep -Fq '## Resuming from: task-b' "$snapshot"
   [ -e "$CASE_DIR/.rig/memory/.wrap-needed" ]
+}
+
+@test "native SessionEnd attributes an unexpanded stub only to its exact session" {
+  local anchor_a anchor_b marker
+  anchor_a=$(printf '%s' "$a" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  anchor_b=$(printf '%s' "$b" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  printf '# Current snapshot\n' > "$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  printf '# Progress\n\n---\n\n## 2026-11-10 — fix: A [abc123] <!-- sid:%s -->\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n\n---\n' \
+    "$anchor_a" > "$CASE_DIR/.rig/memory/PROGRESS.md"
+  mkdir -p "$CASE_DIR/.claude/hooks"
+  cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/stop.sh" "$CASE_DIR/.claude/hooks/stop.sh"
+  run env RIG_AGENT=codex RIG_SESSION_FILE="$file_b" RIG_SESSION_LOG="$BATS_TEST_TMPDIR/b.log" \
+    bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/stop.sh' _ "$CASE_DIR" \
+    '{"source":"logout","session_id":"thread-b"}'
+  [ "$status" -eq 0 ]
+  [ ! -e "$CASE_DIR/.rig/memory/.wrap-needed" ]
+  SESSION_F="$file_b" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["flags"]["wrap_needed"] is False and d["lifecycle"]["state"]=="inactive"'
+
+  run env RIG_AGENT=claude RIG_SESSION_FILE="$file_a" RIG_SESSION_LOG="$BATS_TEST_TMPDIR/a.log" \
+    bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/stop.sh' _ "$CASE_DIR" \
+    '{"source":"logout","session_id":"thread-a"}'
+  [ "$status" -eq 0 ]
+  marker="$CASE_DIR/.rig/memory/.wrap-needed"
+  grep -Fq "anchor=$anchor_a" "$marker"
+  if grep -Fq "anchor=$anchor_b" "$marker"; then return 1; fi
+  SESSION_F="$file_a" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["flags"]["wrap_needed"] is True and d["lifecycle"]["state"]=="ended_no_wrap"'
 }
 
 @test "SessionEnd creates a minimal snapshot only when none exists" {

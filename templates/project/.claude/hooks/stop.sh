@@ -137,7 +137,32 @@ case "$SOURCE" in
 
     NEEDS_WRAP=false
 
-    if [[ -f "$PROGRESS" ]] && grep -Eq "Auto-logged by (post-tool|post-commit) hook" "$PROGRESS" 2>/dev/null; then
+    # Shared PROGRESS.md can contain another session's unexpanded stub. An
+    # exact native session may claim only a stub tagged with its own anchor.
+    # Legacy sessions retain the prior unscoped reminder behavior.
+    OWN_STUB=false
+    if [[ -f "$PROGRESS" ]]; then
+      if [[ -n "$NATIVE_SESSION_ID" && -n "${RIG_SESSION_ANCHOR:-}" ]]; then
+        if PROGRESS_FILE="$PROGRESS" SESSION_ANCHOR="$RIG_SESSION_ANCHOR" python3 - 2>/dev/null <<'PY'
+import os, pathlib, re
+anchor = os.environ["SESSION_ANCHOR"]
+current = None
+for line in pathlib.Path(os.environ["PROGRESS_FILE"]).read_text().splitlines():
+    if line.startswith("## "):
+        match = re.search(r"<!-- sid:([A-Za-z0-9-]+) -->", line)
+        current = match.group(1) if match else None
+    elif current == anchor and re.search(r"Auto-logged by (post-tool|post-commit) hook", line):
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+        then
+          OWN_STUB=true
+        fi
+      elif grep -Eq "Auto-logged by (post-tool|post-commit) hook" "$PROGRESS" 2>/dev/null; then
+        OWN_STUB=true
+      fi
+    fi
+    if [[ "$OWN_STUB" == true ]]; then
       write_wrap_needed "unexpanded stubs in PROGRESS.md"
       NEEDS_WRAP=true
     fi
@@ -147,7 +172,7 @@ case "$SOURCE" in
       NEEDS_WRAP=true
     fi
 
-    if [[ "$NEEDS_WRAP" == false ]]; then
+    if [[ "$NEEDS_WRAP" == false && -z "$NATIVE_SESSION_ID" ]]; then
       SESSION_COMMIT_COUNT=$(grep -c "PROGRESS stub:" "$SESSION_LOG" 2>/dev/null || echo 0)
       if [[ "$SESSION_COMMIT_COUNT" -ge 2 ]]; then
         write_wrap_needed "${SESSION_COMMIT_COUNT} commits this session"

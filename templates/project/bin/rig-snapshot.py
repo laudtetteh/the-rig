@@ -354,7 +354,9 @@ def write_snapshot(memory, rig_dir, sentinel, token, args, new_shared, new_secti
                     fail("done_task_unverified", task=task)
                 if done_file.stem not in (task, f"TASK_{task}", f"TASK-{task}"):
                     fail("done_task_mismatch", task=task)
-                if (active_root / done_file.name).exists():
+                active_names = (f"{task}.md", f"TASK_{task}.md", f"TASK-{task}.md")
+                if any((active_root / name).exists() or (active_root / name).is_symlink()
+                       for name in active_names):
                     fail("task_still_active", task=task)
                 if task in old_sections:
                     retired.append(task)
