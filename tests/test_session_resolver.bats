@@ -164,12 +164,12 @@ json.dump({
   [[ "$output" == *'"anchor": "codex-anchor"'* && "$output" == *'"agent": "codex"'* && "$output" == *'"reason": "native_id"'* ]] || return 1
 }
 
-@test "resolver prefers Codex thread id when both native host env vars are present" {
+@test "resolver refuses ambiguous raw provider IDs when both native host env vars are present" {
   write_native_session "$CASE_DIR/.rig/memory/sessions/session-claude-native.json" claude-anchor claude-native-id active claude
   write_native_session "$CASE_DIR/.rig/memory/sessions/session-codex-native.json" codex-anchor codex-thread-id active codex
   run env CLAUDE_CODE_SESSION_ID=claude-native-id CODEX_THREAD_ID=codex-thread-id RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
-  [ "$status" -eq 0 ]
-  [[ "$output" == *'"anchor": "codex-anchor"'* && "$output" == *'"agent": "codex"'* && "$output" == *'"reason": "native_id"'* ]] || return 1
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'"session_file": null'* && "$output" == *'"reason": "ambiguous_native_provider"'* && "$output" == *'"no_write": true'* ]] || return 1
 }
 
 @test "ambient native session id fails closed on a duplicate binding instead of guessing" {
