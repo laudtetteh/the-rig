@@ -320,6 +320,58 @@ run_linked_pretool() {
   [[ "$output" == *"Direct-to-main commit blocked"* ]] || return 1
 }
 
+@test "commit target does not inherit a subshell or pipeline cwd" {
+  setup_linked_hook_worktrees
+  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
+  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
+  local command payload
+  for command in \
+    "( cd '$LINKED_FEATURE'; true ); git commit -m 'fix: unsafe'" \
+    "cd '$LINKED_FEATURE' | true; git commit -m 'fix: unsafe'" \
+    "true | cd '$LINKED_FEATURE'; git commit -m 'fix: unsafe'" \
+    "cd '$LINKED_FEATURE' & git commit -m 'fix: unsafe'"; do
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT" "$command")"
+    run_linked_pretool "$payload"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"Commit blocked by The Rig."* ]] || return 1
+  done
+}
+
+@test "direct-push accepts a chore message file and refuses a fix message file" {
+  setup_linked_hook_worktrees
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
+  printf 'chore(memory): approved\n\nDetails\n' > "$TEST_ROOT/chore-msg.txt"
+  printf 'fix: unsafe\n' > "$TEST_ROOT/fix-msg.txt"
+  local command payload
+  for command in \
+    "git commit -F '$TEST_ROOT/chore-msg.txt'" \
+    "git commit --file='$TEST_ROOT/chore-msg.txt'"; do
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT" "$command")"
+    run_linked_pretool "$payload"
+    [ "$status" -eq 0 ]
+  done
+  command="git commit -F '$TEST_ROOT/fix-msg.txt'"
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT" "$command")"
+  run_linked_pretool "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Direct-to-main commit blocked"* ]] || return 1
+}
+
+@test "Codex Bash adapter preserves event cwd for main commit policy" {
+  setup_linked_hook_worktrees
+  mkdir -p "$LINKED_FEATURE/.codex/hooks"
+  cp "$TEST_PROJECT/.codex/hooks/rig-adapter.sh" "$LINKED_FEATURE/.codex/hooks/rig-adapter.sh"
+  printf 'abc123  .rig/rules/protected-paths.txt\n' > "$LINKED_FEATURE/.rig/memory/.rig-manifest"
+  touch "$LINKED_FEATURE/.rig/memory/.rig-commit-ok"
+  printf 'housekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
+  local payload
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":"git commit -m \"fix: unsafe\""}}))' "$TEST_PROJECT")"
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .codex/hooks/rig-adapter.sh' _ "$LINKED_FEATURE" "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Commit blocked by The Rig."* ]] || return 1
+}
+
 @test "commit guard inspects executable eval heredocs but not script file contents" {
   local command payload
   command=$'eval "$(cat <<\x27EOF\x27\ngit commit -m "fix: unsafe"\nEOF\n)"'
