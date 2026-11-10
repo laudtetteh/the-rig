@@ -54,6 +54,42 @@ print(content[start:end])
 PY
 }
 
+@test "wrap acquires only after the dirty-file gate and report, then releases before prompts" {
+  run python3 - "$BATS_TEST_DIRNAME/../templates/project/.claude/commands/wrap.md" <<'PY'
+import pathlib, sys
+s = pathlib.Path(sys.argv[1]).read_text()
+git = s.index('## Git state check')
+dirty = s.index('Wait for the answer before continuing.')
+report = s.index('## Wrap report step')
+acquire = s.index('## Concurrent session guard')
+first_write = s.index('## Trim step — PROGRESS.md')
+release = s.index('"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json || exit 1')
+pr_prompt = s.index('Update PR description? [yes / no]')
+name_prompt = s.index('### Step 4 — Present and confirm')
+assert git < dirty < report < acquire < first_write < release < pr_prompt < name_prompt
+assert 'After printing the Wrap report' in s[acquire:first_write]
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "post-merge skips before acquiring and releases before name confirmation" {
+  run python3 - "$BATS_TEST_DIRNAME/../templates/project/.claude/commands/post-merge.md" <<'PY'
+import pathlib, sys
+s = pathlib.Path(sys.argv[1]).read_text()
+git = s.index('## Git state check')
+dirty = s.index('ask\nthe user whether to stash')
+report = s.index('## Post-merge report step')
+skip = s.index('stop before acquiring the workflow lock')
+acquire = s.index('## Concurrent session guard')
+snapshot = s.index('For the snapshot step, write')
+release = s.index('"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json || exit 1')
+name_prompt = s.index('### Step 4 — Present and confirm')
+assert git < dirty < report < skip < acquire < snapshot < release < name_prompt
+assert 'before the first\nPOST_MERGE_WORKFLOW step' in s[report:acquire]
+PY
+  [ "$status" -eq 0 ]
+}
+
 @test "wrap releases the memory lock before waiting for session name confirmation" {
   run "$rig" memory workflow-lock acquire --owner-anchor wrap --provider-pid "$$" --json
   [ "$status" -eq 0 ]
@@ -215,6 +251,80 @@ PY
   backup=$(find "$CASE_DIR/.rig/memory/snapshot-backups" -type f -name '*.md' | head -1)
   [ -n "$backup" ]
   grep -Fq '## Resuming from: legacy-task' "$backup"
+}
+
+@test "shared refresh preserves an annotated legacy handoff through repeated writes" {
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  heading='## Resuming from: website-sprint-3-form-deploy (issue #5, active, blocked)'
+  printf '# Old context\n\n%s\n\n**Next action:** Preserve the form deploy.\n' "$heading" > "$snapshot"
+  printf '# New context\n' > "$BATS_TEST_TMPDIR/shared.md"
+  run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only --json
+  [ "$status" -eq 0 ]
+  grep -Fq "$heading" "$snapshot"
+  grep -Fq 'task=website-sprint-3-form-deploy owner=legacy' "$snapshot"
+  printf '# Newer context\n' > "$BATS_TEST_TMPDIR/shared.md"
+  run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only --json
+  [ "$status" -eq 0 ]
+  grep -Fq '# Newer context' "$snapshot"
+  grep -Fq "$heading" "$snapshot"
+  backup=$(find "$CASE_DIR/.rig/memory/snapshot-backups" -type f -name 'legacy-*.md' | head -1)
+  [ -n "$backup" ]
+  grep -Fq "$heading" "$backup"
+}
+
+@test "annotated legacy headings retain canonical ownership and reject duplicate or malformed slugs" {
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  candidate "$BATS_TEST_TMPDIR/owned.md" feat/a task-a
+  printf '# Old context\n\n## Resuming from: task-a (issue #5, blocked)\n\nKeep me.\n' > "$snapshot"
+  before=$(cksum "$snapshot")
+  run env RIG_SESSION_FILE="$file_a" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/owned.md" --owned-task task-a --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *legacy_adoption_required* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
+  printf '\n## Resuming from: task-a\n\nDuplicate.\n' >> "$snapshot"
+  before=$(cksum "$snapshot")
+  run env RIG_SESSION_FILE="$file_a" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/owned.md" --owned-task task-a --adopt-legacy --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *invalid_task_sections* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
+  printf '# Old context\n\n## Resuming from: task-a (issue #5, blocked\n\nMalformed.\n' > "$snapshot"
+  before=$(cksum "$snapshot")
+  run env RIG_SESSION_FILE="$file_a" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/owned.md" --owned-task task-a --adopt-legacy --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *invalid_task_sections* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
+}
+
+@test "marked annotated headings keep their owner and reject mismatched or duplicate markers" {
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  anchor_a=$(printf '%s' "$a" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  printf '<!-- rig:handoff-start task=task-a owner=%s -->\n## Resuming from: task-a (issue #5, active)\n\nKeep me.\n<!-- rig:handoff-end -->\n' "$anchor_a" > "$snapshot"
+  printf '# New shared context\n' > "$BATS_TEST_TMPDIR/shared.md"
+  run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only --json
+  [ "$status" -eq 0 ]
+  grep -Fq "task=task-a owner=$anchor_a" "$snapshot"
+  grep -Fq '## Resuming from: task-a (issue #5, active)' "$snapshot"
+  candidate "$BATS_TEST_TMPDIR/owned.md" feat/b task-a
+  before=$(cksum "$snapshot")
+  run env RIG_SESSION_FILE="$file_b" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/owned.md" --owned-task task-a --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *owner_conflict* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
+  sed 's/## Resuming from: task-a (issue #5, active)/## Resuming from: task-b (issue #5, active)/' "$snapshot" > "$BATS_TEST_TMPDIR/mismatch.md"
+  cp "$BATS_TEST_TMPDIR/mismatch.md" "$snapshot"
+  before=$(cksum "$snapshot")
+  run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *malformed_handoff_markers* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
+  sed 's/## Resuming from: task-b (issue #5, active)/## Resuming from: task-a (issue #5, active)/' "$snapshot" > "$BATS_TEST_TMPDIR/restored.md"
+  cp "$BATS_TEST_TMPDIR/restored.md" "$snapshot"
+  printf '<!-- rig:handoff-start task=task-a owner=%s -->\n## Resuming from: task-a\n<!-- rig:handoff-end -->\n' "$anchor_a" >> "$snapshot"
+  before=$(cksum "$snapshot")
+  run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *invalid_task_sections* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
 }
 
 @test "if-missing never replaces a snapshot created before the writer acquires its lock" {

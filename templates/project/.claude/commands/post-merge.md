@@ -62,7 +62,127 @@ which PR merged if it's not clear from context.
 >
 > Substitute `$RIG_DIR` for `.rig/` in every step below.
 
-## Concurrent session guard — run before anything else
+## Git state check — run first, before anything else
+
+Before touching any files, verify the repo is in a known-good state:
+
+```bash
+git branch --show-current
+git status --short
+git log --oneline -3
+```
+
+Report briefly:
+
+> "Branch: `[BASE_BRANCH]` | Clean working tree | HEAD: `abc1234 feat: merged PR #N`"
+
+**If the working tree is not clean:** surface any uncommitted changes and ask
+the user whether to stash, commit, or discard them before proceeding.
+
+Do not acquire the memory workflow lock while waiting for this answer.
+
+**If not on `[BASE_BRANCH]`:** note the current branch. The POST_MERGE_WORKFLOW Step 1
+will `git checkout [BASE_BRANCH] && git pull`, but flag it now so the user is aware.
+
+---
+
+## Post-merge report step
+
+**Run this after the git state check, before executing POST_MERGE_WORKFLOW steps.**
+This report-first requirement applies equally to Claude `/post-merge` and the
+generated Codex `$post-merge` skill. If no merge is applicable, print a
+structured skipped report with the reason and next action, then stop before
+writing memory.
+
+### Collection phase
+
+Gather all findings silently — no output yet:
+
+1. **Merged PR** — title, number, branch name (from context or `git log --oneline -1`)
+   If the user names several merged PRs, collect each PR with its merge SHA and
+   closed issue list.
+2. **"This session" summary** — from conversation context: all PRs merged or opened, tasks completed, issues resolved this session. Conversation context is the primary signal; PROGRESS.md markers are cross-reference only.
+3. **Task file** — which active task file maps to the merged PR (for step 3 of POST_MERGE_WORKFLOW)
+4. **ERRORS.md additions** — infer from session context whether any unexpected behaviors, footguns, or pitfalls should be added
+5. **Feature doc overlaps** — files changed in the merged PR vs. documented feature entry points (see Feature doc freshness step below)
+6. **Session name** — derive suggestion from session file and conversation context
+7. **Session identity** — run `bin/rig session resolve --json` read-only. If it
+   returns `ended_record` or `not_found` and a native session environment variable
+   is present, note that exact continuation recovery is pending. After acquiring
+   the workflow lock, run `bin/rig session retrofit --agent codex --from-env --source resume --json`
+   or `bin/rig session retrofit --agent claude --from-env --source resume --json`
+   before other memory writes. UserPromptSubmit may already have attached a
+   resumed thread from the hook event ID. If it remains `not_found`, or ended-record
+   retrofit cannot create an exact active continuation, continue in degraded mode
+   and skip final session-file mutation.
+   Stop on ambiguous, duplicate, cross-project, malformed, or unsafe session
+   state.
+
+### Report
+
+Print a single structured report before executing POST_MERGE_WORKFLOW:
+
+```
+## Post-merge report — [BASE_BRANCH] — [date]
+
+**Scope:** post-merge for [project name] only
+**Cross-project work:** [none | other projects mentioned: project-a, project-b — not updated here]
+
+**Merged:** PR #N — type(scope): description
+**Batch ledger:** [single PR | PR #N sha abc123 closes #X | PR #M sha def456 closes #Y,#Z]
+
+**This session:**
+- PR #N merged: type(scope): description
+- [other work items this session]
+(omit if this is the only work item)
+
+**ERRORS.md:** [N new entries: short-title-1 | no new entries]
+**Feature docs:** [⚠ overlap — run /refresh-feature-doc X | no overlaps]
+**Task file:** [TASK_N_slug.md → moving to done/ | no active task found]
+
+**Session name:** [suggested: "type desc #N | type desc #N" | already set — appending: "..." | exact recovery pending | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
+**Final session name:** [confirmed final: "..." | suggested final: "..." awaiting confirmation | unresolved — reliable name could not be set | nothing meaningful shipped, skipped]
+```
+
+If `/post-merge` is skipped, print instead:
+
+```
+## Post-merge report — skipped — [date]
+
+**Reason:** [no merged PR | not on merge commit | working tree dirty | other concrete reason]
+**Next action:** [merge a PR first | commit/stash changes | run /wrap only | other concrete action]
+```
+
+If the collection phase finds no applicable merged PR, print the skipped report
+and stop before acquiring the workflow lock. Do the same when the dirty-tree
+gate prevents execution.
+
+### Execution
+
+After printing the report, **execute POST_MERGE_WORKFLOW steps 1–8 automatically**:
+
+- Pull latest [BASE_BRANCH] and confirm each expected merge SHA
+- Update PROGRESS.md, one entry per PR or an explicit combined batch summary
+- Move task file to done/ only when its batch ledger rows are terminal
+- Refresh the shared CONTEXT_SNAPSHOT.md header with `bin/rig memory write-snapshot --shared-only`
+- Add inferred ERRORS.md entries (if any)
+- Make housekeeping commit
+- Apply session name — only if user says "use that" or equivalent
+
+All steps execute automatically. The session name is the only action requiring explicit user input.
+
+In degraded mode for `not_found` or `ended_record`, continue project-level
+post-merge housekeeping and write `CONTEXT_SNAPSHOT.md`, but do not fabricate a
+session UUID, do not move any session record to `sessions/done/`, and do not
+clear exact-session obligations that require a resolvable active session.
+
+Acquire the workflow lock after the report and skip gates, before the first
+POST_MERGE_WORKFLOW step. If a later verification step stops execution, release
+the exact token before returning.
+
+---
+
+## Concurrent session guard — acquire before housekeeping
 
 Acquire the owner-recorded memory workflow lock before changing memory. Preserve
 its token through the housekeeping commit. The snapshot writer separately locks its
@@ -98,115 +218,11 @@ before retrying. This commonly happens when Codex is running in
 a project whose `.rigpath` points outside the workspace writable roots.
 If any step fails after acquire, release the exact token before stopping. Keep
 the snapshot draft and pending merge obligation for a retry.
+If exact session retrofit was pending during report collection, perform it now,
+before other memory writes. Update the resolved session identity or continue in
+degraded mode if exact recovery is unavailable.
 
 ---
-
-## Git state check — run first, before anything else
-
-Before touching any files, verify the repo is in a known-good state:
-
-```bash
-git branch --show-current
-git status --short
-git log --oneline -3
-```
-
-Report briefly:
-
-> "Branch: `[BASE_BRANCH]` | Clean working tree | HEAD: `abc1234 feat: merged PR #N`"
-
-**If the working tree is not clean:** surface any uncommitted changes and ask
-the user whether to stash, commit, or discard them before proceeding.
-
-**If not on `[BASE_BRANCH]`:** note the current branch. The POST_MERGE_WORKFLOW Step 1
-will `git checkout [BASE_BRANCH] && git pull`, but flag it now so the user is aware.
-
----
-
-## Post-merge report step
-
-**Run this after the git state check, before executing POST_MERGE_WORKFLOW steps.**
-This report-first requirement applies equally to Claude `/post-merge` and the
-generated Codex `$post-merge` skill. If no merge is applicable, print a
-structured skipped report with the reason and next action, then stop before
-writing memory.
-
-### Collection phase
-
-Gather all findings silently — no output yet:
-
-1. **Merged PR** — title, number, branch name (from context or `git log --oneline -1`)
-   If the user names several merged PRs, collect each PR with its merge SHA and
-   closed issue list.
-2. **"This session" summary** — from conversation context: all PRs merged or opened, tasks completed, issues resolved this session. Conversation context is the primary signal; PROGRESS.md markers are cross-reference only.
-3. **Task file** — which active task file maps to the merged PR (for step 3 of POST_MERGE_WORKFLOW)
-4. **ERRORS.md additions** — infer from session context whether any unexpected behaviors, footguns, or pitfalls should be added
-5. **Feature doc overlaps** — files changed in the merged PR vs. documented feature entry points (see Feature doc freshness step below)
-6. **Session name** — derive suggestion from session file and conversation context
-7. **Session identity** — run `bin/rig session resolve --json`; if it returns
-   `ended_record` or `not_found` and a native session environment variable is present, first run
-   `bin/rig session retrofit --agent codex --from-env --source resume --json` or
-   `bin/rig session retrofit --agent claude --from-env --source resume --json`
-   to create an exact active continuation. UserPromptSubmit may already have
-   attached a resumed thread from the hook event ID. If it remains `not_found`, or
-   ended-record retrofit cannot create an exact active continuation, collect the
-   rest of the report in degraded mode and skip final session-file mutation.
-   Stop on ambiguous, duplicate, cross-project, malformed, or unsafe session
-   state.
-
-### Report
-
-Print a single structured report before executing POST_MERGE_WORKFLOW:
-
-```
-## Post-merge report — [BASE_BRANCH] — [date]
-
-**Scope:** post-merge for [project name] only
-**Cross-project work:** [none | other projects mentioned: project-a, project-b — not updated here]
-
-**Merged:** PR #N — type(scope): description
-**Batch ledger:** [single PR | PR #N sha abc123 closes #X | PR #M sha def456 closes #Y,#Z]
-
-**This session:**
-- PR #N merged: type(scope): description
-- [other work items this session]
-(omit if this is the only work item)
-
-**ERRORS.md:** [N new entries: short-title-1 | no new entries]
-**Feature docs:** [⚠ overlap — run /refresh-feature-doc X | no overlaps]
-**Task file:** [TASK_N_slug.md → moving to done/ | no active task found]
-
-**Session name:** [suggested: "type desc #N | type desc #N" | already set — appending: "..." | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
-**Final session name:** [confirmed final: "..." | suggested final: "..." awaiting confirmation | unresolved — reliable name could not be set | nothing meaningful shipped, skipped]
-```
-
-If `/post-merge` is skipped, print instead:
-
-```
-## Post-merge report — skipped — [date]
-
-**Reason:** [no merged PR | not on merge commit | working tree dirty | other concrete reason]
-**Next action:** [merge a PR first | commit/stash changes | run /wrap only | other concrete action]
-```
-
-### Execution
-
-After printing the report, **execute POST_MERGE_WORKFLOW steps 1–8 automatically**:
-
-- Pull latest [BASE_BRANCH] and confirm each expected merge SHA
-- Update PROGRESS.md, one entry per PR or an explicit combined batch summary
-- Move task file to done/ only when its batch ledger rows are terminal
-- Refresh the shared CONTEXT_SNAPSHOT.md header with `bin/rig memory write-snapshot --shared-only`
-- Add inferred ERRORS.md entries (if any)
-- Make housekeeping commit
-- Apply session name — only if user says "use that" or equivalent
-
-All steps execute automatically. The session name is the only action requiring explicit user input.
-
-In degraded mode for `not_found` or `ended_record`, continue project-level
-post-merge housekeeping and write `CONTEXT_SNAPSHOT.md`, but do not fabricate a
-session UUID, do not move any session record to `sessions/done/`, and do not
-clear exact-session obligations that require a resolvable active session.
 
 For the snapshot step, write the current shared project state to
 `$RIG_DIR/memory/.snapshot-draft-${SNAP_LOCK_TOKEN}.md`. Keep every

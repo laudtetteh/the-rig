@@ -18,6 +18,7 @@ import uuid
 
 TASK_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 HEADING_RE = re.compile(r"^## Resuming from: ([^\n]+)$", re.M)
+ANNOTATED_TASK_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*) \(([^()\n]+)\)$")
 START_RE = re.compile(r"^<!-- rig:handoff-start task=([^ ]+) owner=([^ ]+) -->$", re.M)
 END_MARKER = "<!-- rig:handoff-end -->"
 
@@ -31,6 +32,17 @@ def valid_task(task):
     return bool(TASK_RE.fullmatch(task)) and task not in (".", "..")
 
 
+def heading_task(heading):
+    """Use the slug for ownership while retaining legacy heading annotations."""
+    text = heading.group(1).strip()
+    if valid_task(text):
+        return text
+    annotated = ANNOTATED_TASK_RE.fullmatch(text)
+    if annotated and annotated.group(2).strip() and valid_task(annotated.group(1)):
+        return annotated.group(1)
+    return None
+
+
 def normalize(content):
     return content.rstrip() + "\n" if content.strip() else ""
 
@@ -42,8 +54,8 @@ def split_legacy(content):
     shared = content[: matches[0].start()]
     sections = {}
     for index, match in enumerate(matches):
-        task = match.group(1).strip()
-        if not valid_task(task) or task in sections:
+        task = heading_task(match)
+        if task is None or task in sections:
             fail("invalid_task_sections")
         end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
         sections[task] = {"owner": None, "body": normalize(content[match.start() : end])}
@@ -71,7 +83,7 @@ def split_marked(content):
             fail("malformed_handoff_markers")
         body = content[match.end() : end].strip("\n") + "\n"
         heading = HEADING_RE.search(body)
-        if not heading or heading.start() != 0 or heading.group(1).strip() != task:
+        if not heading or heading.start() != 0 or heading_task(heading) != task:
             fail("malformed_handoff_markers")
         sections[task] = {"owner": None if owner == "legacy" else owner, "body": body}
         cursor = end + len(END_MARKER)
