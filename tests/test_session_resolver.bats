@@ -197,6 +197,47 @@ json.dump({
   [[ "$output" == *'"reason": "anchor"'* && "$output" == *'"anchor": "legacy"'* ]] || return 1
 }
 
+@test "ambient native ID cannot use an old v1 anchor to name another thread" {
+  local result file anchor before
+  result=$("$CASE_DIR/bin/rig" session bind --agent codex --native-session-id old-thread --source startup)
+  file=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  anchor=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  before=$(cksum "$file")
+
+  run env -u RIG_SESSION_FILE CODEX_THREAD_ID=new-thread RIG_SESSION_ANCHOR="$anchor" \
+    "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 3 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="native_conflict" and d["session_file"] is None'
+
+  run env -u RIG_SESSION_FILE CODEX_THREAD_ID=new-thread RIG_SESSION_ANCHOR="$anchor" \
+    "$CASE_DIR/bin/rig" session-name set --final --json 'wrong old name'
+  [ "$status" -eq 3 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="native_conflict"'
+  [ "$(cksum "$file")" = "$before" ]
+}
+
+@test "ambient native ID cannot use a v1 PID fallback for another thread" {
+  local file="$CASE_DIR/.rig/memory/sessions/session-887766991.json"
+  write_native_session "$file" old-anchor old-thread active codex
+  run env -u RIG_SESSION_FILE -u RIG_SESSION_ANCHOR CODEX_THREAD_ID=new-thread RIG_SESSION_PID=887766991 \
+    "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 3 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="native_conflict" and d["session_file"] is None'
+}
+
+@test "ambient native ID retains explicit legacy anchor fallback" {
+  local file="$CASE_DIR/.rig/memory/sessions/session-legacy.json"
+  write_session "$file" legacy-anchor feat/current
+  run env -u RIG_SESSION_FILE CODEX_THREAD_ID=new-thread RIG_SESSION_ANCHOR=legacy-anchor \
+    "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="anchor" and d["anchor"]=="legacy-anchor"'
+  run env -u RIG_SESSION_FILE CODEX_THREAD_ID=new-thread RIG_SESSION_ANCHOR=legacy-anchor \
+    "$CASE_DIR/bin/rig" session-name set --final --json 'legacy name'
+  [ "$status" -eq 0 ]
+  SESSION_F="$file" python3 -c 'import json,os; assert json.load(open(os.environ["SESSION_F"]))["final_name"]=="legacy name"'
+}
+
 @test "ambient native session id that matches nothing at all still fails closed with not_found" {
   write_session "$CASE_DIR/.rig/memory/sessions/session-1.json" one feat/current
   run env CLAUDE_CODE_SESSION_ID=nothing-matches-this RIG_SESSION_PID=999999 "$CASE_DIR/bin/rig" session resolve --json
@@ -905,6 +946,99 @@ SH
   [ "$status" -eq 4 ]
   printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert not d["ok"] and d["reason"]=="malformed_record"'
   [ "$(cksum "$file")" = "$before" ]
+}
+
+@test "malformed v1 native shape yields JSON diagnostics in current and doctor" {
+  local result file before
+  result=$("$CASE_DIR/bin/rig" session bind --agent codex --native-session-id old-thread --source startup)
+  file=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  SESSION_F="$file" python3 -c 'import json,os; p=os.environ["SESSION_F"]; d=json.load(open(p)); d["native"]="bad type"; json.dump(d,open(p,"w"))'
+  before=$(cksum "$file")
+
+  run "$CASE_DIR/bin/rig" session current --agent codex --native-session-id old-thread --json
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="malformed_record" and d["session_file"] is None'
+
+  run "$CASE_DIR/bin/rig" session doctor --json
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert not d["ok"] and d["errors"][0]["reason"]=="malformed_record" and not next(c for c in d["checks"] if c["name"]=="record_syntax")["ok"]'
+
+  run "$CASE_DIR/bin/rig" session list --json
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert not d["ok"] and d["errors"][0]["reason"]=="malformed_record"'
+
+  run env RIG_SESSION_FILE="$file" "$CASE_DIR/bin/rig" session-name set --final --json 'unsafe name'
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; assert json.load(sys.stdin)["reason"]=="malformed_record"'
+  run "$CASE_DIR/bin/rig" session bind --agent codex --native-session-id old-thread --source resume
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; assert json.load(sys.stdin)["reason"]=="malformed_record"'
+  [ "$(cksum "$file")" = "$before" ]
+}
+
+@test "naming writer rejects a malformed v1 record after a stale exact lookup" {
+  local result file anchor before
+  result=$("$CASE_DIR/bin/rig" session bind --agent codex --native-session-id old-thread --source startup)
+  file=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  anchor=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  SESSION_F="$file" python3 -c 'import json,os; p=os.environ["SESSION_F"]; d=json.load(open(p)); d["native"]="bad type"; json.dump(d,open(p,"w"))'
+  before=$(cksum "$file")
+  cat > "$CASE_DIR/bin/rig-session-resolve.py" <<'PY'
+#!/usr/bin/env python3
+import json, os
+print(json.dumps({"ok": True, "confidence": "exact", "reason": "launcher_file",
+                  "session_file": os.environ["RIG_SESSION_FILE"],
+                  "anchor": os.environ["RIG_SESSION_ANCHOR"], "agent": "codex",
+                  "native_session_id": "old-thread"}))
+PY
+  run env RIG_SESSION_FILE="$file" RIG_SESSION_ANCHOR="$anchor" \
+    "$CASE_DIR/bin/rig" session-name set --final --json 'unsafe name'
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="malformed_record" and d["no_write"] is True'
+  [ "$(cksum "$file")" = "$before" ]
+}
+
+@test "other malformed nested v1 shapes fail before lookups and doctor checks" {
+  local result file clean field
+  result=$("$CASE_DIR/bin/rig" session bind --agent codex --native-session-id shape-thread --source startup)
+  file=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  clean="$BATS_TEST_TMPDIR/clean-record.json"
+  cp "$file" "$clean"
+  for field in project lifecycle runtime lineage migration names; do
+    cp "$clean" "$file"
+    SESSION_F="$file" FIELD="$field" python3 -c 'import json,os; p=os.environ["SESSION_F"]; d=json.load(open(p)); d[os.environ["FIELD"]]="bad type"; json.dump(d,open(p,"w"))'
+    run "$CASE_DIR/bin/rig" session resolve --agent codex --native-session-id shape-thread --json
+    [ "$status" -eq 4 ]
+    printf '%s' "$output" | python3 -c 'import json,sys; assert json.load(sys.stdin)["reason"]=="malformed_record"'
+    run "$CASE_DIR/bin/rig" session doctor --json
+    [ "$status" -eq 2 ]
+    printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert not d["ok"] and d["errors"][0]["reason"]=="malformed_record"'
+  done
+}
+
+@test "malformed v1 identity values fail before native and doctor indexing" {
+  local result file clean field
+  result=$("$CASE_DIR/bin/rig" session bind --agent codex --native-session-id shape-thread --source startup)
+  file=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  clean="$BATS_TEST_TMPDIR/clean-identity.json"
+  cp "$file" "$clean"
+  for field in anchor agent native.session_id project.identity lifecycle.state lineage.parent_anchor; do
+    cp "$clean" "$file"
+    SESSION_F="$file" FIELD="$field" python3 -c 'import json,os
+p=os.environ["SESSION_F"]
+d=json.load(open(p))
+keys=os.environ["FIELD"].split(".")
+target=d
+for key in keys[:-1]: target=target[key]
+target[keys[-1]]=["bad type"]
+json.dump(d,open(p,"w"))'
+    run "$CASE_DIR/bin/rig" session current --agent codex --native-session-id shape-thread --json
+    [ "$status" -eq 4 ]
+    printf '%s' "$output" | python3 -c 'import json,sys; assert json.load(sys.stdin)["reason"]=="malformed_record"'
+    run "$CASE_DIR/bin/rig" session doctor --json
+    [ "$status" -eq 2 ]
+    printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert not d["ok"] and d["errors"][0]["reason"]=="malformed_record"'
+  done
 }
 
 @test "session-name mutates v1 names and revision through exact launcher record" {

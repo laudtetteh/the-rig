@@ -49,14 +49,22 @@ def project_identity():
     except (OSError, subprocess.SubprocessError):
         return hashlib.sha256(str(root.resolve()).encode()).hexdigest()
 project_id = project_identity()
+def valid_v1_shapes(data):
+    if data.get("schema_version") != 1:
+        return True
+    return (all(isinstance(data.get(key), dict) for key in ("native", "project", "lifecycle")) and
+            all(key not in data or isinstance(data[key], dict)
+                for key in ("runtime", "lineage", "migration", "names")) and
+            all(value is None or isinstance(value, str) for value in
+                (data.get("anchor"), data.get("agent"), data["native"].get("session_id"),
+                 data["project"].get("identity"), data["lifecycle"].get("state"),
+                 (data.get("lineage") or {}).get("parent_anchor"))))
 def load(path):
     try:
         data = json.loads(path.read_text())
         if not isinstance(data, dict): return None
-        # Older sparse v1 records may omit lineage; a present value must be a map.
-        if data.get("schema_version") == 1 and "lineage" in data and not isinstance(data["lineage"], dict):
-            return None
-        return data
+        # Sparse v1 records may omit optional objects, but present ones must be maps.
+        return data if valid_v1_shapes(data) else None
     except (OSError, ValueError, TypeError): return None
 def original_active_path(data):
     recorded = (data.get("runtime") or {}).get("completed_from")
@@ -260,6 +268,11 @@ if os.environ.get("CODEX_THREAD_ID"):
     native_env_signals.append(("codex", os.environ.get("CODEX_THREAD_ID")))
 if os.environ.get("CLAUDE_CODE_SESSION_ID"):
     native_env_signals.append(("claude", os.environ.get("CLAUDE_CODE_SESSION_ID")))
+def fallback_native_conflict(data):
+    return (data.get("schema_version") == 1 and native_env_signals and
+            (data["project"].get("identity") != project_id or
+             any(data.get("agent") != env_agent or data["native"].get("session_id") != env_id
+                 for env_agent, env_id in native_env_signals)))
 for native_env_agent, native_env_id in native_env_signals:
     matches = [(p, d) for p, d in records if d.get("schema_version") == 1 and
                d.get("project", {}).get("identity") == project_id and d.get("agent") == native_env_agent and
@@ -287,12 +300,17 @@ if not anchor and pid_text.isdigit():
     except OSError: pass
 if anchor:
     matches = [(p,d) for p,d in files if d.get("anchor") == anchor]
-    if len(matches) == 1: emit(*matches[0], "exact", "anchor"); raise SystemExit(0)
+    if len(matches) == 1:
+        p,d = matches[0]
+        if fallback_native_conflict(d): emit(None, None, "none", "native_conflict"); raise SystemExit(3)
+        emit(p,d,"exact","anchor"); raise SystemExit(0)
     if len(matches) > 1: emit(None, None, "ambiguous", "duplicate_anchor"); raise SystemExit(2)
     if explicit_anchor: emit(None, None, "none", "launcher_anchor_not_found"); raise SystemExit(3)
 elif explicit_anchor:
     emit(None, None, "none", "invalid_launcher_anchor"); raise SystemExit(3)
 if pid_text.isdigit():
     direct = session_dir / ("session-" + pid_text + ".json"); d = load(direct)
-    if d: emit(direct, d, "exact", "pid"); raise SystemExit(0)
+    if d:
+        if fallback_native_conflict(d): emit(None, None, "none", "native_conflict"); raise SystemExit(3)
+        emit(direct, d, "exact", "pid"); raise SystemExit(0)
 emit(None, None, "none", "not_found"); raise SystemExit(1)
