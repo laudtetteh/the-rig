@@ -27,8 +27,8 @@ t=$(mktemp) || exit 1
 # Strip Co-authored-by only when the value references a known AI tool or service.
 # An AI name alone is insufficient: a human named Claude may be a co-author.
 # Copilot also emits its bot address without angle brackets.
-grep -viE '^[[:space:]]*co-authored-by[[:space:]]*:[[:space:]]*(Claude( Code| Sonnet [0-9]+(\.[0-9]+)?)?|Codex|Cursor|Copilot|GitHub Copilot)[[:space:]]*<noreply@(anthropic|openai|cursor|github)\.com>[[:space:]]*$' "$f" |
-  grep -viE '^[[:space:]]*co-authored-by[[:space:]]*:[[:space:]]*Copilot[[:space:]]+(<copilot@github\.com>|copilot@github\.com)[[:space:]]*$' |
+grep -viE '^[[:space:]]*co-authored-by[[:space:]]*:[[:space:]]*(Claude( Code| (Sonnet|Opus|Haiku) [0-9]+(\.[0-9]+)?)?|Codex|Cursor|Copilot|GitHub Copilot)[[:space:]]*<noreply@(anthropic|openai|cursor|github)\.com>[[:space:]]*$' "$f" |
+  grep -viE '^[[:space:]]*co-authored-by[[:space:]]*:[[:space:]]*(Copilot|GitHub Copilot)[[:space:]]+(<copilot@github\.com>|copilot@github\.com)[[:space:]]*$' |
   grep -viE '^[^[:alnum:]]*generated[[:space:]]+(with|by)[[:space:]]+\[?(Claude( Code)?|Codex|Cursor|Copilot|GitHub Copilot)\]?([[:space:]]|\(https?://|[.]|$)' |
   grep -viE '^[^[:alnum:]]*committed[[:space:]]+with[[:space:]]+\[?(Claude( Code)?|Codex|Cursor|Copilot|GitHub Copilot)\]?([[:space:]]|\(https?://|[.]|$)' |
   grep -viE '^[^[:alnum:]]*made[-[:space:]]+with[-[:space:]]+(Claude( Code)?|Codex|Cursor|Copilot|GitHub Copilot)([[:space:].:]|$)' |
