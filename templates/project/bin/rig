@@ -1251,7 +1251,7 @@ session_resolve() {
 }
 
 session_bind() {
-  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
+  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" RIG_RESOLVER="$(dirname "${BASH_SOURCE[0]}")/rig-session-resolve.py" python3 - "$@" <<'PY'
 import datetime, fcntl, hashlib, json, os, pathlib, subprocess, sys, tempfile, uuid
 args=sys.argv[1:]
 def option(name, default=""):
@@ -1341,43 +1341,39 @@ for base in (sessions,sessions/"done"):
             records.append((p,d))
 if unsafe_path:
     print(json.dumps({"ok":False,"reason":"invalid_session_path","no_write":True})); raise SystemExit(4)
+def graph_state(candidate=None, path=None):
+    command=[sys.executable,os.environ["RIG_RESOLVER"],"--graph-check"]
+    if candidate is not None: command.extend(["--candidate-path",str(path)])
+    result=subprocess.run(command,input=json.dumps(candidate) if candidate is not None else None,
+                          text=True,capture_output=True,env=os.environ)
+    try: data=json.loads(result.stdout)
+    except (ValueError,TypeError): data={"reason":"lineage_validation_failed"}
+    if result.returncode not in (0,2) or "invalid_anchors" not in data:
+        print(json.dumps({"ok":False,"reason":data.get("reason","lineage_validation_failed"),"no_write":True})); raise SystemExit(4)
+    return data
+graph=graph_state()
 matches=[(p,d) for p,d in records if d.get("schema_version")==1 and d.get("project",{}).get("identity")==project_id and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id]
+if any(not d.get("anchor") for _,d in matches):
+    print(json.dumps({"ok":False,"reason":"invalid_session_anchor","no_write":True})); raise SystemExit(3)
 ended_states=("complete","inactive","ended_no_wrap")
 continuation_states=(*ended_states,"orphaned")
 continuation_from_ended=False
 if len(matches)>1:
-    active_matches=[(p,d) for p,d in matches if "done" not in p.parts and d.get("lifecycle",{}).get("state")=="active"]
-    by_anchor={d.get("anchor"):(p,d) for p,d in matches}
-    if len(active_matches)>1 or not all(by_anchor) or len(by_anchor)!=len(matches):
+    if (any(d.get("anchor") in graph["invalid_anchors"] for _,d in matches) or
+        len({graph["roots"].get(d.get("anchor")) for _,d in matches})!=1 or
+        any(d.get("anchor") in graph["duplicate_native_anchors"] for _,d in matches)):
         print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
-    roots=[d for _,d in matches if not (d.get("lineage") or {}).get("parent_anchor")]
-    parents={(d.get("lineage") or {}).get("parent_anchor") for _,d in matches}
-    leaves=[(p,d) for p,d in matches if d.get("anchor") not in parents]
-    invalid_parent=False
-    for _,record in matches:
-        parent_anchor=(record.get("lineage") or {}).get("parent_anchor")
-        if not parent_anchor: continue
-        if (parent_anchor not in by_anchor or (record.get("lineage") or {}).get("kind")!="continuation" or
-            by_anchor[parent_anchor][1].get("lifecycle",{}).get("state") not in continuation_states):
-            invalid_parent=True; break
-    if len(roots)!=1 or len(leaves)!=1 or (active_matches and leaves[0][0]!=active_matches[0][0]) or invalid_parent:
-        print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
-    leaf_path,leaf_record=leaves[0]
-    leaf_state=leaf_record.get("lifecycle",{}).get("state")
-    if (leaf_state=="active" and "done" in leaf_path.parts) or leaf_state not in (*continuation_states,"active"):
-        print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
-    seen=set(); cursor=leaves[0][1]
-    while cursor and cursor.get("anchor") not in seen:
-        seen.add(cursor.get("anchor")); parent_anchor=(cursor.get("lineage") or {}).get("parent_anchor")
-        cursor=by_anchor[parent_anchor][1] if parent_anchor else None
-    if len(seen)!=len(matches):
-        print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
+    leaves=[max(matches,key=lambda item:graph["depths"].get(item[1].get("anchor"),0))]
 lineage_records=matches[:]
 if len(matches)>1:
     matches=leaves
 cross_project=[d for _,d in records if d.get("schema_version")==1 and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id and d.get("project",{}).get("identity")!=project_id]
 if cross_project:
     print(json.dumps({"ok":False,"reason":"cross_project"})); raise SystemExit(3)
+if matches and matches[0][1].get("anchor") in graph["invalid_anchors"]:
+    invalid_lifecycle=matches[0][1].get("anchor") in graph["invalid_lifecycle_anchors"]
+    reason="invalid_lifecycle_transition" if invalid_lifecycle else "invalid_continuation_lineage"
+    print(json.dumps({"ok":False,"reason":reason,"no_write":True})); raise SystemExit(3)
 if hint_path and matches:
     expected_anchor=os.environ.get("RIG_SESSION_ANCHOR")
     hint_records=[(p,d) for p,d in lineage_records if hint_path==p.resolve() or (d.get("lifecycle",{}).get("state")=="complete" and hint_path==original_active_path(d))]
@@ -1395,8 +1391,16 @@ if matches:
             print(json.dumps({"ok":False,"reason":"ended_record"})); raise SystemExit(3)
         ended_path, ended_record = p, d
         continuation_from_ended=True
-        if not parent:
-            parent = ended_record.get("native", {}).get("session_id") or native_id
+        root_anchor=graph["roots"].get(ended_record.get("anchor"))
+        leaf_anchor=graph["leaves"].get(root_anchor)
+        leaf_matches=[(q,record) for q,record in records if record.get("schema_version")==1 and record.get("anchor")==leaf_anchor]
+        if len(leaf_matches)!=1 or leaf_matches[0][1].get("lifecycle",{}).get("state") not in continuation_states:
+            print(json.dumps({"ok":False,"reason":"invalid_continuation_lineage","no_write":True})); raise SystemExit(3)
+        ended_path,ended_record=leaf_matches[0]
+        leaf_native=ended_record.get("native",{}).get("session_id")
+        if parent and parent!=leaf_native:
+            print(json.dumps({"ok":False,"reason":"invalid_continuation_lineage","no_write":True})); raise SystemExit(3)
+        parent=leaf_native or native_id
         matches = []
         p = None
         d = None
@@ -1430,11 +1434,27 @@ if not matches:
         parent_anchor=ended_record.get("anchor")
     else:
         parent_matches=[other for _,other in records if other.get("schema_version")==1 and other.get("project",{}).get("identity")==project_id and other.get("agent")==agent and other.get("native",{}).get("session_id")==parent]
-        if len(parent_matches)>1:
-            print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
-        parent_anchor=parent_matches[0].get("anchor") if len(parent_matches)==1 else None
-        if allow_continuation and parent_anchor and parent_matches[0].get("lifecycle",{}).get("state") not in continuation_states:
-            print(json.dumps({"ok":False,"reason":"invalid_continuation_lineage","no_write":True})); raise SystemExit(3)
+        if parent_matches:
+            parent_roots={graph["roots"].get(record.get("anchor")) for record in parent_matches}
+            if (len(parent_roots)!=1 or None in parent_roots or
+                any(record.get("anchor") in graph["invalid_anchors"] or record.get("anchor") in graph["duplicate_native_anchors"] for record in parent_matches)):
+                print(json.dumps({"ok":False,"reason":"duplicate_native_id","no_write":True})); raise SystemExit(2)
+            if allow_continuation:
+                leaf_anchor=graph["leaves"].get(next(iter(parent_roots)))
+                leaf_matches=[record for _,record in records if record.get("schema_version")==1 and record.get("anchor")==leaf_anchor]
+                if len(leaf_matches)!=1:
+                    print(json.dumps({"ok":False,"reason":"invalid_continuation_lineage","no_write":True})); raise SystemExit(3)
+                parent_record=leaf_matches[0]
+            else:
+                # A provider fork names its exact origin native ID. Do not
+                # replace that origin with a descendant's different ID.
+                parent_record=max(parent_matches,key=lambda record:graph["depths"].get(record.get("anchor"),0))
+            parent_anchor=parent_record["anchor"]
+            parent=parent_record["native"]["session_id"]
+            if allow_continuation and parent_record.get("lifecycle",{}).get("state") not in continuation_states:
+                print(json.dumps({"ok":False,"reason":"invalid_continuation_lineage","no_write":True})); raise SystemExit(3)
+        else:
+            parent_anchor=None
     lineage_kind="continuation" if allow_continuation and parent_anchor else ("fork" if source=="fork" or parent else "root")
     d={"schema_version":1,"anchor":anchor,"agent":agent,
        "native":{"session_id":native_id,"root_session_id":root_native,"bound_at":now,"source":"launcher_hint" if hint else source},
@@ -1455,6 +1475,13 @@ if matches:
         names=d.setdefault("names",{}); names["native_title"]=native_title
         if not (names.get("final") or names.get("tentative") or names.get("display_title")): names["display_title"]=native_title
         names["native_sync"]="in-sync" if names.get("display_title")==native_title else "suggested"
+candidate_graph=graph_state(d,p)
+if d.get("anchor") in candidate_graph["invalid_anchors"]:
+    invalid_lifecycle=d.get("anchor") in candidate_graph["invalid_lifecycle_anchors"]
+    reason="invalid_lifecycle_transition" if invalid_lifecycle else "invalid_continuation_lineage"
+    print(json.dumps({"ok":False,"reason":reason,"no_write":True})); raise SystemExit(3)
+if d.get("anchor") in candidate_graph["duplicate_native_anchors"]:
+    print(json.dumps({"ok":False,"reason":"duplicate_native_id","no_write":True})); raise SystemExit(2)
 fd,tmp=tempfile.mkstemp(prefix=".session-",suffix=".tmp",dir=str(p.parent))
 try:
     with os.fdopen(fd,"w") as f: json.dump(d,f,indent=2); f.write("\n"); f.flush(); os.fsync(f.fileno())
@@ -1572,7 +1599,7 @@ session_current() {
 
 session_inspect() {
   local action="$1"; shift
-  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$action" "$@" <<'PY'
+  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" RIG_RESOLVER="$(dirname "${BASH_SOURCE[0]}")/rig-session-resolve.py" python3 - "$action" "$@" <<'PY'
 import hashlib, json, os, pathlib, stat, subprocess, sys
 action=sys.argv[1]; args=sys.argv[2:]
 if any(arg not in ("--json","--verbose") for arg in args):
@@ -1638,58 +1665,22 @@ if action=="doctor":
         native=d.get("native",{}).get("session_id")
         if native: natives.setdefault((d.get("project",{}).get("identity"),d.get("agent"),native),[]).append(p.name)
     dup_a=[k for k,v in anchors.items() if k and len(v)>1]
-    def valid_continuation_chain(group):
-        ended_states=("complete","inactive","ended_no_wrap","orphaned")
-        by_anchor={d.get("anchor"):(p,d) for p,d in group}
-        if not all(by_anchor) or len(by_anchor)!=len(group): return False
-        active=[(p,d) for p,d in group if "done" not in p.parts and d.get("lifecycle",{}).get("state")=="active"]
-        if len(active)>1: return False
-        roots=[(p,d) for p,d in group if not (d.get("lineage") or {}).get("parent_anchor")]
-        if len(roots)!=1: return False
-        parents=set()
-        for p,d in group:
-            parent=(d.get("lineage") or {}).get("parent_anchor")
-            if not parent: continue
-            if (d.get("lineage") or {}).get("kind")!="continuation" or parent not in by_anchor: return False
-            _,parent_record=by_anchor[parent]
-            if parent_record.get("lifecycle",{}).get("state") not in ended_states: return False
-            parents.add(parent)
-        leaves=[(p,d) for p,d in group if d.get("anchor") not in parents]
-        if len(leaves)!=1 or (active and leaves[0][0]!=active[0][0]): return False
-        leaf_path,leaf_record=leaves[0]
-        leaf_state=leaf_record.get("lifecycle",{}).get("state")
-        if (leaf_state=="active" and "done" in leaf_path.parts) or leaf_state not in (*ended_states,"active"): return False
-        seen=set(); cursor=leaves[0][1]
-        while cursor and cursor.get("anchor") not in seen:
-            seen.add(cursor.get("anchor")); parent=(cursor.get("lineage") or {}).get("parent_anchor")
-            cursor=by_anchor[parent][1] if parent else None
-        return len(seen)==len(group)
+    graph_run=subprocess.run([sys.executable,os.environ["RIG_RESOLVER"],"--graph-check"],
+                             text=True,capture_output=True,env=os.environ)
+    try: graph=json.loads(graph_run.stdout)
+    except (ValueError,TypeError): graph={}
+    graph_invalid=set(graph.get("invalid_anchors",[]))
+    graph_duplicate=set(graph.get("duplicate_native_anchors",[]))
+    graph_roots=graph.get("roots",{})
     dup_n=[]
     for key in natives:
         group=[(p,d) for p,d in records if (d.get("project",{}).get("identity"),d.get("agent"),d.get("native",{}).get("session_id"))==key]
-        if len(group)>1 and not valid_continuation_chain(group): dup_n.append(key)
+        if len(group)>1 and (any(d.get("anchor") in graph_invalid or d.get("anchor") in graph_duplicate for _,d in group) or
+                             len({graph_roots.get(d.get("anchor")) for _,d in group})!=1): dup_n.append(key)
     check("unique_anchors",not dup_a,"unique" if not dup_a else "%d duplicates"%len(dup_a))
     check("unique_native_bindings",not dup_n,"unique" if not dup_n else "%d duplicates"%len(dup_n))
-    by_anchor={}
-    for p,d in records:
-        if d.get("schema_version")==1 and d.get("anchor"):
-            by_anchor.setdefault(d["anchor"],[]).append((p,d))
-    invalid_lineage=[]
-    ended_states=("complete","inactive","ended_no_wrap","orphaned")
-    for p,d in records:
-        if d.get("schema_version")!=1 or (d.get("lineage") or {}).get("kind")!="continuation": continue
-        lineage=d.get("lineage") or {}
-        parents=by_anchor.get(lineage.get("parent_anchor"),[])
-        if len(parents)!=1:
-            invalid_lineage.append(p.name); continue
-        parent_path,parent=parents[0]
-        if (parent_path==p or parent.get("lifecycle",{}).get("state") not in ended_states or
-            parent.get("project",{}).get("identity")!=d.get("project",{}).get("identity") or
-            parent.get("agent")!=d.get("agent") or
-            parent.get("native",{}).get("session_id")!=lineage.get("parent_native_session_id")):
-            invalid_lineage.append(p.name)
-    lineage_ok=not dup_n and not invalid_lineage
-    check("continuation_lineage",lineage_ok,"valid" if lineage_ok else "%d invalid chains"%(len(dup_n)+len(invalid_lineage)))
+    lineage_ok=graph_run.returncode==0 and not dup_n
+    check("continuation_lineage",lineage_ok,"valid" if lineage_ok else "invalid graph")
     audit=sessions/"repair-audit.jsonl"; audit_ok=True; audit_detail="absent"
     if audit.exists():
         audit_detail="valid"
@@ -1827,7 +1818,7 @@ session_name_set() {
   anchor=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
   [[ -n "$file" ]] || return "$RIG_EXIT_UNAVAILABLE"
   if [[ "$complete" == true ]]; then done_dir="$(rig_dir)/memory/sessions/done"; mkdir -p "$done_dir"; dest="$done_dir/session-$(date +%Y%m%d)-${anchor:-unknown}.json"; fi
-  SESSION_F="$file" SESSION_NAME="$name" SESSION_TENTATIVE="$tentative" SESSION_COMPLETE="$complete" SESSION_DEST="$dest" SESSION_EXPECTED="$resolved" SESSION_ROOT="$(rig_root)" SESSION_RIG="$(rig_dir)" SESSION_JSON="$json" python3 <<'PY' || writer_status=$?
+  SESSION_F="$file" SESSION_NAME="$name" SESSION_TENTATIVE="$tentative" SESSION_COMPLETE="$complete" SESSION_DEST="$dest" SESSION_EXPECTED="$resolved" SESSION_ROOT="$(rig_root)" SESSION_RIG="$(rig_dir)" SESSION_RESOLVER="$(dirname "${BASH_SOURCE[0]}")/rig-session-resolve.py" SESSION_JSON="$json" python3 <<'PY' || writer_status=$?
 import fcntl, hashlib, json, os, pathlib, subprocess, sys, tempfile
 p = pathlib.Path(os.environ["SESSION_F"])
 expected = json.loads(os.environ["SESSION_EXPECTED"])
@@ -1847,6 +1838,7 @@ try:
 except (OSError,ValueError,TypeError): refuse("record_changed")
 if not isinstance(d,dict) or expected.get("confidence")!="exact" or expected.get("session_file")!=str(p) or d.get("anchor")!=expected.get("anchor"):
     refuse("record_changed")
+if d.get("schema_version")==1 and not d.get("anchor"): refuse("invalid_session_anchor")
 if d.get("schema_version")==1 and (
     not all(isinstance(d.get(key),dict) for key in ("native","project","lifecycle")) or
     not all(key not in d or isinstance(d[key],dict) for key in ("runtime","lineage","migration","names")) or
@@ -1869,6 +1861,16 @@ if d.get("schema_version") == 1:
     if d.get("agent")!=expected.get("agent") or d.get("native",{}).get("session_id")!=expected.get("native_session_id"):
         refuse("native_conflict")
     if d.get("lifecycle",{}).get("state")!="active": refuse("ended_record")
+    destination=pathlib.Path(os.environ["SESSION_DEST"]) if os.environ["SESSION_DEST"] else p
+    if destination!=p and (destination.exists() or destination.is_symlink()): refuse("destination_exists")
+    graph_env=dict(os.environ,RIG_ROOT=os.environ["SESSION_ROOT"],RIG_DIR=os.environ["SESSION_RIG"])
+    graph_run=subprocess.run([sys.executable,os.environ["SESSION_RESOLVER"],"--graph-check"],
+                             text=True,capture_output=True,env=graph_env)
+    try: graph=json.loads(graph_run.stdout)
+    except (ValueError,TypeError): graph={}
+    if "invalid_anchors" not in graph: refuse(graph.get("reason","lineage_validation_failed"),4)
+    if d.get("anchor") in graph["invalid_anchors"]: refuse("invalid_continuation_lineage",2)
+    if d.get("anchor") in graph["duplicate_native_anchors"]: refuse("duplicate_native_id",2)
 elif not (expected.get("reason")=="launcher_file" or (expected.get("reason")=="anchor" and os.environ.get("RIG_SESSION_ANCHOR")==d.get("anchor"))) or d.get("status")!="active":
     refuse("migration_required")
 if d.get("schema_version") == 1:
