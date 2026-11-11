@@ -5,6 +5,78 @@
 # created commit changes its SHA, so automatic amend requires explicit opt-in.
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+RIG_DIR="$ROOT/.rig"
+if [ -f "$ROOT/.rigpath" ]; then
+  IFS= read -r RIG_DIR < "$ROOT/.rigpath"
+fi
+
+# A manually completed merge runs post-commit. Its pending marker is only for
+# generated `git merge` commits, which reach the same logger via post-merge.
+if [ "${RIG_COMMIT_POLICY:-}" = guarded ]; then
+  MERGE_PENDING=$(git rev-parse --git-path rig-merge-progress-pending 2>/dev/null) || MERGE_PENDING=""
+  [ -z "$MERGE_PENDING" ] || rm -f "$MERGE_PENDING"
+fi
+
+# Git runs this hook after a successful commit. Read HEAD after any opt-in
+# amendment so the progress entry names the final SHA. PostToolUse cannot
+# reliably infer the target worktree from a Bash tool response.
+record_progress() {
+  [ "${RIG_COMMIT_POLICY:-}" = guarded ] || return
+  if [ -d "$(git rev-parse --git-path rebase-merge)" ] || \
+     [ -d "$(git rev-parse --git-path rebase-apply)" ] || \
+     [ -f "$(git rev-parse --git-path CHERRY_PICK_HEAD)" ] || \
+     [ -f "$(git rev-parse --git-path REVERT_HEAD)" ] || \
+     [ -d "$(git rev-parse --git-path sequencer)" ]; then
+    return
+  fi
+  case "$RIG_DIR" in /*) ;; *) return ;; esac
+  PROGRESS="$RIG_DIR/memory/PROGRESS.md"
+  [ -f "$PROGRESS" ] || return
+  HASH=$(git rev-parse HEAD 2>/dev/null) || return
+  [ -n "$HASH" ] || return
+  SUBJECT=$(git log -1 --format=%s 2>/dev/null) || return
+  [ -n "$SUBJECT" ] || return
+  DATE=$(date +%Y-%m-%d)
+  # Share bin/rig's .progress.lock so two worktrees cannot replace each
+  # other's stubs. The SHA check belongs inside the lock with the write.
+  python3 - "$PROGRESS" "$HASH" "$SUBJECT" "$DATE" <<'PY' || \
+    echo "WARNING: The Rig could not append the guarded commit to PROGRESS.md." >&2
+import fcntl, os, pathlib, re, stat, sys, tempfile
+path = pathlib.Path(sys.argv[1])
+sha, subject, date = sys.argv[2:]
+sid = os.environ.get("RIG_SESSION_ANCHOR", "")
+sid_suffix = f" <!-- sid:{sid} -->" if re.fullmatch(r"[A-Za-z0-9-]+", sid) else ""
+with open(path.parent / ".progress.lock", "a+") as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    if path.is_symlink() or not path.is_file():
+        raise SystemExit(1)
+    with open(path, "r", encoding="utf-8", errors="surrogateescape", newline="") as source:
+        original = source.read()
+    if sha in original:
+        raise SystemExit(0)
+    lines = original.splitlines(keepends=True)
+    position = next((i for i, line in enumerate(lines) if line.rstrip("\r\n") == "---"), None)
+    if position is None:
+        raise SystemExit(1)
+    if not lines[position].endswith("\n"):
+        lines[position] += "\n"
+    stub = f"\n## {date} — {subject} [{sha}]{sid_suffix}\n_Auto-logged by post-commit hook. Expand this entry during wrap-up._\n\n---\n"
+    lines.insert(position + 1, stub)
+    fd, temporary = tempfile.mkstemp(prefix=".progress-", suffix=".tmp", dir=str(path.parent))
+    try:
+        os.fchmod(fd, stat.S_IMODE(path.stat().st_mode))
+        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape", newline="") as handle:
+            handle.write("".join(lines))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+PY
+}
+trap 'record_progress' EXIT
+
 HOOK_DIR="$(CDPATH='' cd "$(dirname "$0")" && pwd -P)" || exit 0
 FILTER="$HOOK_DIR/filter-commit-message-inplace.sh"
 [ -f "$FILTER" ] || FILTER="${ROOT}/.husky/filter-commit-message-inplace.sh"

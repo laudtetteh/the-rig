@@ -117,10 +117,13 @@ import json, os, re, sys
 d = json.load(sys.stdin)
 tool = d.get("tool_input", d.get("toolInput", {}))
 command = tool.get("command", "") if isinstance(tool, dict) else ""
+cwd = d.get("cwd", os.getcwd())
+if not isinstance(cwd, str) or not os.path.isabs(cwd) or not os.path.isdir(cwd):
+    raise SystemExit(1)
 for value in re.findall(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$", command, re.M):
-    path = value if os.path.isabs(value) else os.path.join(sys.argv[1], value)
+    path = value if os.path.isabs(value) else os.path.join(cwd, value)
     print(os.path.realpath(path))
-' "$REPO") || fail_closed "apply_patch payload is malformed."
+') || fail_closed "apply_patch payload is malformed."
   [[ -n "$paths" ]] || fail_closed "apply_patch payload contains no file targets."
   while IFS= read -r path; do
     found=1
@@ -131,15 +134,16 @@ for value in re.findall(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$"
     done
   done <<< "$paths"
   [[ "$found" -eq 1 ]] || fail_closed "apply_patch payload contains no file targets."
+  PATCH_TARGETS="$paths"
 }
 
 PAYLOAD=$(normalize_payload) || fail_closed "hook payload could not be normalized."
 TOOL=$(printf '%s' "$PAYLOAD" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_name", ""))')
 HOOK_PAYLOAD="$PAYLOAD"
 
-# Claude's PreToolUse hook receives the tool input object directly, while Codex
-# wraps that object in its event envelope. Delegate the equivalent shape so the
-# canonical hook sees the same command/file fields on both agent paths.
+# Preserve the event cwd for the canonical PreToolUse guard. In linked
+# worktrees, dropping it can make a main-branch commit appear to target the
+# adapter's feature worktree instead.
 if [[ "$EVENT" == "PreToolUse" ]]; then
   HOOK_PAYLOAD=$(printf '%s' "$PAYLOAD" | python3 -c '
 import json, sys
@@ -147,12 +151,13 @@ data = json.load(sys.stdin)
 tool_input = data.get("tool_input", {})
 if not isinstance(tool_input, dict):
     raise SystemExit(1)
-print(json.dumps(tool_input))
+print(json.dumps(data))
 ') || fail_closed "PreToolUse payload has invalid tool input."
 fi
 
 if [[ "$EVENT" == "PreToolUse" && "$TOOL" == "apply_patch" ]]; then
   validate_apply_patch
+  PATCH_EVENT=true
 fi
 
 HOOK_DIR="$REPO/.claude/hooks"
@@ -179,6 +184,20 @@ case "$EVENT" in
 esac
 
 [[ -r "$HOOK" ]] || fail_closed "canonical hook is missing or unreadable: $HOOK"
+if [[ "${PATCH_EVENT:-false}" == true ]]; then
+  # The canonical Write guard checks project-specific blocked paths and the
+  # target worktree's policy. Check every patch target, not just the caller's
+  # governance paths. Codex cannot apply a per-target Write redirection to a
+  # patch command, so require the caller to use the canonical destination.
+  while IFS= read -r path; do
+    target_payload=$(python3 -c 'import json,sys; print(json.dumps({"file_path":sys.argv[1]}))' "$path") || \
+      fail_closed "apply_patch target could not be encoded."
+    OUTPUT=$(printf '%s' "$target_payload" | RIG_AGENT=codex bash "$HOOK" Write); STATUS=$?
+    [[ "$STATUS" -eq 0 ]] || exit "$STATUS"
+    [[ -z "$OUTPUT" ]] || fail_closed "apply_patch target requires a redirected write; patch the canonical destination."
+  done <<< "$PATCH_TARGETS"
+  exit 0
+fi
 if [[ "$EVENT" == "PreToolUse" || "$EVENT" == "PostToolUse" ]]; then
   OUTPUT=$(printf '%s' "$HOOK_PAYLOAD" | RIG_AGENT=codex bash "$HOOK" "$TOOL"); STATUS=$?
 else

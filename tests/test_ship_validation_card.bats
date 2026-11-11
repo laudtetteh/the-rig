@@ -29,6 +29,10 @@ SHIP_WORKFLOW="$REPO_ROOT/templates/project/.rig/processes/SHIP_WORKFLOW.md"
   grep -q 'docs-only diff still needs one minimal' "$SHIP_COMMAND"
 }
 
+@test "ship command blocks legacy and Git-hook progress stubs" {
+  grep -Fq 'Auto-logged by (post-tool|post-commit) hook' "$SHIP_COMMAND"
+}
+
 @test "ship command makes manual reruns optional without false attestation" {
   grep -q 'Optional manual validation' "$SHIP_COMMAND"
   grep -q 'it does not claim you personally' "$SHIP_COMMAND"

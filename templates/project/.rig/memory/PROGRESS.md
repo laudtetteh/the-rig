@@ -2,7 +2,9 @@
 
 > Running log of completed work. Most recent entry at the top.
 > Updated at the end of every task and after every PR merge.
-> The post-tool hook auto-stubs an entry after each git commit — expand it during wrap-up.
+> The post-commit Git hook auto-stubs guarded agent commits. In a hookless install,
+> PostToolUse stubs approved visible commits when it sees a matching Git result.
+> Expand auto-stubs during wrap-up.
 >
 > **Trim convention:** keep the 20 most recent entries in this file.
 > When `/wrap` detects more than 20 entries, it moves the oldest to

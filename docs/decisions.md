@@ -28,7 +28,7 @@ Why The Rig is built the way it is. Each entry covers what was decided, what was
 
 **Rationale:** Claude Code sessions are stateless — context resets between sessions. Even within a long session, context compaction summarizes conversation history, losing nuance. Three focused files are faster to read, more durable, and more reliable than any conversation artifact. `CONTEXT_SNAPSHOT.md` is designed specifically as a session-handoff document: overwritten at session end, read at session start.
 
-**Tradeoff accepted:** The agent must be disciplined about updating these files. The `post-tool.sh` hook partially automates `PROGRESS.md` (auto-stub after commits) to reduce the discipline requirement.
+**Tradeoff accepted:** The agent must be disciplined about updating these files. The Git `post-commit` hook partially automates `PROGRESS.md` for guarded agent commits; PostToolUse provides a limited fallback for approved visible commits without an active Rig Git hook.
 
 ---
 
@@ -46,13 +46,13 @@ Why The Rig is built the way it is. Each entry covers what was decided, what was
 
 ## 4. Hooks enforce what rules document
 
-**Decided:** Use Claude Code's `PreToolUse` hook to physically block writes to protected paths.
+**Decided:** Use Claude Code's `PreToolUse` hook to block structured Write, Edit, and NotebookEdit calls to protected paths. Use Git's `commit-msg` hook to guard actual commits explicitly marked with `RIG_COMMIT_POLICY=guarded`. When that hook is absent, PreToolUse retains the one-use visible-command approval, branch, and direct-push gate.
 
 **Rejected:** Documenting "don't write to X" in rules files only.
 
-**Rationale:** Documentation is advisory. An agent operating under pressure (tight context, mid-task, complex debugging) will violate documented rules. Hooks make the violation impossible — the tool call fails before the write happens. The security guarantee is mechanical, not behavioural.
+**Rationale:** Documentation is advisory. The structured write hook rejects protected paths before those tool calls run. Bash can generate scripts, use shell escapes, or change Git's worktree through environment variables, so static PreToolUse parsing cannot guarantee a commit policy. The Git hook sees the prepared message and target worktree when an opted-in commit runs. Ordinary terminal commits keep their existing format behavior.
 
-**Tradeoff accepted:** Requires Claude Code's hook system. Not directly portable to other AI coding tools without adaptation.
+**Tradeoff accepted:** Structured write protection requires the provider hook system. Agent tagging is explicit: the provider cannot reliably identify all agent Bash subprocesses. The early hook rejects visible unmarked commits, but a generated or dynamically assembled unmarked command can bypass static detection. The hookless fallback is limited to visible commands. Git hooks depend on installation and can be skipped with `--no-verify`, `-c core.hooksPath=/dev/null`, or Husky's skip mechanism; they do not make commits physically impossible.
 
 ---
 
@@ -120,15 +120,15 @@ Why The Rig is built the way it is. Each entry covers what was decided, what was
 
 ---
 
-## 10. The post-tool hook auto-stubs PROGRESS.md rather than requiring manual updates
+## 10. Commit hooks and PostToolUse auto-stub PROGRESS.md for guarded agent commits
 
-**Decided:** `post-tool.sh` detects git commits by scanning Bash output for a short hash in brackets, then auto-inserts a dated stub entry.
+**Decided:** With active Rig Git hooks, `post-commit` reads final HEAD after any optional late-footer amendment and inserts a dated stub into the actual worktree's progress log for guarded agent commits. For a generated merge commit, `commit-msg` leaves a worktree-specific pending marker and `post-merge` claims it before reusing the same final-SHA logger. A manually completed merge runs `post-commit`, which clears its marker. In a hookless install, PostToolUse uses the matching pending approval and Git result to stub approved visible commits. Both stub writers hold the same `.progress.lock` as `bin/rig memory append-progress` across their duplicate check and atomic replacement, so shared external Rig storage retains concurrent commits. A supplied `RIG_SESSION_ANCHOR` is added to a stub header as a SID marker. These paths skip ordinary terminal commits and rebase/cherry-pick/revert replay commits. A guarded merge commit requires fresh approval even while `MERGE_HEAD` exists.
 
 **Rejected:** Relying solely on the agent to update `PROGRESS.md` during wrap-up.
 
-**Rationale:** Agents under time pressure or approaching a context limit routinely skip housekeeping. The auto-stub means there's always a placeholder entry after every commit — the agent expands it during wrap-up, but if the session ends abruptly, the record still exists. The stub is idempotent (won't duplicate if the hash is already in the file) and clearly marked as auto-logged.
+**Rationale:** Agents under time pressure or approaching a context limit routinely skip housekeeping. The auto-stub leaves a placeholder after a guarded agent commit. The stub is idempotent for the final SHA and clearly marked as auto-logged.
 
-**Tradeoff accepted:** Heuristic-based detection (hash in brackets) could produce false positives if non-commit bash output happens to match the pattern. Accepted — a spurious stub is much less harmful than a missing entry.
+**Tradeoff accepted:** Commits without the explicit agent marker do not create a stub. That preserves ordinary human terminal behavior and means an untagged agent commit can lack a stub. Hookless PostToolUse can miss quiet Git output or a target it could not resolve. Pending markers are keyed by the provider's tool event ID; a provider that omits that ID falls back to a shared legacy marker, so overlapping legacy events can replace one another.
 
 ---
 

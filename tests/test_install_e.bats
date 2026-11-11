@@ -400,10 +400,14 @@ _is_rig_protected() {
 _run_pre_tool_write() {
   local file_path="$1"
   local input
+  # The hook resolves its project from its installed location, not cwd.
+  mkdir -p "$TEST_PROJECT/.claude/hooks"
+  cp "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh" \
+    "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
   input=$(printf '{"file_path":"%s"}' "$file_path")
   run bash -c 'cd "$1" && printf "%s" "$2" | RIG_SESSION_LOG="$3" bash "$4" Write' \
     _ "$TEST_PROJECT" "$input" "$TEMP_DIR/session.log" \
-    "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh"
+    "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
 }
 
 _install_protected_path_policy() {
@@ -417,7 +421,7 @@ _install_protected_path_policy() {
   local repo_root
   repo_root=$(git -C "$TEST_PROJECT" rev-parse --show-toplevel)
   _run_pre_tool_write "$repo_root/CLAUDE.md"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 2 ]
   [[ "$output" == *"is a The Rig governance file"* ]] || return 1
 }
 
@@ -429,7 +433,7 @@ _install_protected_path_policy() {
 
 @test "path policy: real hook fails closed when policy is missing" {
   _run_pre_tool_write "$TEST_PROJECT/src/app.sh"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 2 ]
   [[ "$output" == *"policy is missing or unreadable"* ]] || return 1
 }
 
@@ -437,7 +441,7 @@ _install_protected_path_policy() {
   mkdir -p "$TEST_PROJECT/.rig/rules"
   printf 'relative/path\n' > "$TEST_PROJECT/.rig/rules/protected-paths.txt"
   _run_pre_tool_write "$TEST_PROJECT/src/app.sh"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 2 ]
   [[ "$output" == *"policy is malformed"* ]] || return 1
 }
 
