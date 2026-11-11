@@ -158,8 +158,8 @@ commit-cleanup: yes
 
 | Value | Behaviour |
 |---|---|
-| `yes` | Auto-injected tool footers (`Co-Authored-By: Claude`, `Made-with-Claude`, etc.) are stripped from commit messages by the `commit-msg` and `post-commit` hooks. |
-| `no` | Footers are kept. Comment out or remove `.husky/commit-msg` and `.husky/post-commit` to disable the stripping. |
+| `yes` | `commit-msg` removes known tool footers before the commit. If a client adds one later, `post-commit` warns; `RIG_POST_COMMIT_AUTO_AMEND=1` permits amendment of ordinary unsigned commits. Signed and replayed commits keep late footers for manual cleanup. |
+| `no` | Footers are kept. Comment out or remove `.husky/commit-msg` and `.husky/post-commit` to disable cleanup. |
 
 ```
 # transcript-retention-days: 14

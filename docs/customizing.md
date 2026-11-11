@@ -17,7 +17,7 @@ housekeeping: direct-push  # direct-push | pr-required (how /post-merge commits)
 issue-tracking: github     # github | linear | trello | gus | none
 issue-creator: user        # user (default) | agent — GitHub only: agent auto-creates issues
 secret-scanner: gitleaks   # gitleaks | none
-commit-cleanup: yes        # yes | no (strip auto-injected tool footers from commits)
+commit-cleanup: yes        # yes | no (filter known tool footers; warn on late additions)
 rig-gaps-push-target:      # optional: absolute path to RIG_GAPS.md in the local Rig repo
 ```
 
@@ -334,7 +334,7 @@ wire them directly:
 cp .husky/pre-commit .git/hooks/pre-commit
 cp .husky/commit-msg .git/hooks/commit-msg
 cp .husky/post-commit .git/hooks/post-commit
-cp .husky/filter-commit-message-inplace.sh .husky/
+cp .husky/filter-commit-message-inplace.sh .git/hooks/filter-commit-message-inplace.sh
 
 # Set executable bits
 chmod +x .git/hooks/pre-commit .git/hooks/commit-msg .git/hooks/post-commit
@@ -345,14 +345,27 @@ hooks in `.git/hooks/` are not committed to the repo, so teammates must set them
 manually. Husky solves this by checking in hooks to `.husky/` and auto-installing them
 via `prepare` script in `package.json`.
 
+The `commit-msg` hook requires the filter beside it (or in `.husky/`) and refuses a
+commit if the filter is missing. Human attribution trailers are preserved. If a
+client adds an AI footer after `commit-msg`, `post-commit` reports it without changing
+the commit SHA. Set `RIG_POST_COMMIT_AUTO_AMEND=1` to opt into amending unsigned
+commits automatically during ordinary commits. Signed commits are never amended by
+this hook. Git refuses `git commit --amend` while rebase, cherry-pick, or revert is
+replaying commits, so the hook leaves those commits intact and warns that the
+footer remains even with auto-amend enabled. Once replay finishes, inspect
+`git log` for affected commits. Use `git commit --amend` if the affected commit
+is HEAD; for older commits, use `git rebase -i` from a base before the oldest
+affected commit and mark each one `reword`. Rewriting published commits changes
+their SHAs, so coordinate with anyone using that history before updating a remote.
+
 ---
 
 ## Keeping tool attribution footers in commits
 
-By default, The Rig strips auto-injected footers (`Co-Authored-By: Claude`,
-`Made-with-Claude`, etc.) from commit messages. These lines are inserted automatically
-by AI coding tools — The Rig removes them so commit messages stay clean and reflect
-what the human author wrote.
+By default, the `commit-msg` hook removes known auto-injected footers
+(`Co-Authored-By: Claude`, `Made-with-Claude`, etc.) before the commit. If a
+client adds a footer after that hook, `post-commit` warns and leaves the SHA
+unchanged. The opt-in amendment and replay limits are described above.
 
 If you want these footers to remain (e.g. your team has a policy of crediting AI tools
 in commit history), comment out or remove the `commit-msg` and `post-commit` hooks

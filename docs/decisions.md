@@ -90,6 +90,10 @@ Why The Rig is built the way it is. Each entry covers what was decided, what was
 
 **Tradeoff accepted:** Legitimate human co-author credits using standard trailer format would also be stripped. Acceptable for solo or small-team projects. Adjust `filter-commit-message-inplace.sh` if this matters in your context.
 
+**Superseded 2026-11-07 by #589:** The filter now removes only known AI identities and tool footers. Human `Co-authored-by` and `Signed-off-by` trailers remain. Silent post-commit amendment is disabled by default because it changes an already-created commit's SHA; an unsigned commit may be auto-amended only with `RIG_POST_COMMIT_AUTO_AMEND=1`.
+
+**Clarified 2026-11-10 by #594:** The auto-amend opt-in applies to ordinary unsigned commits. During rebase, cherry-pick, or revert, Git refuses amend while replaying. The post-commit hook warns that the footer remains and leaves the sequencer's history intact; users remove it after replay by amending HEAD or rewording older commits.
+
 ---
 
 ## 8. Verification requires in-container smoke tests, not just diff review
