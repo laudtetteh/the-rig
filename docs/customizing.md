@@ -658,7 +658,7 @@ runs these current postflight checks:
 | `stealth_exclusions` | Stealth/external artifacts are excluded from git visibility | Project is not a stealth/external install |
 | `settings_json` | Claude settings and Codex hooks JSON files parse correctly | Never; invalid JSON is a failure |
 | `claude_commands` | Installed Claude command files match the manifest or at least exist when no manifest baseline is present | Never; missing commands are a failure |
-| `codex_skill_parity` | Generated Codex skills mirror Claude commands when Codex skills are installed | Codex mirroring is not enabled |
+| `codex_skill_parity` | Installed Codex skill names match Claude command names; content parity is not checked | Codex mirroring is not enabled |
 | `codex_project_instructions` | Codex has an effective `AGENTS*` file or configured `CLAUDE.md` fallback when Codex is an installed target | Codex is not an installed project target |
 | `codex_project_target_runtime` | A live Codex runtime has the project target infrastructure it needs | Codex runtime is not detected |
 | `codex_session_runtime` | A live Codex thread is bound to an active Rig session record | Codex runtime is not detected |

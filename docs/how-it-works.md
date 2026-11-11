@@ -461,8 +461,9 @@ Agent finishes response each turn
      │
      └─► stop.sh (Stop event)
            Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
-           If CONTEXT_SNAPSHOT.md exists and has "Last updated:" line:
-             Update the date (preserve description text)
+           Preserves an existing CONTEXT_SNAPSHOT.md; SessionEnd writes a
+           minimal checkpoint through the snapshot writer when wrap is needed
+           and no snapshot exists
            If PROGRESS.md exists:
              Append <!-- session-end YYYY-MM-DD HH:MM --> boundary marker
              (idempotent: skips if last non-blank line is already a marker)
@@ -477,7 +478,8 @@ Session ends (logout / clear / quit)
                                         preserves untagged stubs as a project reminder
                                         writes a minimal auto-checkpoint only when CONTEXT_SNAPSHOT.md is absent
            On clear:                    logs context-cleared; does NOT write .wrap-needed
-           On resume / Stop (no src):   per-turn update (date + PROGRESS marker)
+           On resume:                  no snapshot or PROGRESS change
+           On Stop (no src):            per-turn PROGRESS marker; snapshot unchanged
 ```
 
 **Critical implementation note:** Tool names in Claude Code are `PascalCase`
