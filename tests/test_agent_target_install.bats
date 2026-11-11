@@ -275,6 +275,78 @@ teardown() { rm -rf "$TEST_ROOT"; }
   [[ "$output" == *"Postflight smoke failed"* ]] || return 1
 }
 
+@test "agent-plan reports missing runtime helpers without smoking the old install" {
+  local fake_bin="$TEST_ROOT/fake-bin"
+  mkdir -p "$fake_bin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_bin/claude"
+  cp "$fake_bin/claude" "$fake_bin/codex"
+  chmod +x "$fake_bin/claude" "$fake_bin/codex"
+
+  local tracking agent helper case_project case_home before after
+  for tracking in repo stealth; do
+    case_project="$TEST_ROOT/$tracking/project"
+    case_home="$TEST_ROOT/$tracking/home"
+    mkdir -p "$case_project" "$case_home"
+    git -C "$case_project" init -q
+    if [ "$tracking" = repo ]; then
+      agent=codex
+      helper=rig-snapshot.py
+    else
+      agent=both
+      helper=rig-session-resolve.py
+    fi
+
+    run env HOME="$case_home" PATH="$fake_bin:$PATH" bash "$INSTALLER" \
+      --project-only --project-name Repro623 --target "$case_project" \
+      --tracking "$tracking" --project-agent "$agent" --strategy agent-upgrade
+    [ "$status" -eq 0 ]
+    rm "$case_project/bin/$helper"
+    before="$(find "$case_project" "$case_home" -type f -print0 | xargs -0 cksum | sort)"
+
+    run env HOME="$case_home" PATH="$fake_bin:$PATH" bash "$INSTALLER" \
+      --project-only --project-name Repro623 --target "$case_project" \
+      --tracking "$tracking" --project-agent "$agent" --strategy agent-plan
+    [ "$status" -eq 3 ]
+    printf '%s' "$output" | jq -e --arg path "bin/$helper" \
+      '.mode == "plan" and .status == "refused" and
+       any(.artifacts[]; .path == $path and .action == "update")' >/dev/null
+    after="$(find "$case_project" "$case_home" -type f -print0 | xargs -0 cksum | sort)"
+    [ "$before" = "$after" ]
+    [ ! -e "$case_project/bin/$helper" ]
+
+    run env HOME="$case_home" PATH="$fake_bin:$PATH" bash "$INSTALLER" \
+      --project-only --project-name Repro623 --target "$case_project" \
+      --tracking "$tracking" --project-agent "$agent" --strategy agent-upgrade
+    [ "$status" -eq 0 ]
+    [ -f "$case_project/bin/$helper" ]
+  done
+}
+
+@test "global-only agent-plan classifies an empty destination without postflight writes" {
+  local fake_bin="$TEST_ROOT/fake-bin"
+  mkdir -p "$fake_bin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_bin/claude"
+  chmod +x "$fake_bin/claude"
+
+  run env HOME="$TEST_HOME" PATH="$fake_bin:$PATH" bash "$INSTALLER" \
+    --global-only --global-agent claude --strategy agent-plan
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e '.mode == "plan" and .status == "success"' >/dev/null
+  [ ! -e "$TEST_HOME/.claude" ]
+  [ ! -e "$TEST_HOME/.rig" ]
+}
+
+@test "agent-upgrade still fails required postflight smoke" {
+  local manifest="$TEST_ROOT/failing-postflight.json"
+  printf '{"schema_version":1,"capabilities":[{"id":"missing","layer":"project","agents":["codex"],"smoke":[{"id":"must-exist","type":"exists","target":"never-created","required":true}]}]}\n' > "$manifest"
+  run env HOME="$TEST_HOME" _RIG_CAPABILITY_MANIFEST="$manifest" bash "$INSTALLER" \
+    --project-only --project-agent codex --target "$TEST_PROJECT" \
+    --tracking repo --strategy agent-upgrade
+  [ "$status" -eq 1 ]
+  [ ! -e "$TEST_PROJECT/.rig/install-targets.json" ]
+  [[ "$output" == *"Postflight smoke failed"* ]] || return 1
+}
+
 @test "project capability contract detects either missing runtime helper" {
   manifest="$REPO_ROOT/installer/capabilities.v1.json"
   checker="$REPO_ROOT/installer/check-capabilities.py"
