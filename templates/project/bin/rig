@@ -15,6 +15,7 @@ Commands:
   rig session current       Show the exact current session safely
   rig session list          List redacted public session summaries
   rig session doctor        Check session-record integrity and privacy
+  rig session legacy        Quarantine or restore a historical flat record
   rig session repair        Preview or confirm explicit orphan repair
   rig session retrofit      Bind this process' native session ID safely
   rig session obligation    Mark or clear an exact session obligation
@@ -67,10 +68,11 @@ command_help() {
     worktree) printf 'Usage: rig worktree bootstrap\n';;
     upgrade) printf 'Usage: rig upgrade rollback (--last | --id ID) [--dry-run | --confirm ID] [--json]\n\nUndoes one completed upgrade using the report that run wrote.\nRestores only the paths that upgrade changed, and refuses anything\nedited since. For an interrupted upgrade, use install.sh --recover.\n\nExit codes: 0 fully undone, 3 some paths refused, 70 a restore failed.\n';;
     session) cat <<'EOF'
-Usage: rig session <resolve|current|list|doctor|repair|retrofit|obligation> [options]
+Usage: rig session <resolve|current|list|doctor|legacy|repair|retrofit|obligation> [options]
 
 Native IDs are redacted unless --verbose is explicitly supplied.
 Repair is preview-only unless --confirm TOKEN and --reason REASON are supplied.
+Legacy is preview-only unless --confirm TOKEN or --restore TOKEN is supplied.
 Retrofit binds the native host ID from env or an explicit --native-session-id.
 Content matching is never part of normal resolution.
 Wrap clear can use --adopt-legacy-if-marker-token TOKEN to adopt only an unchanged
@@ -1647,7 +1649,7 @@ session_current() {
 session_inspect() {
   local action="$1"; shift
   RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" RIG_RESOLVER="$(dirname "${BASH_SOURCE[0]}")/rig-session-resolve.py" python3 - "$action" "$@" <<'PY'
-import hashlib, json, os, pathlib, stat, subprocess, sys
+import hashlib, json, os, pathlib, re, stat, subprocess, sys
 action=sys.argv[1]; args=sys.argv[2:]
 if any(arg not in ("--json","--verbose") for arg in args):
     print(json.dumps({"ok":False,"reason":"invalid_input"}) if "--json" in args else "invalid_input"); raise SystemExit(3)
@@ -1660,6 +1662,14 @@ def project_identity():
     except (OSError,subprocess.SubprocessError): common=root
     return hashlib.sha256(str(common).encode()).hexdigest()
 project_id=project_identity(); records=[]; errors=[]; future=[]
+def historical_flat(d):
+    return (d.get("schema_version")==1 and
+            not any(key in d for key in ("native","project","lifecycle")) and
+            isinstance(d.get("anchor"),str) and bool(d["anchor"]) and
+            d.get("agent") in ("claude","codex") and
+            d.get("status") in ("complete","inactive","ended_no_wrap") and
+            isinstance(d.get("binding"),str) and
+            isinstance(d.get("project_root"),str))
 for base in (sessions,sessions/"done"):
     if not base.is_dir(): continue
     for p in sorted(base.glob("session-*.json")):
@@ -1669,6 +1679,13 @@ for base in (sessions,sessions/"done"):
             if isinstance(d.get("schema_version"),int) and d["schema_version"]>1:
                 future.append(p.name)
                 errors.append({"file":p.name,"reason":"unsupported_schema"})
+                continue
+            if historical_flat(d):
+                relative=("done/" if base==sessions/"done" else "")+p.name
+                error={"file":relative,"reason":"historical_flat_record"}
+                if re.fullmatch(r"(?:done/)?session-[A-Za-z0-9._-]+\.json",relative):
+                    error["next_step"]="bin/rig session legacy --file "+relative+" --json"
+                errors.append(error)
                 continue
             if d.get("schema_version")==1 and (
                 not all(isinstance(d.get(key),dict) for key in ("native","project","lifecycle")) or
@@ -1698,8 +1715,8 @@ if action=="list":
 if action=="doctor":
     checks=[]
     def check(name,ok,detail): checks.append({"name":name,"ok":bool(ok),"detail":detail})
-    malformed=[error for error in errors if error["reason"]=="malformed_record"]
-    check("record_syntax",not malformed,"valid" if not malformed else "%d malformed"%len(malformed))
+    malformed=[error for error in errors if error["reason"] in ("malformed_record","historical_flat_record")]
+    check("record_syntax",not malformed,"valid" if not malformed else "%d malformed or historical flat"%len(malformed))
     check("schema_support",not future,"supported" if not future else "%d future schema"%len(future))
     invalid=[]
     for p,d in records:
@@ -1744,6 +1761,163 @@ if action=="doctor":
         for c in checks: print(("PASS" if c["ok"] else "FAIL")+"  "+c["name"]+": "+c["detail"])
     raise SystemExit(0 if result["ok"] else 2)
 raise SystemExit(3)
+PY
+}
+
+session_legacy() {
+  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
+import fcntl, hashlib, json, os, pathlib, re, stat, sys, tempfile
+
+args=sys.argv[1:]
+as_json="--json" in args
+def emit(ok,reason,extra=None,code=0):
+    out={"ok":ok,"reason":reason}
+    out.update(extra or {})
+    print(json.dumps(out) if as_json else reason+(": "+str(extra) if extra else ""))
+    raise SystemExit(code)
+values={}
+i=0
+while i<len(args):
+    if args[i]=="--json": i+=1; continue
+    if args[i] in ("--file","--confirm","--restore") and i+1<len(args) and args[i] not in values:
+        values[args[i]]=args[i+1]; i+=2; continue
+    emit(False,"invalid_input",{"no_write":True},3)
+name=values.get("--file","")
+confirm=values.get("--confirm","")
+restore=values.get("--restore","")
+if (not re.fullmatch(r"(?:done/)?session-[A-Za-z0-9._-]+\.json",name) or
+        (confirm and restore) or any(not v or v.startswith("-") for v in values.values()) or
+        (confirm and not re.fullmatch(r"[0-9a-f]{20}",confirm)) or
+        (restore and not re.fullmatch(r"[0-9a-f]{20}",restore))):
+    emit(False,"invalid_input",{"no_write":True},3)
+root=pathlib.Path(os.environ["RIG_ROOT"]).resolve()
+sessions=pathlib.Path(os.environ["RIG_DIR"])/"memory"/"sessions"
+if sessions.is_symlink() or not sessions.is_dir():
+    emit(False,"invalid_session_path",{"no_write":True},4)
+parent=sessions/"done" if name.startswith("done/") else sessions
+if parent.is_symlink() or not parent.is_dir():
+    emit(False,"invalid_session_path",{"no_write":True},4)
+source=parent/pathlib.Path(name).name
+backup_dir=sessions/"legacy-backups"
+quarantine_dir=sessions/"legacy-quarantine"
+def secure_dir(path):
+    if path.is_symlink(): emit(False,"invalid_session_path",{"no_write":True},4)
+    try:
+        if path.exists():
+            if not path.is_dir() or stat.S_IMODE(path.stat().st_mode)&0o077:
+                emit(False,"unsafe_storage",{"no_write":True},4)
+        else:
+            path.mkdir(mode=0o700)
+    except OSError:
+        emit(False,"unsafe_storage",{"no_write":True},4)
+def regular_file(path):
+    return path.is_file() and not path.is_symlink()
+def sha(raw): return hashlib.sha256(raw).hexdigest()
+def historical_flat(data):
+    return (isinstance(data,dict) and data.get("schema_version")==1 and
+            not any(key in data for key in ("native","project","lifecycle")) and
+            isinstance(data.get("anchor"),str) and bool(data["anchor"]) and
+            data.get("agent") in ("claude","codex") and
+            data.get("status") in ("complete","inactive","ended_no_wrap") and
+            isinstance(data.get("binding"),str) and
+            isinstance(data.get("project_root"),str))
+def read_source():
+    if not regular_file(source): emit(False,"invalid_session_path",{"no_write":True},4)
+    try:
+        raw=source.read_bytes(); data=json.loads(raw)
+    except (OSError,ValueError,TypeError):
+        emit(False,"malformed_record",{"no_write":True},4)
+    if not historical_flat(data): emit(False,"not_historical_flat",{"no_write":True},4)
+    try:
+        recorded_root=pathlib.Path(data["project_root"])
+        if not recorded_root.is_absolute() or recorded_root.resolve()!=root:
+            emit(False,"cross_project",{"no_write":True},4)
+    except (OSError,ValueError,RuntimeError):
+        emit(False,"cross_project",{"no_write":True},4)
+    return raw
+def token_for(raw):
+    return hashlib.sha256((name+"\0"+sha(raw)+"\0"+str(root)).encode()).hexdigest()[:20]
+def atomic_bytes(path,raw):
+    try: fd,tmp=tempfile.mkstemp(prefix=".legacy-",suffix=".tmp",dir=str(path.parent))
+    except OSError: emit(False,"storage_write_failed",code=4)
+    try:
+        os.fchmod(fd,0o600)
+        with os.fdopen(fd,"wb") as handle:
+            handle.write(raw); handle.flush(); os.fsync(handle.fileno())
+        os.replace(tmp,path)
+    except OSError:
+        emit(False,"storage_write_failed",code=4)
+    finally:
+        try: os.unlink(tmp)
+        except FileNotFoundError: pass
+def checked_metadata(path,expected):
+    private_file(path)
+    try: saved=json.loads(path.read_text())
+    except (OSError,ValueError,TypeError): emit(False,"unsafe_storage",{"no_write":True},4)
+    if saved!=expected: emit(False,"unsafe_storage",{"no_write":True},4)
+def checked_bytes(path):
+    if not regular_file(path): emit(False,"unsafe_storage",{"no_write":True},4)
+    try: return path.read_bytes()
+    except OSError: emit(False,"unsafe_storage",{"no_write":True},4)
+def private_file(path):
+    if not regular_file(path): emit(False,"unsafe_storage",{"no_write":True},4)
+    try:
+        if stat.S_IMODE(path.stat().st_mode)&0o077:
+            emit(False,"unsafe_storage",{"no_write":True},4)
+    except OSError:
+        emit(False,"unsafe_storage",{"no_write":True},4)
+
+if not confirm and not restore:
+    raw=read_source(); token=token_for(raw)
+    emit(True,"legacy_preview",{"file":name,"action":"quarantine","confirmation_token":token,
+                                "restore_command":"bin/rig session legacy --file "+name+" --restore "+token+" --json",
+                                "no_write":True})
+
+# The same lock used by native binding and exact-session writes prevents a
+# concurrent resolver mutation while quarantine or restore changes the scan.
+try: lock=open(sessions/".bind.lock","a+")
+except OSError: emit(False,"lock_unavailable",{"no_write":True},4)
+fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
+if restore:
+    for directory in (backup_dir,quarantine_dir):
+        if (directory.is_symlink() or not directory.is_dir() or
+                stat.S_IMODE(directory.stat().st_mode)&0o077):
+            emit(False,"unsafe_storage",{"no_write":True},4)
+    backup=backup_dir/(restore+".json")
+    quarantined=quarantine_dir/(restore+".json")
+    metadata=quarantine_dir/(restore+".meta.json")
+    if not regular_file(backup) or not regular_file(quarantined) or not regular_file(metadata):
+        emit(False,"restore_unavailable",{"no_write":True},4)
+    private_file(backup); private_file(metadata)
+    if source.exists() or source.is_symlink(): emit(False,"destination_exists",{"no_write":True},3)
+    raw=checked_bytes(quarantined)
+    expected={"schema_version":1,"file":name,"sha256":sha(raw),"token":restore}
+    checked_metadata(metadata,expected)
+    if checked_bytes(backup)!=raw or token_for(raw)!=restore:
+        emit(False,"backup_mismatch",{"no_write":True},4)
+    try: os.replace(quarantined,source)
+    except OSError: emit(False,"restore_failed",{"no_write":True},4)
+    emit(True,"legacy_restored",{"file":name,"backup":str(backup)})
+
+raw=read_source(); token=token_for(raw)
+if confirm!=token: emit(False,"confirmation_required",{"no_write":True},3)
+for directory in (backup_dir,quarantine_dir): secure_dir(directory)
+backup=backup_dir/(token+".json")
+quarantined=quarantine_dir/(token+".json")
+metadata=quarantine_dir/(token+".meta.json")
+expected={"schema_version":1,"file":name,"sha256":sha(raw),"token":token}
+if quarantined.exists() or quarantined.is_symlink(): emit(False,"destination_exists",{"no_write":True},3)
+if backup.exists() or backup.is_symlink():
+    private_file(backup)
+    if checked_bytes(backup)!=raw:
+        emit(False,"backup_mismatch",{"no_write":True},4)
+else: atomic_bytes(backup,raw)
+if metadata.exists() or metadata.is_symlink(): checked_metadata(metadata,expected)
+else: atomic_bytes(metadata,(json.dumps(expected,separators=(",",":"))+"\n").encode())
+try: os.replace(source,quarantined)
+except OSError: emit(False,"quarantine_failed",{"backup":str(backup)},4)
+emit(True,"legacy_quarantined",{"file":name,"backup":str(backup),
+                                "restore_command":"bin/rig session legacy --file "+name+" --restore "+token+" --json"})
 PY
 }
 
@@ -2707,7 +2881,7 @@ main() {
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help "$command"; return; fi
       subcommand="${1:-}"; shift || true
-      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; memory:workflow-lock) memory_workflow_lock "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
+      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:legacy) session_legacy "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; memory:workflow-lock) memory_workflow_lock "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
     *) shift; usage_error "unknown command: $command" "$@";;
   esac
 }

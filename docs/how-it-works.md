@@ -374,6 +374,16 @@ legacy name write requires an exact launcher file or anchor. `session doctor`
 checks that repeated continuations form one unbroken chain with at most one
 active leaf. Native IDs stay redacted unless `--verbose` is requested.
 
+An older flat session record can declare schema v1 while lacking the native,
+project, and lifecycle objects required by current v1 records. `session doctor --json`
+names such a record as `historical_flat_record` and gives a read-only
+next step. Run `bin/rig session legacy --file <reported-file> --json` to preview
+quarantine and get a confirmation token. `--confirm <token>` backs up the
+original bytes and moves only that record out of the resolver's scan. Its
+result includes a `--restore <token>` command that restores the original only
+if the destination is still absent and the backup matches. A current malformed
+record cannot use this path, and exact-session writes continue to refuse it.
+
 ---
 
 ## The hook system
