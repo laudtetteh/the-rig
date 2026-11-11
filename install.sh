@@ -3622,12 +3622,18 @@ if [[ "$RECOVERY_ONLY_COMPLETE" == true ]]; then
 fi
 
 if [[ "$DO_GLOBAL" == true ]]; then
-  _global_smoke="$(run_capability_smoke global "$GLOBAL_AGENT" "$HOME/.claude")" || { error "Postflight smoke failed: $_global_smoke"; exit 1; }
+  # A plan describes the incoming install while the current install can still
+  # lack required artifacts. Smoke the destination only after an actual apply.
+  if [[ "$AGENT_DRY_RUN" != true ]]; then
+    _global_smoke="$(run_capability_smoke global "$GLOBAL_AGENT" "$HOME/.claude")" || { error "Postflight smoke failed: $_global_smoke"; exit 1; }
+  fi
   if [[ "$_GLOBAL_STATE_FUTURE" != true ]] && \
      guard_destination_before_write "$HOME" "$GLOBAL_TARGET_STATE" ".rig/install-targets.json"; then
     write_agent_state "$GLOBAL_TARGET_STATE" global "$GLOBAL_AGENT"
   fi
-  success "Postflight targets: global=$GLOBAL_AGENT; smoke=$_global_smoke"
+  if [[ "$AGENT_DRY_RUN" != true ]]; then
+    success "Postflight targets: global=$GLOBAL_AGENT; smoke=$_global_smoke"
+  fi
 fi
 if [[ "$COLLISION_STRATEGY" == upgrade && "$DO_GLOBAL" == true ]]; then
   # Global manifest entries are recorded relative to $CLAUDE_DIR ($HOME/.claude
@@ -4803,7 +4809,9 @@ PYEOF
   fi
 
   # Persist only after the selected layer and its required smoke checks succeed.
-  _project_smoke="$(run_capability_smoke project "$PROJECT_AGENT" "$TARGET")" || { error "Postflight smoke failed: $_project_smoke"; exit 1; }
+  if [[ "$AGENT_DRY_RUN" != true ]]; then
+    _project_smoke="$(run_capability_smoke project "$PROJECT_AGENT" "$TARGET")" || { error "Postflight smoke failed: $_project_smoke"; exit 1; }
+  fi
   if [[ "$_PROJECT_STATE_FUTURE" != true ]]; then
     if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
       _project_state_base="$EXTERNAL_RIG_DIR"
@@ -4818,7 +4826,9 @@ PYEOF
       finish_direct_writer_report
     fi
   fi
-  success "Postflight targets: project=$PROJECT_AGENT; smoke=$_project_smoke"
+  if [[ "$AGENT_DRY_RUN" != true ]]; then
+    success "Postflight targets: project=$PROJECT_AGENT; smoke=$_project_smoke"
+  fi
 
   finish_upgrade_transaction
 
