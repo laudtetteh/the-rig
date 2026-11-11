@@ -20,6 +20,7 @@ setup() {
   git -C "$REPO" commit --allow-empty -m "initial" -q
   mkdir -p "$REPO/bin"
   cp "$(pwd)/templates/project/bin/rig" "$REPO/bin/rig"
+  cp "$(pwd)/templates/project/bin/rig-session-resolve.py" "$REPO/bin/rig-session-resolve.py"
   chmod +x "$REPO/bin/rig"
 
   HOOK_DIR="$TMPDIR/hooks"

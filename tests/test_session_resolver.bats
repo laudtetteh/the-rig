@@ -4,11 +4,58 @@ setup() {
   export CASE_DIR="$BATS_TEST_TMPDIR/project"
   mkdir -p "$CASE_DIR/bin" "$CASE_DIR/.rig/memory/sessions/done"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-tab-title-watch" "$CASE_DIR/bin/rig-tab-title-watch"
   chmod +x "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-tab-title-watch"
   git -C "$CASE_DIR" init -q
   git -C "$CASE_DIR" checkout -q -b feat/current
   unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID RIG_SESSION_BRANCH CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID
+}
+
+@test "macOS Bash 3.2 current without a record reports a reason for JSON and human callers" {
+  run env RIG_SESSION_PID=999999 /bin/bash "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"reason": "not_found"'* ]] || return 1
+  [[ "$output" != *'unbound variable'* ]] || return 1
+
+  run env RIG_SESSION_PID=999999 /bin/bash "$CASE_DIR/bin/rig" session current
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'session not resolved: not_found'* ]] || return 1
+  [[ "$output" != *'unbound variable'* ]] || return 1
+
+  run env RIG_SESSION_PID=999999 /bin/bash "$CASE_DIR/bin/rig" session resolve
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'session not resolved: not_found'* ]] || return 1
+}
+
+@test "resolver and current exact lookup work in a read-only process sandbox" {
+  [ -x /usr/bin/sandbox-exec ] || skip "macOS sandbox-exec is unavailable"
+  write_session "$CASE_DIR/.rig/memory/sessions/session-1.json" exact feat/current
+  session_file="$CASE_DIR/.rig/memory/sessions/session-1.json"
+  run /usr/bin/sandbox-exec -p '(version 1) (allow default) (deny file-write*)' \
+    env RIG_SESSION_FILE="$session_file" /bin/bash "$CASE_DIR/bin/rig" session resolve --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"anchor": "exact"'* ]] || return 1
+
+  run /usr/bin/sandbox-exec -p '(version 1) (allow default) (deny file-write*)' \
+    env RIG_SESSION_FILE="$session_file" /bin/bash "$CASE_DIR/bin/rig" session current --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"anchor": "exact"'* ]] || return 1
+}
+
+@test "installer ships and manifests the read-only resolver helper" {
+  installed="$BATS_TEST_TMPDIR/installed"
+  external_rig="$BATS_TEST_TMPDIR/rig-external"
+  mkdir -p "$installed"
+  git -C "$installed" init -q
+  run bash "$BATS_TEST_DIRNAME/../install.sh" --project-only --target "$installed" \
+    --project-name Test --tracking stealth --rig-dir "$external_rig" --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ -f "$installed/bin/rig-session-resolve.py" ]
+  grep -q 'bin/rig-session-resolve.py' "$external_rig/memory/.rig-manifest"
+  run env RIG_SESSION_PID=999999 "$installed/bin/rig" session resolve --json
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"reason": "not_found"'* ]] || return 1
 }
 
 write_session() {
@@ -230,9 +277,15 @@ json.dump({
   write_session "$file" a feat/current; : > "$tty"
   run env SESSION_F="$file" WATCHER="$CASE_DIR/bin/rig-tab-title-watch" TITLE_TTY="$tty" bash -c '
     RIG_SESSION_FILE="$SESSION_F" RIG_PROJECT_NAME=demo RIG_TITLE_TTY="$TITLE_TTY" RIG_TITLE_INTERVAL=.05 "$WATCHER" & watcher_pid=$!
-    sleep .25
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+      [ -s "$TITLE_TTY" ] && break
+      sleep .1
+    done
     python3 -c '\''import json,os; p=os.environ["SESSION_F"]; d=json.load(open(p)); d["final_name"]="changed"; json.dump(d,open(p,"w"))'\''
-    sleep .25
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+      grep -q changed "$TITLE_TTY" && break
+      sleep .1
+    done
     kill "$watcher_pid" 2>/dev/null || true
     wait "$watcher_pid" 2>/dev/null || true
   '

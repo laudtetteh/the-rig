@@ -5,6 +5,7 @@ setup() {
   export FAKE_BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$CASE_DIR/bin" "$CASE_DIR/.rig/memory" "$CASE_DIR/.claude/commands" "$CASE_DIR/.git/info" "$FAKE_BIN"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   chmod +x "$CASE_DIR/bin/rig"
   printf '{"hooks":{}}\n' > "$CASE_DIR/.claude/settings.json"
   printf 'issue-tracking: none\n' > "$CASE_DIR/CLAUDE.md"
@@ -98,6 +99,42 @@ json_assert() {
   run bash -c "cd '$linked' && '$linked/bin/rig' doctor --json"
   [ "$status" -eq 0 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="worktree_bootstrap"); assert c["ok"] and c["detail"]=="complete"'
+}
+
+@test "linked stealth worktree bootstrap restores session queries through an external .rigpath" {
+  local external="$BATS_TEST_TMPDIR/external-rig"
+  local linked="$BATS_TEST_TMPDIR/linked"
+  local session_file="$external/memory/sessions/session-linked.json"
+  export EXPECTED_SESSION_FILE="$session_file"
+  mkdir -p "$external/memory/sessions"
+  cp "$CASE_DIR/.rig/memory/.rig-manifest" "$external/memory/.rig-manifest"
+  printf '%s\n' "$external" > "$CASE_DIR/.rigpath"
+  printf 'CLAUDE.md\nPROJECT_BRIEF.md\n.claude/\n.rigpath\nbin/rig\n' > "$CASE_DIR/.git/info/exclude"
+  printf '%s\n' '{"anchor":"linked-session","status":"active","branch":"feat/linked"}' > "$session_file"
+  printf 'seed\n' > "$CASE_DIR/README.md"
+  git -C "$CASE_DIR" config user.email test@example.com
+  git -C "$CASE_DIR" config user.name Test
+  git -C "$CASE_DIR" add README.md
+  git -C "$CASE_DIR" commit -qm seed
+  git -C "$CASE_DIR" worktree add -q -b linked-test "$linked"
+
+  run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' worktree bootstrap"
+  [ "$status" -eq 0 ]
+  [ -f "$linked/bin/rig-session-resolve.py" ]
+  run env RIG_SESSION_FILE="$session_file" "$linked/bin/rig" session resolve --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); assert d["ok"] and d["anchor"]=="linked-session" and d["session_file"]==os.path.realpath(os.environ["EXPECTED_SESSION_FILE"])'
+
+  rm "$linked/bin/rig-session-resolve.py"
+  run bash -c "cd '$linked' && '$linked/bin/rig' doctor --json"
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="worktree_bootstrap"); assert not c["ok"] and "bin/rig-session-resolve.py" in c["detail"] and "worktree bootstrap" in c["detail"]'
+
+  run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' worktree bootstrap"
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$session_file" "$linked/bin/rig" session resolve --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"anchor": "linked-session"'* ]] || return 1
 }
 
 @test "worktree bootstrap: never copies .claude/worktrees/ into a linked worktree (self-recursion guard)" {

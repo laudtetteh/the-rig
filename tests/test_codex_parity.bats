@@ -18,6 +18,7 @@ setup() {
     "$TEST_PROJECT/.codex/hooks/rig-adapter.sh"
   mkdir -p "$TEST_PROJECT/bin"
   cp "$REPO_ROOT/templates/project/bin/rig" "$TEST_PROJECT/bin/rig"
+  cp "$REPO_ROOT/templates/project/bin/rig-session-resolve.py" "$TEST_PROJECT/bin/rig-session-resolve.py"
   chmod +x "$TEST_PROJECT/bin/rig"
   cp "$REPO_ROOT/templates/project/.rig/rules/protected-paths.txt" \
     "$TEST_PROJECT/.rig/rules/protected-paths.txt"
