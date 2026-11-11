@@ -142,7 +142,7 @@ Agent is oriented. Hooks are live. Ready to work.
      │
      │  After every tool call:
      │  └─ post-tool.sh (PostToolUse)
-     │       PROGRESS.md fallback stub for approved visible hookless commits
+     │       PROGRESS.md fallback stub for approved visible guarded commits
      │
      │  Before context compaction:
      │  └─ pre-compact.sh (PreCompact)
@@ -158,13 +158,14 @@ Agent is oriented. Hooks are live. Ready to work.
      │
      │  After the agent's final message each turn:
      │  └─ stop.sh (Stop)
-     │       Updates "Last updated:" date in CONTEXT_SNAPSHOT.md
      │       Appends a UUID-tagged session-end marker to PROGRESS.md
+     │       Leaves an existing shared snapshot unchanged
      │       (lightweight; idempotent — safe to run after every response)
      │
      ▼
 Claude /wrap or Codex $wrap — run manually before closing
-     │  Writes .rig/memory/CONTEXT_SNAPSHOT.md (full current state)
+     │  Refreshes the shared snapshot header and this session's task handoffs
+     │  while preserving other active sessions' handoffs
      │  Expands PROGRESS.md stubs; trims if > 20 entries
      │  Logs ERRORS.md and RIG_GAPS.md entries
      │  Trims ERRORS.md if > 30 entries
@@ -175,10 +176,28 @@ Claude /wrap or Codex $wrap — run manually before closing
 Session ends
      │
      └─ stop.sh (also handles SessionEnd — same script, dispatches on `source` field)
-          On logout/prompt_input_exit: writes .wrap-needed + minimal auto-checkpoint
+          On logout/prompt_input_exit: writes .wrap-needed; creates a minimal checkpoint only if no snapshot exists
           On clear: logs context-cleared; no .wrap-needed
-          On resume / Stop (per-turn): per-turn date update + PROGRESS marker
+          On resume: no action; Stop (per-turn): PROGRESS marker only
 ```
+
+In a shared Rig directory, an exact native SessionEnd attributes an unexpanded
+auto-logged commit only when its PROGRESS heading carries that session's
+`<!-- sid:... -->` marker. A stub without a session anchor leaves a project-wide
+`.wrap-needed` reminder for review; it does not assign another session a wrap
+obligation. A later full wrap can clear that reminder with explicit legacy
+adoption. Legacy sessions retain the unscoped reminder path.
+Wrap records the reminder's content and file metadata token when it acquires
+the workflow lock. At completion it adopts an older unscoped reminder only if
+that token still matches and no unexpanded untagged progress stub remains.
+An unexpanded stub tagged to the current session blocks finalization until
+that new work is captured in the wrap.
+Another session's pending work stays visible. Legacy SessionEnd refreshes
+the unscoped marker's generation, so an existing empty marker cannot hide a
+newer reminder.
+An older hook that only touches an existing nonempty marker and writes no
+PROGRESS stub leaves no origin to recover if a later scoped writer replaces
+that marker. Upgrade that hook to the generation-writing version.
 
 ---
 
@@ -195,7 +214,7 @@ Seven files, seven purposes:
 
 ### .rig/memory/PROGRESS.md
 - Append-only build log, one entry per meaningful unit of work
-- Auto-stubbed by Git's `post-commit` hook after a guarded agent commit; PostToolUse uses a matching Git result for the hookless visible-command fallback
+- Auto-stubbed by Git's `post-commit` hook after a guarded agent commit; PostToolUse uses a matching Git result as a fallback when that hook does not log
 - `stop.sh` appends UUID-tagged session-end markers for housekeeping. Naming never uses legacy marker ranges, snapshots, unrelated session files, or project history; current conversation context is authoritative and only the resolved current session's UUID-tagged entries may cross-check it.
 - Most recent entry at the top
 - **Trim convention:** capped at 20 entries. `/wrap` moves older entries to `.rig/memory/PROGRESS_archive.md` (gitignored, disk-only) when the cap is exceeded. Keeps session startup cost low indefinitely.
@@ -298,7 +317,7 @@ Step 6: Log — ERRORS.md entry, always
 Step 1: Pull latest main
 Step 2: Update PROGRESS.md
 Step 3: Move task file active/ → done/
-Step 4: Overwrite CONTEXT_SNAPSHOT.md
+Step 4: Refresh the shared CONTEXT_SNAPSHOT.md header while preserving task handoffs
 Step 5: Check ERRORS.md and RIG_GAPS.md
 Step 6: Housekeeping commit (if needed)
 Step 7: Suggest session name (derives name from session work)
@@ -412,7 +431,7 @@ Every tool call
      │
      └─► post-tool.sh (PostToolUse)
            Logs completion to session log
-           For approved visible hookless commits, auto-stubs PROGRESS.md
+           For approved visible guarded commits, auto-stubs PROGRESS.md
              when the Git result contains the matching commit hash
            For Bash, warn when a new branch name misses the expected prefix
 
@@ -442,23 +461,25 @@ Agent finishes response each turn
      │
      └─► stop.sh (Stop event)
            Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
-           If CONTEXT_SNAPSHOT.md exists and has "Last updated:" line:
-             Update the date (preserve description text)
+           Preserves an existing CONTEXT_SNAPSHOT.md; SessionEnd writes a
+           minimal checkpoint through the snapshot writer when wrap is needed
+           and no snapshot exists
            If PROGRESS.md exists:
              Append <!-- session-end YYYY-MM-DD HH:MM --> boundary marker
              (idempotent: skips if last non-blank line is already a marker)
            Dispatches on `source` field from JSON stdin:
-             Empty source (Stop event): updates CONTEXT_SNAPSHOT date + PROGRESS marker
+             Empty source (Stop event): appends a PROGRESS marker; preserves the shared snapshot
 
 Session ends (logout / clear / quit)
      │
      └─► stop.sh (Stop is registered for SessionEnd too — same script, both events)
            Resolves RIG_DIR
-           On logout/prompt_input_exit: writes .wrap-needed sentinel
-                                        writes a minimal auto-checkpoint to CONTEXT_SNAPSHOT.md
-                                        (current branch + last commit; prevents cold-start next session)
+           On logout/prompt_input_exit: writes an exact wrap obligation for tagged work;
+                                        preserves untagged stubs as a project reminder
+                                        writes a minimal auto-checkpoint only when CONTEXT_SNAPSHOT.md is absent
            On clear:                    logs context-cleared; does NOT write .wrap-needed
-           On resume / Stop (no src):   per-turn update (date + PROGRESS marker)
+           On resume:                  no snapshot or PROGRESS change
+           On Stop (no src):            per-turn PROGRESS marker; snapshot unchanged
 ```
 
 **Critical implementation note:** Tool names in Claude Code are `PascalCase`
@@ -538,7 +559,9 @@ fallback: it checks approval age, target worktree, branch, and direct-push
 subject type, then consumes approval before execution. PostToolUse logs a stub
 for the matching successful Git result. Pending markers use the tool event ID
 when supplied; overlapping events without IDs share a legacy marker. The
-fallback cannot inspect opaque generated scripts and may miss progress logging
+same pending marker backs up a compatible `commit-msg` hook when `post-commit`
+is missing or custom; a final-SHA check avoids duplicate progress entries.
+The fallback cannot inspect opaque generated scripts and may miss progress logging
 for quiet output or a target it cannot resolve. Ordinary human terminal commits
 remain unaffected. Visible commands that explicitly use `--no-verify`,
 `core.hooksPath` overrides, or `HUSKY=0` are blocked early; dynamically
@@ -699,10 +722,10 @@ skills covering the full development lifecycle:
 ### Governance and housekeeping
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/post-merge` | `POST_MERGE_WORKFLOW` | Post-merge hygiene: pull base branch, update PROGRESS, move task file, housekeeping commit, suggest session name, surface next priority |
+| `/post-merge` | `POST_MERGE_WORKFLOW` | Post-merge hygiene: pull base branch, update PROGRESS, move task file, refresh the shared snapshot without removing other task handoffs, housekeeping commit, suggest session name, surface next priority |
 | `/rig-propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
 | `/session-name` | Session naming | Derives a name from current conversation/session evidence only; unrelated snapshots, markers, session records, and project history are rejected |
-| `/wrap` | Session-end sequence | Writes CONTEXT_SNAPSHOT, captures in-flight task state, updates PROGRESS, trims PROGRESS/ERRORS, suggests session name, surfaces next priority. Concurrent session guard prevents race conditions on PROGRESS.md. |
+| `/wrap` | Session-end sequence | Refreshes the snapshot header and owned task handoffs, preserves other sessions' handoffs, updates PROGRESS, trims PROGRESS/ERRORS, suggests session name, and surfaces next priority. The owner-aware writer protects snapshot updates. |
 | `/rig-gaps` | Self-improvement | _(Rig contributors)_ Compiles unsubmitted `RIG_GAPS.md` entries + cross-checks `ERRORS.md`; formats report for review and optional submission. `--push` appends directly to the local Rig repo (requires `rig-gaps-push-target:` in `CLAUDE.md`); `--submit` creates public GitHub issues in `laudtetteh/the-rig` (opt-in; requires `.rig-contribute-enabled` sentinel + `gh` auth) |
 | `/rig-upgrade` | Upgrade workflow | Uses a global-first bootstrap when available: refresh the preferred installer checkout, then follow the latest upgrade command from that checkout. Survey phase always runs `--strategy agent-plan` as a read-only JSON preview. `--mode=agent` (also the non-interactive default) runs `install.sh --strategy agent-upgrade`, presents any `conflicts[]` with repair guidance, then runs `bin/rig doctor --json` as a post-upgrade gate. `--mode=classic` runs plain `install.sh --strategy upgrade`, the original per-file interactive review flow. `--version` prints project and global installed layers, preferred installer checkout state, and the latest tagged release from GitHub (via `gh`), warning if any are out of sync. `--scope=project\|global\|both` limits which layers are upgraded. |
 

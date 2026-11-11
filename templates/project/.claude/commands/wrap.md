@@ -6,7 +6,7 @@ Trigger this command before ending a session or when approaching a context limit
 
 Performs the session-end housekeeping that prevents state loss between sessions:
 
-1. Writes (overwrites) `.rig/memory/CONTEXT_SNAPSHOT.md` with full current project state
+1. Refreshes `.rig/memory/CONTEXT_SNAPSHOT.md` while preserving other sessions' task handoffs
 2. Ensures `.rig/memory/PROGRESS.md` is up to date — expands any auto-stubbed entries
 3. **Trims `.rig/memory/PROGRESS.md`** if it has grown beyond 20 entries (see Trim step below)
 4. **Prunes stale session-end markers** from `PROGRESS.md` (see Marker prune step below)
@@ -55,46 +55,6 @@ even if internal wrap collection happened earlier. Do not end with an implementa
 > ```
 >
 > Substitute `$RIG_DIR` for `.rig/` in every step below.
-
-## Concurrent session guard — run before anything else
-
-Check for a `.snapshot-write-in-progress` sentinel that would indicate another session is
-already running `/wrap` or `/post-merge`:
-
-```bash
-SNAP_LOCK="$RIG_DIR/memory/.snapshot-write-in-progress"
-if [[ -f "$SNAP_LOCK" ]]; then
-  LOCK_AGE=$(( $(date +%s) - $(stat -c %Y "$SNAP_LOCK" 2>/dev/null || stat -f %m "$SNAP_LOCK" 2>/dev/null || echo 0) ))
-  if [[ "$LOCK_AGE" -gt 1800 ]]; then
-    echo "⚠️  Stale lock detected (age: ${LOCK_AGE}s). Auto-removing and proceeding."
-    rm -f "$SNAP_LOCK"
-  else
-    echo "⚠️  A snapshot write is already in progress (/wrap or /post-merge in another session, lock age: ${LOCK_AGE}s)."
-    echo "   If the other session is no longer active: rm '$SNAP_LOCK'"
-    exit 1
-  fi
-fi
-if ! touch "$SNAP_LOCK"; then
-  echo "Unable to write Rig memory lock: $SNAP_LOCK"
-  echo "For Codex with an external .rigpath, request scoped write approval for $RIG_DIR and retry /wrap."
-  echo "No further memory writes were attempted."
-  exit 1
-fi
-```
-
-Create the sentinel immediately. Delete it at the very end of `/wrap` (step 12,
-after flag cleanup). Locks older than 30 minutes are automatically expired on the
-next run — they are from crashed sessions. Locks under 30 minutes block and require
-the other session to finish (or the lock deleted manually if that session is gone).
-
-If creating the sentinel fails with `Operation not permitted`, stop immediately.
-This commonly means Codex is running in a project whose `.rigpath` points outside
-the workspace writable roots. Request one scoped approval for the resolved
-`$RIG_DIR` before retrying; do not continue with partial memory writes.
-
-The sentinel file is gitignored alongside other `.rig/memory/` runtime files.
-
----
 
 ## Git state check — run first, before anything else
 
@@ -146,8 +106,8 @@ Gather all findings silently — no output yet:
 5. **DECISIONS.md additions** — infer whether the session produced any significant adopted architectural, product, or process decisions (see DECISIONS.md logging step below)
 6. **Feature doc overlaps** — files changed this session vs. documented feature entry points (see Feature doc freshness step below)
 7. **Active tasks** — read `.rig/tasks/active/`
-8. **Session identity** — run `bin/rig session resolve --json`; extract its session file,
-   `anchor`, and `tentative_name`. Stop on ambiguous identity.
+8. **Session identity** — run `bin/rig session resolve --json` read-only; extract
+   its session file, `anchor`, and `tentative_name`. Stop on ambiguous identity.
 9. **Skipped post-merge status** — if `/post-merge` was requested in the same turn but
    no merge is applicable, record the skip reason and next action.
 
@@ -174,19 +134,20 @@ Print a single structured report before executing anything:
 **Active tasks:** [task-slug | none]
 **Post-merge:** [skipped — reason and next action | not requested]
 
-**Session:** [anchor: UUID | tentative: "..." | suggested final: "type desc #N | type desc #N" | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
+**Session:** [anchor: UUID | tentative: "..." | suggested final: "type desc #N | type desc #N" | exact recovery pending | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
 **Final session name:** [confirmed final: "..." | suggested final: "..." awaiting confirmation | unresolved — reliable name could not be set | nothing meaningful shipped, skipped]
 ```
 
 If `bin/rig session resolve --json` returns `ended_record` or `not_found` and
-reports a native environment recovery command, first run the appropriate exact retrofit:
+reports a native environment recovery command, record exact recovery as pending
+in the report. After acquiring the workflow lock, run the appropriate exact retrofit:
 `bin/rig session retrofit --agent codex --from-env --source resume --json` for
 Codex, or `bin/rig session retrofit --agent claude --from-env --source resume --json`
 for Claude. Use the returned active continuation record if retrofit succeeds.
 The UserPromptSubmit hook may already have attached a resumed thread from its
 event ID, even when the native ID is absent from the shell environment.
 
-If resolve returns `not_found`, or ended-record retrofit cannot create an exact
+If resolve returns `not_found` without a recovery path, or retrofit cannot create an exact
 active continuation, enter degraded mode: print
 `Session: unresolved — no final session-file write performed`, continue project
 memory maintenance that does not require an exact session record, write
@@ -207,7 +168,65 @@ After printing the report, **execute all automatic actions without further promp
 - Write CONTEXT_SNAPSHOT.md (project state only — no Session name field)
 - Write final session name to session file and move to `sessions/done/` — only if user confirms the suggested name
 
-The session name is the only action requiring explicit user input. Everything else executes immediately after the report is printed.
+The session name and optional PR description update are the only actions requiring
+explicit user input. Ask about the PR description after releasing the workflow
+lock; execute memory housekeeping immediately after the report.
+
+---
+
+## Concurrent session guard — acquire before memory writes
+
+After printing the Wrap report, acquire the owner-recorded memory workflow lock
+before changing memory. The git-state gate and any dirty-file question must be
+resolved before this point. It serializes wrap and post-merge housekeeping; the
+snapshot writer separately locks its short atomic update. Preserve the returned
+token through the snapshot update:
+
+```bash
+LOCK_OWNER=$("$REPO/bin/rig" session current --json 2>/dev/null | \
+  python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")' 2>/dev/null || true)
+LOCK_ARGS=(acquire --json)
+[[ -n "$LOCK_OWNER" ]] && LOCK_ARGS+=(--owner-anchor "$LOCK_OWNER")
+[[ "${RIG_SESSION_PID:-}" =~ ^[0-9]+$ ]] && LOCK_ARGS+=(--provider-pid "$RIG_SESSION_PID")
+SNAP_LOCK_JSON=$("$REPO/bin/rig" memory workflow-lock "${LOCK_ARGS[@]}") || {
+  echo "Unable to write Rig memory lock: $SNAP_LOCK_JSON" >&2
+  echo "No further memory writes were attempted." >&2
+  exit 1
+}
+SNAP_LOCK_TOKEN=$(printf '%s' "$SNAP_LOCK_JSON" | \
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])') || exit 1
+WRAP_MARKER_TOKEN=$(python3 -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); s=p.stat() if p.exists() else None; print(hashlib.sha256(p.read_bytes()).hexdigest()+":"+str(s.st_mtime_ns)+":"+str(s.st_ino) if s else "missing")' \
+  "$RIG_DIR/memory/.wrap-needed") || {
+  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
+  exit 1
+}
+printf 'Rig workflow lock acquired: %s\n' "$SNAP_LOCK_JSON"
+printf 'Wrap reminder baseline: %s\n' "$WRAP_MARKER_TOKEN"
+```
+
+The lock reports the current owner anchor, PID, and age if another workflow is
+active. A dead provider PID is archived and recovered on the next acquire.
+For a tool-sourced lock older than 30 minutes, verify that its workflow has
+stopped, then retry acquire with `--recover-stale`. Age alone does not take over
+the lock; the stale record is archived on explicit recovery.
+Never remove another session's lock by hand as
+part of this command. Keep the exact `token` from the acquire output in your
+working context and reassign `SNAP_LOCK_TOKEN` from that value in later tool-call
+shells; shell variables do not persist between tool calls. Never recover a token
+by reading the current lock file, which could belong to a newer session. If
+`WRAP_MARKER_TOKEN` is lost across tool calls, pass an empty token at the final
+clear; that clears only this session's scoped obligation and preserves all
+unscoped reminders. Never re-read the marker to reconstruct the baseline. If
+acquire fails with `Operation not permitted`, request scoped write approval for $RIG_DIR
+before retrying. This commonly happens when Codex is running in a
+project whose `.rigpath` points outside the workspace writable roots.
+
+The sentinel file is gitignored alongside other `.rig/memory/` runtime files.
+If any step fails after acquire, release the exact token before stopping. Keep
+the snapshot draft and pending obligations for a retry.
+If exact session retrofit was pending during report collection, perform it now,
+before other memory writes. Update the resolved session identity or continue in
+degraded mode if exact recovery is unavailable.
 
 ---
 
@@ -272,54 +291,6 @@ session touched files covered by documented features.
    > - `[feature name]` — run `/refresh-feature-doc <name>`"
    Advisory only — do not block the rest of /wrap.
 7. If no overlap or no docs: skip silently.
-
----
-
-## PR description freshness step
-
-After the feature doc freshness check, verify that the open PR for this branch
-reflects all commits that have landed since it was opened.
-
-**How:**
-
-1. Check for an open PR on the current branch:
-   ```bash
-   CURRENT_BRANCH=$(git branch --show-current)
-   PR_JSON=$(gh pr list --head "$CURRENT_BRANCH" --json number,title,body,labels --limit 1 2>/dev/null || echo "[]")
-   PR_NUMBER=$(echo "$PR_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['number'] if d else '')" 2>/dev/null || echo "")
-   ```
-   If `PR_NUMBER` is empty (no open PR or `gh` unavailable): skip silently.
-
-2. Get the PR body:
-   ```bash
-   PR_BODY=$(echo "$PR_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['body'] if d else '')" 2>/dev/null || echo "")
-   ```
-
-3. Get commits on this branch not yet in base:
-   ```bash
-   BASE=$(grep "^base-branch:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
-   BASE="${BASE:-main}"
-   git log "origin/$BASE"..HEAD --format="%s" 2>/dev/null
-   ```
-
-4. For each commit subject, skip housekeeping types: `chore(memory)`, `chore(post-merge)`,
-   `chore(release)`, `chore(rig)`. For the rest, do a case-insensitive substring check
-   against the PR body.
-
-5. **If any non-housekeeping commits are not reflected in the PR body**, surface in the
-   wrap summary:
-   > "PR #[N] description may be stale — [N] commit(s) not in description:
-   >   - type(scope): commit subject
-   >   - ...
-   > Update PR description? [yes / no]"
-
-   If the user says yes: append an `## Additional changes` section to the PR body
-   listing the unrepresented commits. Show the proposed addition before editing:
-   ```bash
-   gh pr edit "$PR_NUMBER" --body-file /tmp/wrap-pr-body.md
-   ```
-
-6. If all commits are reflected, or this is a housekeeping-only session: skip silently.
 
 ---
 
@@ -438,13 +409,15 @@ Never delete entries — only move them. ERRORS.md is always newest-first: add n
 
 ## Active tasks — in-flight state capture
 
-After ERRORS.md cleanup and before session naming, read `.rig/tasks/active/`.
+After ERRORS.md cleanup and before session naming, read `$RIG_DIR/tasks/active/`.
 
 **If empty:** note "No tasks in flight" and continue.
 
-**If non-empty:** for each active task file, write a `## Resuming from` section
-into CONTEXT_SNAPSHOT.md that captures enough state for the next session to
-resume without re-reading the conversation. The section must include:
+**If non-empty:** identify the active tasks this exact session worked on. For
+each of those tasks, write a `## Resuming from` section in a snapshot draft that
+captures enough state for the next session to resume without re-reading the
+conversation. Leave tasks owned by another active session out of this draft;
+the writer preserves their existing sections. Each owned section must include:
 
 ```
 ## Resuming from: [task-slug]
@@ -463,8 +436,102 @@ pick up exactly where you left off from this section alone.
 If the task has a `## Batches` section, include which batches are complete and
 which are pending.
 
-This section is written into CONTEXT_SNAPSHOT.md alongside the rest of the
-snapshot — overwrite the previous version.
+Build a draft under `$RIG_DIR/memory/` containing the current shared project
+header and only this session's `## Resuming from` sections. Use the token from
+the concurrent session guard to name the draft
+`.snapshot-draft-${SNAP_LOCK_TOKEN}.md`. For a session with no exact active
+record, write the shared header only and report that task handoffs could not be
+updated without an owner. Then run the owner-aware writer:
+
+```bash
+SNAP_DRAFT="$RIG_DIR/memory/.snapshot-draft-${SNAP_LOCK_TOKEN}.md"
+snapshot_write_failed() {
+  "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
+  echo "Snapshot update failed; draft preserved at $SNAP_DRAFT" >&2
+  exit 1
+}
+OWNED_TASKS=()
+while IFS= read -r task; do OWNED_TASKS+=("$task"); done \
+  < <(sed -n 's/^## Resuming from: //p' "$SNAP_DRAFT")
+SNAP_ARGS=(--file "$SNAP_DRAFT" --json)
+if [[ "${#OWNED_TASKS[@]}" -eq 0 ]]; then
+  SNAP_ARGS+=(--shared-only)
+  "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || snapshot_write_failed
+else
+  CURRENT_JSON=$("$REPO/bin/rig" session current --json) || snapshot_write_failed
+  CURRENT_FILE=$(printf '%s' "$CURRENT_JSON" | \
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")') || snapshot_write_failed
+  CURRENT_ANCHOR=$(printf '%s' "$CURRENT_JSON" | \
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")') || snapshot_write_failed
+  [[ -n "$CURRENT_FILE" && -n "$CURRENT_ANCHOR" ]] || snapshot_write_failed
+  for task in "${OWNED_TASKS[@]}"; do SNAP_ARGS+=(--owned-task "$task"); done
+  RIG_SESSION_FILE="$CURRENT_FILE" RIG_SESSION_ANCHOR="$CURRENT_ANCHOR" \
+    "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || snapshot_write_failed
+fi
+rm -f "$SNAP_DRAFT"
+```
+
+For a pre-existing unowned section with the same task slug, inspect it first.
+Only after confirming that this session is taking ownership, rerun with
+`--adopt-legacy`. The writer backs up the original snapshot before migration.
+Never edit `CONTEXT_SNAPSHOT.md` directly; the writer preserves foreign sections
+and atomically materializes the shared view.
+
+Release the workflow lock after the snapshot is written and any legacy section
+adoption is complete. Do this before presenting a session name for confirmation;
+another session can then start its own memory housekeeping while the user decides.
+
+```bash
+"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json || exit 1
+```
+
+---
+
+## PR description freshness step
+
+After the workflow lock is released, verify that the open PR for this branch
+reflects all commits that have landed since it was opened.
+
+**How:**
+
+1. Check for an open PR on the current branch:
+   ```bash
+   CURRENT_BRANCH=$(git branch --show-current)
+   PR_JSON=$(gh pr list --head "$CURRENT_BRANCH" --json number,title,body,labels --limit 1 2>/dev/null || echo "[]")
+   PR_NUMBER=$(echo "$PR_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['number'] if d else '')" 2>/dev/null || echo "")
+   ```
+   If `PR_NUMBER` is empty (no open PR or `gh` unavailable): skip silently.
+
+2. Get the PR body:
+   ```bash
+   PR_BODY=$(echo "$PR_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['body'] if d else '')" 2>/dev/null || echo "")
+   ```
+
+3. Get commits on this branch not yet in base:
+   ```bash
+   BASE=$(grep "^base-branch:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+   BASE="${BASE:-main}"
+   git log "origin/$BASE"..HEAD --format="%s" 2>/dev/null
+   ```
+
+4. For each commit subject, skip housekeeping types: `chore(memory)`, `chore(post-merge)`,
+   `chore(release)`, `chore(rig)`. For the rest, do a case-insensitive substring check
+   against the PR body.
+
+5. **If any non-housekeeping commits are not reflected in the PR body**, surface in the
+   wrap summary:
+   > "PR #[N] description may be stale — [N] commit(s) not in description:
+   >   - type(scope): commit subject
+   >   - ...
+   > Update PR description? [yes / no]"
+
+   If the user says yes: append an `## Additional changes` section to the PR body
+   listing the unrepresented commits. Show the proposed addition before editing:
+   ```bash
+   gh pr edit "$PR_NUMBER" --body-file /tmp/wrap-pr-body.md
+   ```
+
+6. If all commits are reflected, or this is a housekeeping-only session: skip silently.
 
 ---
 
@@ -548,16 +615,28 @@ never interpolate it into shell or Python source.
 
 ```bash
 # Clear only this exact session's wrap obligation while its active record is
-# still resolvable. --adopt-legacy explicitly migrates an older unscoped marker.
-CURRENT_JSON=$("$REPO/bin/rig" session current --json) || exit 1
+# still resolvable. Adopt an older unscoped marker only if it has not changed
+# since the workflow lock was acquired and no unexpanded untagged stub remains;
+# another session may add one while this session waits for name confirmation.
+CURRENT_JSON=$("$REPO/bin/rig" session current --json) || {
+  exit 1
+}
 CURRENT_UUID=$(printf '%s' "$CURRENT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
 [[ -n "$SESSION_UUID" && "$CURRENT_UUID" == "$SESSION_UUID" ]] || {
   echo "Session identity changed; stop before clearing or completing it." >&2
   exit 1
 }
-"$REPO/bin/rig" session obligation clear --kind wrap --adopt-legacy --json
+WRAP_CLEAR_JSON=$("$REPO/bin/rig" session obligation clear --kind wrap \
+  --adopt-legacy-if-marker-token "${WRAP_MARKER_TOKEN:-}" --json) || exit 1
+printf '%s\n' "$WRAP_CLEAR_JSON"
 "$REPO/bin/rig" session-name set --final --complete "$CONFIRMED_NAME"
 ```
+
+If `WRAP_CLEAR_JSON` reports `"legacy_preserved": true`, state that another
+project reminder remains pending. Do not report that `.wrap-needed` was cleared.
+If clear returns `owned_progress_unexpanded`, keep the session active and its
+name unfinalized. Expand the new SID-tagged stub, refresh the snapshot under a
+new workflow lock, and retry with that lock's reminder baseline.
 
 If this is a continuation after an earlier wrap, name only work done since
 that wrap. Preserve the completed parent record and its final name.
@@ -596,13 +675,10 @@ skip the naming step silently but still run the orphan scan.
 
 ## Flag cleanup (step 12)
 
-After suggesting a session name and before asking "What's next?", run both cleanups:
+After suggesting a session name and before asking "What's next?", run checkpoint cleanup:
 
 ```bash
 # The exact wrap obligation was cleared in Step 5 before the record moved to done/.
-
-# Release the concurrent session lock
-rm -f "$RIG_DIR/memory/.snapshot-write-in-progress" 2>/dev/null || true
 
 # Clear this session's compact checkpoint — the full snapshot supersedes it
 rm -f "$RIG_DIR/memory/.compact-checkpoint-${PPID}.md" 2>/dev/null || true
@@ -611,12 +687,16 @@ rm -f "$RIG_DIR/memory/.compact-checkpoint-${PPID}.md" 2>/dev/null || true
 # The atomic session-name writer removes the matching legacy sentinel on completion.
 ```
 
-Log: "`.wrap-needed` cleared. Concurrent session lock released. Compact checkpoint cleared. UUID sentinel cleared."
+Log the exact scoped wrap obligation as cleared. Report `.wrap-needed` as
+cleared only when the marker is gone; otherwise report the remaining project
+or other-session reminder. Log the compact checkpoint and UUID sentinel cleanup.
 
 `.wrap-needed` may contain multiple `anchor=` entries. The exact-session clear
 removes only the current anchor and deletes the reminder only when no scoped or
 unadopted legacy obligation remains.
-`.snapshot-write-in-progress` signals to concurrent sessions that this snapshot write is complete.
+The workflow lock release after the snapshot update signals to concurrent
+sessions that wrap memory housekeeping is complete. The snapshot writer clears
+its own short-lived write marker.
 `.compact-checkpoint-{PPID}.md` is cleared so the next session reads the authoritative
 `CONTEXT_SNAPSHOT.md` rather than a stale post-compaction checkpoint.
 
@@ -801,7 +881,9 @@ The `/fewer-permission-prompts` skill remains available for one-off manual scans
 
 - `.rig/memory/CONTEXT_SNAPSHOT.md` is gitignored — it lives on disk only, never committed
 - `.rig/memory/PROGRESS_archive.md` and `.rig/memory/ERRORS_archive.md` are gitignored — full history on disk, not in the repo
-- Always **overwrite** the snapshot, never append to it; it represents current state, not history
+- Always use `bin/rig memory write-snapshot` to refresh the shared header and this
+  session's task sections. Never overwrite or append to `CONTEXT_SNAPSHOT.md` by hand;
+  the writer preserves sections owned by other active sessions.
 - History belongs in `.rig/memory/PROGRESS.md` (recent) and `PROGRESS_archive.md` (older); same pattern for `ERRORS.md` / `ERRORS_archive.md`
 - If a task is in progress but not done, use the "Active tasks — in-flight state capture" step above to write a structured `## Resuming from` section into CONTEXT_SNAPSHOT. Vague notes are not sufficient — the next session must be able to resume from the snapshot alone.
 - At the very end of the response, after every other report or chained command,

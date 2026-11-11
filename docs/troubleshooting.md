@@ -116,7 +116,9 @@ hook installation. With no active Rig `commit-msg`, a visible guarded agent
 commit uses the limited PreToolUse gate: fresh approval, branch, and direct-push
 type are checked before approval is consumed. PostToolUse stubs progress when
 it sees a matching successful Git result; quiet output or opaque scripts may
-leave no stub. An executable `commit-msg` that lacks Rig's guarded policy is
+leave no stub. With a compatible `commit-msg` but no working `post-commit`,
+the same visible PostToolUse fallback can log the commit once from its final SHA.
+An executable `commit-msg` that lacks Rig's guarded policy is
 treated as incompatible and blocks the visible guarded command. PreToolUse
 checks compatibility with a dedicated `--rig-policy-probe` hook argument;
 custom wrappers must handle it without side effects before normal message-file

@@ -4,14 +4,16 @@
 # Handles two Claude Code hook events in one script:
 #
 #   Stop (fires after every agent turn)
-#     1. Updates the date in the "Last updated:" line in CONTEXT_SNAPSHOT.md
-#     2. Appends a session-end comment to PROGRESS.md (used by /wrap for naming)
+#     Appends a session-end comment to PROGRESS.md (used by /wrap for naming).
+#     The snapshot timestamp belongs to the atomic snapshot writer; Stop must
+#     not rewrite a shared snapshot from a stale read.
 #
 #   SessionEnd (fires once when the session truly terminates)
 #     Source values:
 #       logout / prompt_input_exit — user closed the session
 #           Write .wrap-needed if /wrap hasn't run and the session had meaningful
-#           commits. Write minimal checkpoint. Mark session file ended-no-wrap.
+#           commits. Create a minimal checkpoint only if no snapshot exists.
+#           Mark session file ended-no-wrap.
 #           Clean /tmp UUID sentinel and compact checkpoint.
 #       clear — context was cleared; session continues in a new context window
 #           Log "context cleared". Do NOT set .wrap-needed.
@@ -82,20 +84,56 @@ case "$SOURCE" in
       else
         # Legacy sessions have no exact native binding. Preserve the unscoped
         # reminder for explicit migration/adoption by a later /wrap.
-        touch "$WRAP_NEEDED" 2>/dev/null || true
+        write_unscoped_wrap_needed legacy
       fi
       echo "[$(date +%H:%M:%S)] SESSION_END: .wrap-needed written (${reason})" \
         >> "$SESSION_LOG" 2>/dev/null || true
     }
 
+    write_unscoped_wrap_needed() {
+      local kind="${1:-progress}"
+      # A normal Codex launcher leaves commit stubs without a session anchor.
+      # Keep their reminder without assigning the work to the exiting session.
+      [[ -d "$RIG_DIR/memory" ]] || return
+      WRAP_F="$WRAP_NEEDED" OBLIGATION_LOCK="$RIG_DIR/memory/.session-obligations.lock" REMINDER_KIND="$kind" python3 - 2>/dev/null <<'PY'
+import fcntl, os, pathlib, tempfile, uuid
+marker = pathlib.Path(os.environ["WRAP_F"])
+key = "unscoped_" + os.environ["REMINDER_KIND"]
+with open(os.environ["OBLIGATION_LOCK"], "a+") as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    raw = marker.read_text(encoding="utf-8", errors="surrogateescape") if marker.exists() else ""
+    # A fresh generation makes a concurrent wrap's observed marker hash stale,
+    # even when an earlier unscoped reminder already existed.
+    content = "".join(line for line in raw.splitlines(keepends=True)
+                      if not line.startswith(key + "="))
+    content += ("\n" if content and not content.endswith("\n") else "")
+    content += key + "=" + uuid.uuid4().hex + "\n"
+    fd, temp = tempfile.mkstemp(prefix=marker.name + ".tmp.", dir=str(marker.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as out:
+            out.write(content)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temp, marker)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+PY
+      echo "[$(date +%H:%M:%S)] SESSION_END: unscoped ${kind} reminder retained" \
+        >> "$SESSION_LOG" 2>/dev/null || true
+    }
+
     write_minimal_checkpoint() {
       [[ ! -d "$RIG_DIR/memory" ]] && return
-      if [[ -f "$SNAP_LOCK" ]]; then
+      # A completed wrap or another session may already have written a full
+      # shared view. A SessionEnd hook must never replace that view.
+      [[ -e "$SNAPSHOT" || -L "$SNAPSHOT" ]] && return
+      if [[ -f "$SNAP_LOCK" || -f "$RIG_DIR/memory/.memory-workflow-in-progress" ]]; then
         echo "[$(date +%H:%M:%S)] SESSION_END: snapshot write in progress — skipping minimal checkpoint" \
           >> "$SESSION_LOG" 2>/dev/null || true
         return
       fi
-      local branch commit active_task session_anchor=""
+      local branch commit active_task session_anchor="" draft
       branch=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
       commit=$(git -C "$REPO" log -1 --format="%h %s" 2>/dev/null || echo "none")
       active_task=""
@@ -104,6 +142,7 @@ case "$SOURCE" in
           | head -1 | xargs basename 2>/dev/null || true)
       fi
       session_anchor="${RIG_SESSION_ANCHOR:-$(cat "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true)}"
+      draft=$(mktemp "${TMPDIR:-/tmp}/rig-snapshot-stop.XXXXXX") || return
       {
         echo "# Context Snapshot — session-end checkpoint"
         echo ""
@@ -121,14 +160,50 @@ case "$SOURCE" in
         echo "## Status"
         echo ""
         echo "Session ended without running \`/wrap\`. Run \`/wrap\` to capture full context."
-      } > "$SNAPSHOT" 2>/dev/null || true
-      echo "[$(date +%H:%M:%S)] SESSION_END: minimal checkpoint written" \
-        >> "$SESSION_LOG" 2>/dev/null || true
+      } > "$draft" 2>/dev/null || true
+      if [[ -x "$REPO/bin/rig" ]] && "$REPO/bin/rig" memory write-snapshot --file "$draft" --shared-only --if-missing --json >/dev/null 2>&1; then
+        echo "[$(date +%H:%M:%S)] SESSION_END: minimal checkpoint written" \
+          >> "$SESSION_LOG" 2>/dev/null || true
+      fi
+      rm -f "$draft"
     }
 
     NEEDS_WRAP=false
 
-    if [[ -f "$PROGRESS" ]] && grep -Eq "Auto-logged by (post-tool|post-commit) hook" "$PROGRESS" 2>/dev/null; then
+    # Shared PROGRESS.md can contain another session's unexpanded stub. An
+    # exact native session may claim only a stub tagged with its own anchor.
+    # Untagged stubs retain a project reminder without claiming this session.
+    # Legacy sessions retain the prior unscoped reminder behavior.
+    OWN_STUB=false
+    UNSCOPED_STUB=false
+    if [[ -f "$PROGRESS" ]]; then
+      if [[ -n "$NATIVE_SESSION_ID" && -n "${RIG_SESSION_ANCHOR:-}" ]]; then
+        STUB_SCOPE=$(PROGRESS_FILE="$PROGRESS" SESSION_ANCHOR="$RIG_SESSION_ANCHOR" python3 - 2>/dev/null <<'PY'
+import os, re
+anchor = os.environ["SESSION_ANCHOR"]
+current = None
+scopes = set()
+with open(os.environ["PROGRESS_FILE"], "r", encoding="utf-8", errors="surrogateescape", newline="") as progress:
+    for line in progress:
+        if line.startswith("## "):
+            match = re.search(r"<!-- sid:([A-Za-z0-9-]+) -->", line)
+            current = match.group(1) if match else None
+        elif re.search(r"Auto-logged by (post-tool|post-commit) hook", line):
+            if current == anchor:
+                scopes.add("own")
+            elif current is None:
+                scopes.add("unscoped")
+print(" ".join(sorted(scopes)))
+PY
+        ) || STUB_SCOPE=""
+        [[ " $STUB_SCOPE " == *" own "* ]] && OWN_STUB=true
+        [[ " $STUB_SCOPE " == *" unscoped "* ]] && UNSCOPED_STUB=true
+      elif grep -Eq "Auto-logged by (post-tool|post-commit) hook" "$PROGRESS" 2>/dev/null; then
+        OWN_STUB=true
+      fi
+    fi
+    [[ "$UNSCOPED_STUB" == true ]] && write_unscoped_wrap_needed
+    if [[ "$OWN_STUB" == true ]]; then
       write_wrap_needed "unexpanded stubs in PROGRESS.md"
       NEEDS_WRAP=true
     fi
@@ -138,7 +213,7 @@ case "$SOURCE" in
       NEEDS_WRAP=true
     fi
 
-    if [[ "$NEEDS_WRAP" == false ]]; then
+    if [[ "$NEEDS_WRAP" == false && -z "$NATIVE_SESSION_ID" ]]; then
       SESSION_COMMIT_COUNT=$(grep -c "PROGRESS stub:" "$SESSION_LOG" 2>/dev/null || echo 0)
       if [[ "$SESSION_COMMIT_COUNT" -ge 2 ]]; then
         write_wrap_needed "${SESSION_COMMIT_COUNT} commits this session"
@@ -188,19 +263,6 @@ except Exception:
 
   # ── Stop: per-turn work (source is empty for Stop events) ──────────────────
   *)
-    # Update Last updated: date in CONTEXT_SNAPSHOT
-    if [[ -f "$SNAPSHOT" ]] && grep -q "^\*\*Last updated:\*\*" "$SNAPSHOT" 2>/dev/null; then
-      DESCRIPTION=$(grep "^\*\*Last updated:\*\*" "$SNAPSHOT" \
-        | sed 's/\*\*Last updated:\*\*[^—]*— //')
-      TMP=$(mktemp)
-      awk -v now="$NOW_FULL" -v desc="$DESCRIPTION" -v em="—" '
-        /^\*\*Last updated:\*\*/ { print "**Last updated:** " now " " em " " desc; next }
-        { print }
-      ' "$SNAPSHOT" > "$TMP" && mv "$TMP" "$SNAPSHOT"
-      echo "[$(date +%H:%M:%S)] STOP: updated Last updated: → $NOW_FULL in CONTEXT_SNAPSHOT" \
-        >> "$SESSION_LOG" 2>/dev/null || true
-    fi
-
     # Append session-end marker to PROGRESS.md
     if [[ -f "$PROGRESS" ]]; then
       SESSION_UUID="${RIG_SESSION_ANCHOR:-$(cat "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true)}"

@@ -23,8 +23,9 @@ except (ValueError, TypeError, AttributeError):
 ') || exit 0
 fi
 
-# Git's post-commit hook logs guarded commits when installed. For a visible
-# commit in a hookless install, PreToolUse leaves one pending attempt here.
+# Git's post-commit hook logs guarded commits when installed. PreToolUse
+# leaves one pending attempt for a visible commit so this hook can log it
+# when post-commit is absent or does not log the final SHA.
 HOOK_ROOT=$(cd "$(dirname "$0")/../.." && pwd -P) || exit 0
 REPO=$(git -C "$HOOK_ROOT" rev-parse --show-toplevel 2>/dev/null) || exit 0
 [[ "$REPO" == "$HOOK_ROOT" ]] || exit 0

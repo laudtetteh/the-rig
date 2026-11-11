@@ -951,7 +951,7 @@ matrix_upgrade_case() {
   grep -q "original snapshot" "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
 }
 
-@test "stop.sh (SessionEnd): write_minimal_checkpoint runs normally when no lock exists" {
+@test "stop.sh (SessionEnd): preserves an existing snapshot when no lock exists" {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
@@ -971,8 +971,9 @@ matrix_upgrade_case() {
   echo '{"source": "logout"}' \
     | ( cd "$TEST_PROJECT" && RIG_SESSION_LOG="$session_log" bash "$stop_hook" )
 
-  # Snapshot must have been replaced with the minimal checkpoint content
-  grep -q "session-end checkpoint" "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+  # A progress stub still requests wrap, but the shared snapshot stays intact.
+  grep -q "original snapshot" "$rig_dir/memory/CONTEXT_SNAPSHOT.md"
+  [ -e "$rig_dir/memory/.wrap-needed" ]
 }
 
 # ── Command behavior: /ship commit sentinel ───────────────────────────────────

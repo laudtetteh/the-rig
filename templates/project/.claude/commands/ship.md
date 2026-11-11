@@ -498,7 +498,15 @@ In this order:
    - `## Approach` stays as the original plan (historical intent); deviations belong in `## Done notes`
 2. Move the task file: `.rig/tasks/active/TASK_[name].md` → `.rig/tasks/done/`
 3. Update `.rig/memory/PROGRESS.md` — add a full entry at the top (not a stub); if scope changed, the entry reflects the actual outcome
-4. Overwrite `.rig/memory/CONTEXT_SNAPSHOT.md` with current project state
+4. Create a unique draft under `$RIG_DIR/memory/` with `mktemp`, write only the
+   current shared project header to it, and in the same shell call
+   `bin/rig memory write-snapshot --file "$DRAFT" --shared-only --json` with
+   `DRAFT` set to that draft's path. If Step 2 moved a task to done, inspect
+   the existing snapshot for its exact `## Resuming from: <task-slug>` heading
+   and append `--retire-task <task-slug> --done-task-file "$RIG_DIR/tasks/done/<filename>"`
+   for that task. The writer checks the done file and backs up the old view.
+   Remove the draft after a successful write. Keep other sessions' active
+   handoffs; do not edit `CONTEXT_SNAPSHOT.md` directly.
 5. If anything surprised you, log it in `.rig/memory/ERRORS.md`
 6. If anything about The Rig's workflow was missing or felt wrong, log it in `.rig/memory/RIG_GAPS.md`
 7. **Post a closing comment on the GitHub Issue:**

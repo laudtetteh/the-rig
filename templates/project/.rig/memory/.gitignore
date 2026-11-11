@@ -39,11 +39,18 @@ ERRORS_archive.md
 # Deleted by /post-merge when it completes successfully. Never committed.
 .post-merge-pending
 
-# .snapshot-write-in-progress is a mutual-exclusion lock held by /wrap and
-# /post-merge while writing CONTEXT_SNAPSHOT.md. Prevents concurrent writes from
-# silently overwriting each other. stop.sh (SessionEnd) checks this before calling
-# write_minimal_checkpoint. Never committed.
+# The owner-aware snapshot writer holds a short file lock and publishes a
+# short-lived write marker. /wrap and /post-merge hold a separate workflow
+# lock with owner metadata. Stop checks these before its minimal checkpoint.
+# Drafts, migration backups and stale-lock archives are local runtime state.
+# None of these files should make an in-repo Rig checkout dirty.
 .snapshot-write-in-progress
+.snapshot-write.lock
+.memory-workflow-in-progress
+.memory-workflow-gate.lock
+.snapshot-draft-*.md
+snapshot-backups/
+workflow-lock-archive/
 
 # .wrap-in-progress is the legacy name for .snapshot-write-in-progress (renamed
 # to cover /post-merge too). Kept here for projects that still have this file on

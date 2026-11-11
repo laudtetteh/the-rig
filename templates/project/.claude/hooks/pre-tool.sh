@@ -91,6 +91,22 @@ commit_ok_age_seconds() {
   printf '%s\n' "$((now - mtime))"
 }
 
+record_commit_fallback_pending() {
+  local target_repo="$1" fallback_id pending previous_head
+  fallback_id=$(printf '%s' "$INPUT" | python3 -c '
+import hashlib, json, sys
+data = json.load(sys.stdin)
+value = data.get("tool_use_id")
+print(hashlib.sha256(value.encode()).hexdigest()[:16] if isinstance(value, str) and value else "legacy")
+') || fail_closed "fallback event identity could not be read."
+  pending="$RIG_DIR/memory/.rig-commit-fallback-pending-$fallback_id"
+  previous_head=$(git -C "$target_repo" rev-parse HEAD 2>/dev/null || true)
+  printf '%s\n%s\n%s\n' "$fallback_id" "$target_repo" "$previous_head" > "$pending.tmp-$$" || \
+    fail_closed "fallback progress marker could not be written."
+  mv "$pending.tmp-$$" "$pending" || \
+    fail_closed "fallback progress marker could not be installed."
+}
+
 # ── Session log ──────────────────────────────────────────────────────────────
 # Logs every tool call with a timestamp. Useful for debugging agent behaviour.
 # Scoped per-project so concurrent sessions on different projects don't
@@ -369,7 +385,11 @@ print(os.path.abspath(cwd or sys.argv[1]) + "\t")
           fail_closed "The target commit-msg hook does not support guarded commits: $HOOK_PATH"
         [[ "$HOOK_CAPABILITY" == rig-commit-policy-v1 ]] || \
           fail_closed "The target commit-msg hook does not support guarded commits: $HOOK_PATH"
-        continue  # Git will claim approval and log final HEAD.
+        # commit-msg claims approval, but a customized hook directory may have
+        # no Rig post-commit logger. PostToolUse will dedupe by final SHA when
+        # post-commit did log it.
+        record_commit_fallback_pending "$COMMIT_REPO"
+        continue
       fi
 
       # Supported --skip-git-hooks installs have no runtime guard. Preserve
@@ -405,22 +425,11 @@ print(os.path.abspath(cwd or sys.argv[1]) + "\t")
           fail_closed "Direct-to-$CURRENT_BRANCH commit blocked; only chore/docs subjects are allowed."
       fi
 
-      FALLBACK_ID=$(printf '%s' "$INPUT" | python3 -c '
-import hashlib, json, sys
-data = json.load(sys.stdin)
-value = data.get("tool_use_id")
-print(hashlib.sha256(value.encode()).hexdigest()[:16] if isinstance(value, str) and value else "legacy")
-') || fail_closed "fallback event identity could not be read."
-      FALLBACK_PENDING="$RIG_DIR/memory/.rig-commit-fallback-pending-$FALLBACK_ID"
-      PREVIOUS_HEAD=$(git -C "$COMMIT_REPO" rev-parse HEAD 2>/dev/null || true)
       COMMIT_CLAIM="$COMMIT_OK.claimed-$$-$RANDOM"
       mv "$COMMIT_OK" "$COMMIT_CLAIM" 2>/dev/null || \
         fail_closed "commit authorization was already claimed; request fresh approval."
       rm -f "$COMMIT_CLAIM" || fail_closed "claimed commit authorization could not be removed."
-      printf '%s\n%s\n%s\n' "$FALLBACK_ID" "$COMMIT_REPO" "$PREVIOUS_HEAD" > "$FALLBACK_PENDING.tmp-$$" || \
-        fail_closed "fallback progress marker could not be written."
-      mv "$FALLBACK_PENDING.tmp-$$" "$FALLBACK_PENDING" || \
-        fail_closed "fallback progress marker could not be installed."
+      record_commit_fallback_pending "$COMMIT_REPO"
       echo "WARNING: No active Rig commit-msg hook; PreToolUse used the visible-command fallback." >&2
     done <<< "$COMMIT_TARGETS"
   fi

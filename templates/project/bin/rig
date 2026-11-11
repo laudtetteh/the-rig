@@ -24,7 +24,8 @@ Commands:
   rig memory repair-markers Reposition unambiguous Rig memory markers
   rig memory append-gap     Append one structured Rig gap
   rig memory append-progress Append one dated progress entry
-  rig memory write-snapshot Atomically replace CONTEXT_SNAPSHOT.md
+  rig memory write-snapshot Atomically update CONTEXT_SNAPSHOT.md; preserve owned task handoffs
+  rig memory workflow-lock Acquire or release an owner-recorded memory workflow lock
   rig upgrade rollback      Undo one completed Rig upgrade
   rig codex                 Launch Codex with Rig context
   rig claude                Launch Claude Code with Rig context
@@ -72,15 +73,27 @@ Native IDs are redacted unless --verbose is explicitly supplied.
 Repair is preview-only unless --confirm TOKEN and --reason REASON are supplied.
 Retrofit binds the native host ID from env or an explicit --native-session-id.
 Content matching is never part of normal resolution.
+Wrap clear can use --adopt-legacy-if-marker-token TOKEN to adopt only an unchanged
+project reminder with no unexpanded untagged progress stub. Other reminders remain
+pending while this session clears. A current-session tagged stub blocks clear.
 EOF
       ;;
     session-name) printf 'Usage: rig session-name set [--tentative|--final] [--complete] [--json] <name>\n';;
     sprint) printf 'Usage: rig sprint <audit|plan|status> [options] --json\n';;
     memory) cat <<'EOF'
-Usage: rig memory <validate|repair-markers|append-gap|append-progress|write-snapshot> [options]
+Usage: rig memory <validate|repair-markers|append-gap|append-progress|write-snapshot|workflow-lock> [options]
 
 Append helpers resolve .rigpath before writing and use atomic file replacement
 where replacement is required.
+write-snapshot accepts --shared-only or repeated --owned-task TASK; --if-missing
+creates a shared snapshot only when none exists. Owning a
+legacy handoff requires --adopt-legacy after review. To remove a completed
+handoff, pass --shared-only with matched --retire-task TASK and
+--done-task-file FILE pairs; the writer verifies the done file and backs up
+the prior snapshot. workflow-lock accepts
+acquire or release, with --owner-anchor and --provider-pid for acquisition;
+--recover-stale explicitly takes over an aged tool-sourced lock,
+and --token for release. Both commands support --json.
 EOF
       ;;
     codex) printf 'Usage: rig codex [-- <codex arguments>]\n';;
@@ -99,7 +112,7 @@ worktree_bootstrap() {
 import pathlib, shutil, sys
 source, target = map(pathlib.Path, sys.argv[1:])
 paths = [".rigpath","CLAUDE.md","PROJECT_BRIEF.md",".gitleaks.toml","bin/rig",
-         "bin/rig-session-resolve.py",
+         "bin/rig-session-resolve.py","bin/rig-snapshot.py",
          ".claude",".agents",".codex",".mcp.json",".playwright-mcp",".github",
          "docs/INDEX.md","docs/features/README.md"]
 # Linked worktrees live under the primary's own .claude/worktrees/ (see the
@@ -129,7 +142,7 @@ PY
 }
 
 session_obligation() {
-  local action="${1:-}" kind="" merge_sha="" adopt=false json=false arg resolved file anchor
+  local action="${1:-}" kind="" merge_sha="" adopt=false guarded_adopt=false marker_token="" json=false arg resolved file anchor
   shift || true
   while [[ "$#" -gt 0 ]]; do
     arg="$1"
@@ -137,6 +150,7 @@ session_obligation() {
       --kind) [[ "$#" -ge 2 ]] || { usage_error "--kind requires a value" "$@"; return; }; kind="$2"; shift 2;;
       --merge-sha) [[ "$#" -ge 2 ]] || { usage_error "--merge-sha requires a value" "$@"; return; }; merge_sha="$2"; shift 2;;
       --adopt-legacy) adopt=true; shift;;
+      --adopt-legacy-if-marker-token) [[ "$#" -ge 2 ]] || { usage_error "--adopt-legacy-if-marker-token requires a value" "$@"; return; }; guarded_adopt=true; marker_token="$2"; shift 2;;
       --json) json=true; shift;;
       *) usage_error "unknown obligation option: $arg" "$@"; return;;
     esac
@@ -144,16 +158,18 @@ session_obligation() {
   [[ "$action" == mark || "$action" == clear ]] || { usage_error "obligation action must be mark or clear"; return; }
   [[ "$kind" == wrap || "$kind" == post-merge ]] || { usage_error "obligation kind must be wrap or post-merge"; return; }
   [[ "$kind" != post-merge || -n "$merge_sha" ]] || { usage_error "post-merge obligation requires --merge-sha"; return; }
+  [[ "$guarded_adopt" == false || ( "$action" == clear && "$kind" == wrap && "$adopt" == false ) ]] || { usage_error "guarded legacy adoption requires wrap clear without --adopt-legacy"; return; }
   resolved=$(session_resolve --json) || return $?
   file=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")')
   anchor=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
   [[ -n "$file" && -n "$anchor" ]] || return "$RIG_EXIT_UNAVAILABLE"
-  RIG_DIR="$(rig_dir)" SESSION_F="$file" SESSION_ANCHOR="$anchor" OBLIGATION_ACTION="$action" OBLIGATION_KIND="$kind" MERGE_SHA="$merge_sha" ADOPT_LEGACY="$adopt" python3 <<'PY'
-import datetime, fcntl, json, os, pathlib, tempfile
+  RIG_DIR="$(rig_dir)" SESSION_F="$file" SESSION_ANCHOR="$anchor" OBLIGATION_ACTION="$action" OBLIGATION_KIND="$kind" MERGE_SHA="$merge_sha" ADOPT_LEGACY="$adopt" GUARDED_ADOPT="$guarded_adopt" OBSERVED_MARKER_TOKEN="$marker_token" python3 <<'PY'
+import datetime, fcntl, hashlib, json, os, pathlib, re, tempfile, uuid
 rig=pathlib.Path(os.environ["RIG_DIR"]); memory=rig/"memory"; memory.mkdir(parents=True,exist_ok=True)
 p=pathlib.Path(os.environ["SESSION_F"]); anchor=os.environ["SESSION_ANCHOR"]
 action=os.environ["OBLIGATION_ACTION"]; kind=os.environ["OBLIGATION_KIND"]
 merge_sha=os.environ.get("MERGE_SHA",""); adopt=os.environ.get("ADOPT_LEGACY")=="true"
+guarded_adopt=os.environ.get("GUARDED_ADOPT")=="true"; observed_token=os.environ.get("OBSERVED_MARKER_TOKEN","")
 marker=memory/(".wrap-needed" if kind=="wrap" else ".post-merge-pending")
 global_lock=open(memory/".session-obligations.lock","a+"); fcntl.flock(global_lock.fileno(),fcntl.LOCK_EX)
 record_lock=open(str(p)+".lock","a+"); fcntl.flock(record_lock.fileno(),fcntl.LOCK_EX)
@@ -161,20 +177,61 @@ with open(p) as f: d=json.load(f)
 if d.get("schema_version")!=1 or d.get("anchor")!=anchor:
     print(json.dumps({"ok":False,"reason":"record_changed","no_write":True})); raise SystemExit(3)
 now=datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec="seconds")
-raw=marker.read_text() if marker.exists() else ""
+marker_stat=marker.stat() if marker.exists() else None
+raw_bytes=marker.read_bytes() if marker_stat is not None else None
+raw=raw_bytes.decode("utf-8","surrogateescape") if raw_bytes is not None else ""
+marker_content_hash=hashlib.sha256(raw_bytes).hexdigest() if raw_bytes is not None else ""
+marker_token=(marker_content_hash+":"+str(marker_stat.st_mtime_ns)+":"+str(marker_stat.st_ino)
+              if marker_stat is not None else "missing")
 cleared_global=False
+legacy_preserved=False
 if kind=="wrap":
     scoped=[]; legacy=[]
     for line in raw.splitlines():
         if line.startswith("anchor="): scoped.append(line[7:])
         elif line.strip(): legacy.append(line)
     if action=="mark":
+        if raw_bytes==b"" and not legacy:
+            # A prior hook's empty marker is an unknown obligation. Keep it
+            # when a new exact session adds its own scoped reminder.
+            legacy.append("unscoped_legacy="+uuid.uuid4().hex)
         if anchor not in scoped: scoped.append(anchor)
     else:
-        if anchor not in scoped and (legacy or marker.exists()) and not adopt:
+        if anchor not in scoped and (legacy or marker.exists()) and not (adopt or guarded_adopt):
             print(json.dumps({"ok":False,"reason":"legacy_adoption_required","no_write":True})); raise SystemExit(3)
         scoped=[value for value in scoped if value!=anchor]
-        if adopt: legacy=[]
+        reviewed=guarded_adopt and observed_token and observed_token==marker_token
+        pending_unscoped_stub=False
+        pending_owned_stub=False
+        if guarded_adopt:
+            try:
+                with open(memory/"PROGRESS.md", "r", encoding="utf-8", errors="surrogateescape") as progress:
+                    current_sid=None
+                    for line in progress:
+                        if line.startswith("## "):
+                            match=re.search(r"<!-- sid:([A-Za-z0-9-]+) -->", line)
+                            current_sid=match.group(1) if match else None
+                        elif re.search(r"Auto-logged by (post-tool|post-commit) hook", line):
+                            if current_sid==anchor: pending_owned_stub=True
+                            elif current_sid is None: pending_unscoped_stub=True
+            except FileNotFoundError:
+                pass
+            except OSError:
+                print(json.dumps({"ok":False,"reason":"progress_unreadable","no_write":True})); raise SystemExit(3)
+            if pending_owned_stub:
+                print(json.dumps({"ok":False,"reason":"owned_progress_unexpanded","no_write":True})); raise SystemExit(3)
+            if pending_unscoped_stub:
+                reviewed=False
+                if not legacy: legacy.append("unscoped_progress="+uuid.uuid4().hex)
+            elif (not reviewed and not legacy and raw_bytes is not None and
+                  ((observed_token not in ("", "missing") and observed_token.split(":",1)[0]==marker_content_hash) or
+                   (observed_token=="missing" and not scoped))):
+                # An older hook can touch an unchanged marker or create an
+                # empty one. A new scoped anchor changes content and has its
+                # own reminder, so it needs no extra unscoped warning.
+                legacy.append("unscoped_legacy="+uuid.uuid4().hex)
+        if adopt or reviewed: legacy=[]
+        elif guarded_adopt: legacy_preserved=bool(legacy)
     content="".join("anchor="+value+"\n" for value in scoped)+"".join(value+"\n" for value in legacy)
 else:
     values={}
@@ -212,7 +269,7 @@ fd,tmp=tempfile.mkstemp(prefix=".session-",suffix=".tmp",dir=str(p.parent))
 with os.fdopen(fd,"w") as f: json.dump(d,f,indent=2); f.write("\n"); f.flush(); os.fsync(f.fileno())
 os.replace(tmp,p)
 if action=="clear": write_marker()
-print(json.dumps({"ok":True,"anchor":anchor,"kind":kind,"action":action,"cleared_global":cleared_global,"revision":d["revision"]}))
+print(json.dumps({"ok":True,"anchor":anchor,"kind":kind,"action":action,"cleared_global":cleared_global,"legacy_preserved":legacy_preserved,"revision":d["revision"]}))
 PY
 }
 unavailable() { local command="$1"; shift; if json_requested "$@"; then printf '{"ok":false,"command":"%s","error":"not_implemented"}\n' "$command"; else printf 'rig: %s is not implemented in this version\n' "$command" >&2; fi; return "$RIG_EXIT_UNAVAILABLE"; }
@@ -512,56 +569,59 @@ PY
 }
 
 memory_write_snapshot() {
-  local from_file="" json=false arg stdin_tmp=""
+  local from_file="" json=false shared_only=false adopt_legacy=false if_missing=false arg stdin_tmp="" mode=replace resolved status=0
+  local -a owned_tasks=() retire_tasks=() done_files=() helper_args=()
   while [[ "$#" -gt 0 ]]; do
     arg="$1"
     case "$arg" in
       --file) [[ "$#" -ge 2 ]] || { usage_error "--file requires a value" "$@"; return; }; from_file="$2"; shift 2;;
       --stdin) from_file="-"; shift;;
+      --shared-only) shared_only=true; shift;;
+      --owned-task) [[ "$#" -ge 2 ]] || { usage_error "--owned-task requires a value" "$@"; return; }; owned_tasks+=("$2"); shift 2;;
+      --retire-task) [[ "$#" -ge 2 ]] || { usage_error "--retire-task requires a value" "$@"; return; }; retire_tasks+=("$2"); shift 2;;
+      --done-task-file) [[ "$#" -ge 2 ]] || { usage_error "--done-task-file requires a value" "$@"; return; }; done_files+=("$2"); shift 2;;
+      --adopt-legacy) adopt_legacy=true; shift;;
+      --if-missing) if_missing=true; shift;;
       --json) json=true; shift;;
       *) usage_error "unknown memory option: $arg" "$@"; return;;
     esac
   done
   [[ -n "$from_file" ]] || { usage_error "write-snapshot requires --file FILE or --stdin" "$@"; return; }
+  [[ "$shared_only" == false || "${#owned_tasks[@]}" -eq 0 ]] || { usage_error "--shared-only and --owned-task conflict"; return; }
+  [[ "$adopt_legacy" == false || "${#owned_tasks[@]}" -gt 0 ]] || { usage_error "--adopt-legacy requires --owned-task"; return; }
+  [[ "$if_missing" == false || ( "$shared_only" == true && "${#retire_tasks[@]}" -eq 0 ) ]] || { usage_error "--if-missing requires --shared-only without retirement"; return; }
+  [[ "${#retire_tasks[@]}" -eq "${#done_files[@]}" ]] || { usage_error "--retire-task needs one --done-task-file per task"; return; }
+  [[ "${#retire_tasks[@]}" -eq 0 || "$shared_only" == true ]] || { usage_error "--retire-task requires --shared-only"; return; }
+  if [[ "${#owned_tasks[@]}" -gt 0 ]]; then mode=owned; elif [[ "$shared_only" == true ]]; then mode=shared; fi
   if [[ "$from_file" == "-" ]]; then
     stdin_tmp=$(mktemp "${TMPDIR:-/tmp}/rig-snapshot-stdin.XXXXXX") || return 1
     cat > "$stdin_tmp"
     from_file="$stdin_tmp"
   fi
-  RIG_DIR="$(rig_dir)" SNAPSHOT_SOURCE="$from_file" SNAPSHOT_JSON="$json" python3 <<'PY'
-import json, os, pathlib, stat, sys, tempfile
-
-source = os.environ["SNAPSHOT_SOURCE"]
-source_path = pathlib.Path(source)
-if not source_path.is_file():
-    print(json.dumps({"ok": False, "reason": "source_missing"}))
-    raise SystemExit(1)
-content = source_path.read_text()
-memory = pathlib.Path(os.environ["RIG_DIR"]) / "memory"
-memory.mkdir(parents=True, exist_ok=True)
-path = memory / "CONTEXT_SNAPSHOT.md"
-mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
-fd, tmp = tempfile.mkstemp(prefix=".context-snapshot-", suffix=".tmp", dir=str(memory))
-try:
-    with os.fdopen(fd, "w") as handle:
-        handle.write(content)
-        if content and not content.endswith("\n"):
-            handle.write("\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.chmod(tmp, mode)
-    os.replace(tmp, path)
-finally:
-    try:
-        os.unlink(tmp)
-    except FileNotFoundError:
-        pass
-payload = {"ok": True, "file": str(path)}
-print(json.dumps(payload, separators=(",", ":")) if os.environ["SNAPSHOT_JSON"] == "true" else "Wrote CONTEXT_SNAPSHOT.md")
-PY
-  local status=$?
+  helper_args=(--rig-dir "$(rig_dir)" --root "$(rig_root)" --file "$from_file" --mode "$mode")
+  [[ "$json" == true ]] && helper_args+=(--json)
+  [[ "$adopt_legacy" == true ]] && helper_args+=(--adopt-legacy)
+  [[ "$if_missing" == true ]] && helper_args+=(--if-missing)
+  for arg in ${owned_tasks[@]+"${owned_tasks[@]}"}; do helper_args+=(--owned-task "$arg"); done
+  for arg in ${retire_tasks[@]+"${retire_tasks[@]}"}; do helper_args+=(--retire-task "$arg"); done
+  for arg in ${done_files[@]+"${done_files[@]}"}; do helper_args+=(--done-task-file "$arg"); done
+  if [[ "$mode" == owned ]]; then
+    resolved=$(session_resolve --json --verbose) || status=$?
+    if [[ "$status" -ne 0 ]]; then
+      printf '%s\n' "$resolved"
+      [[ -n "$stdin_tmp" ]] && rm -f "$stdin_tmp"
+      return "$status"
+    fi
+    helper_args+=(--expected-session "$resolved")
+  fi
+  status=0
+  python3 "$(dirname "${BASH_SOURCE[0]}")/rig-snapshot.py" "${helper_args[@]}" || status=$?
   [[ -n "$stdin_tmp" ]] && rm -f "$stdin_tmp"
   return "$status"
+}
+
+memory_workflow_lock() {
+  python3 "$(dirname "${BASH_SOURCE[0]}")/rig-snapshot.py" workflow-lock "$@" --rig-dir "$(rig_dir)"
 }
 
 doctor() {
@@ -608,7 +668,7 @@ common = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"])
 if common is not None and common.returncode == 0:
     primary = pathlib.Path(common.stdout.strip()).parent
     if primary != root and (primary / ".rigpath").exists():
-        required = [".rigpath", "CLAUDE.md", "bin/rig", "bin/rig-session-resolve.py", ".claude"]
+        required = [".rigpath", "CLAUDE.md", "bin/rig", "bin/rig-session-resolve.py", "bin/rig-snapshot.py", ".claude"]
         missing = [p for p in required if not (root / p).exists()]
         recovery = f"cd {shlex.quote(str(root))} && {shlex.quote(str(primary / 'bin/rig'))} worktree bootstrap"
         check("worktree_bootstrap", not missing, "complete" if not missing else "missing: " + ", ".join(missing) + "; recover: " + recovery)
@@ -2647,7 +2707,7 @@ main() {
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help "$command"; return; fi
       subcommand="${1:-}"; shift || true
-      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
+      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; memory:workflow-lock) memory_workflow_lock "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
     *) shift; usage_error "unknown command: $command" "$@";;
   esac
 }

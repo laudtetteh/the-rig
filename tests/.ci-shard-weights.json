@@ -55,6 +55,7 @@
   "tests/test_session_obligations.bats": 5.0,
   "tests/test_session_resolver.bats": 5.0,
   "tests/test_ship_validation_card.bats": 5.0,
+  "tests/test_snapshot_workstreams.bats": 75.0,
   "tests/test_sprint_lifecycle.bats": 5.0,
   "tests/test_stealth_audit.bats": 5.0,
   "tests/test_strategy_lookahead_last_wins.bats": 5.0,

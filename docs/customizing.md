@@ -367,10 +367,13 @@ enforces approval.
 checks a visible guarded commit's fresh approval, branch, and direct-push type,
 then consumes approval before execution; PostToolUse attempts a progress stub
 after a successful commit. This fallback cannot inspect generated scripts or
-guarantee a stub when the Git output omits the commit hash. Visible commands
-that explicitly disable hooks are blocked by PreToolUse. Git hooks can still be
-disabled outside its visible-command checks with `--no-verify`, `core.hooksPath`,
-or `HUSKY=0`; this is a workflow guard, not a physical restriction.
+guarantee a stub when the Git output omits the commit hash. A visible command
+with a compatible `commit-msg` hook also leaves a PostToolUse fallback marker;
+it logs when `post-commit` is missing or custom, and skips a SHA already logged.
+Visible commands that explicitly disable hooks are blocked by PreToolUse.
+Git hooks can still be disabled outside its visible-command checks with
+`--no-verify`, `core.hooksPath`, or `HUSKY=0`; this is a workflow guard, not a
+physical restriction.
 
 If a client adds an AI footer after `commit-msg`, `post-commit` reports it without changing
 the commit SHA. Set `RIG_POST_COMMIT_AUTO_AMEND=1` to opt into amending unsigned
@@ -655,7 +658,7 @@ runs these current postflight checks:
 | `stealth_exclusions` | Stealth/external artifacts are excluded from git visibility | Project is not a stealth/external install |
 | `settings_json` | Claude settings and Codex hooks JSON files parse correctly | Never; invalid JSON is a failure |
 | `claude_commands` | Installed Claude command files match the manifest or at least exist when no manifest baseline is present | Never; missing commands are a failure |
-| `codex_skill_parity` | Generated Codex skills mirror Claude commands when Codex skills are installed | Codex mirroring is not enabled |
+| `codex_skill_parity` | Installed Codex skill names match Claude command names; content parity is not checked | Codex mirroring is not enabled |
 | `codex_project_instructions` | Codex has an effective `AGENTS*` file or configured `CLAUDE.md` fallback when Codex is an installed target | Codex is not an installed project target |
 | `codex_project_target_runtime` | A live Codex runtime has the project target infrastructure it needs | Codex runtime is not detected |
 | `codex_session_runtime` | A live Codex thread is bound to an active Rig session record | Codex runtime is not detected |
