@@ -81,6 +81,7 @@ elif [[ -n "$NATIVE_SESSION_ID" && -x "$REPO/bin/rig" ]]; then
   [[ -n "$ROOT_SESSION_ID" ]] && BIND_ARGS+=(--root-session-id "$ROOT_SESSION_ID")
   [[ -n "$PARENT_NATIVE_SESSION_ID" ]] && BIND_ARGS+=(--parent-native-session-id "$PARENT_NATIVE_SESSION_ID")
   [[ -n "$NATIVE_TITLE" ]] && BIND_ARGS+=(--native-title "$NATIVE_TITLE")
+  [[ "$SOURCE" == resume ]] && BIND_ARGS+=(--allow-continuation)
   BIND_RESULT=$(RIG_SESSION_PID="$SESSION_PID" "$REPO/bin/rig" session bind "${BIND_ARGS[@]}" 2>/dev/null) || exit 0
   SESSION_FILE=$(printf '%s' "$BIND_RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])' 2>/dev/null) || exit 0
   SESSION_UUID=$(printf '%s' "$BIND_RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])' 2>/dev/null) || exit 0

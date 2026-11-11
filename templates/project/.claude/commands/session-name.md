@@ -9,9 +9,8 @@ suggestion. Can be run at any point in the session — not just at wrap time.
 
 1. Reads `$RIG_DIR/rules/session-naming.md` and applies it as the canonical
    session-local evidence contract
-2. Resolves this session with `bin/rig session resolve --json` (launcher identity
-   first, then the legacy PPID sentinel); unresolved raw launches use conversation
-   context only
+2. Resolves this session with `bin/rig session current --json` using exact native
+   identity or a launcher hint; unresolved raw launches use conversation context only
 3. Reads any existing `tentative_name` from the resolved current session file
 4. Derives a name in the standard `type short-desc #N | ...` format using conversation
    context as the primary signal and UUID-tagged PROGRESS entries as cross-reference
@@ -48,7 +47,7 @@ evidence. It is authoritative for evidence eligibility and contamination checks.
 
 ```bash
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
-SESSION_JSON=$("$REPO/bin/rig" session resolve --json 2>/dev/null || true)
+SESSION_JSON=$("$REPO/bin/rig" session current --json 2>/dev/null || true)
 SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("session_file") or "")' 2>/dev/null || true)
 SESSION_UUID=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("anchor") or "")' 2>/dev/null || true)
 TENTATIVE_NAME=""
@@ -56,6 +55,25 @@ if [[ -n "$SESSION_FILE" ]]; then
   TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); print(d.get("names",{}).get("tentative") or d.get("tentative_name") or "")')
 fi
 ```
+
+If `SESSION_JSON` reports `ended_record` or `not_found` and includes a `recovery`
+command, run that exact `bin/rig session retrofit ... --from-env --json` command,
+then refresh every captured identity field before collecting evidence or
+reaching the write guard. A resumed client may already have attached its native
+ID through UserPromptSubmit.
+
+```bash
+SESSION_JSON=$("$REPO/bin/rig" session current --json) || exit 1
+SESSION_FILE=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")')
+SESSION_UUID=$(printf '%s' "$SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
+[[ -n "$SESSION_FILE" && -n "$SESSION_UUID" ]] || exit 1
+TENTATIVE_NAME=$(SESSION_F="$SESSION_FILE" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); print(d.get("names",{}).get("tentative") or d.get("tentative_name") or "")')
+```
+
+Do not keep the empty or completed anchor captured before retrofit. Do not infer
+an ID from another session file or provider history. If there is still no exact
+active record, you may suggest a name from this conversation, but do not write
+or complete a record.
 
 ### 1 — Determine what happened this session
 
@@ -163,9 +181,18 @@ Pass the confirmed name as one opaque argument to the atomic writer. Never inter
 it into shell or Python source:
 
 ```bash
+CURRENT_JSON=$("$REPO/bin/rig" session current --json) || exit 1
+CURRENT_UUID=$(printf '%s' "$CURRENT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
+[[ -n "$SESSION_UUID" && "$CURRENT_UUID" == "$SESSION_UUID" ]] || {
+  echo "Session identity changed; stop before naming another session." >&2
+  exit 1
+}
 "$REPO/bin/rig" session-name set --tentative "$CONFIRMED_NAME" # early
 "$REPO/bin/rig" session-name set --final "$CONFIRMED_NAME"     # mid-session/final
 ```
+
+Run only the one writer call that matches the confirmed name stage. The writer
+rechecks project, provider, native ID, anchor and active state under its lock.
 
 **Do NOT write Session name to CONTEXT_SNAPSHOT.md.** CONTEXT_SNAPSHOT is
 project state only. Session names belong in session files.
@@ -190,3 +217,6 @@ If writing a final name, add a note at the top of PROGRESS.md:
   reconstruct work from file signals alone.
 - **Why not `/rename`?** Claude Code has a built-in `/rename` command that renames
   the conversation. This command was renamed to `/session-name` to avoid the conflict.
+- End the response with a short session block containing the anchor, proposed or
+  confirmed name, and whether the record was written. Repeat that block after
+  all other output when this command is chained with other workflows.

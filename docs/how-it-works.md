@@ -307,6 +307,56 @@ Step 8: Surface next priority — ask "What's next?"
 
 ---
 
+## Session identity and continuation
+
+| Moment | Record state | Naming and obligation rule |
+|---|---|---|
+| Active work | One active record for the exact project, provider and native thread | Names and obligations update only that record. |
+| Memory checkpoint | The same active record | Saving context does not complete or rename the session. |
+| Wrap completed | Record moves to `sessions/done/` with `lifecycle.state: complete` | Its final name stays with that work segment. |
+| Later work in the same native thread | A new active record with `lineage.kind: continuation` and `parent_anchor` | The parent name is not copied. New work can be named and wrapped independently. |
+
+SessionStart binds the native ID when the provider fires it. On a resumed thread
+that skips SessionStart, UserPromptSubmit can bind the exact ID in its event
+payload. If that hook cannot attach, `rig session current --json` reports a
+retrofit command when a native ID environment variable is available. Resolution
+never picks a session from branch name or recent activity alone.
+
+Attaching from a hook event does not export that ID to later tool-call shells.
+When a client supplies neither a native ID environment variable nor a launcher
+hint to those shells, a standalone `rig session current` remains unresolved.
+The hook event can still create the exact record; a later caller must supply
+exact identity before naming or completing it. A direct stdio app-server probe
+with Codex CLI 0.166.0 completed two turns and resumed the loaded thread without
+emitting `SessionStart` or `UserPromptSubmit`, even with those hooks configured
+for the probe; `codex exec` did emit both and bind the session. This observation
+does not establish how every app-server client behaves. An app-server client
+that knows the thread ID can recover explicitly with
+`bin/rig session retrofit --agent codex --native-session-id <thread-id> --source resume --json`.
+Subsequent shell calls must pass the same exact hint, for example
+`bin/rig session current --agent codex --native-session-id <thread-id> --json`.
+For commands such as `session-name set` and the snapshot writer that do not
+accept an explicit native ID, carry both `session_file` and `anchor` from that
+same retrofit JSON result into the command environment:
+
+```bash
+RIG_SESSION_FILE='<session_file from retrofit JSON>' \
+RIG_SESSION_ANCHOR='<anchor from retrofit JSON>' \
+  bin/rig session-name set --final --complete 'Final session name'
+```
+
+Pass both values again in each separate tool-call shell. An explicit retrofit
+refuses an ID that conflicts with a native provider ID already in the shell.
+Automatic recovery on app-server reattach remains unverified.
+
+The name writer rechecks anchor, project identity, provider, native ID and
+active state after locking the record. Legacy PID records remain readable; a
+legacy name write requires an exact launcher file or anchor. `session doctor`
+checks that repeated continuations form one unbroken chain with at most one
+active leaf. Native IDs stay redacted unless `--verbose` is requested.
+
+---
+
 ## The hook system
 
 ### Claude Code hooks (`.claude/`)
@@ -332,6 +382,7 @@ Session starts
 User submits a prompt
      │
      └─► prompt-submit.sh (UserPromptSubmit)
+           Attaches an unbound resumed thread from its exact event session_id
            Re-checks .wrap-needed / .post-merge-pending on every prompt
            Re-injects warnings when flags are present
            (ensures flags surface even mid-session without repeating session-start)

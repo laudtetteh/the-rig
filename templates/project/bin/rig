@@ -70,7 +70,7 @@ Usage: rig session <resolve|current|list|doctor|repair|retrofit|obligation> [opt
 
 Native IDs are redacted unless --verbose is explicitly supplied.
 Repair is preview-only unless --confirm TOKEN and --reason REASON are supplied.
-Retrofit binds the current native host ID from env with no transcript matching.
+Retrofit binds the native host ID from env or an explicit --native-session-id.
 Content matching is never part of normal resolution.
 EOF
       ;;
@@ -762,7 +762,14 @@ if codex_runtime_id:
             for path in base.glob("session-*.json"):
                 try:
                     data = json.loads(read(path))
-                    if isinstance(data, dict):
+                    if isinstance(data, dict) and (data.get("schema_version") != 1 or
+                        (all(isinstance(data.get(key), dict) for key in ("native", "project", "lifecycle")) and
+                         all(key not in data or isinstance(data[key], dict)
+                             for key in ("runtime", "lineage", "migration", "names")) and
+                         all(value is None or isinstance(value, str) for value in
+                             (data.get("anchor"), data.get("agent"), data["native"].get("session_id"),
+                              data["project"].get("identity"), data["lifecycle"].get("state"),
+                              (data.get("lineage") or {}).get("parent_anchor"))))):
                         records.append((path, data))
                     else:
                         session_errors.append(path.name)
@@ -1231,7 +1238,7 @@ session_resolve() {
 }
 
 session_bind() {
-  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
+  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" RIG_RESOLVER="$(dirname "${BASH_SOURCE[0]}")/rig-session-resolve.py" python3 - "$@" <<'PY'
 import datetime, fcntl, hashlib, json, os, pathlib, subprocess, sys, tempfile, uuid
 args=sys.argv[1:]
 def option(name, default=""):
@@ -1241,6 +1248,7 @@ agent=option("--agent"); native_id=option("--native-session-id"); source=option(
 root_native=option("--root-session-id") or native_id; parent=option("--parent-native-session-id") or None
 native_title=option("--native-title") or None
 allow_continuation="--allow-continuation" in args
+verbose="--verbose" in args
 if agent not in ("claude","codex") or not native_id:
     print(json.dumps({"ok":False,"reason":"invalid_input"})); raise SystemExit(3)
 root=pathlib.Path(os.environ["RIG_ROOT"]).resolve(); rig=pathlib.Path(os.environ["RIG_DIR"]); sessions=rig/"memory"/"sessions"; sessions.mkdir(parents=True,exist_ok=True)
@@ -1276,8 +1284,30 @@ except (OSError,subprocess.SubprocessError): common=root
 project_id=hashlib.sha256(str(common).encode()).hexdigest(); now=datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec="seconds")
 def read(p):
     try:
-        d=json.loads(p.read_text()); return d if isinstance(d,dict) else None
+        d=json.loads(p.read_text())
+        if not isinstance(d,dict): return None
+        if d.get("schema_version")==1 and (
+            not all(isinstance(d.get(key),dict) for key in ("native","project","lifecycle")) or
+            not all(key not in d or isinstance(d[key],dict) for key in ("runtime","lineage","migration","names")) or
+            not all(value is None or isinstance(value,str) for value in
+                (d.get("anchor"),d.get("agent"),d["native"].get("session_id"),
+                 d["project"].get("identity"),d["lifecycle"].get("state"),
+                 (d.get("lineage") or {}).get("parent_anchor")))):
+            return None
+        return d
     except (OSError,ValueError,TypeError): return None
+def original_active_path(d):
+    recorded=(d.get("runtime") or {}).get("completed_from")
+    if recorded:
+        if not isinstance(recorded,str): return None
+        return confined_session_path(recorded)
+    # Records completed before completed_from was recorded can still prove the
+    # launcher's original filename from the legacy launcher record it migrated.
+    legacy_pid=(d.get("migration") or {}).get("legacy_pid")
+    anchor=d.get("anchor")
+    if (d.get("native") or {}).get("source")=="launcher_hint" and str(legacy_pid).isdigit() and isinstance(anchor,str):
+        return confined_session_path(str(sessions/("session-"+str(legacy_pid)+"-"+anchor+".json")))
+    return None
 hint=os.environ.get("RIG_SESSION_FILE","")
 hint_path=confined_session_path(hint) if hint else None
 if hint and hint_path is None:
@@ -1298,31 +1328,76 @@ for base in (sessions,sessions/"done"):
             records.append((p,d))
 if unsafe_path:
     print(json.dumps({"ok":False,"reason":"invalid_session_path","no_write":True})); raise SystemExit(4)
+def graph_state(candidate=None, path=None):
+    command=[sys.executable,os.environ["RIG_RESOLVER"],"--graph-check"]
+    if candidate is not None: command.extend(["--candidate-path",str(path)])
+    result=subprocess.run(command,input=json.dumps(candidate) if candidate is not None else None,
+                          text=True,capture_output=True,env=os.environ)
+    try: data=json.loads(result.stdout)
+    except (ValueError,TypeError): data={"reason":"lineage_validation_failed"}
+    if result.returncode not in (0,2) or "invalid_anchors" not in data:
+        print(json.dumps({"ok":False,"reason":data.get("reason","lineage_validation_failed"),"no_write":True})); raise SystemExit(4)
+    return data
+graph=graph_state()
 matches=[(p,d) for p,d in records if d.get("schema_version")==1 and d.get("project",{}).get("identity")==project_id and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id]
+if any(not d.get("anchor") for _,d in matches):
+    print(json.dumps({"ok":False,"reason":"invalid_session_anchor","no_write":True})); raise SystemExit(3)
+ended_states=("complete","inactive","ended_no_wrap")
+continuation_states=(*ended_states,"orphaned")
 continuation_from_ended=False
 if len(matches)>1:
-    active_matches=[(p,d) for p,d in matches if "done" not in p.parts and d.get("lifecycle",{}).get("state")!="complete"]
-    if len(active_matches)==1:
-        matches=active_matches
-    else:
+    if (any(d.get("anchor") in graph["invalid_anchors"] for _,d in matches) or
+        len({graph["roots"].get(d.get("anchor")) for _,d in matches})!=1 or
+        any(d.get("anchor") in graph["duplicate_native_anchors"] for _,d in matches)):
         print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
+    leaves=[max(matches,key=lambda item:graph["depths"].get(item[1].get("anchor"),0))]
+lineage_records=matches[:]
+if len(matches)>1:
+    matches=leaves
+cross_project=[d for _,d in records if d.get("schema_version")==1 and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id and d.get("project",{}).get("identity")!=project_id]
+if cross_project:
+    print(json.dumps({"ok":False,"reason":"cross_project"})); raise SystemExit(3)
+if matches and matches[0][1].get("anchor") in graph["invalid_anchors"]:
+    invalid_lifecycle=matches[0][1].get("anchor") in graph["invalid_lifecycle_anchors"]
+    reason="invalid_lifecycle_transition" if invalid_lifecycle else "invalid_continuation_lineage"
+    print(json.dumps({"ok":False,"reason":reason,"no_write":True})); raise SystemExit(3)
+if hint_path and matches:
+    expected_anchor=os.environ.get("RIG_SESSION_ANCHOR")
+    hint_records=[(p,d) for p,d in lineage_records if hint_path==p.resolve() or (d.get("lifecycle",{}).get("state")=="complete" and hint_path==original_active_path(d))]
+    all_hint_records=[(p,d) for p,d in records if hint_path==p.resolve() or (d.get("lifecycle",{}).get("state")=="complete" and hint_path==original_active_path(d))]
+    if len(all_hint_records)>1:
+        print(json.dumps({"ok":False,"reason":"duplicate_launcher_origin"})); raise SystemExit(2)
+    if len(hint_records)!=1 or (expected_anchor is not None and expected_anchor!=hint_records[0][1].get("anchor")) or (not hint_path.exists() and expected_anchor is None):
+        print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
 if matches:
     p,d=matches[0]
-    if hint_path and hint_path!=p.resolve():
-        print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
-    if "done" in p.parts or d.get("lifecycle",{}).get("state")=="complete":
+    state=d.get("lifecycle",{}).get("state")
+    # Direct bind may reopen an orphan; retrofit requests a new continuation.
+    if state in ended_states or (state=="orphaned" and allow_continuation):
         if not allow_continuation:
             print(json.dumps({"ok":False,"reason":"ended_record"})); raise SystemExit(3)
         ended_path, ended_record = p, d
         continuation_from_ended=True
-        if not parent:
-            parent = ended_record.get("native", {}).get("session_id") or native_id
+        root_anchor=graph["roots"].get(ended_record.get("anchor"))
+        leaf_anchor=graph["leaves"].get(root_anchor)
+        leaf_matches=[(q,record) for q,record in records if record.get("schema_version")==1 and record.get("anchor")==leaf_anchor]
+        if len(leaf_matches)!=1 or leaf_matches[0][1].get("lifecycle",{}).get("state") not in continuation_states:
+            print(json.dumps({"ok":False,"reason":"invalid_continuation_lineage","no_write":True})); raise SystemExit(3)
+        ended_path,ended_record=leaf_matches[0]
+        leaf_native=ended_record.get("native",{}).get("session_id")
+        if parent and parent!=leaf_native:
+            print(json.dumps({"ok":False,"reason":"invalid_continuation_lineage","no_write":True})); raise SystemExit(3)
+        parent=leaf_native or native_id
         matches = []
         p = None
         d = None
-    elif d.get("lifecycle",{}).get("state") in ("conflict","superseded","repair_pending"):
+        hint_path = None
+        hint = ""
+    elif "done" in p.parts or state not in ("active","orphaned"):
         print(json.dumps({"ok":False,"reason":"invalid_lifecycle_transition"})); raise SystemExit(3)
 if not matches:
+    if hint_path and not hint_path.exists() and not continuation_from_ended:
+        print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
     cross=[d for _,d in records if d.get("schema_version")==1 and d.get("agent")==agent and d.get("native",{}).get("session_id")==native_id]
     cross_project=[d for d in cross if d.get("project",{}).get("identity")!=project_id]
     if cross_project:
@@ -1331,6 +1406,8 @@ if not matches:
         print(json.dumps({"ok":False,"reason":"cross_project"})); raise SystemExit(3)
     p=hint_path
     d=read(p) if p else None
+    if d and "RIG_SESSION_ANCHOR" in os.environ and d.get("anchor")!=os.environ["RIG_SESSION_ANCHOR"]:
+        print(json.dumps({"ok":False,"reason":"launcher_anchor_conflict"})); raise SystemExit(3)
     if d and d.get("schema_version")==1 and d.get("native",{}).get("session_id") not in (None,""):
         print(json.dumps({"ok":False,"reason":"native_conflict"})); raise SystemExit(3)
     if d and d.get("agent") not in (None,agent):
@@ -1340,10 +1417,31 @@ if not matches:
         print(json.dumps({"ok":False,"reason":"duplicate_anchor"})); raise SystemExit(2)
     p=p or sessions/("session-"+anchor+".json")
     legacy=d or {}; created=legacy.get("created_at") or legacy.get("started_at") or now
-    parent_matches=[other for _,other in records if other.get("schema_version")==1 and other.get("project",{}).get("identity")==project_id and other.get("agent")==agent and other.get("native",{}).get("session_id")==parent]
-    if len(parent_matches)>1:
-        print(json.dumps({"ok":False,"reason":"duplicate_native_id"})); raise SystemExit(2)
-    parent_anchor=parent_matches[0].get("anchor") if len(parent_matches)==1 else None
+    if continuation_from_ended:
+        parent_anchor=ended_record.get("anchor")
+    else:
+        parent_matches=[other for _,other in records if other.get("schema_version")==1 and other.get("project",{}).get("identity")==project_id and other.get("agent")==agent and other.get("native",{}).get("session_id")==parent]
+        if parent_matches:
+            parent_roots={graph["roots"].get(record.get("anchor")) for record in parent_matches}
+            if (len(parent_roots)!=1 or None in parent_roots or
+                any(record.get("anchor") in graph["invalid_anchors"] or record.get("anchor") in graph["duplicate_native_anchors"] for record in parent_matches)):
+                print(json.dumps({"ok":False,"reason":"duplicate_native_id","no_write":True})); raise SystemExit(2)
+            if allow_continuation:
+                leaf_anchor=graph["leaves"].get(next(iter(parent_roots)))
+                leaf_matches=[record for _,record in records if record.get("schema_version")==1 and record.get("anchor")==leaf_anchor]
+                if len(leaf_matches)!=1:
+                    print(json.dumps({"ok":False,"reason":"invalid_continuation_lineage","no_write":True})); raise SystemExit(3)
+                parent_record=leaf_matches[0]
+            else:
+                # A provider fork names its exact origin native ID. Do not
+                # replace that origin with a descendant's different ID.
+                parent_record=max(parent_matches,key=lambda record:graph["depths"].get(record.get("anchor"),0))
+            parent_anchor=parent_record["anchor"]
+            parent=parent_record["native"]["session_id"]
+            if allow_continuation and parent_record.get("lifecycle",{}).get("state") not in continuation_states:
+                print(json.dumps({"ok":False,"reason":"invalid_continuation_lineage","no_write":True})); raise SystemExit(3)
+        else:
+            parent_anchor=None
     lineage_kind="continuation" if allow_continuation and parent_anchor else ("fork" if source=="fork" or parent else "root")
     d={"schema_version":1,"anchor":anchor,"agent":agent,
        "native":{"session_id":native_id,"root_session_id":root_native,"bound_at":now,"source":"launcher_hint" if hint else source},
@@ -1364,6 +1462,13 @@ if matches:
         names=d.setdefault("names",{}); names["native_title"]=native_title
         if not (names.get("final") or names.get("tentative") or names.get("display_title")): names["display_title"]=native_title
         names["native_sync"]="in-sync" if names.get("display_title")==native_title else "suggested"
+candidate_graph=graph_state(d,p)
+if d.get("anchor") in candidate_graph["invalid_anchors"]:
+    invalid_lifecycle=d.get("anchor") in candidate_graph["invalid_lifecycle_anchors"]
+    reason="invalid_lifecycle_transition" if invalid_lifecycle else "invalid_continuation_lineage"
+    print(json.dumps({"ok":False,"reason":reason,"no_write":True})); raise SystemExit(3)
+if d.get("anchor") in candidate_graph["duplicate_native_anchors"]:
+    print(json.dumps({"ok":False,"reason":"duplicate_native_id","no_write":True})); raise SystemExit(2)
 fd,tmp=tempfile.mkstemp(prefix=".session-",suffix=".tmp",dir=str(p.parent))
 try:
     with os.fdopen(fd,"w") as f: json.dump(d,f,indent=2); f.write("\n"); f.flush(); os.fsync(f.fileno())
@@ -1374,32 +1479,50 @@ finally:
 sentinel=pathlib.Path("/tmp")/(".rig-session-"+str(d["runtime"]["pid"])+".uuid")
 try: sentinel.write_text(d["anchor"])
 except OSError: pass
-print(json.dumps({"ok":True,"schema_version":1,"session_file":str(p),"anchor":d["anchor"],"agent":agent,"state":"active","confidence":"exact","reason":"native_id","native_session_id":None,"revision":d["revision"],"warnings":[]}))
+public_lineage=dict(d.get("lineage") or {})
+if public_lineage.get("parent_native_session_id") and not verbose:
+    public_lineage["parent_native_session_id"]="<redacted>"
+print(json.dumps({"ok":True,"schema_version":1,"session_file":str(p),"anchor":d["anchor"],"agent":agent,"state":"active","confidence":"exact","reason":"native_id","native_session_id":native_id if verbose else "<redacted>","lineage":public_lineage,"parent_anchor":public_lineage.get("parent_anchor"),"revision":d["revision"],"warnings":[]}))
 PY
 }
 
 session_retrofit() {
-  local agent="" from_env=false source="resume" json=false arg native_id env_name resolved status
+  local agent="" from_env=false source="resume" json=false verbose=false arg native_id="" native_arg="" env_name resolved status
+  local -a resolve_args bind_args
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
       --agent) [[ "$#" -ge 2 ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }; agent="$2"; shift 2;;
       --from-env) from_env=true; shift;;
+      --native-session-id) [[ "$#" -ge 2 && -n "$2" && "$2" != -* && -z "$native_arg" ]] || { printf '{"ok":false,"reason":"invalid_input","no_write":true}\n'; return 3; }; native_arg="$2"; shift 2;;
       --source) [[ "$#" -ge 2 ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }; source="$2"; shift 2;;
       --json) json=true; shift;;
+      --verbose) verbose=true; shift;;
       *) printf '{"ok":false,"reason":"invalid_input"}\n'; return 3;;
     esac
   done
   [[ "$agent" == codex || "$agent" == claude ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }
-  [[ "$from_env" == true ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }
-  case "$agent" in
-    codex) env_name=CODEX_THREAD_ID; native_id="${CODEX_THREAD_ID:-}" ;;
-    claude) env_name=CLAUDE_CODE_SESSION_ID; native_id="${CLAUDE_CODE_SESSION_ID:-}" ;;
-  esac
+  if [[ "$from_env" == true ]]; then
+    [[ -z "$native_arg" ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }
+    case "$agent" in
+      codex) env_name=CODEX_THREAD_ID; native_id="${CODEX_THREAD_ID:-}" ;;
+      claude) env_name=CLAUDE_CODE_SESSION_ID; native_id="${CLAUDE_CODE_SESSION_ID:-}" ;;
+    esac
+  else
+    [[ -n "$native_arg" ]] || { printf '{"ok":false,"reason":"invalid_input"}\n'; return 3; }
+    native_id="$native_arg"
+    if { [[ -n "${CODEX_THREAD_ID:-}" ]] && { [[ "$agent" != codex ]] || [[ "$CODEX_THREAD_ID" != "$native_id" ]]; }; } ||
+       { [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]] && { [[ "$agent" != claude ]] || [[ "$CLAUDE_CODE_SESSION_ID" != "$native_id" ]]; }; }; then
+      printf '{"ok":false,"reason":"native_conflict","no_write":true}\n'
+      return 3
+    fi
+  fi
   if [[ -z "$native_id" ]]; then
     printf '{"ok":false,"reason":"missing_native_env","agent":"%s","env":"%s","no_write":true}\n' "$agent" "$env_name"
     return 3
   fi
-  resolved="$(session_resolve --json --agent "$agent" --native-session-id "$native_id")" && {
+  resolve_args=(--json --agent "$agent" --native-session-id "$native_id")
+  [[ "$verbose" == true ]] && resolve_args+=(--verbose)
+  resolved="$(session_resolve "${resolve_args[@]}")" && {
     if [[ "$json" == true ]]; then
       printf '%s\n' "$resolved" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["retrofitted"]=False; print(json.dumps(d))'
     else
@@ -1417,6 +1540,7 @@ session_retrofit() {
     return "$status"
   fi
   bind_args=(session_bind --agent "$agent" --native-session-id "$native_id" --source "$source")
+  [[ "$verbose" == true ]] && bind_args+=(--verbose)
   if [[ "$status" -eq 3 ]]; then
     bind_args+=(--allow-continuation)
   fi
@@ -1448,7 +1572,7 @@ session_current() {
     if [[ "$json" == true ]]; then
       if [[ -n "$resolved" ]]; then printf '%s\n' "$resolved"; else printf '{"ok":false,"reason":"resolver_failed"}\n'; fi
     else
-      summary=$(printf '%s' "$resolved" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("%s (confidence: %s)" % (d.get("reason") or "resolver_failed", d.get("confidence") or "none"))' 2>/dev/null) || summary="resolver_failed (confidence: none)"
+      summary=$(printf '%s' "$resolved" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("%s (confidence: %s)" % (d.get("reason") or "resolver_failed", d.get("confidence") or "none")); recovery=d.get("recovery"); print("Recovery: "+recovery if recovery else "", end="")' 2>/dev/null) || summary="resolver_failed (confidence: none)"
       printf 'session not resolved: %s\n' "$summary" >&2
     fi
     return "$status"
@@ -1462,7 +1586,7 @@ session_current() {
 
 session_inspect() {
   local action="$1"; shift
-  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$action" "$@" <<'PY'
+  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" RIG_RESOLVER="$(dirname "${BASH_SOURCE[0]}")/rig-session-resolve.py" python3 - "$action" "$@" <<'PY'
 import hashlib, json, os, pathlib, stat, subprocess, sys
 action=sys.argv[1]; args=sys.argv[2:]
 if any(arg not in ("--json","--verbose") for arg in args):
@@ -1475,13 +1599,25 @@ def project_identity():
         common=pathlib.Path(common if os.path.isabs(common) else root/common).resolve()
     except (OSError,subprocess.SubprocessError): common=root
     return hashlib.sha256(str(common).encode()).hexdigest()
-project_id=project_identity(); records=[]; errors=[]
+project_id=project_identity(); records=[]; errors=[]; future=[]
 for base in (sessions,sessions/"done"):
     if not base.is_dir(): continue
     for p in sorted(base.glob("session-*.json")):
         try:
             d=json.loads(p.read_text())
             if not isinstance(d,dict): raise ValueError("not an object")
+            if isinstance(d.get("schema_version"),int) and d["schema_version"]>1:
+                future.append(p.name)
+                errors.append({"file":p.name,"reason":"unsupported_schema"})
+                continue
+            if d.get("schema_version")==1 and (
+                not all(isinstance(d.get(key),dict) for key in ("native","project","lifecycle")) or
+                not all(key not in d or isinstance(d[key],dict) for key in ("runtime","lineage","migration","names")) or
+                not all(value is None or isinstance(value,str) for value in
+                    (d.get("anchor"),d.get("agent"),d["native"].get("session_id"),
+                     d["project"].get("identity"),d["lifecycle"].get("state"),
+                     (d.get("lineage") or {}).get("parent_anchor")))):
+                raise ValueError("malformed v1 object")
             records.append((p,d))
         except (OSError,ValueError,TypeError): errors.append({"file":p.name,"reason":"malformed_record"})
 def summary(p,d):
@@ -1502,8 +1638,8 @@ if action=="list":
 if action=="doctor":
     checks=[]
     def check(name,ok,detail): checks.append({"name":name,"ok":bool(ok),"detail":detail})
-    check("record_syntax",not errors,"valid" if not errors else "%d malformed"%len(errors))
-    future=[p.name for p,d in records if isinstance(d.get("schema_version"),int) and d["schema_version"]>1]
+    malformed=[error for error in errors if error["reason"]=="malformed_record"]
+    check("record_syntax",not malformed,"valid" if not malformed else "%d malformed"%len(malformed))
     check("schema_support",not future,"supported" if not future else "%d future schema"%len(future))
     invalid=[]
     for p,d in records:
@@ -1516,18 +1652,22 @@ if action=="doctor":
         native=d.get("native",{}).get("session_id")
         if native: natives.setdefault((d.get("project",{}).get("identity"),d.get("agent"),native),[]).append(p.name)
     dup_a=[k for k,v in anchors.items() if k and len(v)>1]
+    graph_run=subprocess.run([sys.executable,os.environ["RIG_RESOLVER"],"--graph-check"],
+                             text=True,capture_output=True,env=os.environ)
+    try: graph=json.loads(graph_run.stdout)
+    except (ValueError,TypeError): graph={}
+    graph_invalid=set(graph.get("invalid_anchors",[]))
+    graph_duplicate=set(graph.get("duplicate_native_anchors",[]))
+    graph_roots=graph.get("roots",{})
     dup_n=[]
-    for key, names in natives.items():
-        if len(names) <= 1:
-            continue
-        pair_records=[(p,d) for p,d in records if p.name in names]
-        active=[(p,d) for p,d in pair_records if "done" not in p.parts and d.get("lifecycle",{}).get("state")!="complete"]
-        done=[(p,d) for p,d in pair_records if "done" in p.parts or d.get("lifecycle",{}).get("state")=="complete"]
-        continuation_ok=(len(active)==1 and len(done)==len(pair_records)-1 and active[0][1].get("lineage",{}).get("kind")=="continuation")
-        if not continuation_ok:
-            dup_n.append(key)
+    for key in natives:
+        group=[(p,d) for p,d in records if (d.get("project",{}).get("identity"),d.get("agent"),d.get("native",{}).get("session_id"))==key]
+        if len(group)>1 and (any(d.get("anchor") in graph_invalid or d.get("anchor") in graph_duplicate for _,d in group) or
+                             len({graph_roots.get(d.get("anchor")) for _,d in group})!=1): dup_n.append(key)
     check("unique_anchors",not dup_a,"unique" if not dup_a else "%d duplicates"%len(dup_a))
     check("unique_native_bindings",not dup_n,"unique" if not dup_n else "%d duplicates"%len(dup_n))
+    lineage_ok=graph_run.returncode==0 and not dup_n
+    check("continuation_lineage",lineage_ok,"valid" if lineage_ok else "invalid graph")
     audit=sessions/"repair-audit.jsonl"; audit_ok=True; audit_detail="absent"
     if audit.exists():
         audit_detail="valid"
@@ -1591,6 +1731,14 @@ for base in (sessions,sessions/"done"):
             emit(False,"invalid_session_path",{"no_write":True},4)
         try: d=json.loads(p.read_text())
         except (OSError,ValueError,TypeError): emit(False,"malformed_record",{"no_write":True},4)
+        if not isinstance(d,dict) or (d.get("schema_version")==1 and (
+            not all(isinstance(d.get(key),dict) for key in ("native","project","lifecycle")) or
+            not all(key not in d or isinstance(d[key],dict) for key in ("runtime","lineage","migration","names")) or
+            not all(value is None or isinstance(value,str) for value in
+                (d.get("anchor"),d.get("agent"),d["native"].get("session_id"),
+                 d["project"].get("identity"),d["lifecycle"].get("state"),
+                 (d.get("lineage") or {}).get("parent_anchor"))))):
+            emit(False,"malformed_record",{"no_write":True},4)
         if isinstance(d.get("schema_version"),int) and d["schema_version"]>1: emit(False,"unsupported_schema",{"no_write":True},4)
         records.append((p,d))
 candidates=[(p,d) for p,d in records if d.get("anchor")==anchor]
@@ -1633,7 +1781,7 @@ PY
 }
 
 session_name_set() {
-  local tentative=false complete=false json=false name="" arg resolved file anchor done_dir dest="" end_options=false
+  local tentative=false complete=false json=false name="" arg resolved resolve_status=0 writer_status=0 file anchor done_dir dest="" end_options=false
   for arg in "$@"; do
     if [[ "$end_options" == false ]]; then
       case "$arg" in
@@ -1646,29 +1794,88 @@ session_name_set() {
     name="$arg"
   done
   [[ -n "$name" ]] || { usage_error "session name is required" "$@"; return; }
-  resolved=$(session_resolve --json) || return $?
+  resolved=$(session_resolve --json --verbose) || resolve_status=$?
+  if [[ "$resolve_status" -ne 0 ]]; then
+    if [[ "$json" == true ]]; then printf '%s\n' "$resolved"
+    else printf 'session name refused: %s\n' "$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("reason") or "resolver_failed")' 2>/dev/null || printf resolver_failed)" >&2
+    fi
+    return "$resolve_status"
+  fi
   file=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")')
   anchor=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
   [[ -n "$file" ]] || return "$RIG_EXIT_UNAVAILABLE"
   if [[ "$complete" == true ]]; then done_dir="$(rig_dir)/memory/sessions/done"; mkdir -p "$done_dir"; dest="$done_dir/session-$(date +%Y%m%d)-${anchor:-unknown}.json"; fi
-  SESSION_F="$file" SESSION_NAME="$name" SESSION_TENTATIVE="$tentative" SESSION_COMPLETE="$complete" SESSION_DEST="$dest" python3 <<'PY'
-import fcntl, json, os, tempfile
-p = os.environ["SESSION_F"]
-lock=open(p+".lock","a+"); fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
-with open(p) as f: d = json.load(f)
+  SESSION_F="$file" SESSION_NAME="$name" SESSION_TENTATIVE="$tentative" SESSION_COMPLETE="$complete" SESSION_DEST="$dest" SESSION_EXPECTED="$resolved" SESSION_ROOT="$(rig_root)" SESSION_RIG="$(rig_dir)" SESSION_RESOLVER="$(dirname "${BASH_SOURCE[0]}")/rig-session-resolve.py" SESSION_JSON="$json" python3 <<'PY' || writer_status=$?
+import fcntl, hashlib, json, os, pathlib, subprocess, sys, tempfile
+p = pathlib.Path(os.environ["SESSION_F"])
+expected = json.loads(os.environ["SESSION_EXPECTED"])
+sessions = pathlib.Path(os.environ["SESSION_RIG"]) / "memory" / "sessions"
+def refuse(reason,code=3):
+    if os.environ["SESSION_JSON"] == "true": print(json.dumps({"ok":False,"reason":reason,"no_write":True}))
+    else: print("session name refused: " + reason, file=sys.stderr)
+    raise SystemExit(code)
+try:
+    p.resolve(strict=True).relative_to(sessions.resolve())
+    if p.is_symlink() or not p.is_file(): refuse("invalid_session_path")
+except (OSError,ValueError,RuntimeError): refuse("invalid_session_path")
+global_lock=open(sessions/".bind.lock","a+"); fcntl.flock(global_lock.fileno(),fcntl.LOCK_EX)
+lock=open(str(p)+".lock","a+"); fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
+try:
+    with open(p) as f: d = json.load(f)
+except (OSError,ValueError,TypeError): refuse("record_changed")
+if not isinstance(d,dict) or expected.get("confidence")!="exact" or expected.get("session_file")!=str(p) or d.get("anchor")!=expected.get("anchor"):
+    refuse("record_changed")
+if d.get("schema_version")==1 and not d.get("anchor"): refuse("invalid_session_anchor")
+if d.get("schema_version")==1 and (
+    not all(isinstance(d.get(key),dict) for key in ("native","project","lifecycle")) or
+    not all(key not in d or isinstance(d[key],dict) for key in ("runtime","lineage","migration","names")) or
+    not all(value is None or isinstance(value,str) for value in
+        (d.get("anchor"),d.get("agent"),d["native"].get("session_id"),
+         d["project"].get("identity"),d["lifecycle"].get("state"),
+         (d.get("lineage") or {}).get("parent_anchor")))):
+    refuse("malformed_record",4)
+if isinstance(d.get("schema_version"),int) and d["schema_version"]>1:
+    refuse("unsupported_schema",4)
+if d.get("schema_version") == 1:
+    root=pathlib.Path(os.environ["SESSION_ROOT"])
+    try:
+        common=subprocess.check_output(["git","-C",str(root),"rev-parse","--git-common-dir"],text=True,stderr=subprocess.DEVNULL).strip()
+        common=pathlib.Path(common if os.path.isabs(common) else root/common).resolve()
+    except (OSError,subprocess.SubprocessError): common=root.resolve()
+    project_id=hashlib.sha256(str(common).encode()).hexdigest()
+    if d.get("project",{}).get("identity")!=project_id: refuse("cross_project")
+    if not d.get("native",{}).get("session_id"): refuse("invalid_native_binding")
+    if d.get("agent")!=expected.get("agent") or d.get("native",{}).get("session_id")!=expected.get("native_session_id"):
+        refuse("native_conflict")
+    if d.get("lifecycle",{}).get("state")!="active": refuse("ended_record")
+    destination=pathlib.Path(os.environ["SESSION_DEST"]) if os.environ["SESSION_DEST"] else p
+    if destination!=p and (destination.exists() or destination.is_symlink()): refuse("destination_exists")
+    graph_env=dict(os.environ,RIG_ROOT=os.environ["SESSION_ROOT"],RIG_DIR=os.environ["SESSION_RIG"])
+    graph_run=subprocess.run([sys.executable,os.environ["SESSION_RESOLVER"],"--graph-check"],
+                             text=True,capture_output=True,env=graph_env)
+    try: graph=json.loads(graph_run.stdout)
+    except (ValueError,TypeError): graph={}
+    if "invalid_anchors" not in graph: refuse(graph.get("reason","lineage_validation_failed"),4)
+    if d.get("anchor") in graph["invalid_anchors"]: refuse("invalid_continuation_lineage",2)
+    if d.get("anchor") in graph["duplicate_native_anchors"]: refuse("duplicate_native_id",2)
+elif not (expected.get("reason")=="launcher_file" or (expected.get("reason")=="anchor" and os.environ.get("RIG_SESSION_ANCHOR")==d.get("anchor"))) or d.get("status")!="active":
+    refuse("migration_required")
 if d.get("schema_version") == 1:
     names=d.setdefault("names", {})
     if os.environ["SESSION_TENTATIVE"] == "true": names["tentative"] = os.environ["SESSION_NAME"]
     else: names["final"] = os.environ["SESSION_NAME"]; names["tentative"] = None
     names["display_title"] = os.environ["SESSION_NAME"]
     names["native_sync"] = "in-sync" if names.get("native_title") == os.environ["SESSION_NAME"] else "suggested"
-    if os.environ["SESSION_COMPLETE"] == "true": d["lifecycle"]["state"] = "complete"
+    if os.environ["SESSION_COMPLETE"] == "true":
+        d["lifecycle"]["state"] = "complete"
+        d.setdefault("runtime", {})["completed_from"] = str(p.resolve())
     d["revision"] = int(d.get("revision", 0)) + 1
 else:
     if os.environ["SESSION_TENTATIVE"] == "true": d["tentative_name"] = os.environ["SESSION_NAME"]
     else: d["final_name"] = os.environ["SESSION_NAME"]; d["tentative_name"] = None
     if os.environ["SESSION_COMPLETE"] == "true": d["status"] = "complete"
-dest = os.environ["SESSION_DEST"] or p
+dest = pathlib.Path(os.environ["SESSION_DEST"]) if os.environ["SESSION_DEST"] else p
+if dest != p and (dest.exists() or dest.is_symlink()): refuse("destination_exists")
 fd, tmp = tempfile.mkstemp(prefix=".session-", suffix=".tmp", dir=os.path.dirname(dest))
 try:
     with os.fdopen(fd, "w") as f: json.dump(d, f, indent=2); f.write("\n"); f.flush(); os.fsync(f.fileno())
@@ -1684,6 +1891,7 @@ finally:
     try: os.unlink(tmp)
     except FileNotFoundError: pass
 PY
+  [[ "$writer_status" -eq 0 ]] || return "$writer_status"
   [[ "$json" == true ]] && printf '{"ok":true,"session_file":"%s"}\n' "${dest:-$file}"
   return 0
 }
@@ -1692,7 +1900,8 @@ launch_claude() {
   local resolved watcher session_dir session_file session_anchor branch started
   # The launcher is the authority for a new Claude process. Create its identity
   # before the SessionStart hook so the watcher and hook share the exact file.
-  export RIG_SESSION_PID="${RIG_SESSION_PID:-$$}"
+  unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID
+  export RIG_SESSION_PID="$$"
   local resolve_status=0
   resolved=$(session_resolve --json) || resolve_status=$?
   if [[ "$resolve_status" -ne 0 ]]; then
@@ -1723,7 +1932,8 @@ PY
 }
 
 launch_codex() {
-  export RIG_SESSION_PID="${RIG_SESSION_PID:-$$}"
+  unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID
+  export RIG_SESSION_PID="$$"
   [[ "${1:-}" == -- ]] && shift
   exec codex "$@"
 }

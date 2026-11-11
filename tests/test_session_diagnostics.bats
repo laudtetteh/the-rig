@@ -8,7 +8,7 @@ setup() {
   chmod +x "$CASE_DIR/bin/rig"
   git -C "$CASE_DIR" init -q
   git -C "$CASE_DIR" checkout -q -b feat/current
-  unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID
+  unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID
 }
 
 bind_record() {
@@ -96,6 +96,19 @@ json.dump(d,open(p,"w"),indent=2)
   run "$CASE_DIR/bin/rig" session repair --anchor "$anchor" --agent claude --native-session-id claimed-id --reason recovery --confirm bogus --json
   [ "$status" -eq 2 ]; [[ "$output" == *duplicate_native_id* ]] || return 1
   [ "$before" = "$(cksum "$file")" ]
+}
+
+@test "repair refuses malformed nested v1 records with JSON and no write" {
+  local result file anchor before
+  result=$(bind_record codex old-thread)
+  file=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_file"])')
+  anchor=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  SESSION_F="$file" python3 -c 'import json,os; p=os.environ["SESSION_F"]; d=json.load(open(p)); d["native"]="bad type"; json.dump(d,open(p,"w"))'
+  before=$(cksum "$file")
+  run "$CASE_DIR/bin/rig" session repair --anchor "$anchor" --agent codex --native-session-id new-thread --json
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["reason"]=="malformed_record" and d["no_write"] is True'
+  [ "$(cksum "$file")" = "$before" ]
 }
 
 @test "last-resort content matching requires authorization and stays no-write without documented export" {

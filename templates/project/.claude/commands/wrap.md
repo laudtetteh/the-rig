@@ -178,11 +178,13 @@ Print a single structured report before executing anything:
 **Final session name:** [confirmed final: "..." | suggested final: "..." awaiting confirmation | unresolved — reliable name could not be set | nothing meaningful shipped, skipped]
 ```
 
-If `bin/rig session resolve --json` returns `ended_record` and a native session
-environment variable is present, first run the appropriate exact retrofit:
+If `bin/rig session resolve --json` returns `ended_record` or `not_found` and
+reports a native environment recovery command, first run the appropriate exact retrofit:
 `bin/rig session retrofit --agent codex --from-env --source resume --json` for
 Codex, or `bin/rig session retrofit --agent claude --from-env --source resume --json`
 for Claude. Use the returned active continuation record if retrofit succeeds.
+The UserPromptSubmit hook may already have attached a resumed thread from its
+event ID, even when the native ID is absent from the shell environment.
 
 If resolve returns `not_found`, or ended-record retrofit cannot create an exact
 active continuation, enter degraded mode: print
@@ -547,9 +549,18 @@ never interpolate it into shell or Python source.
 ```bash
 # Clear only this exact session's wrap obligation while its active record is
 # still resolvable. --adopt-legacy explicitly migrates an older unscoped marker.
+CURRENT_JSON=$("$REPO/bin/rig" session current --json) || exit 1
+CURRENT_UUID=$(printf '%s' "$CURRENT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
+[[ -n "$SESSION_UUID" && "$CURRENT_UUID" == "$SESSION_UUID" ]] || {
+  echo "Session identity changed; stop before clearing or completing it." >&2
+  exit 1
+}
 "$REPO/bin/rig" session obligation clear --kind wrap --adopt-legacy --json
 "$REPO/bin/rig" session-name set --final --complete "$CONFIRMED_NAME"
 ```
+
+If this is a continuation after an earlier wrap, name only work done since
+that wrap. Preserve the completed parent record and its final name.
 
 **Do NOT write Session name to CONTEXT_SNAPSHOT.md.** CONTEXT_SNAPSHOT contains
 project state only (branch, PRs, roadmap, key facts). Session names live in session files.
@@ -793,3 +804,6 @@ The `/fewer-permission-prompts` skill remains available for one-off manual scans
 - Always **overwrite** the snapshot, never append to it; it represents current state, not history
 - History belongs in `.rig/memory/PROGRESS.md` (recent) and `PROGRESS_archive.md` (older); same pattern for `ERRORS.md` / `ERRORS_archive.md`
 - If a task is in progress but not done, use the "Active tasks — in-flight state capture" step above to write a structured `## Resuming from` section into CONTEXT_SNAPSHOT. Vague notes are not sufficient — the next session must be able to resume from the snapshot alone.
+- At the very end of the response, after every other report or chained command,
+  repeat the session block: anchor, final or suggested name, and whether the
+  record was completed or remains unresolved.
