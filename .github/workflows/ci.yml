@@ -16,7 +16,7 @@ env:
 jobs:
   plan-shards:
     name: plan bats shards
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
 
@@ -33,7 +33,7 @@ jobs:
 
   test:
     name: bats test suite (shard ${{ matrix.shard }}, ~${{ matrix.weight }}s)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: plan-shards
     strategy:
       fail-fast: false
@@ -55,9 +55,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install bats-core
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y bats
+        run: bash tests/ci-install-bats.sh
 
       - name: Configure test Git identity
         run: |
@@ -71,7 +69,7 @@ jobs:
 
   test-shard-coverage:
     name: bats test suite (shard coverage check)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [plan-shards, test]
     steps:
       - name: Checkout
@@ -90,8 +88,8 @@ jobs:
 
       - name: Install static tools
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends shellcheck python3
+          command -v shellcheck
+          command -v python3
 
       - name: Check Bash syntax
         run: |
@@ -126,8 +124,8 @@ jobs:
 
       - name: Install focused test tools
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends bats jq
+          bash tests/ci-install-bats.sh
+          command -v jq
 
       - name: Run focused security and recovery tests
         run: bats tests/test_security_recovery_gates.bats
