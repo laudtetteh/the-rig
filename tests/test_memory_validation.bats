@@ -254,6 +254,19 @@ assert b"\n" not in raw.replace(b"\r\n",b"")
 PY
 }
 
+@test "memory append-gap keeps no-space bracketed headings ahead of older entries" {
+  gaps="$TEST_PROJECT/.rig/memory/RIG_GAPS.md"
+  printf '# Rig Gaps\n\n## [2026-11-10]—recent\n\n## [2026-11-09]—older\n' > "$gaps"
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "new no-space gap" --scope rig-core --observation "New observation." --json
+  [ "$status" -eq 0 ]
+  GAPS_FILE="$gaps" python3 - <<'PY'
+import os, pathlib
+text=pathlib.Path(os.environ["GAPS_FILE"]).read_text()
+assert text.index("new no-space gap") < text.index("recent") < text.index("older")
+PY
+}
+
 @test "memory append-gap preserves CRLF in external markerless and marked logs" {
   rig_external="$TEST_ROOT/external rig"
   mkdir -p "$rig_external/memory"
