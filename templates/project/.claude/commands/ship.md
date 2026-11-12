@@ -6,17 +6,17 @@ This is a **sequential hard gate** — each step must be completed and confirmed
 before the next one executes. Do not skip steps, combine steps, or proceed past
 a failure without surfacing it.
 
-> **RIG_DIR resolution (stealth mode):** Before reading or writing any `.rig/` path,
-> resolve where `.rig/` actually lives. If `.rigpath` exists at the project root, read
-> it — it contains the absolute path to the external `.rig/` directory.
+> **RIG_DIR resolution:** Before reading or writing any `.rig/` path, use the
+> inventory helper's resolved `rig_dir`. It handles in-repo, external, and
+> relative `.rigpath` values without changing spaces in a path.
 >
 > ```bash
 > REPO=$(git rev-parse --show-toplevel)
-> if [[ -f "$REPO/.rigpath" ]]; then
->   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
-> else
->   RIG_DIR="$REPO/.rig"
-> fi
+> TASK_INVENTORY_JSON=$("$REPO/bin/rig" task inventory --json) || {
+>   printf '%s\n' "$TASK_INVENTORY_JSON" >&2
+>   exit 1
+> }
+> RIG_DIR=$(printf '%s' "$TASK_INVENTORY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rig_dir"])')
 > ```
 >
 > Substitute `$RIG_DIR` for `.rig/` in every step below.
@@ -25,9 +25,18 @@ a failure without surfacing it.
 
 ## Step 1 — Identify the task
 
-Read `.rig/tasks/active/`. If there is exactly one task file, confirm it.
+Use the inventory result above before listing tasks. If it reports
+`state: omitted`, stop with: "Task lifecycle unavailable: this Rig install
+intentionally omitted the task component. Install tasks before shipping."
+If it reports `state: ambiguous` or `ok: false`, stop and report its `reason`
+as an inventory error. This includes any missing installed task directory.
+Do not interpret either state as an empty task list.
+
+For `state: installed` with `ok: true`, read task files in
+`$RIG_DIR/tasks/active/` (ignore `.gitkeep`). If there is exactly one task file,
+confirm it.
 If there are multiple, ask the user which task is being shipped. If there are
-none, stop and say: "No active task found. Move a task to `.rig/tasks/active/`
+none, stop and say: "No active task found. Move a task to `$RIG_DIR/tasks/active/`
 before shipping."
 
 State clearly:
@@ -471,8 +480,8 @@ cat > /tmp/ship-commit-msg.txt << 'EOF'
 [approved commit message]
 EOF
 ROOT=$(git rev-parse --show-toplevel)
-RIG_DIR="$ROOT/.rig"
-if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; fi
+TASK_INVENTORY_JSON=$("$ROOT/bin/rig" task inventory --json) || exit 1
+RIG_DIR=$(printf '%s' "$TASK_INVENTORY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rig_dir"])')
 touch "$RIG_DIR/memory/.rig-commit-ok"
 ```
 
@@ -496,7 +505,7 @@ In this order:
    - Required fields: **What was built** / **Deviations from plan** / **Actual files touched** / **Follow-ups opened**
    - If scope or approach changed during execution, capture it in `## Done notes`
    - `## Approach` stays as the original plan (historical intent); deviations belong in `## Done notes`
-2. Move the task file: `.rig/tasks/active/TASK_[name].md` → `.rig/tasks/done/`
+2. Move the task file: `$RIG_DIR/tasks/active/TASK_[name].md` → `$RIG_DIR/tasks/done/`
 3. Update `.rig/memory/PROGRESS.md` — add a full entry at the top (not a stub); if scope changed, the entry reflects the actual outcome
 4. Create a unique draft under `$RIG_DIR/memory/` with `mktemp`, write only the
    current shared project header to it, and in the same shell call
@@ -697,5 +706,5 @@ See `SHIP_WORKFLOW.md` Post-batch audit for full details.
 - The optional-card commit pause (Step 5) is non-negotiable regardless of autonomy level.
 - The branch check (Step 3.5) is also a gate — never commit directly to main.
 - If the task has multiple commits, summarise all changes in the PR body.
-- The task file is moved to `.rig/tasks/done/` only after a successful commit (Step 8).
+- The task file is moved to `$RIG_DIR/tasks/done/` only after a successful commit (Step 8).
 - The PR body (Step 9) must reflect what was actually built — not the original plan.

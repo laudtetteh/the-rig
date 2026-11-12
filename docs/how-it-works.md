@@ -122,8 +122,8 @@ CLAUDE.md instructs: skim ./.rig/memory/DECISIONS.md
      │  Significant architectural and process decisions (skim only)
      │
      ▼
-CLAUDE.md instructs: read ./.rig/tasks/active/
-     │  What task is currently in flight
+CLAUDE.md instructs: read the installed task path
+     │  What task is currently in flight in a standard install
      │
      ▼
 Agent is oriented. Hooks are live. Ready to work.
@@ -592,20 +592,32 @@ merge command is still running; the hook warns and logs the unchanged final SHA.
 
 ## The task lifecycle
 
+`bin/rig task inventory --json` reads the install manifest and reports whether
+task lifecycle was installed, intentionally omitted, or cannot be classified.
+It also errors when an installed task component has a missing task directory.
+The wrap, ship, and post-merge workflows resolve `$RIG_DIR` through `.rigpath`
+for external and stealth installs before reading or moving task files. With tasks
+omitted and shared memory installed, `/wrap` and `/post-merge` still update
+shared memory; `/ship` reports that
+task lifecycle is unavailable.
+
 ```
-.rig/tasks/backlog/TASK_name.md    ← created by /task or /kickoff
+$RIG_DIR/tasks/backlog/TASK_name.md    ← created by /task or /kickoff
         │
         │  (user starts work via /run or /task)
         ▼
-.rig/tasks/active/TASK_name.md     ← Status: active
+$RIG_DIR/tasks/active/TASK_name.md     ← Status: active
         │                             ## Operating mode set (autonomy/check-ins/risk)
         │  (implementation complete, tests pass)
         ▼
-.rig/tasks/done/TASK_name.md       ← Status: done, Done notes filled in
+$RIG_DIR/tasks/done/TASK_name.md       ← Status: done, Done notes filled in
 ```
 
 **Staging rule:** The task file is never staged in the implementation commit. It's
-staged only from `.rig/tasks/done/` in a separate housekeeping commit.
+staged only from `.rig/tasks/done/` in a separate housekeeping commit for an
+in-repo install whose `.rig/` is tracked. External or locally ignored Rig
+memory and task files cannot be staged in the project repository; their
+workflows report the update without a housekeeping commit.
 
 ---
 

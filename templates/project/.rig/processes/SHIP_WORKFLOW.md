@@ -12,6 +12,19 @@
 
 ---
 
+## Task inventory gate
+
+Resolve `REPO=$(git rev-parse --show-toplevel)`, run
+`"$REPO/bin/rig" task inventory --json`, and take its `rig_dir` field as
+`RIG_DIR` before selecting a task. If the state
+is `omitted`, stop with "Task lifecycle unavailable: this Rig install
+intentionally omitted the task component. Install tasks before shipping."
+If the state is `ambiguous` or `ok` is false, stop and report the inventory
+`reason` as an error. Only an installed, usable task directory set can have a
+valid empty active task list.
+
+---
+
 ## Step 0 — Create the GitHub issue first
 
 **Read `issue-tracking:` from `CLAUDE.md` before proceeding.**
@@ -83,7 +96,7 @@ Work through this list before staging anything:
 - [ ] No hardcoded secrets, tokens, or credentials
 - [ ] Error cases handled — not just the happy path
 - [ ] If the PR touches `Dockerfile`, `requirements.txt`, `package.json`, or the service layer:
-      in-container verification has been run per `.rig/rules/verification.md`
+      in-container verification has been run per `$RIG_DIR/rules/verification.md`
 - [ ] After any Docker verification step: `git status --short` checked — volume mounts
       can generate untracked files that must be committed or gitignored
 
@@ -248,9 +261,9 @@ feat(scope): description [#N]
 
 Body explaining the why.
 EOF
-ROOT=$(git rev-parse --show-toplevel)
-RIG_DIR="$ROOT/.rig"
-if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; fi
+ROOT=$(cd "$(git rev-parse --show-toplevel)" && pwd -P)
+TASK_INVENTORY_JSON=$("$ROOT/bin/rig" task inventory --json) || exit 1
+RIG_DIR=$(printf '%s' "$TASK_INVENTORY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rig_dir"])')
 touch "$RIG_DIR/memory/.rig-commit-ok"
 ```
 
@@ -273,14 +286,16 @@ In this order:
    - If scope or approach changed during execution, it must be captured here
    - `## Approach` stays as the original plan (historical intent); deviations belong in `## Done notes`
 
-2. Move task file from `.rig/tasks/active/` → `.rig/tasks/done/`
+2. Move the selected task file from `$RIG_DIR/tasks/active/` to
+   `$RIG_DIR/tasks/done/`. Never move a relative `.rig/tasks/` path when the
+   install points outside the checkout.
 
-3. Update `.rig/memory/PROGRESS.md` — add entry at top with what actually shipped
+3. Update `$RIG_DIR/memory/PROGRESS.md` — add entry at top with what actually shipped
    (if scope changed from the plan, the PROGRESS entry reflects the actual outcome)
 
 4. Write a draft containing the shared project state without task sections,
    then run `bin/rig memory write-snapshot --file "$DRAFT" --shared-only --json`.
-   Resolve `$RIG_DIR` from `.rigpath` and keep the draft under its `memory/`
+   Reuse the inventory helper's `$RIG_DIR` and keep the draft under its `memory/`
    directory. Remove the draft after a successful write. Never edit or delete
    `CONTEXT_SNAPSHOT.md` directly; the writer preserves other sessions' task
    handoffs. For the task moved to done in Step 2, inspect the existing
@@ -288,9 +303,9 @@ In this order:
    --done-task-file FILE`. The writer verifies the done file and backs up
    the prior snapshot.
 
-5. If anything surprised you, log it in `.rig/memory/ERRORS.md`
+5. If anything surprised you, log it in `$RIG_DIR/memory/ERRORS.md`
 
-6. If anything about The Rig's workflow was missing or felt wrong, log it in `.rig/memory/RIG_GAPS.md`
+6. If anything about The Rig's workflow was missing or felt wrong, log it in `$RIG_DIR/memory/RIG_GAPS.md`
 
 7. **Post a closing comment on the GitHub Issue:**
    ```bash
@@ -373,23 +388,30 @@ gh pr create --title "..." --body-file /tmp/pr-body.md --base [BASE_BRANCH] \
 
 ## Step 7 — Housekeeping commit (if needed)
 
-If the memory updates and task file move were not included in the implementation commit,
-make a follow-up housekeeping commit on the same branch. Obtain fresh user
-approval for this separate attempt, then prepare its one-use authorization:
+If the memory updates and task file move were not included in the implementation
+commit, make a follow-up housekeeping commit on the same branch only when the
+files are stageable in this repository. Obtain fresh user approval for this
+separate attempt. Create the one-use authorization only after staging succeeds
+and immediately before the commit. For external or locally ignored Rig files,
+skip this whole commit step and leave no approval sentinel behind.
 
 ```bash
-ROOT=$(git rev-parse --show-toplevel)
-RIG_DIR="$ROOT/.rig"
-if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; fi
-touch "$RIG_DIR/memory/.rig-commit-ok"
+ROOT=$(cd "$(git rev-parse --show-toplevel)" && pwd -P)
+TASK_INVENTORY_JSON=$("$ROOT/bin/rig" task inventory --json) || exit 1
+RIG_DIR=$(printf '%s' "$TASK_INVENTORY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rig_dir"])')
+if [[ "$RIG_DIR" == "$ROOT/.rig" ]] && ! git -C "$ROOT" check-ignore -q .rig/memory/PROGRESS.md; then
+  git -C "$ROOT" add .rig/memory/PROGRESS.md .rig/tasks/done/TASK_[name].md
+  if git -C "$ROOT" ls-files --error-unmatch -- .rig/tasks/active/TASK_[name].md >/dev/null 2>&1; then
+    git -C "$ROOT" add -u -- .rig/tasks/active/TASK_[name].md
+  fi
+  touch "$RIG_DIR/memory/.rig-commit-ok"
+  RIG_COMMIT_POLICY=guarded git -C "$ROOT" commit -m "chore: post-task housekeeping [#N]"
+else
+  echo "Rig memory and task files are external or locally ignored; no housekeeping commit is needed."
+fi
 ```
 
-```bash
-git add .rig/memory/PROGRESS.md .rig/tasks/done/TASK_[name].md
-RIG_COMMIT_POLICY=guarded git commit -m "chore: post-task housekeeping [#N]"
-```
-
-This commit goes on the same PR branch before the PR is merged.
+When made, this commit goes on the same PR branch before the PR is merged.
 
 ---
 
@@ -408,7 +430,7 @@ touched multiple systems (e.g. both install.sh and command files).
 - [ ] **Comments consistent** — inline code comments match what the code actually does (stale comments are technical debt)
 - [ ] **CONTEXT_SNAPSHOT and PROGRESS current** — run `/wrap` to lock in the batch's state before starting the next group
 
-**Log the result:** a brief line in `.rig/memory/PROGRESS.md` is sufficient —
+**Log the result:** a brief line in `$RIG_DIR/memory/PROGRESS.md` is sufficient —
 e.g. "Post-batch audit passed — batch: PRs #117, #122, #124, #126"
 
 If anything fails the checklist, fix it before starting the next task group.

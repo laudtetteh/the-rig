@@ -20,6 +20,7 @@ Commands:
   rig session retrofit      Bind this process' native session ID safely
   rig session obligation    Mark or clear an exact session obligation
   rig sprint                Audit, plan, or inspect a durable sprint
+  rig task inventory        Identify installed, omitted, or uncertain task lifecycle
   rig session-name set      Set the current session name atomically
   rig memory validate       Validate Rig memory files
   rig memory repair-markers Reposition unambiguous Rig memory markers
@@ -83,6 +84,7 @@ EOF
       ;;
     session-name) printf 'Usage: rig session-name set [--tentative|--final] [--complete] [--json] <name>\n';;
     sprint) printf 'Usage: rig sprint <audit|plan|status> [options] --json\n';;
+    task) printf 'Usage: rig task inventory [--json]\n\nReads the install manifest to classify task lifecycle availability.\nAn installed task component with a missing task directory, or an uncertain\nmanifest, exits 3. An intentionally omitted component exits 0.\n';;
     memory) cat <<'EOF'
 Usage: rig memory <validate|repair-markers|append-gap|append-progress|write-snapshot|workflow-lock> [options]
 
@@ -102,6 +104,109 @@ EOF
     codex) printf 'Usage: rig codex [-- <codex arguments>]\n';;
     claude) printf 'Usage: rig claude [-- <claude arguments>]\n';;
   esac
+}
+
+task_inventory() {
+  [[ "${1:-}" == inventory ]] || { usage_error "usage: rig task inventory [--json]" "$@"; return; }
+  shift
+  [[ "$#" -eq 0 || ( "$#" -eq 1 && "$1" == --json ) ]] || { usage_error "usage: rig task inventory [--json]" "$@"; return; }
+  local json=false
+  [[ "${1:-}" == --json ]] && json=true
+  RIG_DIR="$(rig_dir)" TASK_ROOT="$(rig_root)" TASK_INVENTORY_JSON="$json" python3 <<'PY'
+import json, os, pathlib, re, sys
+
+rig = pathlib.Path(os.environ["RIG_DIR"])
+pointer = pathlib.Path(os.environ["TASK_ROOT"]) / ".rigpath"
+manifest = rig / "memory" / ".rig-manifest"
+project_state = rig / "install-targets.json"
+tasks = rig / "tasks"
+active = tasks / "active"
+backlog = tasks / "backlog"
+done = tasks / "done"
+required = {
+    ".rig/tasks/active/.gitkeep",
+    ".rig/tasks/done/.gitkeep",
+    ".rig/tasks/backlog/TASK_example.md",
+}
+state = "ambiguous"
+reason = "install manifest is unavailable"
+entries = set()
+try:
+    if pointer.exists() or pointer.is_symlink():
+        if pointer.is_symlink() or not pointer.is_file():
+            raise ValueError(".rigpath is not a regular file; task location is ambiguous")
+        pointer_lines = pointer.read_text(encoding="utf-8").splitlines()
+        if len(pointer_lines) != 1 or not pointer_lines[0].strip():
+            raise ValueError(".rigpath is empty or multiline; task location is ambiguous")
+    if manifest.is_symlink() or not manifest.is_file():
+        raise ValueError(reason)
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        match = re.fullmatch(r"[0-9a-fA-F]{64}  (.+)", line)
+        if not match or match.group(1) in entries:
+            raise ValueError("install manifest is malformed")
+        entries.add(match.group(1))
+    if not entries:
+        raise ValueError("install manifest has no inventory entries")
+    task_entries = {item for item in entries if item.startswith(".rig/tasks/")}
+    if required <= task_entries:
+        state = "installed"
+        reason = "task scaffold is recorded in the install manifest"
+    elif task_entries:
+        raise ValueError("install manifest has a partial task inventory")
+    elif tasks.exists() or tasks.is_symlink():
+        raise ValueError("task directories exist without an install inventory")
+    else:
+        if project_state.is_symlink() or not project_state.is_file():
+            raise ValueError("task inventory is absent without completed project install metadata")
+        state_record = json.loads(project_state.read_text(encoding="utf-8"))
+        if (not isinstance(state_record, dict)
+                or state_record.get("schema") != "https://the-rig.dev/schemas/install-targets/v1"
+                or type(state_record.get("schema_version")) is not int
+                or state_record.get("schema_version") != 1
+                or state_record.get("layer") != "project"
+                or not isinstance(state_record.get("agents"), list)
+                or any(agent not in ("claude", "codex") for agent in state_record["agents"])
+                or len(state_record["agents"]) != len(set(state_record["agents"]))
+                or not isinstance(state_record.get("updated_by"), dict)
+                or not isinstance(state_record["updated_by"].get("installer_version"), str)
+                or not state_record["updated_by"]["installer_version"]
+                or not isinstance(state_record.get("project_root"), str)
+                or not state_record["project_root"]):
+            raise ValueError("project install metadata is malformed")
+        state = "omitted"
+        reason = "task component was omitted from the install manifest"
+except (OSError, UnicodeError, ValueError) as exc:
+    reason = str(exc)
+
+def directory_state(path):
+    if tasks.is_symlink() or path.is_symlink():
+        return "symlink"
+    if path.is_dir():
+        return "present"
+    if path.exists():
+        return "not_directory"
+    return "missing"
+
+directories = {"active": directory_state(active),
+               "backlog": directory_state(backlog),
+               "done": directory_state(done)}
+unusable = [name for name, value in directories.items() if value != "present"]
+if state == "installed" and unusable:
+    reason = "installed task component has unusable directories: " + ", ".join(unusable)
+elif state == "omitted" and any(value != "missing" for value in directories.values()):
+    state = "ambiguous"
+    reason = "task directory exists despite omitted install inventory"
+ok = state == "omitted" or (state == "installed" and not unusable)
+result = {"ok": ok, "state": state, "active_directory": directories["active"],
+          "directories": directories, "rig_dir": str(rig), "reason": reason}
+if os.environ["TASK_INVENTORY_JSON"] == "true":
+    print(json.dumps(result, separators=(",", ":")))
+else:
+    print("Task lifecycle: %s (%s)" % (state, reason))
+sys.exit(0 if ok else 3)
+PY
 }
 
 worktree_bootstrap() {
@@ -2931,6 +3036,7 @@ main() {
     connector) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help connector; else exec "$(dirname "${BASH_SOURCE[0]}")/rig-connector-preflight" "$@"; fi;;
     worktree) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help worktree; else worktree_bootstrap "$@"; fi;;
     sprint) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help sprint; else exec "$(dirname "${BASH_SOURCE[0]}")/rig-sprint" "$@"; fi;;
+    task) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help task; else task_inventory "$@"; fi;;
     upgrade)
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help upgrade; return; fi
