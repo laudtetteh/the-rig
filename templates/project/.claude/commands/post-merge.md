@@ -28,7 +28,7 @@ Follows `.rig/processes/POST_MERGE_WORKFLOW.md`:
 
 1. Pulls latest `main` and confirms the expected commit is at HEAD
 2. Adds an entry at the top of `.rig/memory/PROGRESS.md` for the merged PR
-3. Moves the task file from `.rig/tasks/active/` → `.rig/tasks/done/`; marks `**Status**` as `done`
+3. When task lifecycle is installed, moves the task file from `$RIG_DIR/tasks/active/` → `$RIG_DIR/tasks/done/` and marks `**Status**` as `done`
 4. Refreshes `.rig/memory/CONTEXT_SNAPSHOT.md` without replacing task handoffs
 5. **Checks feature doc freshness** — detects if merged changes overlap with documented features (see below)
 6. Checks `.rig/memory/ERRORS.md` and `.rig/memory/RIG_GAPS.md` — prompts you to log anything unexpected or any workflow friction observed
@@ -47,20 +47,29 @@ Follows `.rig/processes/POST_MERGE_WORKFLOW.md`:
 Run this immediately after you merge (or are told a PR merged). Claude will ask
 which PR merged if it's not clear from context.
 
-> **RIG_DIR resolution (stealth mode):** Before reading or writing any `.rig/` path,
-> resolve where `.rig/` actually lives. If `.rigpath` exists at the project root, read
-> it — it contains the absolute path to the external `.rig/` directory.
+> **RIG_DIR resolution:** After the Git state check, before reading or writing
+> any `.rig/` path, use the inventory helper's resolved `rig_dir`. It handles
+> in-repo, external, and relative `.rigpath` values without changing spaces.
 >
 > ```bash
 > REPO=$(git rev-parse --show-toplevel)
-> if [[ -f "$REPO/.rigpath" ]]; then
->   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
-> else
->   RIG_DIR="$REPO/.rig"
-> fi
+> TASK_INVENTORY_JSON=$("$REPO/bin/rig" task inventory --json) || {
+>   printf '%s\n' "$TASK_INVENTORY_JSON" >&2
+>   exit 1
+> }
+> RIG_DIR=$(printf '%s' "$TASK_INVENTORY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rig_dir"])')
 > ```
 >
 > Substitute `$RIG_DIR` for `.rig/` in every step below.
+
+After the Git state check, use the inventory result from the block above.
+If it reports `state: omitted`, record "task lifecycle omitted", skip the task
+move and task handoff retirement, and continue shared memory and PR cleanup.
+If it reports `state: ambiguous` or `ok: false`, stop and report its `reason`
+as a task inventory error.
+An installed but missing directory is not an empty task list.
+If shared memory files such as `$RIG_DIR/memory/PROGRESS.md` are missing,
+report "shared memory component unavailable" and stop before memory writes.
 
 ## Git state check — run first, before anything else
 
@@ -102,7 +111,7 @@ Gather all findings silently — no output yet:
    If the user names several merged PRs, collect each PR with its merge SHA and
    closed issue list.
 2. **"This session" summary** — from conversation context: all PRs merged or opened, tasks completed, issues resolved this session. Conversation context is the primary signal; PROGRESS.md markers are cross-reference only.
-3. **Task file** — which active task file maps to the merged PR (for step 3 of POST_MERGE_WORKFLOW)
+3. **Task file** — when installed, which file in `$RIG_DIR/tasks/active/` maps to the merged PR; when omitted, record "task lifecycle omitted"
 4. **ERRORS.md additions** — infer from session context whether any unexpected behaviors, footguns, or pitfalls should be added
 5. **Feature doc overlaps** — files changed in the merged PR vs. documented feature entry points (see Feature doc freshness step below)
 6. **Session name** — derive suggestion from session file and conversation context
@@ -138,7 +147,7 @@ Print a single structured report before executing POST_MERGE_WORKFLOW:
 
 **ERRORS.md:** [N new entries: short-title-1 | no new entries]
 **Feature docs:** [⚠ overlap — run /refresh-feature-doc X | no overlaps]
-**Task file:** [TASK_N_slug.md → moving to done/ | no active task found]
+**Task file:** [TASK_N_slug.md → moving to done/ | no active task found | task lifecycle omitted]
 
 **Session name:** [suggested: "type desc #N | type desc #N" | already set — appending: "..." | exact recovery pending | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
 **Final session name:** [confirmed final: "..." | suggested final: "..." awaiting confirmation | unresolved — reliable name could not be set | nothing meaningful shipped, skipped]
@@ -163,10 +172,10 @@ After printing the report, **execute POST_MERGE_WORKFLOW steps 1–8 automatical
 
 - Pull latest [BASE_BRANCH] and confirm each expected merge SHA
 - Update PROGRESS.md, one entry per PR or an explicit combined batch summary
-- Move task file to done/ only when its batch ledger rows are terminal
+- Move an installed task file to `$RIG_DIR/tasks/done/` only when its batch ledger rows are terminal; skip this step when task lifecycle was omitted
 - Refresh the shared CONTEXT_SNAPSHOT.md header with `bin/rig memory write-snapshot --shared-only`
 - Add inferred ERRORS.md entries (if any)
-- Make housekeeping commit
+- Make a housekeeping commit only for stageable in-repo memory or task changes
 - Apply session name — only if user says "use that" or equivalent
 
 All steps execute automatically. The session name is the only action requiring explicit user input.
@@ -399,8 +408,9 @@ concurrent `/wrap` or `/post-merge` waiting to run.
 - `CONTEXT_SNAPSHOT.md` is the most important output — it's what orients the next
   session. A stale or missing snapshot means the next session loads PROGRESS.md in
   full instead, which is slower and less precise.
-- If `.rig/tasks/active/` is empty when `/post-merge` runs (task was already moved),
-  Claude will note it and skip the move step.
+- If an installed `$RIG_DIR/tasks/active/` directory has no task files when
+  `/post-merge` runs, note it and skip the move. An omitted task component is
+  reported separately; a missing installed directory is an inventory error.
 - **Housekeeping commit convention** is controlled by `## Git workflow convention` in
   the project `CLAUDE.md`. Default is `direct-push` (no branch, no PR). Change to
   `pr-required` for repos that require PRs for all changes to main.

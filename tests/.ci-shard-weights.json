@@ -60,6 +60,7 @@
   "tests/test_sprint_lifecycle.bats": 5.0,
   "tests/test_stealth_audit.bats": 5.0,
   "tests/test_strategy_lookahead_last_wins.bats": 5.0,
+  "tests/test_task_inventory.bats": 5.0,
   "tests/test_template_parity.bats": 5.0,
   "tests/test_upgrade_acceptance_matrix.bats": 5.0,
   "tests/test_upgrade_manifest_mutation_scope.bats": 5.0,

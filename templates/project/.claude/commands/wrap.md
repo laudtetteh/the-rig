@@ -14,9 +14,9 @@ Performs the session-end housekeeping that prevents state loss between sessions:
 6. Checks for significant architectural, product, or process decisions made this session and logs new ones to `.rig/memory/DECISIONS.md` (see DECISIONS.md logging step below)
 7. **Self-improvement check** — scans for Rig workflow gaps and logs them to `.rig/memory/RIG_GAPS.md`
 8. **Trims `.rig/memory/ERRORS.md`** if it has grown beyond 30 entries (see Trim step below)
-9. Reports what's in `.rig/tasks/active/` so you know what's in flight
+9. Reports installed active tasks, or that this install omitted task lifecycle
 10. **Suggests a session name** — derives a name from this session's work via `/session-name` logic (see Session naming step below)
-11. Surfaces the next priority from `.rig/tasks/backlog/` and asks: "What's next?"
+11. When tasks are installed, surfaces the next priority from `$RIG_DIR/tasks/backlog/` and asks: "What's next?"
 12. **Cleans up housekeeping flags** — deletes `.rig/memory/.wrap-needed` if present
 13. **(opt-in) Auto-scans JSONL transcripts** for frequent Bash patterns and appends new `permissions.allow` entries to `.claude/settings.json` — enable with `touch $RIG_DIR/memory/.fewer-prompts-enabled`
 
@@ -41,20 +41,29 @@ even if internal wrap collection happened earlier. Do not end with an implementa
 /wrap
 ```
 
-> **RIG_DIR resolution (stealth mode):** Before reading or writing any `.rig/` path,
-> resolve where `.rig/` actually lives. If `.rigpath` exists at the project root, read
-> it — it contains the absolute path to the external `.rig/` directory.
+> **RIG_DIR resolution:** After the Git state check, before reading or writing
+> any `.rig/` path, use the inventory helper's resolved `rig_dir`. It handles
+> in-repo, external, and relative `.rigpath` values without changing spaces.
 >
 > ```bash
 > REPO=$(git rev-parse --show-toplevel)
-> if [[ -f "$REPO/.rigpath" ]]; then
->   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
-> else
->   RIG_DIR="$REPO/.rig"
-> fi
+> TASK_INVENTORY_JSON=$("$REPO/bin/rig" task inventory --json) || {
+>   printf '%s\n' "$TASK_INVENTORY_JSON" >&2
+>   exit 1
+> }
+> RIG_DIR=$(printf '%s' "$TASK_INVENTORY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rig_dir"])')
 > ```
 >
 > Substitute `$RIG_DIR` for `.rig/` in every step below.
+
+After the Git state check, use the inventory result from the block above.
+If it reports `state: omitted`, continue shared memory housekeeping and report
+task handoffs and backlog priority as unavailable. If it reports `state:
+ambiguous` or `ok: false`, stop and report its `reason` as a task inventory
+error. A missing installed directory must never be described as an empty task
+list. If shared memory files such as `$RIG_DIR/memory/PROGRESS.md` are missing,
+report "shared memory component unavailable" and stop before memory writes;
+task omission alone does not make a missing memory component usable.
 
 ## Git state check — run first, before anything else
 
@@ -105,7 +114,7 @@ Gather all findings silently — no output yet:
 4. **ERRORS.md additions** — infer from session context whether any unexpected behaviors, footguns, or non-obvious pitfalls should be added (see ERRORS.md logging step below)
 5. **DECISIONS.md additions** — infer whether the session produced any significant adopted architectural, product, or process decisions (see DECISIONS.md logging step below)
 6. **Feature doc overlaps** — files changed this session vs. documented feature entry points (see Feature doc freshness step below)
-7. **Active tasks** — read `.rig/tasks/active/`
+7. **Active tasks** — when the inventory is installed, read `$RIG_DIR/tasks/active/`; when omitted, record "task lifecycle omitted"
 8. **Session identity** — run `bin/rig session resolve --json` read-only; extract
    its session file, `anchor`, and `tentative_name`. Stop on ambiguous identity.
 9. **Skipped post-merge status** — if `/post-merge` was requested in the same turn but
@@ -409,7 +418,11 @@ Never delete entries — only move them. ERRORS.md is always newest-first: add n
 
 ## Active tasks — in-flight state capture
 
-After ERRORS.md cleanup and before session naming, read `$RIG_DIR/tasks/active/`.
+After ERRORS.md cleanup and before session naming, use the task inventory
+result from the resolution block. If tasks were intentionally omitted, write a
+shared-only snapshot draft, report that task handoffs are unavailable, and
+continue session naming. Do not create a task section or infer an empty list.
+For installed tasks, read `$RIG_DIR/tasks/active/`.
 
 **If empty:** note "No tasks in flight" and continue.
 
@@ -548,7 +561,8 @@ evidence rules are authoritative for this suggestion.
 
 ```bash
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
-if [[ -f "$REPO/.rigpath" ]]; then RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath"); else RIG_DIR="$REPO/.rig"; fi
+TASK_INVENTORY_JSON=$("$REPO/bin/rig" task inventory --json) || exit 1
+RIG_DIR=$(printf '%s' "$TASK_INVENTORY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rig_dir"])')
 SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
   echo "Unable to resolve this session unambiguously; stop before writing snapshot state."
   exit 1

@@ -282,7 +282,7 @@ provider's hooks establish the same shared lifecycle:
 4. The agent reads `$RIG_DIR/memory/CONTEXT_SNAPSHOT.md` — **if present, this is sufficient; the agent stops here**
 5. `$RIG_DIR/memory/PROGRESS.md` — only loaded if snapshot is absent or stale
 6. `$RIG_DIR/memory/ERRORS.md` — what to avoid
-7. `$RIG_DIR/tasks/active/` — what's currently in flight
+7. When task lifecycle is installed, `$RIG_DIR/tasks/active/` — what's currently in flight
 
 `$RIG_DIR` is the effective Rig directory. In repo/local tracking it is the
 project's `.rig/`; in stealth or external tracking it is the path stored in
