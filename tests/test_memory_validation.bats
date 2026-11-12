@@ -222,6 +222,38 @@ PY
   [ "$(grep -c 'new markerless gap' "$gaps")" -eq 1 ]
 }
 
+@test "memory append-gap recognizes bare-date headings in repo and external logs" {
+  gaps="$TEST_PROJECT/.rig/memory/RIG_GAPS.md"
+  printf '# Rig Gaps\n\nNewest first.\n\n## 2026-11-10 — recent\n\n## 2026-11-09 — older\n' > "$gaps"
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "new in-repo bare-date gap" --scope rig-core --observation "New observation." --json
+  [ "$status" -eq 0 ]
+  GAPS_FILE="$gaps" python3 - <<'PY'
+import os, pathlib
+text=pathlib.Path(os.environ["GAPS_FILE"]).read_text()
+assert text.index("new in-repo bare-date gap") < text.index("recent") < text.index("older")
+PY
+
+  rig_external="$TEST_ROOT/external rig"
+  mkdir -p "$rig_external/memory"
+  printf '%s\n' "$rig_external" > "$TEST_PROJECT/.rigpath"
+  gaps="$rig_external/memory/RIG_GAPS.md"
+  GAPS_FILE="$gaps" python3 - <<'PY'
+import os, pathlib
+path=pathlib.Path(os.environ["GAPS_FILE"])
+path.write_bytes(b"# Rig Gaps\r\n\r\nNewest first.\r\n\r\n## 2026-11-10 - recent\r\n\r\n## 2026-11-09 - older\r\n")
+PY
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "new external bare-date gap" --scope rig-core --observation "New observation." --json
+  [ "$status" -eq 0 ]
+  GAPS_FILE="$gaps" python3 - <<'PY'
+import os, pathlib
+raw=pathlib.Path(os.environ["GAPS_FILE"]).read_bytes()
+assert raw.index(b"new external bare-date gap") < raw.index(b"recent") < raw.index(b"older")
+assert b"\n" not in raw.replace(b"\r\n",b"")
+PY
+}
+
 @test "memory append-gap preserves CRLF in external markerless and marked logs" {
   rig_external="$TEST_ROOT/external rig"
   mkdir -p "$rig_external/memory"

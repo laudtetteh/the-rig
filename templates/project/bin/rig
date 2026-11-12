@@ -508,7 +508,7 @@ with open(lock_path, "a+") as lock:
                     fence_char, fence_length = run[0], len(run)
                 elif run[0] == fence_char and len(run) >= fence_length and not content[fence.end(1):].strip():
                     fence_char = None
-            elif fence_char is None and re.match(r"^##[ \t]+\[[0-9]{4}-[0-9]{2}-[0-9]{2}\]", content):
+            elif fence_char is None and re.match(r"^##[ \t]+(?:\[[0-9]{4}-[0-9]{2}-[0-9]{2}\]|[0-9]{4}-[0-9]{2}-[0-9]{2})(?:[ \t]|$)", content):
                 first_entry = offset
                 break
             offset += len(line)
