@@ -33,7 +33,7 @@ write_gap_log() {
 **Severity**: annoying
 **Scope**: rig-core
 **Observation**: alpha observation'
-  write_gap_log beta '## [2026-07-31] — hook blocks safe command!!!
+  write_gap_log beta '## [2026-07-31] — hook_blocks safe command!!!
 
 **Category**: bug
 **Severity**: annoying
@@ -56,6 +56,110 @@ write_gap_log() {
   [[ "$output" == *"Duplicate matches: 2"* ]] || return 1
   [[ "$output" == *"### [project] Hook blocks safe command"* ]] || return 1
   [[ "$output" == *"route to project owner"* ]] || return 1
+}
+
+@test "collector includes in-repo bare dates and numbered reports with source lines" {
+  write_gap_log external '## [2026-11-10] — External report
+
+**Scope**: rig-core
+**Observation**: external observation'
+  inrepo="$TEST_HOME/code/inrepo/.rig/memory/RIG_GAPS.md"
+  mkdir -p "$(dirname "$inrepo")"
+  cat > "$inrepo" <<'EOF'
+# Rig Gaps
+
+```markdown
+## [2020-01-01] — Fenced example
+```
+
+## 2026-11-09 — Bare-date report
+
+**Scope**: project
+
+## 1. Numbered undated report
+
+**Observation**: old report
+
+```markdown
+**Scope**: rig-core
+```
+
+## [2026-11-08] — Submitted report [submitted 2026-11-09]
+
+**Scope**: rig-core
+EOF
+
+  run env HOME="$TEST_HOME" bash "$COLLECTOR"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"3 source report(s) from 2 canonical log(s)"* ]] || return 1
+  [[ "$output" == *"3 unique unsubmitted candidate(s)"* ]] || return 1
+  [[ "$output" == *"### [project] Bare-date report"* ]] || return 1
+  [[ "$output" == *"### [needs-review] Numbered undated report"* ]] || return 1
+  [[ "$output" == *"$inrepo:7 (date: 2026-11-09)"* ]] || return 1
+  [[ "$output" == *"$inrepo:11 (date: unknown)"* ]] || return 1
+  [[ "$output" == *"- Date: unknown"* ]] || return 1
+}
+
+@test "collector follows external rigpath and reads each physical log once" {
+  write_gap_log primary '## [2026-11-10] — Primary report
+
+**Scope**: rig-core'
+  mkdir -p "$TEST_HOME/.rig/projects/alias/memory"
+  ln -s "$TEST_HOME/.rig/projects/primary/memory/RIG_GAPS.md" \
+    "$TEST_HOME/.rig/projects/alias/memory/RIG_GAPS.md"
+  mkdir -p "$TEST_HOME/.rig/projects/linked/memory"
+  ln "$TEST_HOME/.rig/projects/primary/memory/RIG_GAPS.md" \
+    "$TEST_HOME/.rig/projects/linked/memory/RIG_GAPS.md"
+  mkdir -p "$TEST_HOME/code/stealth" "$TEST_HOME/custom storage/memory"
+  printf '%s\n' "$TEST_HOME/custom storage" > "$TEST_HOME/code/stealth/.rigpath"
+  printf '%s\n' '## 2026-11-09 — External path report
+
+**Scope**: project' > "$TEST_HOME/custom storage/memory/RIG_GAPS.md"
+  mkdir -p "$TEST_HOME/code/stealth/.rig/backups/memory"
+  printf '%s\n' '## [2026-11-08] — Backup trap' > \
+    "$TEST_HOME/code/stealth/.rig/backups/memory/RIG_GAPS.md"
+
+  run env HOME="$TEST_HOME" bash "$COLLECTOR"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 source report(s) from 2 canonical log(s)"* ]] || return 1
+  [[ "$output" == *"2 unique unsubmitted candidate(s)"* ]] || return 1
+  [[ "$output" == *"Projects: primary"* ]] || return 1
+  [[ "$output" == *"Projects: stealth"* ]] || return 1
+  [[ "$output" == *"Duplicate matches: 1"* ]] || return 1
+  [[ "$output" == *"$TEST_HOME/custom storage/memory/RIG_GAPS.md:1 (date: 2026-11-09)"* ]] || return 1
+}
+
+@test "collector falls back to in-repo memory when rigpath is empty" {
+  project="$TEST_HOME/code/empty-pointer"
+  mkdir -p "$project/.rig/memory"
+  : > "$project/.rigpath"
+  printf '%s\n' '## [2026-11-10] — In-repo fallback report
+
+**Scope**: project' > "$project/.rig/memory/RIG_GAPS.md"
+
+  run env HOME="$TEST_HOME" bash "$COLLECTOR"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 source report(s) from 1 canonical log(s)"* ]] || return 1
+  [[ "$output" == *"### [project] In-repo fallback report"* ]] || return 1
+}
+
+@test "generated Codex skill retains the same collector script" {
+  output_dir="$TEST_HOME/codex-skills"
+  run python3 "$REPO_ROOT/installer/generate-codex-skills.py" \
+    --output "$output_dir" --base-branch main "$COMMAND"
+  [ "$status" -eq 0 ]
+
+  generated="$TEST_HOME/generated-collector.sh"
+  awk '
+    /<!-- rig-gaps-collector:start -->/ { wanted = 1; next }
+    wanted && /^```bash$/ { code = 1; next }
+    code && /^```$/ { exit }
+    code { print }
+  ' "$output_dir/rig-gaps/references/command.md" > "$generated"
+  cmp -s "$COLLECTOR" "$generated"
 }
 
 @test "collector ignores backups and submitted entries while retaining invalid scope" {

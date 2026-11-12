@@ -15,10 +15,11 @@ source gap entries submitted.
 
 Run the provider's collect command first — Claude `/rig-gaps --collect` or Codex
 `$rig-gaps --collect` — or reuse a fresh collector report from the same calendar
-day. Collection covers canonical `memory/RIG_GAPS.md` files under machine-wide
-Rig project storage and excludes backups. Preserve source project, scope, title,
-date, category, severity, workflow, observation, and suggested fix for every
-candidate.
+day. Collection covers canonical `memory/RIG_GAPS.md` files in external Rig
+storage and direct `~/code` projects, including `.rigpath` targets, and excludes
+backups and duplicate physical paths. Preserve source file and heading line,
+project, scope, title, date, category, severity, workflow, observation, and
+suggested fix for every candidate.
 
 Do not write under any source project's Rig memory during triage. Missing or
 invalid `**Scope**` remains `needs-review`; do not infer `rig-core` from old
