@@ -24,9 +24,10 @@ The Rig itself — for review and optional submission.
 /rig-gaps --add "short title"
 ```
 
-Use `/rig-gaps --collect` from any project to review unsubmitted gaps across all
-projects registered below `~/.rig/projects/`. Collector mode is read-only: it does
-not modify source logs, mark entries submitted, or create GitHub issues.
+Use `/rig-gaps --collect` from any project to review unsubmitted gaps in canonical
+external Rig storage and direct project checkouts under `~/code`, including their
+`.rigpath` targets. Collector mode is read-only: it does not modify source logs,
+mark entries submitted, or create GitHub issues.
 
 Use `/rig-gaps --triage` from a Rig development checkout to turn the collected
 machine-wide candidates into a validated, deduped, prioritized report. Triage
@@ -106,100 +107,169 @@ run this flow instead of collection, push, submit, or report mode.
 If the user says **"collect"**, **"--collect"**, or **"collect across projects"**,
 run this flow instead of Steps 1–4. Do not run push or submit mode as part of it.
 
-Run the reference collector below exactly as a single Bash script. Its path glob
-selects only each project's canonical `memory/RIG_GAPS.md`; it cannot descend into
-`backups/` directories or include files such as `RIG_GAPS.md.bak`.
+Run the reference collector below exactly as a single Bash script. It selects only
+canonical `memory/RIG_GAPS.md` files from external storage and direct `~/code`
+projects, follows `.rigpath`, and reads each physical file once. Backups and
+`RIG_GAPS.md.bak` are outside these exact paths. It recognizes bracketed dates,
+bare dates, and numbered undated reports outside fenced examples. The report
+includes the source file and heading line; numbered reports retain `date: unknown`.
 
 <!-- rig-gaps-collector:start -->
 ```bash
 set -eu
+python3 - <<'PY'
+import pathlib
+import re
 
-projects_root="${HOME}/.rig/projects"
-tmp_entries="$(mktemp "${TMPDIR:-/tmp}/rig-gaps-entries.XXXXXX")"
-trap 'rm -f "$tmp_entries"' EXIT HUP INT TERM
+home = pathlib.Path.home()
+external_root = home / ".rig/projects"
+code_root = home / "code"
+sources = []
 
-found=0
-for gap_file in "$projects_root"/*/memory/RIG_GAPS.md; do
-  [ -f "$gap_file" ] || continue
-  found=1
-  project="${gap_file#"$projects_root"/}"
-  project="${project%%/*}"
+# The external registry and direct code projects are the two canonical layouts.
+# A project's .rigpath may point to another external location.
+for project_dir in sorted(external_root.glob("*")):
+    sources.append((project_dir.name, project_dir / "memory/RIG_GAPS.md"))
+for project_dir in sorted(code_root.glob("*")):
+    if not project_dir.is_dir():
+        continue
+    pointer = project_dir / ".rigpath"
+    if pointer.is_file():
+        try:
+            value = pointer.read_text().splitlines()[0].strip()
+        except (OSError, IndexError, UnicodeError):
+            continue
+        if not value:
+            continue
+        rig_dir = pathlib.Path(value)
+        if not rig_dir.is_absolute():
+            rig_dir = project_dir / rig_dir
+    else:
+        rig_dir = project_dir / ".rig"
+    sources.append((project_dir.name, rig_dir / "memory/RIG_GAPS.md"))
 
-  awk -v project="$project" '
-    function emit() {
-      if (entry == "" || header ~ /\[submitted([: ][^]]*)?\]/) return
-      scope = "needs-review"
-      if (entry ~ /\*\*Scope\*\*:[[:space:]]*project([[:space:]]|$)/) scope = "project"
-      if (entry ~ /\*\*Scope\*\*:[[:space:]]*rig-core([[:space:]]|$)/) scope = "rig-core"
-      title = header
-      sub(/^##[[:space:]]*\[[^]]+\][[:space:]]*[—-][[:space:]]*/, "", title)
-      if (title == header) sub(/^##[[:space:]]*/, "", title)
-      printf "@@ENTRY@@\n@@PROJECT@@%s\n@@SCOPE@@%s\n@@TITLE@@%s\n%s\n", project, scope, title, entry
-    }
-    /^##[[:space:]]*\[[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\]/ {
-      emit()
-      header = $0
-      entry = $0
-      next
-    }
-    header != "" { entry = entry "\n" $0 }
-    END { emit() }
-  ' "$gap_file" >> "$tmp_entries"
-done
+seen_files = set()
+canonical_logs = []
+entries = []
+date_token = r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
+bracketed = re.compile(r"^##[ \t]+\[(" + date_token + r")\](.*)$")
+bare = re.compile(r"^##[ \t]+(" + date_token + r")(?=[ \t—–-]|$)(.*)$")
+numbered = re.compile(r"^##[ \t]+[0-9]+\.[ \t]+(.+)$")
+submitted = re.compile(r"\[submitted(?:[: ][^]]*)?\]", re.IGNORECASE)
+scope_pattern = re.compile(r"^\*\*Scope\*\*:[ \t]*(project|rig-core)(?:[ \t]|$)", re.MULTILINE)
 
-if [ "$found" -eq 0 ]; then
-  echo "No project RIG_GAPS.md files found below $projects_root."
-  exit 0
-fi
+for project, path in sources:
+    try:
+        real = path.resolve(strict=True)
+        if not real.is_file():
+            continue
+        stat_result = real.stat()
+        physical_id = (stat_result.st_dev, stat_result.st_ino)
+        if physical_id in seen_files:
+            continue
+        content = real.read_text(errors="replace")
+    except (OSError, RuntimeError, UnicodeError):
+        continue
+    seen_files.add(physical_id)
+    canonical_logs.append(real)
+    # Prefer the canonical registry name if a symlinked alias was found first.
+    try:
+        relative = real.relative_to(external_root.resolve())
+        if len(relative.parts) == 3 and relative.parts[1:] == ("memory", "RIG_GAPS.md"):
+            project = relative.parts[0]
+    except (OSError, ValueError):
+        pass
 
-awk '
-  function flush() {
-    if (title == "") return
-    key = tolower(title)
-    gsub(/[^[:alnum:]]+/, " ", key)
-    gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
-    key = scope SUBSEP key
-    if (seen[key]++) {
-      projects[key] = projects[key] ", " project
-      duplicates[key]++
-      return
-    }
-    order[++count] = key
-    projects[key] = project
-    scopes[key] = scope
-    titles[key] = title
-    bodies[key] = body
-  }
-  /^@@ENTRY@@$/ { flush(); project = scope = title = body = ""; next }
-  /^@@PROJECT@@/ { project = substr($0, 12); next }
-  /^@@SCOPE@@/ { scope = substr($0, 10); next }
-  /^@@TITLE@@/ { title = substr($0, 10); next }
-  { body = body (body == "" ? "" : "\n") $0 }
-  END {
-    flush()
-    print "## Cross-project Rig Gaps — triage report"
-    print ""
-    print count " unique unsubmitted candidate(s). Near-identical titles are grouped within the same scope."
-    for (i = 1; i <= count; i++) {
-      key = order[i]
-      print ""
-      print "### [" scopes[key] "] " titles[key]
-      print "- Projects: " projects[key]
-      print "- Duplicate matches: " (duplicates[key] + 1)
-      print "- Triage: " (scopes[key] == "rig-core" ? "candidate for Rig core" : scopes[key] == "project" ? "route to project owner" : "needs-review (missing or invalid Scope)")
-      print ""
-      print bodies[key]
-    }
-  }
-' "$tmp_entries"
+    current = None
+    fence_char = None
+    fence_length = 0
+    for line_number, line in enumerate(content.splitlines(), 1):
+        fence = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+        if fence:
+            run = fence.group(1)
+            if fence_char is None:
+                fence_char, fence_length = run[0], len(run)
+            elif run[0] == fence_char and len(run) >= fence_length and not line[fence.end(1):].strip():
+                fence_char = None
+            if current is not None:
+                current["body"].append(line)
+            continue
+
+        heading = None
+        if fence_char is None:
+            match = bracketed.match(line)
+            if match:
+                heading = (match.group(1), match.group(2))
+            else:
+                match = bare.match(line)
+                if match:
+                    heading = (match.group(1), match.group(2))
+                else:
+                    match = numbered.match(line)
+                    if match:
+                        heading = ("unknown", match.group(1))
+        if heading is not None:
+            if current is not None and not submitted.search(current["header"]):
+                entries.append(current)
+            title = heading[1].strip().lstrip("—–- ").strip()
+            current = {"project": project, "path": real, "line": line_number,
+                       "date": heading[0], "title": title, "header": line,
+                       "body": [line], "metadata": [line]}
+        elif current is not None:
+            current["body"].append(line)
+            if fence_char is None:
+                current["metadata"].append(line)
+    if current is not None and not submitted.search(current["header"]):
+        entries.append(current)
+
+if not canonical_logs:
+    print("No project RIG_GAPS.md files found below " + str(external_root) + " or " + str(code_root) + ".")
+    raise SystemExit(0)
+
+groups = {}
+for entry in entries:
+    body = "\n".join(entry["body"])
+    scope_match = scope_pattern.search("\n".join(entry["metadata"]))
+    scope = scope_match.group(1) if scope_match else "needs-review"
+    title = entry["title"] or entry["header"][2:].strip()
+    key = (scope, re.sub(r"[\W_]+", " ", title.lower()).strip())
+    if key not in groups:
+        groups[key] = {"scope": scope, "title": title, "body": body,
+                       "date": entry["date"], "projects": [], "sources": []}
+    group = groups[key]
+    if entry["project"] not in group["projects"]:
+        group["projects"].append(entry["project"])
+    group["sources"].append(entry)
+
+print("## Cross-project Rig Gaps — triage report")
+print()
+print(f"{len(entries)} source report(s) from {len(canonical_logs)} canonical log(s).")
+print(f"{len(groups)} unique unsubmitted candidate(s). Near-identical titles are grouped within the same scope.")
+for group in groups.values():
+    scope = group["scope"]
+    print()
+    print(f"### [{scope}] {group['title']}")
+    print("- Projects: " + ", ".join(group["projects"]))
+    print("- Duplicate matches: " + str(len(group["sources"])))
+    print("- Date: " + group["date"])
+    print("- Sources:")
+    for entry in group["sources"]:
+        print(f"  - {entry['path']}:{entry['line']} (date: {entry['date']})")
+    route = ("candidate for Rig core" if scope == "rig-core" else
+             "route to project owner" if scope == "project" else
+             "needs-review (missing or invalid Scope)")
+    print("- Triage: " + route)
+    print()
+    print(group["body"].rstrip())
+PY
 ```
 <!-- rig-gaps-collector:end -->
 
 The normalized key is `scope + title`, lowercased with punctuation and repeated
 whitespace removed. This deliberately groups case/punctuation variants while
 keeping equally named project and Rig-core gaps separate. The report includes
-source projects, duplicate count, full representative entry, and an explicit
-triage route. Review `needs-review` entries before acting. Automatic issue creation
+source projects and lines, dates, duplicate count, full representative entry, and
+an explicit triage route. Review `needs-review` entries before acting. Automatic issue creation
 is out of scope; use the separately gated `--submit` flow only after human review.
 
 ## Triage mode (`--triage`)
