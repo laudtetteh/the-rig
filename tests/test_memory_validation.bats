@@ -187,6 +187,123 @@ EOF
   [ "$before" = "$(cksum "$gaps")" ]
 }
 
+@test "memory append-gap keeps markerless in-repo logs newest-first and exact retries unchanged" {
+  gaps="$TEST_PROJECT/.rig/memory/RIG_GAPS.md"
+  cat > "$gaps" <<'EOF'
+# Rig Gaps
+
+Newest first.
+
+```markdown
+## [2026-01-01] — fenced example
+```
+
+## [2026-11-10] — recent gap
+
+## [2026-11-09] — older gap
+EOF
+
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "new markerless gap" --scope rig-core --observation "New observation." --json
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e '.ok == true and .already_present == false' >/dev/null
+  GAPS_FILE="$gaps" python3 - <<'PY'
+import os, pathlib
+text=pathlib.Path(os.environ["GAPS_FILE"]).read_text()
+assert text.index("fenced example") < text.index("new markerless gap") < text.index("recent gap") < text.index("older gap")
+assert text.startswith("# Rig Gaps\n\nNewest first.\n\n```markdown\n## [2026-01-01] — fenced example\n```\n\n")
+PY
+  first_write="$(cksum "$gaps")"
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "new markerless gap" --scope rig-core --observation "New observation." --json
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e '.ok == true and .already_present == true' >/dev/null
+  [ "$(cksum "$gaps")" = "$first_write" ]
+  [ "$(grep -c 'new markerless gap' "$gaps")" -eq 1 ]
+}
+
+@test "memory append-gap recognizes bare-date headings in repo and external logs" {
+  gaps="$TEST_PROJECT/.rig/memory/RIG_GAPS.md"
+  printf '# Rig Gaps\n\nNewest first.\n\n## 2026-11-10 — recent\n\n## 2026-11-09 — older\n' > "$gaps"
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "new in-repo bare-date gap" --scope rig-core --observation "New observation." --json
+  [ "$status" -eq 0 ]
+  GAPS_FILE="$gaps" python3 - <<'PY'
+import os, pathlib
+text=pathlib.Path(os.environ["GAPS_FILE"]).read_text()
+assert text.index("new in-repo bare-date gap") < text.index("recent") < text.index("older")
+PY
+
+  rig_external="$TEST_ROOT/external rig"
+  mkdir -p "$rig_external/memory"
+  printf '%s\n' "$rig_external" > "$TEST_PROJECT/.rigpath"
+  gaps="$rig_external/memory/RIG_GAPS.md"
+  GAPS_FILE="$gaps" python3 - <<'PY'
+import os, pathlib
+path=pathlib.Path(os.environ["GAPS_FILE"])
+path.write_bytes(b"# Rig Gaps\r\n\r\nNewest first.\r\n\r\n## 2026-11-10 - recent\r\n\r\n## 2026-11-09 - older\r\n")
+PY
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "new external bare-date gap" --scope rig-core --observation "New observation." --json
+  [ "$status" -eq 0 ]
+  GAPS_FILE="$gaps" python3 - <<'PY'
+import os, pathlib
+raw=pathlib.Path(os.environ["GAPS_FILE"]).read_bytes()
+assert raw.index(b"new external bare-date gap") < raw.index(b"recent") < raw.index(b"older")
+assert b"\n" not in raw.replace(b"\r\n",b"")
+PY
+}
+
+@test "memory append-gap keeps no-space bracketed headings ahead of older entries" {
+  gaps="$TEST_PROJECT/.rig/memory/RIG_GAPS.md"
+  printf '# Rig Gaps\n\n## [2026-11-10]—recent\n\n## [2026-11-09]—older\n' > "$gaps"
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "new no-space gap" --scope rig-core --observation "New observation." --json
+  [ "$status" -eq 0 ]
+  GAPS_FILE="$gaps" python3 - <<'PY'
+import os, pathlib
+text=pathlib.Path(os.environ["GAPS_FILE"]).read_text()
+assert text.index("new no-space gap") < text.index("recent") < text.index("older")
+PY
+}
+
+@test "memory append-gap preserves CRLF in external markerless and marked logs" {
+  rig_external="$TEST_ROOT/external rig"
+  mkdir -p "$rig_external/memory"
+  printf '%s\n' "$rig_external" > "$TEST_PROJECT/.rigpath"
+  gaps="$rig_external/memory/RIG_GAPS.md"
+  GAPS_FILE="$gaps" python3 - <<'PY'
+import os, pathlib
+path=pathlib.Path(os.environ["GAPS_FILE"])
+path.write_bytes(b"# Rig Gaps\r\n\r\nNewest first.\r\n\r\n## [2026-11-10] - recent\r\n\r\n## [2026-11-09] - older\r\n")
+PY
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "new CRLF gap" --scope rig-core --observation "New observation." --json
+  [ "$status" -eq 0 ]
+  GAPS_FILE="$gaps" python3 - <<'PY'
+import os, pathlib
+raw=pathlib.Path(os.environ["GAPS_FILE"]).read_bytes()
+assert b"\n" not in raw.replace(b"\r\n",b"")
+assert raw.index(b"new CRLF gap") < raw.index(b"recent") < raw.index(b"older")
+assert raw.startswith(b"# Rig Gaps\r\n\r\nNewest first.\r\n\r\n")
+PY
+
+  GAPS_FILE="$gaps" python3 - <<'PY'
+import os, pathlib
+path=pathlib.Path(os.environ["GAPS_FILE"])
+path.write_bytes(b"# Rig Gaps\r\n\r\n<!-- Add entries below \xe2\x80\x94 newest first -->\r\n\r\n## [2026-11-10] - older\r\n")
+PY
+  run "$TEST_PROJECT/bin/rig" memory append-gap \
+    --title "new marked CRLF gap" --scope rig-core --observation "New observation." --json
+  [ "$status" -eq 0 ]
+  GAPS_FILE="$gaps" python3 - <<'PY'
+import os, pathlib
+raw=pathlib.Path(os.environ["GAPS_FILE"]).read_bytes()
+assert b"\n" not in raw.replace(b"\r\n",b"")
+assert raw.index(b"new marked CRLF gap") < raw.index(b"older")
+PY
+}
+
 @test "memory append-progress inserts above marker and preserves sid" {
   write_valid_memory
 
