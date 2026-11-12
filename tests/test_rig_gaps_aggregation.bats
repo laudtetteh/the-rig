@@ -131,6 +131,21 @@ EOF
   [[ "$output" == *"$TEST_HOME/custom storage/memory/RIG_GAPS.md:1 (date: 2026-11-09)"* ]] || return 1
 }
 
+@test "collector falls back to in-repo memory when rigpath is empty" {
+  project="$TEST_HOME/code/empty-pointer"
+  mkdir -p "$project/.rig/memory"
+  : > "$project/.rigpath"
+  printf '%s\n' '## [2026-11-10] — In-repo fallback report
+
+**Scope**: project' > "$project/.rig/memory/RIG_GAPS.md"
+
+  run env HOME="$TEST_HOME" bash "$COLLECTOR"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 source report(s) from 1 canonical log(s)"* ]] || return 1
+  [[ "$output" == *"### [project] In-repo fallback report"* ]] || return 1
+}
+
 @test "generated Codex skill retains the same collector script" {
   output_dir="$TEST_HOME/codex-skills"
   run python3 "$REPO_ROOT/installer/generate-codex-skills.py" \

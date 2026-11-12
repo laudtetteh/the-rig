@@ -133,19 +133,17 @@ for project_dir in sorted(external_root.glob("*")):
 for project_dir in sorted(code_root.glob("*")):
     if not project_dir.is_dir():
         continue
+    rig_dir = project_dir / ".rig"
     pointer = project_dir / ".rigpath"
     if pointer.is_file():
         try:
             value = pointer.read_text().splitlines()[0].strip()
         except (OSError, IndexError, UnicodeError):
-            continue
-        if not value:
-            continue
-        rig_dir = pathlib.Path(value)
-        if not rig_dir.is_absolute():
-            rig_dir = project_dir / rig_dir
-    else:
-        rig_dir = project_dir / ".rig"
+            value = ""
+        if value:
+            rig_dir = pathlib.Path(value)
+            if not rig_dir.is_absolute():
+                rig_dir = project_dir / rig_dir
     sources.append((project_dir.name, rig_dir / "memory/RIG_GAPS.md"))
 
 seen_files = set()
