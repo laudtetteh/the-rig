@@ -11,7 +11,7 @@ One-liner per file. Keep this current when a doc is added, removed, or substanti
 | [`troubleshooting.md`](troubleshooting.md) | Symptoms, causes, and fixes for common issues |
 | [`agent-install.md`](agent-install.md) | Non-interactive and scripted installation patterns |
 | [`provider-neutral-project-brain.md`](provider-neutral-project-brain.md) | Spike for moving provider-neutral project context away from a Claude-named canonical file |
-| [`features/README.md`](features/README.md) | Index of feature documentation (per-feature end-to-end traces) |
+| `features/README.md` (optional) | Local feature documentation index, present when feature docs are installed |
 | [`release-verification.md`](release-verification.md) | Hosted CI gates required before tagging a release |
 | [`rig-gaps-triage-2026-11-07.md`](rig-gaps-triage-2026-11-07.md) | Preliminary cross-project Rig gap inventory and source references |
 | [`rig-gaps-impact-review-2026-11-07.md`](rig-gaps-impact-review-2026-11-07.md) | Validated implementation candidates, impact assessment, and sequencing |

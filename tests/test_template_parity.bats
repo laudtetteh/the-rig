@@ -72,6 +72,27 @@ PYEOF
   grep -Fq '[`features/README.md`](features/README.md)' "$REPO_ROOT/templates/project/docs/INDEX.md"
 }
 
+@test "tracked source docs index links only to tracked files" {
+  python3 - "$REPO_ROOT" <<'PYEOF'
+import pathlib
+import re
+import subprocess
+import sys
+
+root = pathlib.Path(sys.argv[1])
+tracked = set(subprocess.check_output(
+    ["git", "-C", str(root), "ls-files", "--", "docs/"], text=True
+).splitlines())
+index = (root / "docs/INDEX.md").read_text()
+for target in re.findall(r"\]\(([^)#]+)(?:#[^)]*)?\)", index):
+    if "://" in target:
+        continue
+    source_path = (pathlib.Path("docs") / target).as_posix()
+    if source_path not in tracked:
+        raise SystemExit(f"untracked docs index link: {target}")
+PYEOF
+}
+
 @test "README links canonical docs index instead of duplicating doc list" {
   grep -Fq '[docs/INDEX.md](docs/INDEX.md)' "$REPO_ROOT/README.md"
   run grep -F '[How it works](docs/how-it-works.md)' "$REPO_ROOT/README.md"
