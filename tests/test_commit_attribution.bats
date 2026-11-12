@@ -130,7 +130,7 @@ Made-with: Cursor'
   rm "$TEST_PROJECT/.git/hooks/filter-commit-message-inplace.sh"
   message_file="$BATS_TEST_TMPDIR/message"
   printf 'fix: example [#589]\n\nCo-authored-by: Jane <jane@example.com>\n' > "$message_file"
-  run sh "$TEST_PROJECT/.git/hooks/commit-msg" "$message_file"
+  run bash -c 'cd "$1" && sh .git/hooks/commit-msg "$2"' _ "$TEST_PROJECT" "$message_file"
   [ "$status" -eq 1 ]
   [[ "$output" == *"filter is missing"* ]] || return 1
   grep -q 'Co-authored-by: Jane' "$message_file"
@@ -281,4 +281,62 @@ Made-with: Cursor'
     --project-name Test --tracking stealth --rig-dir "$external_rig" --strategy upgrade
   [ "$status" -eq 0 ]
   commit_with_mixed_trailers
+}
+
+@test "stale Husky manifest entries do not recreate Husky during stealth upgrade or repair" {
+  external_rig="$BATS_TEST_TMPDIR/rig-external"
+  run bash "$REPO_ROOT/install.sh" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$external_rig" --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_PROJECT/.husky" ]
+
+  # A previous repository-tracked install could leave a Rig-owned Husky entry
+  # in the manifest after moving the project to stealth tracking. Seed that
+  # historical state without putting a Husky file back on disk.
+  hash="$(shasum -a 256 "$REPO_ROOT/templates/project/.husky/commit-msg" | awk '{print $1}')"
+  printf '%s  .husky/commit-msg\n' "$hash" >> "$external_rig/memory/.rig-manifest"
+  python3 - "$external_rig/memory/.rig-manifest.json" "$hash" "$REPO_ROOT/VERSION" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+data = json.loads(path.read_text())
+version = pathlib.Path(sys.argv[3]).read_text().strip()
+data["entries"][".husky/commit-msg"] = {
+    "base_revision": version, "generator": "install.sh", "installer_version": version,
+    "mode": "755", "owner": "rig", "provider": "claude", "sha256": sys.argv[2],
+    "source": "project-tooling", "type": "file",
+}
+path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+PY
+  [ -z "$(git -C "$TEST_PROJECT" status --porcelain)" ]
+
+  run bash "$REPO_ROOT/install.sh" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$external_rig" --strategy upgrade
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"project:missing:.husky/commit-msg"* ]] || return 1
+  [ ! -e "$TEST_PROJECT/.husky" ]
+  [ -x "$TEST_PROJECT/.git/hooks/commit-msg" ]
+  [ -x "$TEST_PROJECT/.git/hooks/filter-commit-message-inplace.sh" ]
+  [ -z "$(git -C "$TEST_PROJECT" status --porcelain)" ]
+
+  run bash "$REPO_ROOT/install.sh" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$external_rig" --strategy upgrade --repair-stale
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_PROJECT/.husky" ]
+  [ -x "$TEST_PROJECT/.git/hooks/commit-msg" ]
+  [ -x "$TEST_PROJECT/.git/hooks/filter-commit-message-inplace.sh" ]
+  ! grep -q '.husky/commit-msg' "$external_rig/memory/.rig-manifest"
+  [ -z "$(git -C "$TEST_PROJECT" status --porcelain)" ]
+
+  report="$(find "$external_rig/upgrade-reports" -maxdepth 1 -name '*.json' ! -name 'rollback_*' | sort | tail -1)"
+  [ -n "$report" ]
+  rollback_id="${report##*/}"
+  rollback_id="${rollback_id%.json}"
+  run "$TEST_PROJECT/bin/rig" upgrade rollback --id "$rollback_id" --dry-run --json
+  [ "$status" -eq 0 ]
+  run "$TEST_PROJECT/bin/rig" upgrade rollback --id "$rollback_id" --confirm "$rollback_id" --json
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_PROJECT/.husky" ]
+  [ -x "$TEST_PROJECT/.git/hooks/commit-msg" ]
+  [ -x "$TEST_PROJECT/.git/hooks/filter-commit-message-inplace.sh" ]
+  [ -z "$(git -C "$TEST_PROJECT" status --porcelain)" ]
 }
