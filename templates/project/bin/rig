@@ -73,6 +73,7 @@ Usage: rig session <resolve|current|list|doctor|legacy|repair|retrofit|obligatio
 Native IDs are redacted unless --verbose is explicitly supplied.
 Repair is preview-only unless --confirm TOKEN and --reason REASON are supplied.
 Legacy is preview-only unless --confirm TOKEN or --restore TOKEN is supplied.
+An archival flat record still marked active also requires --acknowledge-active.
 Retrofit binds the native host ID from env or an explicit --native-session-id.
 Content matching is never part of normal resolution.
 Wrap clear can use --adopt-legacy-if-marker-token TOKEN to adopt only an unchanged
@@ -1663,11 +1664,16 @@ def project_identity():
     return hashlib.sha256(str(common).encode()).hexdigest()
 project_id=project_identity(); records=[]; errors=[]; future=[]
 def historical_flat(d):
-    return (d.get("schema_version")==1 and
+    archival_active=(d.get("status")=="active" and
+                     isinstance(d.get("native_session_id_sha256_prefix"),str) and
+                     re.fullmatch(r"[0-9a-f]{16}",d["native_session_id_sha256_prefix"]) and
+                     isinstance(d.get("started_at"),str) and
+                     isinstance(d.get("privacy_note"),str))
+    return (type(d.get("schema_version")) is int and d["schema_version"]==1 and
             not any(key in d for key in ("native","project","lifecycle")) and
             isinstance(d.get("anchor"),str) and bool(d["anchor"]) and
             d.get("agent") in ("claude","codex") and
-            d.get("status") in ("complete","inactive","ended_no_wrap") and
+            (d.get("status") in ("complete","inactive","ended_no_wrap") or archival_active) and
             isinstance(d.get("binding"),str) and
             isinstance(d.get("project_root"),str))
 for base in (sessions,sessions/"done"):
@@ -1682,7 +1688,8 @@ for base in (sessions,sessions/"done"):
                 continue
             if historical_flat(d):
                 relative=("done/" if base==sessions/"done" else "")+p.name
-                error={"file":relative,"reason":"historical_flat_record"}
+                error={"file":relative,"reason":"historical_flat_record",
+                       "requires_acknowledge_active":d.get("status")=="active"}
                 if re.fullmatch(r"(?:done/)?session-[A-Za-z0-9._-]+\.json",relative):
                     error["next_step"]="bin/rig session legacy --file "+relative+" --json"
                 errors.append(error)
@@ -1778,21 +1785,29 @@ def emit(ok,reason,extra=None,code=0):
 values={}
 i=0
 while i<len(args):
-    if args[i]=="--json": i+=1; continue
+    if args[i] in ("--json","--acknowledge-active"): i+=1; continue
     if args[i] in ("--file","--confirm","--restore") and i+1<len(args) and args[i] not in values:
         values[args[i]]=args[i+1]; i+=2; continue
     emit(False,"invalid_input",{"no_write":True},3)
 name=values.get("--file","")
 confirm=values.get("--confirm","")
 restore=values.get("--restore","")
+acknowledge_active="--acknowledge-active" in args
 if (not re.fullmatch(r"(?:done/)?session-[A-Za-z0-9._-]+\.json",name) or
         (confirm and restore) or any(not v or v.startswith("-") for v in values.values()) or
         (confirm and not re.fullmatch(r"[0-9a-f]{20}",confirm)) or
-        (restore and not re.fullmatch(r"[0-9a-f]{20}",restore))):
+        (restore and not re.fullmatch(r"[0-9a-f]{20}",restore)) or
+        (acknowledge_active and not confirm)):
     emit(False,"invalid_input",{"no_write":True},3)
 root=pathlib.Path(os.environ["RIG_ROOT"]).resolve()
-sessions=pathlib.Path(os.environ["RIG_DIR"])/"memory"/"sessions"
-if sessions.is_symlink() or not sessions.is_dir():
+rig=pathlib.Path(os.environ["RIG_DIR"])
+memory=rig/"memory"
+sessions=memory/"sessions"
+if rig.is_symlink() or memory.is_symlink() or sessions.is_symlink() or not sessions.is_dir():
+    emit(False,"invalid_session_path",{"no_write":True},4)
+try:
+    sessions.resolve(strict=True).relative_to(rig.resolve(strict=True))
+except (OSError,ValueError,RuntimeError):
     emit(False,"invalid_session_path",{"no_write":True},4)
 parent=sessions/"done" if name.startswith("done/") else sessions
 if parent.is_symlink() or not parent.is_dir():
@@ -1814,11 +1829,17 @@ def regular_file(path):
     return path.is_file() and not path.is_symlink()
 def sha(raw): return hashlib.sha256(raw).hexdigest()
 def historical_flat(data):
-    return (isinstance(data,dict) and data.get("schema_version")==1 and
+    if not isinstance(data,dict): return False
+    archival_active=(data.get("status")=="active" and
+                     isinstance(data.get("native_session_id_sha256_prefix"),str) and
+                     re.fullmatch(r"[0-9a-f]{16}",data["native_session_id_sha256_prefix"]) and
+                     isinstance(data.get("started_at"),str) and
+                     isinstance(data.get("privacy_note"),str))
+    return (isinstance(data,dict) and type(data.get("schema_version")) is int and data["schema_version"]==1 and
             not any(key in data for key in ("native","project","lifecycle")) and
             isinstance(data.get("anchor"),str) and bool(data["anchor"]) and
             data.get("agent") in ("claude","codex") and
-            data.get("status") in ("complete","inactive","ended_no_wrap") and
+            (data.get("status") in ("complete","inactive","ended_no_wrap") or archival_active) and
             isinstance(data.get("binding"),str) and
             isinstance(data.get("project_root"),str))
 def read_source():
@@ -1834,7 +1855,7 @@ def read_source():
             emit(False,"cross_project",{"no_write":True},4)
     except (OSError,ValueError,RuntimeError):
         emit(False,"cross_project",{"no_write":True},4)
-    return raw
+    return raw,data
 def token_for(raw):
     return hashlib.sha256((name+"\0"+sha(raw)+"\0"+str(root)).encode()).hexdigest()[:20]
 def atomic_bytes(path,raw):
@@ -1868,14 +1889,21 @@ def private_file(path):
         emit(False,"unsafe_storage",{"no_write":True},4)
 
 if not confirm and not restore:
-    raw=read_source(); token=token_for(raw)
+    raw,data=read_source(); token=token_for(raw)
     emit(True,"legacy_preview",{"file":name,"action":"quarantine","confirmation_token":token,
+                                "record_state":data["status"],
+                                "requires_acknowledge_active":data["status"]=="active",
+                                "started_at":data.get("started_at"),
                                 "restore_command":"bin/rig session legacy --file "+name+" --restore "+token+" --json",
                                 "no_write":True})
 
 # The same lock used by native binding and exact-session writes prevents a
 # concurrent resolver mutation while quarantine or restore changes the scan.
-try: lock=open(sessions/".bind.lock","a+")
+lock_path=sessions/".bind.lock"
+if lock_path.is_symlink(): emit(False,"invalid_session_path",{"no_write":True},4)
+try:
+    lock_fd=os.open(lock_path,os.O_RDWR|os.O_CREAT|getattr(os,"O_NOFOLLOW",0),0o600)
+    lock=os.fdopen(lock_fd,"a+")
 except OSError: emit(False,"lock_unavailable",{"no_write":True},4)
 fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
 if restore:
@@ -1899,8 +1927,10 @@ if restore:
     except OSError: emit(False,"restore_failed",{"no_write":True},4)
     emit(True,"legacy_restored",{"file":name,"backup":str(backup)})
 
-raw=read_source(); token=token_for(raw)
+raw,data=read_source(); token=token_for(raw)
 if confirm!=token: emit(False,"confirmation_required",{"no_write":True},3)
+if data["status"]=="active" and not acknowledge_active:
+    emit(False,"active_record_acknowledgment_required",{"no_write":True},3)
 for directory in (backup_dir,quarantine_dir): secure_dir(directory)
 backup=backup_dir/(token+".json")
 quarantined=quarantine_dir/(token+".json")

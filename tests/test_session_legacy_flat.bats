@@ -117,6 +117,88 @@ PY
   [ "$(cksum "$CASE_LEGACY")" = "$before" ]
 }
 
+@test "archival active flat record requires explicit acknowledgment before quarantine" {
+  make_project repo
+  LEGACY_FILE="$CASE_LEGACY" python3 - <<'PY'
+import json, os
+path=os.environ["LEGACY_FILE"]
+with open(path) as handle: data=json.load(handle)
+data.update({"status":"active","native_session_id_sha256_prefix":"0123456789abcdef",
+             "started_at":"2020-01-01T00:00:00+00:00","privacy_note":"historical redacted record"})
+with open(path,"w") as handle: json.dump(data,handle)
+PY
+  before="$(cksum "$CASE_LEGACY")"
+  run bash -c 'cd "$1" && bin/rig session doctor --json' _ "$CASE_PROJECT"
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | jq -e \
+    'any(.errors[]; .file == "session-old-flat.json" and .reason == "historical_flat_record" and .requires_acknowledge_active == true)' >/dev/null
+  run bash -c 'cd "$1" && bin/rig session legacy --file session-old-flat.json --json' _ "$CASE_PROJECT"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e '.requires_acknowledge_active == true and .record_state == "active"' >/dev/null
+  token="$(printf '%s' "$output" | jq -r '.confirmation_token')"
+  run bash -c 'cd "$1" && bin/rig session legacy --file session-old-flat.json --confirm "$2" --json' _ "$CASE_PROJECT" "$token"
+  [ "$status" -eq 3 ]
+  printf '%s' "$output" | jq -e '.reason == "active_record_acknowledgment_required" and .no_write == true' >/dev/null
+  [ "$(cksum "$CASE_LEGACY")" = "$before" ]
+  [ ! -e "$CASE_RIG/memory/sessions/legacy-backups" ]
+  run bash -c 'cd "$1" && bin/rig session legacy --file session-old-flat.json --confirm "$2" --acknowledge-active --json' _ "$CASE_PROJECT" "$token"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && bin/rig session resolve --agent codex --native-session-id current-probe --json' _ "$CASE_PROJECT"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && bin/rig session legacy --file session-old-flat.json --restore "$2" --json' _ "$CASE_PROJECT" "$token"
+  [ "$status" -eq 0 ]
+  [ "$(cksum "$CASE_LEGACY")" = "$before" ]
+}
+
+@test "boolean schema version is malformed and cannot be quarantined" {
+  make_project repo
+  LEGACY_FILE="$CASE_LEGACY" python3 - <<'PY'
+import json, os
+path=os.environ["LEGACY_FILE"]
+with open(path) as handle: data=json.load(handle)
+data["schema_version"]=True
+with open(path,"w") as handle: json.dump(data,handle)
+PY
+  before="$(cksum "$CASE_LEGACY")"
+  run bash -c 'cd "$1" && bin/rig session doctor --json' _ "$CASE_PROJECT"
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | jq -e 'any(.errors[]; .file == "session-old-flat.json" and .reason == "malformed_record")' >/dev/null
+  run bash -c 'cd "$1" && bin/rig session legacy --file session-old-flat.json --json' _ "$CASE_PROJECT"
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | jq -e '.reason == "not_historical_flat" and .no_write == true' >/dev/null
+  [ "$(cksum "$CASE_LEGACY")" = "$before" ]
+  run bash -c 'cd "$1" && bin/rig session resolve --agent codex --native-session-id current-probe --json' _ "$CASE_PROJECT"
+  [ "$status" -eq 4 ]
+}
+
+@test "symlinked memory ancestor cannot redirect quarantine outside Rig storage" {
+  make_project repo
+  outside="$CASE_ROOT/outside-memory"
+  mv "$CASE_PROJECT/.rig/memory" "$outside"
+  ln -s "$outside" "$CASE_PROJECT/.rig/memory"
+  before="$(cksum "$outside/sessions/session-old-flat.json")"
+  run bash -c 'cd "$1" && bin/rig session legacy --file session-old-flat.json --json' _ "$CASE_PROJECT"
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | jq -e '.reason == "invalid_session_path" and .no_write == true' >/dev/null
+  run bash -c 'cd "$1" && bin/rig session legacy --file session-old-flat.json --confirm 00000000000000000000 --json' _ "$CASE_PROJECT"
+  [ "$status" -eq 4 ]
+  [ "$(cksum "$outside/sessions/session-old-flat.json")" = "$before" ]
+  [ ! -e "$outside/sessions/legacy-backups" ]
+}
+
+@test "symlinked Rig root cannot redirect quarantine" {
+  make_project repo
+  outside="$CASE_ROOT/outside-rig"
+  mv "$CASE_PROJECT/.rig" "$outside"
+  ln -s "$outside" "$CASE_PROJECT/.rig"
+  before="$(cksum "$outside/memory/sessions/session-old-flat.json")"
+  run bash -c 'cd "$1" && bin/rig session legacy --file session-old-flat.json --json' _ "$CASE_PROJECT"
+  [ "$status" -eq 4 ]
+  printf '%s' "$output" | jq -e '.reason == "invalid_session_path" and .no_write == true' >/dev/null
+  [ "$(cksum "$outside/memory/sessions/session-old-flat.json")" = "$before" ]
+  [ ! -e "$outside/memory/sessions/legacy-backups" ]
+}
+
 @test "legacy restore refuses a changed backup without changing the quarantine" {
   make_project repo
   run bash -c 'cd "$1" && bin/rig session legacy --file session-old-flat.json --json' _ "$CASE_PROJECT"

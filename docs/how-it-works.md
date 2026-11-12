@@ -382,7 +382,10 @@ quarantine and get a confirmation token. `--confirm <token>` backs up the
 original bytes and moves only that record out of the resolver's scan. Its
 result includes a `--restore <token>` command that restores the original only
 if the destination is still absent and the backup matches. A current malformed
-record cannot use this path, and exact-session writes continue to refuse it.
+record cannot use this path. An old flat record still marked `active` needs the
+older provenance fields and an explicit `--acknowledge-active` on confirmation;
+preview reports this requirement before any write. Exact-session writes
+continue to refuse malformed current records.
 
 ---
 
