@@ -3150,9 +3150,9 @@ Acquires or releases the owner-recorded memory workflow lock. Keep the token
 from acquire; --recover-stale takes over an aged tool-sourced lock only.
 EOF
       ;;
-    sprint:audit) printf 'Usage: rig sprint audit [--all | SELECTION ...] [--tracker-evidence FILE] --json\n\nAudits local task cards against tracker evidence. Read-only.\n';;
-    sprint:plan) printf 'Usage: rig sprint plan [--all | SELECTION ...] [--audit FILE] [--sprint ID] [--mode MODE] [--write --approval-token TOKEN] --json\n\nBuilds a sprint plan; writes only with --write and a matching approval token.\n';;
-    sprint:status) printf 'Usage: rig sprint status --sprint ID [--refresh] --json\n\nShows a durable sprint status.\n';;
+    sprint:audit) printf 'Usage: rig sprint audit [--all | SELECTION ...] [--tracker-evidence FILE] [--mode MODE] [--write [--sprint ID]] [--json]\n\nAudits local task cards against tracker evidence and prints JSON. Read-only\nunless --write records the audit as a durable sprint document.\n';;
+    sprint:plan) printf 'Usage: rig sprint plan [--all | SELECTION ...] [--audit FILE] [--sprint ID] [--mode MODE] [--write --approval-token TOKEN] [--json]\n\nBuilds a sprint plan; writes only with --write and a matching approval token.\n';;
+    sprint:status) printf 'Usage: rig sprint status --sprint ID [--refresh [--tracker-evidence FILE]] [--json]\n\nShows a durable sprint status as JSON; --refresh reports source drift.\n';;
     task:inventory) command_help task;;
     worktree:bootstrap) printf 'Usage: rig worktree bootstrap\n\nRestores missing stealth artifacts in a linked worktree.\n';;
     upgrade:rollback) command_help upgrade;;
