@@ -143,11 +143,17 @@ PY
       fi
       session_anchor="${RIG_SESSION_ANCHOR:-$(cat "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true)}"
       draft=$(mktemp "${TMPDIR:-/tmp}/rig-snapshot-stop.XXXXXX") || return
+      # Codex runs this hook through its adapter with RIG_AGENT=codex.
+      case "${RIG_AGENT:-claude}" in
+        codex) wrap_invocation='$wrap' ;;
+        claude) wrap_invocation='/wrap' ;;
+        *) wrap_invocation='the wrap workflow' ;;
+      esac
       {
         echo "# Context Snapshot — session-end checkpoint"
         echo ""
         echo "> Minimal checkpoint written at session end by stop.sh (SessionEnd)."
-        echo "> Run \`/wrap\` at the start of the next session for a full snapshot."
+        echo "> Run \`$wrap_invocation\` at the start of the next session for a full snapshot."
         echo ""
         echo "**Last updated:** $NOW_FULL — session-end checkpoint"
         echo "**Branch:** $branch"
@@ -159,7 +165,7 @@ PY
         echo ""
         echo "## Status"
         echo ""
-        echo "Session ended without running \`/wrap\`. Run \`/wrap\` to capture full context."
+        echo "Session ended without running \`$wrap_invocation\`. Run \`$wrap_invocation\` to capture full context."
       } > "$draft" 2>/dev/null || true
       if [[ -x "$REPO/bin/rig" ]] && "$REPO/bin/rig" memory write-snapshot --file "$draft" --shared-only --if-missing --json >/dev/null 2>&1; then
         echo "[$(date +%H:%M:%S)] SESSION_END: minimal checkpoint written" \

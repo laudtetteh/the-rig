@@ -129,7 +129,7 @@ for value in re.findall(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$"
     found=1
     for protected in "${PROTECTED_PATHS[@]}"; do
       if [[ "$path" == "$protected" || "$path" == "$protected/"* ]]; then
-        fail_closed "'$path' is a The Rig governance file."
+        fail_closed "'$path' is a The Rig governance file. Use \$rig-propose to stage a change for human review, or edit manually."
       fi
     done
   done <<< "$paths"

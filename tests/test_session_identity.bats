@@ -293,6 +293,29 @@ with open('$TEST_SESSION_FILE', 'w') as f:
   fi
 }
 
+@test "session-end: Codex minimal checkpoint names \$wrap, never /wrap" {
+  cp "$(pwd)/templates/project/bin/rig-snapshot.py" "$REPO/bin/rig-snapshot.py"
+  rm "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
+  echo "## stub <!-- Auto-logged by post-tool hook -->" > "$RIG_DIR/memory/PROGRESS.md"
+  export RIG_AGENT=codex
+
+  run_hook_exec "stop.sh" '{"source":"logout"}'
+
+  grep -Fq 'Run `$wrap` to capture full context.' "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
+  run grep -F '/wrap' "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
+  [ "$status" -ne 0 ]
+}
+
+@test "session-end: Claude minimal checkpoint still names /wrap" {
+  cp "$(pwd)/templates/project/bin/rig-snapshot.py" "$REPO/bin/rig-snapshot.py"
+  rm "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
+  echo "## stub <!-- Auto-logged by post-tool hook -->" > "$RIG_DIR/memory/PROGRESS.md"
+
+  run_hook_exec "stop.sh" '{"source":"logout"}'
+
+  grep -Fq 'Run `/wrap` to capture full context.' "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md"
+}
+
 @test "session-end: clear does not set .wrap-needed" {
   echo "## stub <!-- Auto-logged by post-tool hook -->" > "$RIG_DIR/memory/PROGRESS.md"
 
