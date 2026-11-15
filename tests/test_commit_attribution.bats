@@ -335,6 +335,9 @@ PY
   [ "$status" -eq 0 ]
   run "$TEST_PROJECT/bin/rig" upgrade rollback --id "$rollback_id" --confirm "$rollback_id" --json
   [ "$status" -eq 0 ]
+  # Rolling back the repair restores its recorded manifest state, including the
+  # stale entry, without materializing a Husky directory from it.
+  grep -q '.husky/commit-msg' "$external_rig/memory/.rig-manifest"
   [ ! -e "$TEST_PROJECT/.husky" ]
   [ -x "$TEST_PROJECT/.git/hooks/commit-msg" ]
   [ -x "$TEST_PROJECT/.git/hooks/filter-commit-message-inplace.sh" ]
