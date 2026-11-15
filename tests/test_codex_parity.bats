@@ -587,3 +587,74 @@ PY
   [ "$status" -eq 0 ]
   [[ "$output" == *'"agent": "codex"'* && "$output" == *'"reason": "native_id"'* ]] || return 1
 }
+
+# Encode an apply_patch PreToolUse payload: codex_patch_payload CWD PATCH
+codex_patch_payload() {
+  python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"apply_patch","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$1" "$2"
+}
+
+# Encode a Claude Write PreToolUse payload: claude_write_payload CWD PATH
+claude_write_payload() {
+  python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","cwd":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"x"}}))' "$1" "$2"
+}
+
+@test "Codex apply_patch and Claude Write agree on target-only policy for symlinked and relative targets" {
+  setup_linked_hook_worktrees
+  printf '[REPO]/sensitive.txt\n' >> "$LINKED_FEATURE/.rig/rules/protected-paths.txt"
+  ln -s "$LINKED_FEATURE/sensitive.txt" "$TEST_PROJECT/alias.txt"
+
+  run_codex_adapter "$(codex_patch_payload "$TEST_PROJECT" $'*** Begin Patch\n*** Update File: alias.txt\n@@\n-a\n+b\n*** End Patch')"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+  run_claude_pretool_from_settings "$(claude_write_payload "$TEST_PROJECT" "$TEST_PROJECT/alias.txt")"
+  [ "$status" -eq 2 ]
+
+  run_codex_adapter "$(codex_patch_payload "$LINKED_FEATURE" $'*** Begin Patch\n*** Add File: sensitive.txt\n+x\n*** End Patch')"
+  [ "$status" -eq 2 ]
+  run_claude_pretool_from_settings "$(claude_write_payload "$LINKED_FEATURE" sensitive.txt)"
+  [ "$status" -eq 2 ]
+}
+
+@test "Codex apply_patch denies a mixed patch when only the other worktree's target is protected" {
+  setup_linked_hook_worktrees
+  printf '[REPO]/sensitive.txt\n' >> "$LINKED_FEATURE/.rig/rules/protected-paths.txt"
+  patch="$(printf '*** Begin Patch\n*** Add File: ordinary.txt\n+safe\n*** Add File: %s\n+unsafe\n*** End Patch\n' "$LINKED_FEATURE/sensitive.txt")"
+  run_codex_adapter "$(codex_patch_payload "$TEST_PROJECT" "$patch")"
+  [ "$status" -eq 2 ]
+
+  patch="$(printf '*** Begin Patch\n*** Add File: ordinary.txt\n+safe\n*** Add File: %s\n+safe\n*** End Patch\n' "$LINKED_FEATURE/also-ordinary.txt")"
+  run_codex_adapter "$(codex_patch_payload "$TEST_PROJECT" "$patch")"
+  [ "$status" -eq 0 ]
+}
+
+@test "Codex apply_patch fails closed like Claude Write on malformed missing or unreadable target policy" {
+  setup_linked_hook_worktrees
+  local target="$LINKED_FEATURE/ordinary.txt" policy="$LINKED_FEATURE/.rig/rules/protected-paths.txt" patch
+  patch="$(printf '*** Begin Patch\n*** Add File: %s\n+x\n*** End Patch\n' "$target")"
+
+  printf 'not-a-rooted-path\n' >> "$policy"
+  run_codex_adapter "$(codex_patch_payload "$TEST_PROJECT" "$patch")"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"policy is malformed"* ]] || return 1
+  run_claude_pretool_from_settings "$(claude_write_payload "$TEST_PROJECT" "$target")"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"policy is malformed"* ]] || return 1
+
+  cp "$TEST_PROJECT/.rig/rules/protected-paths.txt" "$policy"
+  chmod 000 "$policy"
+  # A root runner can still read a mode-000 file, so only assert the
+  # unreadable case where the permission change actually takes effect.
+  if [ ! -r "$policy" ]; then
+    run_codex_adapter "$(codex_patch_payload "$TEST_PROJECT" "$patch")"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"missing or unreadable"* ]] || return 1
+  fi
+  chmod 644 "$policy"
+
+  rm "$policy"
+  run_codex_adapter "$(codex_patch_payload "$TEST_PROJECT" "$patch")"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"missing or unreadable"* ]] || return 1
+  run_claude_pretool_from_settings "$(claude_write_payload "$TEST_PROJECT" "$target")"
+  [ "$status" -eq 2 ]
+}
