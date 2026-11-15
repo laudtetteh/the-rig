@@ -23,6 +23,9 @@ install_rig() {
   run bash "$REPO_ROOT/install.sh" "${args[@]}" "$@" </dev/null
   # Strip colour codes so assertions read plain text.
   output="$(printf '%s' "$output" | sed 's/\x1b\[[0-9;]*m//g')"
+  # Preflight may add environment-dependent items (for example a missing
+  # gitleaks), so tests inspect only this one line for skip-derived items.
+  DEGRADED="$(printf '%s\n' "$output" | grep '^Degraded/skipped capabilities:' || true)"
 }
 
 @test "a skipped customized enforcement hook is reported as degraded enforcement" {
@@ -32,7 +35,7 @@ install_rig() {
   install_rig repo upgrade
   [ "$status" -eq 0 ]
   [[ "$output" == *"- .claude/hooks/pre-tool.sh — protected-path and commit policy still run your customized older copy"* ]] || return 1
-  [[ "$output" == *"Degraded/skipped capabilities: protected-path/commit enforcement (1 customized hook file(s) not updated)"* ]] || return 1
+  [[ "$DEGRADED" == *"protected-path/commit enforcement (1 customized hook file(s) not updated)"* ]] || return 1
   [[ "$output" == *"not fully converged"* ]] || return 1
   [[ "$output" == *"--strategy agent-plan"* ]] || return 1
   [[ "$output" != *"The Rig upgrade is complete"* ]] || return 1
@@ -50,7 +53,7 @@ assert_codex_retrofit_reports_divergence() {
   [ -f "$TEST_PROJECT/.agents/skills/ship/SKILL.md" ]
   grep -Fq 'local ship tweak' "$TEST_PROJECT/.claude/commands/ship.md"
   [[ "$output" == *'- .claude/commands/ship.md — Claude /ship keeps your customized copy, but the Codex $ship skill was generated from current Rig source'* ]] || return 1
-  [[ "$output" == *"Degraded/skipped capabilities: Claude/Codex workflow parity (1 customized command(s))"* ]] || return 1
+  [[ "$DEGRADED" == *"Claude/Codex workflow parity (1 customized command(s))"* ]] || return 1
   [[ "$output" == *"not fully converged"* && "$output" == *"--strategy agent-plan"* ]] || return 1
 }
 
@@ -70,7 +73,8 @@ assert_codex_retrofit_reports_divergence() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"- .claude/commands/ship.md — Claude /ship keeps your customized older copy"* ]] || return 1
   [[ "$output" != *'Codex $ship'* ]] || return 1
-  [[ "$output" == *"Degraded/skipped capabilities: none"* ]] || return 1
+  [ -n "$DEGRADED" ]
+  [[ "$DEGRADED" != *"parity"* && "$DEGRADED" != *"enforcement"* ]] || return 1
 }
 
 @test "an upgrade with nothing to review still reports completion" {

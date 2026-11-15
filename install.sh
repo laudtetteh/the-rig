@@ -5262,9 +5262,17 @@ fi
 [[ "$COLLISION_STRATEGY" != upgrade ]] && echo "Postflight smoke results: manifest-derived checks passed."
 if [[ "$COLLISION_STRATEGY" == upgrade && "${UPGRADE_REVIEW_REQUIRED:-0}" -eq 1 ]]; then
   echo "The Rig upgrade finished but is not fully converged: the files listed above need review."
-  echo "Your selected strategy was kept. To converge customized files with guarded merging, preview with"
-  echo "  ./install.sh --project-only --target \"$TARGET\" --strategy agent-plan"
-  echo "then apply with --strategy agent-upgrade (or run /rig-upgrade). Other next steps:"
+  echo "Your selected strategy was kept."
+  # A global-only run has no project target, and guarded convergence covers
+  # project files only.
+  if [[ "$DO_PROJECT" == true && -n "${TARGET:-}" ]]; then
+    echo "To converge customized project files with guarded merging, preview with"
+    echo "  ./install.sh --project-only --target \"$TARGET\" --strategy agent-plan"
+    echo "then apply with --strategy agent-upgrade (or run /rig-upgrade)."
+  else
+    echo "Review each listed file, or rerun the installer interactively to decide per file."
+  fi
+  echo "Other next steps:"
 elif [[ "$COLLISION_STRATEGY" == upgrade ]]; then
   echo "The Rig upgrade is complete. Next steps:"
 else
