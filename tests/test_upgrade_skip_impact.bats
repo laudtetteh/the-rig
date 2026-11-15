@@ -39,15 +39,27 @@ install_rig() {
   [[ "$output" == *"RIG_UPGRADE_REVIEW_REQUIRED=1"* ]] || return 1
 }
 
-@test "a customized Claude command with a Codex mirror reports provider divergence (stealth)" {
-  install_rig stealth merge --project-agent both
+# Add Codex to a customized Claude-only install through a classic upgrade.
+assert_codex_retrofit_reports_divergence() {
+  local tracking="$1"
+  install_rig "$tracking" merge --project-agent claude
   [ "$status" -eq 0 ]
   printf '\n<!-- local ship tweak -->\n' >> "$TEST_PROJECT/.claude/commands/ship.md"
-  install_rig stealth upgrade --project-agent both
+  install_rig "$tracking" upgrade --project-agent both
   [ "$status" -eq 0 ]
+  [ -f "$TEST_PROJECT/.agents/skills/ship/SKILL.md" ]
+  grep -Fq 'local ship tweak' "$TEST_PROJECT/.claude/commands/ship.md"
   [[ "$output" == *'- .claude/commands/ship.md — Claude /ship keeps your customized copy, but the Codex $ship skill was generated from current Rig source'* ]] || return 1
   [[ "$output" == *"Degraded/skipped capabilities: Claude/Codex workflow parity (1 customized command(s))"* ]] || return 1
-  [[ "$output" == *"not fully converged"* ]] || return 1
+  [[ "$output" == *"not fully converged"* && "$output" == *"--strategy agent-plan"* ]] || return 1
+}
+
+@test "classic Codex retrofit of a customized in-repo install reports provider divergence" {
+  assert_codex_retrofit_reports_divergence repo
+}
+
+@test "classic Codex retrofit of a customized stealth install reports provider divergence" {
+  assert_codex_retrofit_reports_divergence stealth
 }
 
 @test "a Claude-only customized command is listed without a provider divergence claim" {
