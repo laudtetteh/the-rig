@@ -25,6 +25,7 @@
   "tests/test_bats_assertion_safety.bats": 5.0,
   "tests/test_branch_case_rename.bats": 5.0,
   "tests/test_ci_shard_planner.bats": 5.0,
+  "tests/test_cli_subcommand_help.bats": 5.0,
   "tests/test_codex_config_merge.bats": 5.0,
   "tests/test_codex_fallback.bats": 5.0,
   "tests/test_codex_parity.bats": 5.0,

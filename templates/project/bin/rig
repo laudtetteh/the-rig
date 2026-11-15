@@ -1780,7 +1780,15 @@ session_current() {
   if [[ "$json" == true ]]; then
     printf '%s\n' "$resolved"
   else
-    printf '%s' "$resolved" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("%s  %s  %s  %s" % (d.get("anchor") or "-", d.get("agent") or "legacy", d.get("state") or "unknown", d.get("branch") or "-"))'
+    printf '%s' "$resolved" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+line = "%s  %s  %s  %s" % (d.get("anchor") or "-", d.get("agent") or "legacy", d.get("state") or "unknown", d.get("branch") or "-")
+lineage = d.get("lineage") or {}
+kind = lineage.get("kind")
+if kind and kind != "root":
+    line += "  %s of %s" % (kind, lineage.get("parent_anchor") or "an unrecorded parent")
+print(line)'
   fi
 }
 
@@ -3025,6 +3033,143 @@ sys.exit(3 if refusals else 0)
 PY
 }
 
+# Print help for one subcommand. Returns 1 when the subcommand has no help
+# text, so the caller can fall through to its usual usage error.
+subcommand_help() {
+  case "$1:$2" in
+    session:resolve) cat <<'EOF'
+Usage: rig session resolve [--agent claude|codex] [--native-session-id ID] [--json] [--verbose]
+
+Resolves the current session record read-only from the native session ID
+(argument or provider environment) and prints its record path, or JSON with
+the anchor, state, confidence and reason. Native IDs are redacted unless
+--verbose is supplied. Exits non-zero for ambiguous, missing or unsafe state.
+EOF
+      ;;
+    session:current) cat <<'EOF'
+Usage: rig session current [--agent claude|codex] [--native-session-id ID] [--json] [--verbose]
+
+Shows the exact current session safely: anchor, provider, state and lineage.
+Fails closed instead of guessing when the session cannot be resolved exactly.
+EOF
+      ;;
+    session:list) cat <<'EOF'
+Usage: rig session list [--json] [--verbose]
+
+Lists redacted public summaries of this project's Rig session records.
+Native IDs are shown only with --verbose. Read-only.
+EOF
+      ;;
+    session:doctor) cat <<'EOF'
+Usage: rig session doctor [--json] [--verbose]
+
+Checks session-record integrity and privacy for this project. Read-only.
+EOF
+      ;;
+    session:legacy) cat <<'EOF'
+Usage: rig session legacy --file NAME [--confirm TOKEN | --restore TOKEN] [--acknowledge-active] [--json]
+
+Previews, quarantines or restores one historical flat session record.
+Without --confirm or --restore it only previews and prints a token.
+--confirm TOKEN quarantines with a private backup; --restore TOKEN restores it.
+A record still marked active also requires --acknowledge-active.
+EOF
+      ;;
+    session:repair) cat <<'EOF'
+Usage: rig session repair [--anchor ANCHOR] [--agent claude|codex] [--native-session-id ID]
+                          [--match-prompt | --match-transcript] [--exported-text FILE]
+                          [--authorize-last-resort] [--confirm TOKEN --reason REASON] [--json]
+
+Previews an explicit orphan-record repair. Nothing is written unless both
+--confirm TOKEN (from the preview) and --reason REASON are supplied.
+EOF
+      ;;
+    session:bind) cat <<'EOF'
+Usage: rig session bind --agent claude|codex --native-session-id ID [--source SOURCE]
+                        [--root-session-id ID] [--parent-native-session-id ID]
+                        [--native-title TITLE] [--allow-continuation] [--json] [--verbose]
+
+Hook-internal: binds a provider's documented native session ID to an exact
+Rig session record. Use session retrofit for manual recovery.
+EOF
+      ;;
+    session:retrofit) cat <<'EOF'
+Usage: rig session retrofit --agent claude|codex (--from-env | --native-session-id ID)
+                            [--source SOURCE] [--json] [--verbose]
+
+Binds this process' native session ID to an exact Rig session record, or
+starts an exact continuation after an ended record. Content matching is
+never used. Native IDs are redacted unless --verbose is supplied.
+EOF
+      ;;
+    session:obligation) cat <<'EOF'
+Usage: rig session obligation (mark|clear) --kind post-merge --merge-sha SHA [--adopt-legacy] [--json]
+       rig session obligation (mark|clear) --kind wrap [--adopt-legacy] [--json]
+       rig session obligation clear --kind wrap --adopt-legacy-if-marker-token TOKEN [--json]
+
+Marks or clears an obligation on the exact current session. A post-merge
+obligation requires the pending marker's exact --merge-sha; a mismatch leaves
+the reminder in place.
+EOF
+      ;;
+    session-name:set) cat <<'EOF'
+Usage: rig session-name set [--tentative|--final] [--complete] [--json] [--] <name>
+
+Sets the exact current session's name atomically. --final records the final
+name; --complete also moves the record to done/. Use -- before a name that
+begins with a dash.
+EOF
+      ;;
+    memory:validate) printf 'Usage: rig memory validate [--json]\n\nValidates PROGRESS.md and ERRORS.md markers and entry format. Read-only.\n';;
+    memory:repair-markers) printf 'Usage: rig memory repair-markers [--json]\n\nRepositions unambiguous Rig memory markers, preserving every entry.\n';;
+    memory:append-gap) cat <<'EOF'
+Usage: rig memory append-gap --title TEXT [--scope TEXT] [--category NAME] [--severity LEVEL]
+                             [--workflow TEXT] [--observation TEXT] [--suggested-fix TEXT] [--json]
+
+Appends one structured entry to RIG_GAPS.md, newest first. Category defaults
+to workflow and severity to medium.
+EOF
+      ;;
+    memory:append-progress) printf 'Usage: rig memory append-progress --title TEXT --body TEXT [--sid ANCHOR] [--json]\n\nAppends one dated PROGRESS.md entry, newest first.\n';;
+    memory:write-snapshot) cat <<'EOF'
+Usage: rig memory write-snapshot (--file FILE | --stdin)
+                                 (--shared-only [--if-missing] | --owned-task TASK ...)
+                                 [--retire-task TASK --done-task-file FILE ...]
+                                 [--adopt-legacy] [--json]
+
+Atomically updates CONTEXT_SNAPSHOT.md while preserving other workstreams'
+task handoffs. Retiring a handoff requires a matched done task file; the
+prior snapshot is backed up first.
+EOF
+      ;;
+    memory:workflow-lock) cat <<'EOF'
+Usage: rig memory workflow-lock acquire [--owner-anchor ANCHOR] [--provider-pid PID] [--recover-stale] [--json]
+       rig memory workflow-lock release --token TOKEN [--json]
+
+Acquires or releases the owner-recorded memory workflow lock. Keep the token
+from acquire; --recover-stale takes over an aged tool-sourced lock only.
+EOF
+      ;;
+    sprint:audit) printf 'Usage: rig sprint audit [--all | SELECTION ...] [--tracker-evidence FILE] --json\n\nAudits local task cards against tracker evidence. Read-only.\n';;
+    sprint:plan) printf 'Usage: rig sprint plan [--all | SELECTION ...] [--audit FILE] [--sprint ID] [--mode MODE] [--write --approval-token TOKEN] --json\n\nBuilds a sprint plan; writes only with --write and a matching approval token.\n';;
+    sprint:status) printf 'Usage: rig sprint status --sprint ID [--refresh] --json\n\nShows a durable sprint status.\n';;
+    task:inventory) command_help task;;
+    worktree:bootstrap) printf 'Usage: rig worktree bootstrap\n\nRestores missing stealth artifacts in a linked worktree.\n';;
+    upgrade:rollback) command_help upgrade;;
+    *) return 1;;
+  esac
+}
+
+# Succeed when -h or --help appears before an explicit -- end of options.
+help_requested() {
+  local arg
+  for arg in "$@"; do
+    [[ "$arg" == -- ]] && return 1
+    [[ "$arg" == -h || "$arg" == --help ]] && return 0
+  done
+  return 1
+}
+
 main() {
   local command="${1:-}" subcommand
   case "$command" in
@@ -3034,13 +3179,23 @@ main() {
     codex) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help codex; else launch_codex "$@"; fi;;
     doctor) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help doctor; else doctor "$@"; fi;;
     connector) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help connector; else exec "$(dirname "${BASH_SOURCE[0]}")/rig-connector-preflight" "$@"; fi;;
-    worktree) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help worktree; else worktree_bootstrap "$@"; fi;;
-    sprint) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help sprint; else exec "$(dirname "${BASH_SOURCE[0]}")/rig-sprint" "$@"; fi;;
-    task) shift; if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help task; else task_inventory "$@"; fi;;
+    worktree) shift
+      if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help worktree
+      elif help_requested "${@:2}" && subcommand_help worktree "$1"; then :
+      else worktree_bootstrap "$@"; fi;;
+    sprint) shift
+      if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help sprint
+      elif help_requested "${@:2}" && subcommand_help sprint "$1"; then :
+      else exec "$(dirname "${BASH_SOURCE[0]}")/rig-sprint" "$@"; fi;;
+    task) shift
+      if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help task
+      elif help_requested "${@:2}" && subcommand_help task "$1"; then :
+      else task_inventory "$@"; fi;;
     upgrade)
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help upgrade; return; fi
       subcommand="${1:-}"; shift || true
+      if help_requested "$@" && subcommand_help upgrade "$subcommand"; then return; fi
       case "$subcommand" in
         rollback) upgrade_rollback "$@";;
         *) usage_error "unexpected upgrade subcommand" "$@";;
@@ -3049,6 +3204,8 @@ main() {
       shift
       if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then command_help "$command"; return; fi
       subcommand="${1:-}"; shift || true
+      # Help never runs the subcommand, so it cannot resolve, bind or write.
+      if help_requested "$@" && subcommand_help "$command" "$subcommand"; then return; fi
       case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:legacy) session_legacy "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; memory:workflow-lock) memory_workflow_lock "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
     *) shift; usage_error "unknown command: $command" "$@";;
   esac
