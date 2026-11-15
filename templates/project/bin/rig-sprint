@@ -24,8 +24,20 @@ def metadata(text,key):
     match=re.search(r"(?mi)^\*\*"+re.escape(key)+r"\*\*:\s*(.+)$",text); return match.group(1).strip() if match else ""
 def bullets(value):
     return [re.sub(r"\s+(?:—|#).*?$","",m.group(1).strip()).strip().strip("`'\"") for m in re.finditer(r"(?m)^-\s+(.+)$",value)]
+# Supported issue-link fields, newest first; "GitHub" is the legacy spelling.
+ISSUE_FIELDS=("GitHub issue","Issue","GitHub")
+# Declared task statuses that mean the work is finished and never schedulable.
+TERMINAL_STATUSES={"done","complete","completed","closed","cancelled","canceled"}
+def issue_ref(text):
+    for key in ISSUE_FIELDS:
+        value=metadata(text,key)
+        if value: return value
+    return ""
+def declared_status(text):
+    words=metadata(text,"Status").split()
+    return words[0].strip("`*").lower() if words else ""
 def task_record(path,done_refs):
-    text=path.read_text(); issue=metadata(text,"GitHub issue") or metadata(text,"Issue")
+    text=path.read_text(); issue=issue_ref(text)
     deps=re.findall(r"(?:#\d+|[A-Z]+-\d+|trello:[^,\s]+|W-\d+)",metadata(text,"Depends on"))
     files=bullets(section(text,"Files likely affected")); blockers=bullets(section(text,"Blockers"))
     title=text.splitlines()[0].removeprefix("# Task:").strip() if text else path.stem
@@ -38,18 +50,26 @@ def task_record(path,done_refs):
 def load_tasks(selection):
     rd=rig_dir(); roots=[rd/"tasks"/"backlog",rd/"tasks"/"active",rd/"tasks"/"done"]
     paths=[p for base in roots if base.is_dir() for p in base.glob("*.md") if p.name!="TASK_example.md"]
-    done_refs=set()
+    # Either completion signal (done/ folder or a terminal declared status)
+    # keeps a card out of the plan. A disagreement between them is reported
+    # so the card can be moved or corrected; it is never scheduled.
+    done_refs=set(); mismatches=[]; open_paths=[]
     for p in paths:
-        if p.parent.name=="done":
-            t=p.read_text(); ref=metadata(t,"GitHub issue") or metadata(t,"Issue")
+        t=p.read_text(); ref=issue_ref(t); status=declared_status(t)
+        in_done=p.parent.name=="done"; status_done=status in TERMINAL_STATUSES
+        if status and in_done!=status_done:
+            mismatches.append({"task":p.stem,"folder":p.parent.name,"status":status})
+        if in_done or status_done:
             if ref: done_refs.add(ref)
-    records=[task_record(p,done_refs) for p in paths if p.parent.name!="done"]
+        else:
+            open_paths.append(p)
+    records=[task_record(p,done_refs) for p in open_paths]
     if selection and "--all" not in selection:
         wanted=set(selection); records=[r for r in records if r["slug"] in wanted or r["canonical_ref"] in wanted]
     selected_refs={r["canonical_ref"] for r in records if r["canonical_ref"]}
     for record in records:
         if any(dep not in done_refs and dep not in selected_refs for dep in record["dependencies"]): record["lane"]="blocked"
-    return records,done_refs
+    return records,done_refs,mismatches
 def tracker(path):
     if not path: return None,["tracker_evidence_unavailable"]
     try: data=json.loads(pathlib.Path(path).read_text())
@@ -57,7 +77,8 @@ def tracker(path):
     if data.get("schema")!=EVIDENCE_SCHEMA or data.get("schema_version")!=1 or not isinstance(data.get("items"),list): raise ValueError("unsupported_tracker_evidence")
     return data,[]
 def audit(selection,evidence_path):
-    tasks,_=load_tasks(selection); evidence,warnings=tracker(evidence_path)
+    tasks,_,mismatches=load_tasks(selection); evidence,warnings=tracker(evidence_path)
+    warnings=warnings+["task_status_folder_mismatch:"+m["task"] for m in mismatches]
     local={t["canonical_ref"]:t for t in tasks if t["canonical_ref"]}; tracked={i.get("canonical_ref"):i for i in (evidence or {}).get("items",[]) if i.get("canonical_ref")}
     parity=[]
     for ref in sorted(set(local)|set(tracked)):
@@ -71,7 +92,7 @@ def audit(selection,evidence_path):
         key=t["canonical_ref"]
         if key and key in seen: dup.append({"canonical_ref":key,"tasks":[seen[key],t["slug"]]})
         elif key: seen[key]=t["slug"]
-    return {"tasks":tasks,"parity":parity,"duplicates":dup,"tracker":{"available":evidence is not None,"digest":digest(evidence) if evidence else None},"source_digest":digest({"tasks":[(t["path"],t["digest"]) for t in tasks],"evidence":evidence})},warnings
+    return {"tasks":tasks,"status_mismatches":mismatches,"parity":parity,"duplicates":dup,"tracker":{"available":evidence is not None,"digest":digest(evidence) if evidence else None},"source_digest":digest({"tasks":[(t["path"],t["digest"]) for t in tasks],"evidence":evidence})},warnings
 def overlap(a,b):
     for x in a:
         for y in b:
