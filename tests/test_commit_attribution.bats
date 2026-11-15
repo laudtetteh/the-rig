@@ -130,7 +130,7 @@ Made-with: Cursor'
   rm "$TEST_PROJECT/.git/hooks/filter-commit-message-inplace.sh"
   message_file="$BATS_TEST_TMPDIR/message"
   printf 'fix: example [#589]\n\nCo-authored-by: Jane <jane@example.com>\n' > "$message_file"
-  run sh "$TEST_PROJECT/.git/hooks/commit-msg" "$message_file"
+  run bash -c 'cd "$1" && sh .git/hooks/commit-msg "$2"' _ "$TEST_PROJECT" "$message_file"
   [ "$status" -eq 1 ]
   [[ "$output" == *"filter is missing"* ]] || return 1
   grep -q 'Co-authored-by: Jane' "$message_file"
@@ -281,4 +281,93 @@ Made-with: Cursor'
     --project-name Test --tracking stealth --rig-dir "$external_rig" --strategy upgrade
   [ "$status" -eq 0 ]
   commit_with_mixed_trailers
+}
+
+# Report whether the stale Husky entry is in the flat and JSON manifests.
+# Upgrade detects stale entries from the JSON manifest, so both are checked.
+husky_manifest_state() {
+  run python3 - "$1/memory" <<'PY'
+import json, pathlib, sys
+memory = pathlib.Path(sys.argv[1])
+flat = any(line.split()[-1:] == [".husky/commit-msg"]
+           for line in (memory / ".rig-manifest").read_text().splitlines())
+entries = json.loads((memory / ".rig-manifest.json").read_text())["entries"]
+print("flat=%s json=%s" % ("present" if flat else "absent",
+                           "present" if ".husky/commit-msg" in entries else "absent"))
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "stale Husky manifest entries do not recreate Husky during stealth upgrade or repair" {
+  external_rig="$BATS_TEST_TMPDIR/rig-external"
+  run bash "$REPO_ROOT/install.sh" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$external_rig" --strategy upgrade
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_PROJECT/.husky" ]
+
+  # A previous repository-tracked install could leave a Rig-owned Husky entry
+  # in the manifest after moving the project to stealth tracking. Seed that
+  # historical state without putting a Husky file back on disk.
+  hash="$(shasum -a 256 "$REPO_ROOT/templates/project/.husky/commit-msg" | awk '{print $1}')"
+  printf '%s  .husky/commit-msg\n' "$hash" >> "$external_rig/memory/.rig-manifest"
+  python3 - "$external_rig/memory/.rig-manifest.json" "$hash" "$REPO_ROOT/VERSION" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+data = json.loads(path.read_text())
+version = pathlib.Path(sys.argv[3]).read_text().strip()
+data["entries"][".husky/commit-msg"] = {
+    "base_revision": version, "generator": "install.sh", "installer_version": version,
+    "mode": "755", "owner": "rig", "provider": "claude", "sha256": sys.argv[2],
+    "source": "project-tooling", "type": "file",
+}
+path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+PY
+  [ -z "$(git -C "$TEST_PROJECT" status --porcelain)" ]
+
+  run bash "$REPO_ROOT/install.sh" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$external_rig" --strategy upgrade
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"project:missing:.husky/commit-msg"* ]] || return 1
+  [ ! -e "$TEST_PROJECT/.husky" ]
+  [ -x "$TEST_PROJECT/.git/hooks/commit-msg" ]
+  [ -x "$TEST_PROJECT/.git/hooks/filter-commit-message-inplace.sh" ]
+  [ -z "$(git -C "$TEST_PROJECT" status --porcelain)" ]
+
+  # Plain upgrade reports the stale entry but leaves it for explicit repair.
+  husky_manifest_state "$external_rig"
+  [ "$output" = "flat=present json=present" ]
+
+  reports_before="$(find "$external_rig/upgrade-reports" -maxdepth 1 -name '*.json' ! -name 'rollback_*' | sort)"
+  run bash "$REPO_ROOT/install.sh" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$external_rig" --strategy upgrade --repair-stale
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_PROJECT/.husky" ]
+  [ -x "$TEST_PROJECT/.git/hooks/commit-msg" ]
+  [ -x "$TEST_PROJECT/.git/hooks/filter-commit-message-inplace.sh" ]
+  husky_manifest_state "$external_rig"
+  [ "$output" = "flat=absent json=absent" ]
+  [ -z "$(git -C "$TEST_PROJECT" status --porcelain)" ]
+
+  # Roll back exactly the report the repair run wrote. Rolling back the earlier
+  # upgrade would also restore the seeded entry and prove nothing.
+  reports_after="$(find "$external_rig/upgrade-reports" -maxdepth 1 -name '*.json' ! -name 'rollback_*' | sort)"
+  report="$(comm -13 <(printf '%s\n' "$reports_before") <(printf '%s\n' "$reports_after"))"
+  [ -n "$report" ]
+  [ "$(printf '%s\n' "$report" | wc -l | tr -d ' ')" -eq 1 ]
+  rollback_id="${report##*/}"
+  rollback_id="${rollback_id%.json}"
+  run "$TEST_PROJECT/bin/rig" upgrade rollback --id "$rollback_id" --dry-run --json
+  [ "$status" -eq 0 ]
+  husky_manifest_state "$external_rig"
+  [ "$output" = "flat=absent json=absent" ]
+  run "$TEST_PROJECT/bin/rig" upgrade rollback --id "$rollback_id" --confirm "$rollback_id" --json
+  [ "$status" -eq 0 ]
+  # Rolling back the repair restores its recorded manifest state, including the
+  # stale entry in both manifests, without materializing a Husky directory.
+  husky_manifest_state "$external_rig"
+  [ "$output" = "flat=present json=present" ]
+  [ ! -e "$TEST_PROJECT/.husky" ]
+  [ -x "$TEST_PROJECT/.git/hooks/commit-msg" ]
+  [ -x "$TEST_PROJECT/.git/hooks/filter-commit-message-inplace.sh" ]
+  [ -z "$(git -C "$TEST_PROJECT" status --porcelain)" ]
 }
