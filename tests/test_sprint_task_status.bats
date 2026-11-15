@@ -77,3 +77,29 @@ assert pairs == {("TASK_40_marked_done", "backlog", "done"), ("TASK_41_still_act
   [ "$(scheduled)" = "TASK_51_active #51" ]
   printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["result"]["status_mismatches"] == [] and not any(w.startswith("task_status_folder_mismatch") for w in d["warnings"])'
 }
+
+@test "decorated terminal statuses finish a card but look-alikes do not" {
+  write_card backlog TASK_60_dot 'Done.' 'GitHub issue' '#60'
+  write_card backlog TASK_61_emoji '✅ Done' 'GitHub issue' '#61'
+  write_card backlog TASK_62_ish 'done-ish' 'GitHub issue' '#62'
+  write_card backlog TASK_63_not 'not done' 'GitHub issue' '#63'
+  audit
+  [ "$(scheduled | sort)" = "$(printf 'TASK_62_ish #62\nTASK_63_not #63')" ]
+}
+
+@test "a done card with a non-open status such as merged is not a mismatch" {
+  write_card done TASK_70_merged merged 'GitHub issue' '#70'
+  audit
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["result"]["status_mismatches"] == [], d["result"]["status_mismatches"]'
+}
+
+@test "a selected audit reports mismatches only for the selection" {
+  write_card backlog TASK_80_selected backlog 'GitHub issue' '#80'
+  write_card done TASK_81_other active 'GitHub issue' '#81'
+  run bash -c 'cd "$1" && python3 bin/rig-sprint audit TASK_80_selected --json' _ "$CASE_DIR"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert not any(w.startswith("task_status_folder_mismatch") for w in d["warnings"]), d["warnings"]'
+  run bash -c 'cd "$1" && python3 bin/rig-sprint audit TASK_81_other --json' _ "$CASE_DIR"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "task_status_folder_mismatch:TASK_81_other" in d["warnings"], d["warnings"]'
+}

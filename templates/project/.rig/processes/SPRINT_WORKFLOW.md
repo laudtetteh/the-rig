@@ -46,9 +46,11 @@ rig sprint audit --all --tracker-evidence "$EVIDENCE" --json
 Review task schema, tracker/local parity, dependencies, duplicates, file scope,
 source freshness, and confidence. A card is never scheduled when it is in
 `tasks/done/` or declares a terminal `**Status**` (`done`, `complete`,
-`closed`, `cancelled`). When folder and declared status disagree, the audit
-lists the card under `status_mismatches` and warns
-`task_status_folder_mismatch:<slug>`; propose moving or correcting it. Issue
+`closed`, `cancelled`); `Done.` or `✅ Done` count, `done-ish` does not. When an
+open card declares a terminal status, or a `tasks/done/` card declares an open
+one (`backlog`, `active`, `blocked`, ...), the audit lists it under
+`status_mismatches` and warns `task_status_folder_mismatch:<slug>`, scoped to
+the selection; propose moving or correcting it. Issue
 links are read from `**GitHub issue**`, `**Issue**`, or the legacy `**GitHub**`
 field. Repairs are proposals. Task metadata,
 dependency, scope, duplicate-fold, lifecycle, and tracker changes require the
