@@ -1049,6 +1049,30 @@ PROJECT_CLAUDE_PRESERVED_USER=false
 # issue #444 lane 444-C.
 UPGRADE_ARTIFACT_RECORDS=()
 
+# Describe what a skipped customized Rig-owned file leaves outdated, so the
+# classic upgrade summary states the impact instead of only listing a path.
+# Echoes "<category>|<sentence>"; category is enforcement, parity or other.
+skipped_customized_impact() {
+  local rel="$1" name
+  case "$rel" in
+    .claude/hooks/pre-tool.sh|.claude/hooks/permission-request.sh|.codex/hooks/rig-adapter.sh|.husky/*|.git/hooks/*|*rules/protected-paths.txt)
+      printf 'enforcement|protected-path and commit policy still run your customized older copy'
+      ;;
+    .claude/commands/*.md)
+      name="${rel##*/}"
+      name="${name%.md}"
+      if has_agent "${PROJECT_AGENT:-claude}" codex; then
+        printf 'parity|Claude /%s keeps your customized copy, but the Codex $%s skill was generated from current Rig source, so the two providers may now behave differently' "$name" "$name"
+      else
+        printf 'other|Claude /%s keeps your customized older copy' "$name"
+      fi
+      ;;
+    *)
+      printf 'other|keeps your customized older copy'
+      ;;
+  esac
+}
+
 record_upgrade_result() {
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
   local result="$1" rel="${2:-}" detail="${3:-}"
@@ -5153,12 +5177,26 @@ if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
       echo "  - $_stale_file"
     done
   fi
+  _SKIP_DEGRADED=""
   if [[ "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" -gt 0 ]]; then
     UPGRADE_REVIEW_REQUIRED=1
+    _skip_enforcement=0
+    _skip_parity=0
     echo "Customized files requiring manual review:"
     for _skipped_file in "${UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]}"; do
-      echo "  - $_skipped_file"
+      _skip_impact="$(skipped_customized_impact "$_skipped_file")"
+      case "${_skip_impact%%|*}" in
+        enforcement) _skip_enforcement=$((_skip_enforcement + 1)) ;;
+        parity) _skip_parity=$((_skip_parity + 1)) ;;
+      esac
+      echo "  - $_skipped_file — ${_skip_impact#*|}"
     done
+    [[ "$_skip_enforcement" -gt 0 ]] && \
+      _SKIP_DEGRADED="protected-path/commit enforcement (${_skip_enforcement} customized hook file(s) not updated)"
+    if [[ "$_skip_parity" -gt 0 ]]; then
+      [[ -n "$_SKIP_DEGRADED" ]] && _SKIP_DEGRADED+=", "
+      _SKIP_DEGRADED+="Claude/Codex workflow parity (${_skip_parity} customized command(s))"
+    fi
   fi
   if [[ "$UPGRADE_SKIPPED_CONFLICT_COUNT" -gt 0 ]]; then
     UPGRADE_REVIEW_REQUIRED=1
@@ -5186,8 +5224,9 @@ d=json.load(sys.stdin)
 missing=[x["id"] for x in d["dependencies"] if x["status"] != "ok" and x["classification"] != "optional"]
 print("Selected agents: global=%s project=%s" % (sys.argv[1], sys.argv[2]))
 print("Missing prerequisites: " + (", ".join(missing) or "none"))
-print("Degraded/skipped capabilities: " + (", ".join(d["degraded_features"]) or "none"))
-print("Exact next steps: " + ("; ".join(d["next_steps"]) or "none"))' "$GLOBAL_AGENT" "$PROJECT_AGENT" <<< "$_preflight_json"
+degraded=list(d["degraded_features"]) + ([sys.argv[3]] if sys.argv[3] else [])
+print("Degraded/skipped capabilities: " + (", ".join(degraded) or "none"))
+print("Exact next steps: " + ("; ".join(d["next_steps"]) or "none"))' "$GLOBAL_AGENT" "$PROJECT_AGENT" "${_SKIP_DEGRADED:-}" <<< "$_preflight_json"
   [[ "$DO_GLOBAL" == true ]] && echo "Global smoke tests (expected signal: passed): ${_global_smoke:-none}"
   [[ "$DO_PROJECT" == true ]] && echo "Project smoke tests (expected signal: passed): ${_project_smoke:-none}"
   blank
@@ -5221,7 +5260,12 @@ fi
 [[ -n "${PREVIOUS_GLOBAL_AGENT:-}" && "$PREVIOUS_GLOBAL_AGENT" != "$GLOBAL_AGENT" ]] && echo "Preserved prior global target files: $PREVIOUS_GLOBAL_AGENT."
 [[ -n "${PREVIOUS_PROJECT_AGENT:-}" && "$PREVIOUS_PROJECT_AGENT" != "$PROJECT_AGENT" ]] && echo "Preserved prior project target files: $PREVIOUS_PROJECT_AGENT."
 [[ "$COLLISION_STRATEGY" != upgrade ]] && echo "Postflight smoke results: manifest-derived checks passed."
-if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+if [[ "$COLLISION_STRATEGY" == upgrade && "${UPGRADE_REVIEW_REQUIRED:-0}" -eq 1 ]]; then
+  echo "The Rig upgrade finished but is not fully converged: the files listed above need review."
+  echo "Your selected strategy was kept. To converge customized files with guarded merging, preview with"
+  echo "  ./install.sh --project-only --target \"$TARGET\" --strategy agent-plan"
+  echo "then apply with --strategy agent-upgrade (or run /rig-upgrade). Other next steps:"
+elif [[ "$COLLISION_STRATEGY" == upgrade ]]; then
   echo "The Rig upgrade is complete. Next steps:"
 else
   echo "The Rig is installed. Next steps:"
