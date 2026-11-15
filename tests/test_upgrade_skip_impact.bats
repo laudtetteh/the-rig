@@ -63,6 +63,9 @@ assert_codex_retrofit_reports_divergence() {
 
 @test "classic Codex retrofit of a customized stealth install reports provider divergence" {
   assert_codex_retrofit_reports_divergence stealth
+  # The printed route must reproduce this run's tracking, or agent-plan would
+  # re-detect the install and plan the wrong files.
+  [[ "$output" == *"--tracking stealth --rig-dir \"$EXTERNAL_RIG\" --strategy agent-plan"* ]] || return 1
 }
 
 @test "a Claude-only customized command is listed without a provider divergence claim" {
@@ -75,6 +78,19 @@ assert_codex_retrofit_reports_divergence() {
   [[ "$output" != *'Codex $ship'* ]] || return 1
   [ -n "$DEGRADED" ]
   [[ "$DEGRADED" != *"parity"* && "$DEGRADED" != *"enforcement"* ]] || return 1
+}
+
+@test "review required only by a manifest conflict does not recommend agent-upgrade" {
+  install_rig repo merge
+  [ "$status" -eq 0 ]
+  mv "$TEST_PROJECT/.rig/memory/.rig-manifest.json" "$TEST_PROJECT/.rig/memory/real.json"
+  ln -s real.json "$TEST_PROJECT/.rig/memory/.rig-manifest.json"
+  install_rig repo upgrade
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Skipped customized: 0"* ]] || return 1
+  [[ "$output" == *"not fully converged"* ]] || return 1
+  [[ "$output" != *"--strategy agent-plan"* ]] || return 1
+  [[ "$output" == *"Review each listed file"* ]] || return 1
 }
 
 @test "an upgrade with nothing to review still reports completion" {

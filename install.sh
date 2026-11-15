@@ -1055,13 +1055,14 @@ UPGRADE_ARTIFACT_RECORDS=()
 skipped_customized_impact() {
   local rel="$1" name
   case "$rel" in
-    .claude/hooks/pre-tool.sh|.claude/hooks/permission-request.sh|.codex/hooks/rig-adapter.sh|.husky/*|.git/hooks/*|*rules/protected-paths.txt)
+    .claude/hooks/pre-tool.sh|.claude/hooks/permission-request.sh|.codex/hooks/rig-adapter.sh|.codex/hooks.json|.husky/pre-commit|.husky/commit-msg|.git/hooks/pre-commit|.git/hooks/commit-msg|*rules/protected-paths.txt)
       printf 'enforcement|protected-path and commit policy still run your customized older copy'
       ;;
     .claude/commands/*.md)
       name="${rel##*/}"
       name="${name%.md}"
-      if has_agent "${PROJECT_AGENT:-claude}" codex; then
+      if has_agent "${PROJECT_AGENT:-claude}" codex && \
+         ! upgrade_skipped_path ".agents/skills/${name}/SKILL.md" ""; then
         printf 'parity|Claude /%s keeps your customized copy, but the Codex $%s skill was generated from current Rig source, so the two providers may now behave differently' "$name" "$name"
       else
         printf 'other|Claude /%s keeps your customized older copy' "$name"
@@ -1164,17 +1165,21 @@ upgrade_set_executable_bits() {
   # agent-plan: classification only, never change file modes.
   [[ "$AGENT_DRY_RUN" == true ]] && return 0
   while IFS= read -r -d '' path; do
+    # A skipped customized file keeps the mode the user left, too.
+    upgrade_skipped_path "${rel}$(basename "$path")" "$path" && continue
     chmod +x "$path"
     refresh_executable_manifest_entry "$path" "${rel}$(basename "$path")"
   done < <(find -P "$directory" -maxdepth 1 -type f -name "$pattern" -print0)
 }
 
-# Succeed when this run left REL untouched as customized or conflicting.
-# Post-copy passes must not refresh such a path's manifest hash: recording the
-# user's content as the Rig baseline would make the next upgrade treat the
-# customization as unmodified Rig content and replace it.
+# Succeed when this run left REL (at PATH) untouched as customized or
+# conflicting. Post-copy passes must not refresh such a path's manifest hash:
+# recording the user's content as the Rig baseline would make the next upgrade
+# treat the customization as unmodified Rig content and replace it. A file this
+# run wrote is never "skipped", even if a later manifest conflict recorded it.
 upgrade_skipped_path() {
-  local rel="$1" skipped
+  local rel="$1" path="$2" skipped
+  was_written_this_run "$path" && return 1
   for skipped in ${UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]+"${UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]}"} \
                  ${UPGRADE_SKIPPED_CONFLICT_FILES[@]+"${UPGRADE_SKIPPED_CONFLICT_FILES[@]}"}; do
     [[ "$skipped" == "$rel" ]] && return 0
@@ -1187,7 +1192,7 @@ refresh_executable_manifest_entry() {
   [[ "$AGENT_DRY_RUN" == true ]] && return 0
   [[ -f "$path" && ! -L "$path" ]] || return 0
   [[ -n "$(read_manifest_hash "$rel")" ]] || return 0
-  upgrade_skipped_path "$rel" && return 0
+  upgrade_skipped_path "$rel" "$path" && return 0
   write_manifest_entry "$(sha256_file "$path")" "$rel" "$MANIFEST_FILE" "$path"
   # The chmod +x above happens AFTER _upgrade_write() recorded this file's
   # after-state, so the report's recorded mode is the pre-chmod one and
@@ -4446,12 +4451,13 @@ PYEOF
     if [[ "$rel" == "CLAUDE.md" && "$PROJECT_CLAUDE_PRESERVED_USER" == true ]]; then
       return 0
     fi
+    # A customized or conflicting file this run skipped is not substituted and
+    # its manifest baseline is not refreshed. Check before the destination
+    # guard, which backs the file up and marks it as written this run.
+    upgrade_skipped_path "$rel" "$f" && return 0
     guard_destination_before_write "$base" "$f" "$rel" || return 0
     # agent-plan: classification only, never substitute placeholders.
     [[ "$AGENT_DRY_RUN" == true ]] && return 0
-    # A customized or conflicting file this run skipped stays exactly as the
-    # user left it, and its manifest baseline is not refreshed.
-    upgrade_skipped_path "$rel" && return 0
     sed_inplace "s/\\[BASE_BRANCH\\]/${_BASE_ESC}/g" "$f"
     # Refresh the manifest hash for whatever this substitution just changed.
     # A manifest entry recorded earlier in this same run (by copy_file()'s
@@ -4764,7 +4770,8 @@ PYEOF
       record_upgrade_destination_conflict 'bin/rig' symlink
     elif [[ -f "$RIG_DISPATCHER" ]]; then
       # agent-plan: classification only, never change file modes.
-      [[ "$AGENT_DRY_RUN" == true ]] || chmod +x "$RIG_DISPATCHER"
+      # A skipped customized dispatcher keeps the mode the user left.
+      [[ "$AGENT_DRY_RUN" == true ]] || upgrade_skipped_path bin/rig "$RIG_DISPATCHER" || chmod +x "$RIG_DISPATCHER"
       refresh_executable_manifest_entry "$RIG_DISPATCHER" "bin/rig"
       success "Set executable bit on bin/rig"
     fi
@@ -5265,10 +5272,17 @@ if [[ "$COLLISION_STRATEGY" == upgrade && "${UPGRADE_REVIEW_REQUIRED:-0}" -eq 1 
   echo "Your selected strategy was kept."
   # A global-only run has no project target, and guarded convergence covers
   # project files only.
-  if [[ "$DO_PROJECT" == true && -n "${TARGET:-}" ]]; then
+  if [[ "$DO_PROJECT" == true && -n "${TARGET:-}" && "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" -gt 0 ]]; then
+    _route_tracking="$RIG_TRACKING"
+    [[ "$_route_tracking" == exclude ]] && _route_tracking=local
+    _route_flags=""
+    [[ -n "$_route_tracking" ]] && _route_flags=" --tracking $_route_tracking"
+    if [[ ( "$RIG_TRACKING" == external || "$RIG_TRACKING" == stealth ) && -n "${EXTERNAL_RIG_DIR:-}" ]]; then
+      _route_flags+=" --rig-dir \"$EXTERNAL_RIG_DIR\""
+    fi
     echo "To converge customized project files with guarded merging, preview with"
-    echo "  ./install.sh --project-only --target \"$TARGET\" --strategy agent-plan"
-    echo "then apply with --strategy agent-upgrade (or run /rig-upgrade)."
+    echo "  ./install.sh --project-only --target \"$TARGET\"${_route_flags} --strategy agent-plan"
+    echo "then apply the same command with --strategy agent-upgrade (or run /rig-upgrade)."
   else
     echo "Review each listed file, or rerun the installer interactively to decide per file."
   fi
