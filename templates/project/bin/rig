@@ -808,8 +808,25 @@ root = pathlib.Path(os.environ["RIG_ROOT"])
 rig = pathlib.Path(os.environ["RIG_DIR"])
 checks = []
 
-def check(name, ok, detail):
-    checks.append({"name": name, "ok": bool(ok), "detail": str(detail)})
+# Every check carries an explicit state so an unexecuted check is never shown
+# as PASS (issue #603):
+#   pass     -- the check ran and found nothing wrong
+#   fail     -- the check ran and found a problem (the only state that fails doctor)
+#   skipped  -- the check did not run; detail says why
+#   advisory -- informational only; never a failure
+# "ok" stays for backward compatibility: false only for fail. "fix" is a
+# preview (a command to run or a file to inspect) attached to failures only;
+# doctor never applies it.
+SKIPPED = "skipped"
+ADVISORY = "advisory"
+
+def check(name, ok, detail, fix=None, state=None):
+    if state not in (SKIPPED, ADVISORY):
+        state = "pass" if ok else "fail"
+    item = {"name": name, "ok": state != "fail", "state": state, "detail": str(detail)}
+    if state == "fail" and fix:
+        item["fix"] = str(fix)
+    checks.append(item)
 
 def read(path):
     try:
@@ -838,20 +855,24 @@ if common is not None and common.returncode == 0:
         required = [".rigpath", "CLAUDE.md", "bin/rig", "bin/rig-session-resolve.py", "bin/rig-snapshot.py", ".claude"]
         missing = [p for p in required if not (root / p).exists()]
         recovery = f"cd {shlex.quote(str(root))} && {shlex.quote(str(primary / 'bin/rig'))} worktree bootstrap"
-        check("worktree_bootstrap", not missing, "complete" if not missing else "missing: " + ", ".join(missing) + "; recover: " + recovery)
+        check("worktree_bootstrap", not missing, "complete" if not missing else "missing: " + ", ".join(missing) + "; recover: " + recovery,
+              fix=recovery)
 
 # Path resolution must be both usable and recognisably a Rig data directory.
 marker = rig / "memory"
 check("rig_directory", rig.is_dir() and os.access(rig, os.R_OK) and marker.is_dir(),
-      f"resolved {rig}" if rig.is_dir() else f"missing {rig}")
+      f"resolved {rig}" if rig.is_dir() else f"missing {rig}",
+      fix=f"inspect {rig} (expected a readable directory containing memory/)")
 rigpath = root / ".rigpath"
 if rigpath.exists():
     raw_text = read(rigpath)
     raw = raw_text.strip()
     check("rigpath", bool(raw) and len(raw_text.splitlines()) == 1 and rig.is_dir(),
-          f"resolves to {rig}" if raw else "empty .rigpath")
+          f"resolves to {rig}" if raw else "empty .rigpath",
+          fix=f"inspect {rigpath} (one line naming an existing Rig directory)")
 else:
-    check("rigpath", rig == root / ".rig", "using local .rig")
+    check("rigpath", rig == root / ".rig", "using local .rig" if rig == root / ".rig" else f"no .rigpath, but Rig directory resolved to {rig}",
+          fix=f"inspect {root / '.rig'} and the RIG_DIR environment variable")
 
 # Stealth exclusions are required only for stealth installs. Future Codex paths
 # become required when the corresponding integration is detectable.
@@ -865,9 +886,10 @@ if rigpath.exists():
     for candidate in [".agents", ".codex", ".mcp.json", ".playwright-mcp"]:
         if (root / candidate).exists(): required.append(candidate)
     missing = [item for item in required if item.rstrip("/") not in entries]
-    check("stealth_exclusions", not missing, "complete" if not missing else "missing: " + ", ".join(missing))
+    check("stealth_exclusions", not missing, "complete" if not missing else "missing: " + ", ".join(missing),
+          fix=f"inspect {resolved_exclude} (add one line per missing entry)")
 else:
-    check("stealth_exclusions", True, "not a stealth install")
+    check("stealth_exclusions", True, "not a stealth install", state=SKIPPED)
 
 json_files = [root / ".claude" / "settings.json"]
 hooks = root / ".codex" / "hooks.json"
@@ -878,7 +900,8 @@ for path in json_files:
         with path.open() as handle: json.load(handle)
     except (OSError, ValueError) as exc:
         bad_json.append(f"{path.relative_to(root)}: {exc}")
-check("settings_json", not bad_json, "valid" if not bad_json else "; ".join(bad_json))
+check("settings_json", not bad_json, "valid" if not bad_json else "; ".join(bad_json),
+      fix="python3 -m json.tool " + " ".join(shlex.quote(str(path.relative_to(root))) for path in json_files))
 
 # The per-install manifest records exactly which optional commands were selected.
 manifest = rig / "memory" / ".rig-manifest"
@@ -895,7 +918,8 @@ else:
     present = sorted(command_dir.glob("*.md")) if command_dir.is_dir() else []
     missing = [] if present else [".claude/commands/*.md"]
     detail = f"{len(present)} commands present (no manifest baseline)"
-check("claude_commands", not missing, detail if not missing else "missing: " + ", ".join(missing))
+check("claude_commands", not missing, detail if not missing else "missing: " + ", ".join(missing),
+      fix="/rig-upgrade --scope=project --mode=agent (restores Rig-owned command files)")
 
 skills = root / ".agents" / "skills"
 if skills.is_dir():
@@ -905,9 +929,10 @@ if skills.is_dir():
     extra_skills = sorted(skill_names - command_names)
     check("codex_skill_parity", not missing_skills and not extra_skills,
           f"{len(skill_names)}/{len(command_names)} mirrored" if not missing_skills and not extra_skills
-          else "missing skills: " + (", ".join(missing_skills) or "none") + "; extra skills: " + (", ".join(extra_skills) or "none"))
+          else "missing skills: " + (", ".join(missing_skills) or "none") + "; extra skills: " + (", ".join(extra_skills) or "none"),
+          fix="ls .claude/commands .agents/skills; then /rig-upgrade --scope=project --mode=agent to regenerate skills")
 else:
-    check("codex_skill_parity", True, "Codex mirroring not enabled")
+    check("codex_skill_parity", True, "Codex mirroring not enabled", state=SKIPPED)
 
 # Codex target metadata makes project-instruction visibility a required health
 # check. AGENTS.override.md and AGENTS.md take precedence; CLAUDE.md is effective
@@ -950,18 +975,21 @@ if "codex" in target_agents:
         detail = "no effective AGENTS file or CLAUDE.md fallback"
         if config_error:
             detail += ": " + config_error
-    check("codex_project_instructions", effective, detail)
+    check("codex_project_instructions", effective, detail,
+          fix="inspect .codex/config.toml (top-level project_doc_fallback_filenames should list CLAUDE.md) or add AGENTS.md")
 else:
-    check("codex_project_instructions", True, "Codex project target not enabled")
+    check("codex_project_instructions", True, "Codex project target not enabled", state=SKIPPED)
 
 codex_runtime_id = os.environ.get("CODEX_THREAD_ID", "")
 if codex_runtime_id:
     if "codex" not in target_agents:
         selected = ",".join(target_agents) if target_agents else "none"
         check("codex_project_target_runtime", True,
-              f"Codex runtime detected, but Codex is not an installed project target (agents: {selected})")
+              f"Codex runtime detected, but Codex is not an installed project target (agents: {selected})",
+              state=ADVISORY)
         check("codex_session_runtime", True,
-              "Codex runtime detected, but Codex session binding is not required for this project target")
+              "Codex runtime detected, but Codex session binding is not required for this project target",
+              state=SKIPPED)
     else:
         required_codex = []
         if not (root / ".codex" / "hooks.json").is_file():
@@ -978,7 +1006,8 @@ if codex_runtime_id:
         target_detail = ("Codex project runtime support present" if not required_codex else
                          "missing: " + ", ".join(required_codex) +
                          "; converge with /rig-upgrade --scope=project --mode=agent or install.sh --project-only --project-agent both --strategy merge")
-        check("codex_project_target_runtime", not required_codex, target_detail)
+        check("codex_project_target_runtime", not required_codex, target_detail,
+              fix="/rig-upgrade --scope=project --mode=agent")
 
         session_root = rig / "memory" / "sessions"
         records = []
@@ -1028,24 +1057,29 @@ if codex_runtime_id:
         else:
             session_ok = False
             session_detail = "current Codex thread is not bound; run: bin/rig session retrofit --agent codex --from-env --source resume --json"
-        check("codex_session_runtime", session_ok, session_detail)
+        check("codex_session_runtime", session_ok, session_detail,
+              fix="bin/rig session retrofit --agent codex --from-env --source resume --json")
 else:
-    check("codex_project_target_runtime", True, "Codex runtime not detected")
-    check("codex_session_runtime", True, "Codex runtime not detected")
+    check("codex_project_target_runtime", True, "Codex runtime not detected", state=SKIPPED)
+    check("codex_session_runtime", True, "Codex runtime not detected", state=SKIPPED)
 
 claude_md = read(root / "CLAUDE.md")
 matches = re.findall(r"(?m)^issue-tracking:\s*([^\s#]+)", claude_md)
 tracker = matches[-1].lower() if matches else "github"
 supported = {"github", "linear", "trello", "gus", "none"}
 check("issue_tracking", len(matches) <= 1 and tracker in supported,
-      f"configured: {tracker}" if tracker in supported else f"unsupported: {tracker}")
+      (f"configured: {tracker}" if len(matches) <= 1 else f"{len(matches)} issue-tracking lines; last wins: {tracker}")
+      if tracker in supported else f"unsupported: {tracker}",
+      fix="grep -n '^issue-tracking:' CLAUDE.md (keep exactly one of: " + ", ".join(sorted(supported)) + ")")
 
 if tracker == "github":
     auth = run(["gh", "auth", "status"])
     authenticated = auth is not None and auth.returncode == 0
-    check("github_auth", authenticated, "authenticated" if authenticated else "gh authentication unavailable")
+    check("github_auth", authenticated, "authenticated" if authenticated else "gh authentication unavailable",
+          fix="gh auth status")
 else:
-    check("github_auth", True, f"not required for {tracker}")
+    authenticated = False
+    check("github_auth", True, f"not required for {tracker}", state=SKIPPED)
 
 # Command guidance is checked separately from repository history: command files
 # must describe the selected tracker, while commits use the generic reference
@@ -1054,7 +1088,8 @@ guidance = read(command_dir / "task.md") + "\n" + read(command_dir / "ship.md")
 tokens = {"github": "issue-tracking: github", "linear": "issue-tracking: linear",
           "trello": "issue-tracking: trello", "gus": "issue-tracking: gus", "none": "issue-tracking: none"}
 check("tracker_command_guidance", tokens.get(tracker, "") in guidance,
-      f"command guidance covers {tracker}" if tokens.get(tracker, "") in guidance else f"command guidance missing {tracker}")
+      f"command guidance covers {tracker}" if tokens.get(tracker, "") in guidance else f"command guidance missing {tracker}",
+      fix="grep -n 'issue-tracking:' .claude/commands/task.md .claude/commands/ship.md")
 
 log = run(["git", "log", "-20", "--pretty=%s"])
 subjects = log.stdout.splitlines() if log is not None and log.returncode == 0 else []
@@ -1065,9 +1100,11 @@ elif tracker == "gus": pattern = re.compile(r"\bW-\d+\b", re.I)
 else: pattern = None
 if pattern and subjects:
     drift = [subject for subject in subjects if not pattern.search(subject)]
-    check("recent_commit_references", not drift, f"{len(subjects)-len(drift)}/{len(subjects)} match {tracker}; first drift: {drift[0]}" if drift else f"{len(subjects)}/{len(subjects)} match {tracker}")
+    check("recent_commit_references", not drift, f"{len(subjects)-len(drift)}/{len(subjects)} match {tracker}; first drift: {drift[0]}" if drift else f"{len(subjects)}/{len(subjects)} match {tracker}",
+          fix="git log -20 --pretty=%s")
 else:
-    check("recent_commit_references", True, "no convention required" if pattern is None else "no commits to inspect")
+    check("recent_commit_references", True, "no convention required" if pattern is None else "no commits to inspect",
+          state=SKIPPED)
 
 # Query PRs only when this is a GitHub-backed checkout and auth already passed;
 # this avoids surprising network activity in ordinary local/non-GitHub projects.
@@ -1080,7 +1117,8 @@ if tracker == "github" and "github.com" in remote_url and authenticated:
     except (TypeError, ValueError):
         pr_data = None
     if pr_data is None:
-        check("recent_pr_references", False, "unable to inspect GitHub PRs")
+        check("recent_pr_references", False, "unable to inspect GitHub PRs",
+              fix="gh pr list --state all --limit 20 --json title,body")
     else:
         # A project may use conventional PR titles without the commit-only [#N]
         # suffix. Accept an issue reference or close keyword in either title/body.
@@ -1088,10 +1126,16 @@ if tracker == "github" and "github.com" in remote_url and authenticated:
                     if not re.search(r"(?i)(?:\[#\d+\]|\b(?:closes|fixes|resolves)\s+#\d+\b)",
                                      pr.get("title", "") + "\n" + (pr.get("body") or ""))]
         check("recent_pr_references", not unlinked,
-              f"{len(pr_data)-len(unlinked)}/{len(pr_data)} linked; first drift: {unlinked[0]}" if unlinked else f"{len(pr_data)}/{len(pr_data)} linked")
+              f"{len(pr_data)-len(unlinked)}/{len(pr_data)} linked; first drift: {unlinked[0]}" if unlinked else f"{len(pr_data)}/{len(pr_data)} linked",
+              fix="gh pr list --state all --limit 20 --json title,body")
 else:
-    reason = "not a GitHub remote" if tracker == "github" else f"not required for {tracker}"
-    check("recent_pr_references", True, reason)
+    if tracker != "github":
+        reason = f"not required for {tracker}"
+    elif "github.com" not in remote_url:
+        reason = "not a GitHub remote"
+    else:
+        reason = "GitHub authentication unavailable"
+    check("recent_pr_references", True, reason, state=SKIPPED)
 
 # Connector declarations are local configuration only. Doctor validates the
 # public envelope but never promotes them to schema-visible or callable: those
@@ -1108,7 +1152,8 @@ if connector_declaration.exists():
     except (AttributeError, TypeError, ValueError):
         connector_ok = False
     check("connector_declarations", connector_ok,
-          "configured; session evidence required for schema visibility and callability" if connector_ok else "invalid declaration")
+          "configured; session evidence required for schema visibility and callability" if connector_ok else "invalid declaration",
+          fix=f"inspect {connector_declaration} (schema, schema_version 1, skills, providers, smoke_checks)")
 
 # CLAUDE.md/PROJECT_BRIEF.md placeholder gate: a historical installer bug
 # (v1.10.0, fixed v1.10.1 / commit 28b8756, issue #140) could silently reset
@@ -1131,7 +1176,8 @@ if _placeholder_hits:
     check("template_placeholder_content", False,
           f"still shows the raw template placeholder: {', '.join(_placeholder_hits)} — "
           "either never filled in, or possibly reset by a historical upgrade bug "
-          "(docs/lessons-learned.md #14); worth a manual check, especially for stealth installs where git can't show a diff")
+          "(docs/lessons-learned.md #14); worth a manual check, especially for stealth installs where git can't show a diff",
+          fix="inspect " + " ".join(_placeholder_hits) + " and replace the bracketed template placeholders")
 else:
     check("template_placeholder_content", True, "no unfilled core-content placeholders detected")
 
@@ -1176,9 +1222,10 @@ manifest_metadata = rig / "memory" / ".rig-manifest.json"
 provenance_script = find_installer_script("validate-manifest-provenance.py")
 if provenance_script is None:
     check("manifest_provenance", True,
-          "skipped: installer/validate-manifest-provenance.py not present (activates once #448 merges/is colocated)")
+          "skipped: installer/validate-manifest-provenance.py not present (activates once #448 merges/is colocated)",
+          state=SKIPPED)
 elif not manifest_metadata.is_file():
-    check("manifest_provenance", True, "skipped: no manifest metadata file present")
+    check("manifest_provenance", True, "skipped: no manifest metadata file present", state=SKIPPED)
 else:
     provenance_command = ["python3", str(provenance_script), str(manifest_metadata)]
     installed_version_file = rig / "VERSION"
@@ -1187,7 +1234,8 @@ else:
         provenance_command += ["--running-version", installed_version]
     provenance_run = run(provenance_command)
     if provenance_run is None:
-        check("manifest_provenance", False, "validator failed to execute")
+        check("manifest_provenance", False, "validator failed to execute",
+              fix=shlex.join(provenance_command))
     else:
         try:
             provenance_payload = json.loads(provenance_run.stdout)
@@ -1195,10 +1243,12 @@ else:
             provenance_payload = None
         if provenance_payload is None:
             check("manifest_provenance", False,
-                  f"validator produced invalid output (exit {provenance_run.returncode}): {provenance_run.stderr.strip()}")
+                  f"validator produced invalid output (exit {provenance_run.returncode}): {provenance_run.stderr.strip()}",
+                  fix=shlex.join(provenance_command))
         elif provenance_run.returncode == 2:
             check("manifest_provenance", False,
-                  "manifest metadata invalid: " + provenance_payload.get("error", {}).get("message", "unknown"))
+                  "manifest metadata invalid: " + provenance_payload.get("error", {}).get("message", "unknown"),
+                  fix=f"inspect {manifest_metadata}")
         else:
             malformed = provenance_payload.get("malformed", [])
             legacy = provenance_payload.get("legacy_provenance", [])
@@ -1218,7 +1268,8 @@ else:
                     detail += f" and {len(future) - 1} more"
             elif legacy:
                 detail += f"; {len(legacy)} legacy/unknown-provenance entr{'y' if len(legacy) == 1 else 'ies'} (not an error)"
-            check("manifest_provenance", provenance_payload.get("ok", False), detail)
+            check("manifest_provenance", provenance_payload.get("ok", False), detail,
+                  fix=shlex.join(provenance_command))
 
 # Stealth-status gate: delegates to audit-stealth.py when present. Reports
 # tracked_leak/untracked_leak findings as failures; a non-stealth project (no
@@ -1227,11 +1278,13 @@ else:
 stealth_script = find_installer_script("audit-stealth.py")
 if stealth_script is None:
     check("stealth_status", True,
-          "skipped: installer/audit-stealth.py not present (activates once #449 merges/is colocated)")
+          "skipped: installer/audit-stealth.py not present (activates once #449 merges/is colocated)",
+          state=SKIPPED)
 else:
-    stealth_run = run(["python3", str(stealth_script), str(root)])
+    stealth_command = ["python3", str(stealth_script), str(root)]
+    stealth_run = run(stealth_command)
     if stealth_run is None:
-        check("stealth_status", False, "audit failed to execute")
+        check("stealth_status", False, "audit failed to execute", fix=shlex.join(stealth_command))
     else:
         try:
             stealth_payload = json.loads(stealth_run.stdout)
@@ -1239,15 +1292,18 @@ else:
             stealth_payload = None
         if stealth_payload is None:
             check("stealth_status", False,
-                  f"audit produced invalid output (exit {stealth_run.returncode}): {stealth_run.stderr.strip()}")
+                  f"audit produced invalid output (exit {stealth_run.returncode}): {stealth_run.stderr.strip()}",
+                  fix=shlex.join(stealth_command))
         elif stealth_run.returncode == 2:
             err = stealth_payload.get("error", {})
             if err.get("code") == "not-a-git-repo":
-                check("stealth_status", True, "skipped: not a primary git repository")
+                check("stealth_status", True, "skipped: not a primary git repository", state=SKIPPED)
             else:
-                check("stealth_status", False, "audit error: " + err.get("message", "unknown"))
+                check("stealth_status", False, "audit error: " + err.get("message", "unknown"),
+                      fix=shlex.join(stealth_command))
         elif not stealth_payload.get("stealth", False):
-            check("stealth_status", True, stealth_payload.get("message", "not a stealth/external install"))
+            check("stealth_status", True, stealth_payload.get("message", "not a stealth/external install"),
+                  state=SKIPPED)
         else:
             leaks = [a for a in stealth_payload.get("artifacts", [])
                      if a.get("status") in ("tracked_leak", "untracked_leak")]
@@ -1258,7 +1314,8 @@ else:
                     detail += f" and {len(leaks) - 5} more"
             else:
                 detail = "no leaks detected"
-            check("stealth_status", stealth_payload.get("ok", False), detail)
+            check("stealth_status", stealth_payload.get("ok", False), detail,
+                  fix=shlex.join(stealth_command) + " (then review installer/repair-stealth.py guidance)")
 
 # Manifest mode/hash drift + stale-state gates share one parse of the
 # manifest metadata JSON (schema_version 1, entries: relpath -> {sha256,
@@ -1276,8 +1333,10 @@ if manifest_metadata.is_file():
         manifest_entries = None
 
     if manifest_entries is None:
-        check("manifest_mode_hash", False, "manifest metadata file is not valid JSON")
-        check("stale_manifest_entries", False, "manifest metadata file is not valid JSON")
+        check("manifest_mode_hash", False, "manifest metadata file is not valid JSON",
+              fix=f"python3 -m json.tool {shlex.quote(str(manifest_metadata))}")
+        check("stale_manifest_entries", False, "manifest metadata file is not valid JSON",
+              fix=f"python3 -m json.tool {shlex.quote(str(manifest_metadata))}")
     else:
         def path_is_safe(rel):
             return isinstance(rel, str) and rel and not rel.startswith("/") and ".." not in rel.split("/")
@@ -1331,7 +1390,8 @@ if manifest_metadata.is_file():
                 mode_hash_detail += "; drift: " + ", ".join(drift[:5])
                 if len(drift) > 5:
                     mode_hash_detail += f" and {len(drift) - 5} more"
-            check("manifest_mode_hash", not drift, mode_hash_detail)
+            check("manifest_mode_hash", not drift, mode_hash_detail,
+                  fix="/rig-upgrade --scope=project --mode=agent (review hand-edits to the listed files first)")
         elif manifest_entries:
             # The manifest has entries but none are Rig-owned. For any
             # actually-installed Rig project this is suspicious — dozens of
@@ -1341,9 +1401,10 @@ if manifest_metadata.is_file():
             # failure instead of folding it into a vacuous pass alongside
             # the genuine "no manifest file at all yet" case below.
             check("manifest_mode_hash", False,
-                  "manifest has entries but none are Rig-owned — unexpected for an installed Rig project")
+                  "manifest has entries but none are Rig-owned — unexpected for an installed Rig project",
+                  fix=f"inspect {manifest_metadata} (entries[*].owner)")
         else:
-            check("manifest_mode_hash", True, "no rig-owned manifest entries to check")
+            check("manifest_mode_hash", True, "no rig-owned manifest entries to check", state=SKIPPED)
 
         # Stale-state: any manifest entry (any owner) whose artifact no longer
         # exists on disk at all. This mirrors report_stale_manifest_entries()'s
@@ -1360,10 +1421,11 @@ if manifest_metadata.is_file():
                 stale_detail += f" and {len(stale) - 5} more"
         else:
             stale_detail = "no stale entries"
-        check("stale_manifest_entries", not stale, stale_detail)
+        check("stale_manifest_entries", not stale, stale_detail,
+              fix="/rig-upgrade --scope=project --mode=agent (reports and repairs stale manifest entries)")
 else:
-    check("manifest_mode_hash", True, "skipped: no manifest metadata file present")
-    check("stale_manifest_entries", True, "skipped: no manifest metadata file present")
+    check("manifest_mode_hash", True, "skipped: no manifest metadata file present", state=SKIPPED)
+    check("stale_manifest_entries", True, "skipped: no manifest metadata file present", state=SKIPPED)
 
 # Idempotence gate: doctor is a read-only diagnostic and deliberately never
 # re-invokes the installer against a live project tree (there is no safe way
@@ -1371,12 +1433,13 @@ else:
 # bin/rig has no recorded path back to the install.sh that produced it once
 # installed). Idempotence is instead proven by a dedicated test that runs
 # install.sh twice against a disposable fixture and asserts the second run
-# changes nothing: tests/test_install_idempotence.bats. This check always
-# reports the documented procedure rather than silently claiming a live
-# verification that did not happen.
+# changes nothing: tests/test_install_idempotence.bats. This check is always
+# reported as skipped with the documented procedure, never as a pass, because
+# no live verification happened (issue #603).
 check("idempotence", True,
       "not verified live (would require mutating the live project tree from a read-only command); "
-      "run: bats tests/test_install_idempotence.bats")
+      "run: bats tests/test_install_idempotence.bats",
+      state=SKIPPED)
 
 # ── Post-upgrade validation against known historical bug patterns (issue #473) ──
 # Diffs the most recent #472 pre-flight snapshot against current state for a
@@ -1400,8 +1463,10 @@ def _latest_preflight_snapshot():
 
 snapshot_dir = _latest_preflight_snapshot()
 if snapshot_dir is None:
-    check("upgrade_pattern_blanked_file", True, "no pre-flight snapshot found (issue #472) -- nothing to compare yet")
-    check("upgrade_pattern_symlink_replaced", True, "no pre-flight snapshot found (issue #472) -- nothing to compare yet")
+    check("upgrade_pattern_blanked_file", True, "no pre-flight snapshot found (issue #472) -- nothing to compare yet",
+          state=SKIPPED)
+    check("upgrade_pattern_symlink_replaced", True, "no pre-flight snapshot found (issue #472) -- nothing to compare yet",
+          state=SKIPPED)
 else:
     # Lesson #14: a file that had already been personalized (its
     # "[Project Name]" placeholder substituted at install time) reverted to
@@ -1422,7 +1487,8 @@ else:
             blanked.append(rel_name)
     check("upgrade_pattern_blanked_file", not blanked,
           "none detected" if not blanked else
-          "reverted to raw template (lesson #14): " + ", ".join(blanked))
+          "reverted to raw template (lesson #14): " + ", ".join(blanked),
+          fix="; ".join(f"diff {shlex.quote(str(snapshot_dir / name))} {shlex.quote(name)}" for name in blanked))
 
     # Lesson #15: a path that was a symlink before the upgrade now exists as
     # a regular file -- the exact signature of a symlink-refusal guard being
@@ -1447,14 +1513,22 @@ else:
             replaced.append(str(rel))
     check("upgrade_pattern_symlink_replaced", not replaced,
           "none detected" if not replaced else
-          "symlink silently replaced by a regular file (lesson #15): " + ", ".join(replaced))
+          "symlink silently replaced by a regular file (lesson #15): " + ", ".join(replaced),
+          fix="; ".join(f"ls -l {shlex.quote(str(snapshot_dir / name))} {shlex.quote(name)}" for name in replaced))
 
-result = {"ok": all(item["ok"] for item in checks), "command": "doctor", "root": str(root), "rig_dir": str(rig), "checks": checks}
+summary = {state: sum(1 for item in checks if item["state"] == state)
+           for state in ("pass", "fail", SKIPPED, ADVISORY)}
+result = {"ok": summary["fail"] == 0, "command": "doctor", "root": str(root), "rig_dir": str(rig),
+          "summary": summary, "checks": checks}
 if "--json" in sys.argv[1:]:
     print(json.dumps(result, separators=(",", ":")))
 else:
+    labels = {"pass": "PASS", "fail": "FAIL", SKIPPED: "SKIP", ADVISORY: "ADVISORY"}
     for item in checks:
-        print(("PASS" if item["ok"] else "FAIL") + f"  {item['name']}: {item['detail']}")
+        print(labels[item["state"]] + f"  {item['name']}: {item['detail']}")
+        if "fix" in item:
+            print(f"      fix: {item['fix']}")
+    print(f"Checks: {summary['pass']} pass, {summary['fail']} fail, {summary[SKIPPED]} skipped, {summary[ADVISORY]} advisory")
     print("Rig doctor: " + ("healthy" if result["ok"] else "problems found"))
 raise SystemExit(0 if result["ok"] else 1)
 PY

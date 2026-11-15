@@ -546,7 +546,9 @@ names = {"manifest_provenance","stealth_status","manifest_mode_hash","stale_mani
 present = {c["name"] for c in d["checks"]}
 assert names <= present
 for c in d["checks"]:
-    assert set(c) == {"name","ok","detail"}
+    assert set(c) in ({"name","ok","state","detail"}, {"name","ok","state","detail","fix"})
+    assert c["state"] in ("pass","fail","skipped","advisory") and c["ok"] is (c["state"] != "fail")
+    assert ("fix" in c) <= (c["state"] == "fail")
     assert isinstance(c["ok"], bool) and isinstance(c["detail"], str)'
 
   cat > "$CASE_DIR/.rig/memory/.rig-manifest.json" <<'EOF'
@@ -561,7 +563,9 @@ EOF
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"])
 for c in d["checks"]:
-    assert set(c) == {"name","ok","detail"}
+    assert set(c) in ({"name","ok","state","detail"}, {"name","ok","state","detail","fix"})
+    assert c["state"] in ("pass","fail","skipped","advisory") and c["ok"] is (c["state"] != "fail")
+    assert ("fix" in c) <= (c["state"] == "fail")
     assert isinstance(c["ok"], bool) and isinstance(c["detail"], str)
 assert d["ok"] is False'
 }
