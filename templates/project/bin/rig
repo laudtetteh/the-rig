@@ -684,7 +684,7 @@ with open(lock_path, "a+") as lock:
     text = path.read_bytes().decode("utf-8") if path.exists() else "# Progress\n\n## Format\n\n"
     first_break = re.search(r"\r\n|\n|\r", text)
     newline = first_break.group() if first_break else "\n"
-    entry = entry.replace("\n", newline)
+    entry = entry.replace("\r\n", "\n").replace("\r", "\n").replace("\n", newline)
     marker = "<!-- Add entries above this line, newest first -->"
     marker_count = text.count(marker)
     if marker_count > 1:

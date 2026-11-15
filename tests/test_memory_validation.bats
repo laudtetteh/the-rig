@@ -344,7 +344,7 @@ EOF
     --title "new markerless progress" --body "New body." --json
   [ "$status" -eq 0 ]
   [[ "$output" == *'"ok":true'* ]] || return 1
-  run env PROGRESS_FILE="$progress" python3 -c 'import os, pathlib; text=pathlib.Path(os.environ["PROGRESS_FILE"]).read_text(); assert text.index("example") < text.index("new markerless progress") < text.index("recent work") < text.index("older work"); assert "Recent body.\n\n## [2026-11-13]" in text'
+  run env PROGRESS_FILE="$progress" python3 -c 'import os, pathlib; text=pathlib.Path(os.environ["PROGRESS_FILE"]).read_text(); assert text.index("example") < text.index("\n```\n") < text.index("new markerless progress") < text.index("recent work") < text.index("older work"); assert "Recent body.\n\n## [2026-11-13]" in text'
   [ "$status" -eq 0 ]
 }
 
@@ -356,10 +356,10 @@ EOF
   PROGRESS_FILE="$progress" python3 -c 'import os, pathlib; pathlib.Path(os.environ["PROGRESS_FILE"]).write_bytes(b"# Progress\r\n\r\nNewest first.\r\n\r\n## [2026-11-14] - recent\r\n\r\n## [2026-11-13] - older\r\n")'
 
   run "$TEST_PROJECT/bin/rig" memory append-progress \
-    --title "new external progress" --body "New body." --json
+    --title "new external progress" --body $'Line one\r\nLine two.' --json
   [ "$status" -eq 0 ]
   [[ "$output" == *'"ok":true'* ]] || return 1
-  run env PROGRESS_FILE="$progress" python3 -c 'import os, pathlib; raw=pathlib.Path(os.environ["PROGRESS_FILE"]).read_bytes(); assert b"\n" not in raw.replace(b"\r\n", b""); assert raw.index(b"new external progress") < raw.index(b"recent") < raw.index(b"older")'
+  run env PROGRESS_FILE="$progress" python3 -c 'import os, pathlib; raw=pathlib.Path(os.environ["PROGRESS_FILE"]).read_bytes(); assert b"\n" not in raw.replace(b"\r\n", b""); assert b"Line one\r\nLine two." in raw and b"\r\r\n" not in raw; assert raw.index(b"new external progress") < raw.index(b"recent") < raw.index(b"older")'
   [ "$status" -eq 0 ]
 }
 
