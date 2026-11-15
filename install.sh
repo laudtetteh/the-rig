@@ -3216,11 +3216,19 @@ PYEOF
       if _converged_output="$(attempt_convergence_merge "$src" "$dest" "$rel" "$manifest_hash")"; then
         if [[ "$AGENT_DRY_RUN" != true ]]; then
           _upgrade_write "$_converged_output" "$dest" "$base"
-          # Baseline = what Rig itself would install here (rendered template),
-          # so the merged customization stays detectable as customized (#636).
+          # Baseline = what Rig itself would install here, so the merged
+          # customization stays detectable as customized (#636). Only the
+          # named workflow files receive post-copy [BASE_BRANCH] substitution;
+          # other templates may mention placeholders as literal documentation
+          # (bin/rig mentions [Project Name]) and are copied verbatim.
           local _converged_baseline
-          _converged_baseline="$(rendered_project_template_hash "$src" "${base:-}" "$rel")"
-          [[ -n "$_converged_baseline" ]] || _converged_baseline="$new_hash"
+          case "$rel" in
+            .claude/commands/ship.md|.claude/commands/post-merge.md|.rig/processes/SHIP_WORKFLOW.md|.rig/processes/POST_MERGE_WORKFLOW.md)
+              _converged_baseline="$(rendered_project_template_hash "$src" "${base:-}" "$rel")"
+              [[ -n "$_converged_baseline" ]] || _converged_baseline="$new_hash"
+              ;;
+            *) _converged_baseline="$new_hash" ;;
+          esac
           write_manifest_entry "$_converged_baseline" "$rel" "$manifest_file" "$dest"
         fi
         rm -f "$_converged_output"
