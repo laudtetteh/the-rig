@@ -1145,11 +1145,25 @@ upgrade_set_executable_bits() {
   done < <(find -P "$directory" -maxdepth 1 -type f -name "$pattern" -print0)
 }
 
+# Succeed when this run left REL untouched as customized or conflicting.
+# Post-copy passes must not refresh such a path's manifest hash: recording the
+# user's content as the Rig baseline would make the next upgrade treat the
+# customization as unmodified Rig content and replace it.
+upgrade_skipped_path() {
+  local rel="$1" skipped
+  for skipped in ${UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]+"${UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]}"} \
+                 ${UPGRADE_SKIPPED_CONFLICT_FILES[@]+"${UPGRADE_SKIPPED_CONFLICT_FILES[@]}"}; do
+    [[ "$skipped" == "$rel" ]] && return 0
+  done
+  return 1
+}
+
 refresh_executable_manifest_entry() {
   local path="$1" rel="$2"
   [[ "$AGENT_DRY_RUN" == true ]] && return 0
   [[ -f "$path" && ! -L "$path" ]] || return 0
   [[ -n "$(read_manifest_hash "$rel")" ]] || return 0
+  upgrade_skipped_path "$rel" && return 0
   write_manifest_entry "$(sha256_file "$path")" "$rel" "$MANIFEST_FILE" "$path"
   # The chmod +x above happens AFTER _upgrade_write() recorded this file's
   # after-state, so the report's recorded mode is the pre-chmod one and
@@ -4411,6 +4425,9 @@ PYEOF
     guard_destination_before_write "$base" "$f" "$rel" || return 0
     # agent-plan: classification only, never substitute placeholders.
     [[ "$AGENT_DRY_RUN" == true ]] && return 0
+    # A customized or conflicting file this run skipped stays exactly as the
+    # user left it, and its manifest baseline is not refreshed.
+    upgrade_skipped_path "$rel" && return 0
     sed_inplace "s/\\[BASE_BRANCH\\]/${_BASE_ESC}/g" "$f"
     # Refresh the manifest hash for whatever this substitution just changed.
     # A manifest entry recorded earlier in this same run (by copy_file()'s
