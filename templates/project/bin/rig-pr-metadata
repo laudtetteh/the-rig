@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""Read-only PR metadata review for the final merge boundary.
+
+Compares a pull request's current title, body, labels and closing-issue links
+against the PR's final commit list and the issue scope recorded for the task.
+It never contacts GitHub and never edits anything: the caller fetches the PR,
+commit and closing-reference JSON with `gh` and passes the files (or `-` for
+stdin) in. The output is a list of findings plus the exact proposed edits, so a
+human can approve or reject each external write explicitly.
+
+Exit codes: 0 = metadata consistent (or review skipped), 1 = findings with
+proposed edits, 2 = unusable input.
+"""
+import argparse
+import json
+import re
+import shlex
+import sys
+
+HOUSEKEEPING_PREFIXES = (
+    "chore(memory)",
+    "chore(post-merge)",
+    "chore(release)",
+    "chore(rig)",
+)
+CONVENTIONAL = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?!?:\s*(?P<desc>.+)$")
+SUBJECT_ISSUES = re.compile(r"\[([^\]]*#\d+[^\]]*)\]")
+ISSUE_NUMBER = re.compile(r"#(\d+)")
+CLOSING_LINE = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s+#(\d+)", re.IGNORECASE
+)
+PLACEHOLDER_CLOSES = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#N\b", re.IGNORECASE)
+
+
+class InputError(Exception):
+    """Raised when an input file is missing or is not the expected JSON shape."""
+
+
+def load_json(path):
+    """Load JSON from a path, or from stdin when the path is '-'."""
+    try:
+        if path == "-":
+            return json.load(sys.stdin)
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError as exc:
+        raise InputError(f"input file not found: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise InputError(f"input is not valid JSON: {path} ({exc.msg})") from exc
+
+
+def parse_pr(data):
+    """Normalize `gh pr view --json number,title,body,labels` output."""
+    if not isinstance(data, dict) or not isinstance(data.get("title"), str):
+        raise InputError("PR JSON must be an object with a string 'title'")
+    labels = []
+    for label in data.get("labels") or []:
+        name = label.get("name") if isinstance(label, dict) else label
+        if isinstance(name, str):
+            labels.append(name)
+    return {
+        "number": data.get("number"),
+        "title": data["title"],
+        "body": data.get("body") or "",
+        "labels": labels,
+    }
+
+
+def parse_commits(data):
+    """Normalize `gh pr view --json commits` output (or a bare commit list)."""
+    if isinstance(data, dict):
+        data = data.get("commits")
+    if not isinstance(data, list):
+        raise InputError("commits JSON must be a list or an object with a 'commits' list")
+    commits = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            raise InputError("each commit must be an object")
+        subject = entry.get("messageHeadline", entry.get("subject"))
+        if not isinstance(subject, str):
+            raise InputError("each commit needs a 'messageHeadline' (or 'subject') string")
+        body = entry.get("messageBody", entry.get("body")) or ""
+        commits.append({"subject": subject, "body": body})
+    return commits
+
+
+def parse_closing(data):
+    """Extract closing issue numbers from a GraphQL response or a bare list."""
+    nodes = data
+    if isinstance(data, dict):
+        try:
+            refs = data["data"]["repository"]["pullRequest"]["closingIssuesReferences"]
+        except (KeyError, TypeError) as exc:
+            raise InputError(
+                "closing JSON must be the closingIssuesReferences GraphQL response"
+            ) from exc
+        nodes = refs.get("nodes") if isinstance(refs, dict) else None
+    if not isinstance(nodes, list):
+        raise InputError("closing JSON has no issue node list")
+    numbers = set()
+    for node in nodes:
+        value = node.get("number") if isinstance(node, dict) else node
+        if not isinstance(value, int):
+            raise InputError("each closing reference needs an integer 'number'")
+        numbers.add(value)
+    return numbers
+
+
+def is_housekeeping(subject):
+    """True for Rig housekeeping and merge commits that never shape PR metadata."""
+    lowered = subject.lower()
+    return lowered.startswith(HOUSEKEEPING_PREFIXES) or lowered.startswith("merge ")
+
+
+def subject_issues(subject):
+    """Issue numbers named in a subject's trailing `[#N]` reference block."""
+    numbers = set()
+    for block in SUBJECT_ISSUES.findall(subject):
+        numbers.update(int(n) for n in ISSUE_NUMBER.findall(block))
+    return numbers
+
+
+def strip_issue_block(subject):
+    """Drop the `[#N]` reference block so subjects compare on their description."""
+    return SUBJECT_ISSUES.sub("", subject).strip()
+
+
+def body_closing_issues(body):
+    """Issue numbers the body closes with one keyword per issue (body fallback)."""
+    return {int(n) for n in CLOSING_LINE.findall(body)}
+
+
+def review(pr, commits, closing, scope_issues, not_closing, required_labels):
+    """Return (findings, proposal) comparing PR metadata with the final commits."""
+    findings = []
+    work = [c for c in commits if not is_housekeeping(c["subject"])]
+    commit_types = []
+    referenced = set()
+    for commit in work:
+        match = CONVENTIONAL.match(commit["subject"])
+        if match and match.group("type") not in commit_types:
+            commit_types.append(match.group("type"))
+        referenced.update(subject_issues(commit["subject"]))
+        referenced.update(body_closing_issues(commit["body"]))
+    expected_closing = (referenced | set(scope_issues)) - set(not_closing)
+
+    proposal = {"title": None, "add_labels": [], "body_append": []}
+
+    title_match = CONVENTIONAL.match(pr["title"])
+    title_type = title_match.group("type") if title_match else None
+    if work and (title_type is None or title_type not in commit_types):
+        suggested = strip_issue_block(work[0]["subject"])
+        issue_suffix = " ".join(f"#{n}" for n in sorted(expected_closing))
+        if issue_suffix:
+            suggested = f"{suggested} [{issue_suffix}]"
+        reason = (
+            "title is not a conventional 'type(scope): description'"
+            if title_type is None
+            else f"title type '{title_type}' matches no final commit type ({', '.join(commit_types)})"
+        )
+        findings.append({"code": "stale_title", "detail": reason})
+        proposal["title"] = suggested
+        title_type = CONVENTIONAL.match(suggested).group("type") if CONVENTIONAL.match(suggested) else None
+    else:
+        title_issues = subject_issues(pr["title"])
+        out_of_scope = sorted(title_issues - expected_closing - set(not_closing))
+        if out_of_scope and expected_closing:
+            findings.append({
+                "code": "stale_title",
+                "detail": "title references issue(s) outside the final scope: "
+                + ", ".join(f"#{n}" for n in out_of_scope),
+            })
+            proposal["title"] = (
+                f"{strip_issue_block(pr['title'])} ["
+                + " ".join(f"#{n}" for n in sorted(expected_closing)) + "]"
+            )
+
+    labels = set(pr["labels"])
+    wanted = list(required_labels)
+    if title_type:
+        wanted.insert(0, f"type: {title_type}")
+    for label in wanted:
+        if label not in labels and label not in proposal["add_labels"]:
+            findings.append({"code": "missing_label", "detail": f"label '{label}' is not applied"})
+            proposal["add_labels"].append(label)
+
+    if not pr["body"].strip():
+        findings.append({"code": "empty_body", "detail": "PR body is empty"})
+    if PLACEHOLDER_CLOSES.search(pr["body"]):
+        findings.append({"code": "body_placeholder", "detail": "PR body still contains a literal 'Closes #N' placeholder"})
+
+    for number in sorted(expected_closing - closing):
+        findings.append({
+            "code": "missing_closing_link",
+            "detail": f"issue #{number} is in the final scope but the PR does not close it",
+        })
+        proposal["body_append"].append(f"Closes #{number}")
+    for number in sorted(closing - expected_closing - set(not_closing)):
+        findings.append({
+            "code": "unexpected_closing_link",
+            "detail": f"PR closes #{number}, which no final commit or task scope references; "
+            "remove its closing line unless it is intentionally resolved",
+        })
+    for number in sorted(closing & set(not_closing)):
+        findings.append({
+            "code": "unexpected_closing_link",
+            "detail": f"PR closes #{number}, which was marked as only partially delivered; "
+            "move it out of the closing section",
+        })
+
+    body_lower = pr["body"].lower()
+    for commit in work:
+        description = strip_issue_block(commit["subject"])
+        if description.lower() not in body_lower:
+            findings.append({
+                "code": "body_missing_commit",
+                "detail": f"final commit not reflected in body: {description}",
+            })
+            proposal["body_append"].append(f"- {description}")
+
+    return findings, proposal
+
+
+def edit_commands(pr, proposal):
+    """Render the exact `gh pr edit` commands for the proposed edits."""
+    number = pr["number"] if pr["number"] is not None else "<PR_NUMBER>"
+    commands = []
+    if proposal["title"]:
+        commands.append(f"gh pr edit {number} --title {shlex.quote(proposal['title'])}")
+    for label in proposal["add_labels"]:
+        commands.append(f"gh pr edit {number} --add-label {shlex.quote(label)}")
+    if proposal["body_append"]:
+        commands.append(f"gh pr edit {number} --body-file <proposed-body-file>")
+    return commands
+
+
+def proposed_body(pr, proposal):
+    """Current body with the proposed lines appended in a review section."""
+    if not proposal["body_append"]:
+        return None
+    base = pr["body"].rstrip()
+    closing = [line for line in proposal["body_append"] if line.startswith("Closes ")]
+    changes = [line for line in proposal["body_append"] if not line.startswith("Closes ")]
+    parts = [base] if base else []
+    if changes:
+        parts.append("## Changes (added at merge review)\n" + "\n".join(changes))
+    if closing:
+        parts.append("## Closes (added at merge review)\n" + "\n".join(closing))
+    return "\n\n".join(parts) + "\n"
+
+
+def render_text(pr, findings, proposal, closing_source):
+    """Human-readable report for the agent to show the user before any edit."""
+    lines = [f"PR metadata review (read-only) for PR #{pr['number']}: {pr['title']}"]
+    lines.append(f"Closing links checked from: {closing_source}")
+    if not findings:
+        lines.append("Result: CLEAN — title, body, labels and closing links match the final commits.")
+        return "\n".join(lines)
+    lines.append(f"Result: {len(findings)} finding(s). No edit has been made.")
+    for finding in findings:
+        lines.append(f"  - [{finding['code']}] {finding['detail']}")
+    lines.append("Proposed edits (each needs explicit user approval before running):")
+    if proposal["title"]:
+        lines.append(f"  title -> {proposal['title']}")
+    for label in proposal["add_labels"]:
+        lines.append(f"  add label -> {label}")
+    for line in proposal["body_append"]:
+        lines.append(f"  append to body -> {line}")
+    lines.append("Commands:")
+    for command in edit_commands(pr, proposal):
+        lines.append(f"  {command}")
+    return "\n".join(lines)
+
+
+def build_parser():
+    """CLI definition."""
+    parser = argparse.ArgumentParser(
+        prog="rig-pr-metadata",
+        description="Read-only review of PR title, body, labels and closing links "
+        "against the final commits, run immediately before merge.",
+    )
+    parser.add_argument("--pr", required=True, help="gh pr view --json number,title,body,labels output (file or -)")
+    parser.add_argument("--commits", required=True, help="gh pr view --json commits output (file or -)")
+    parser.add_argument("--closing", help="closingIssuesReferences GraphQL response (file or -); "
+                        "without it, closing keywords in the body are used")
+    parser.add_argument("--issue", action="append", type=int, default=[],
+                        help="issue number in the task's scope (repeatable)")
+    parser.add_argument("--not-closing", action="append", type=int, default=[],
+                        help="issue intentionally left open, e.g. partially delivered (repeatable)")
+    parser.add_argument("--require-label", action="append", default=[],
+                        help="label the PR must carry, e.g. 'area: hooks' (repeatable)")
+    parser.add_argument("--issue-tracking", default="github",
+                        help="value of issue-tracking: from CLAUDE.md; anything but github skips the review")
+    parser.add_argument("--proposed-body-out", help="write the proposed body to this local file")
+    parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    return parser
+
+
+def main():
+    """Entry point."""
+    args = build_parser().parse_args()
+    tracking = args.issue_tracking.strip().lower() or "github"
+    if tracking != "github":
+        reason = (f"issue-tracking is '{args.issue_tracking}', so PR closing links and "
+                  "issue scope are not GitHub-managed; review skipped")
+        if args.json:
+            print(json.dumps({"ok": True, "skipped": True, "reason": reason}, indent=2))
+        else:
+            print(f"PR metadata review skipped: {reason}.")
+        return 0
+    if [args.pr, args.commits, args.closing].count("-") > 1:
+        print("rig-pr-metadata: only one input may be read from stdin", file=sys.stderr)
+        return 2
+    try:
+        pr = parse_pr(load_json(args.pr))
+        commits = parse_commits(load_json(args.commits))
+        if args.closing:
+            closing = parse_closing(load_json(args.closing))
+            closing_source = "GitHub closingIssuesReferences"
+        else:
+            closing = body_closing_issues(pr["body"])
+            closing_source = "PR body closing keywords (GitHub references not supplied)"
+    except InputError as exc:
+        print(f"rig-pr-metadata: {exc}", file=sys.stderr)
+        return 2
+
+    findings, proposal = review(pr, commits, closing, args.issue, args.not_closing, args.require_label)
+    body = proposed_body(pr, proposal)
+    if body is not None and args.proposed_body_out:
+        with open(args.proposed_body_out, "w", encoding="utf-8") as handle:
+            handle.write(body)
+
+    if args.json:
+        print(json.dumps({
+            "ok": not findings,
+            "skipped": False,
+            "pr": pr["number"],
+            "closing_source": closing_source,
+            "findings": findings,
+            "proposal": proposal,
+            "commands": edit_commands(pr, proposal),
+        }, indent=2))
+    else:
+        print(render_text(pr, findings, proposal, closing_source))
+    return 1 if findings else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
