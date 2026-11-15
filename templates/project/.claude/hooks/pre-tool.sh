@@ -539,7 +539,12 @@ print(match.group(1) + (match.group(2) or "/"), end="")
     if [[ "$PATH_ARG" == *"$protected"* || "$PATH_CANONICAL" == "$protected_canonical" || "$PATH_CANONICAL" == "$protected_canonical/"* ]]; then
       echo "Blocked: '$PATH_ARG' is a The Rig governance file." >&2
       echo "The agent must not modify its own rules directly." >&2
-      echo "Use /rig-propose to stage a change for human review, or edit manually." >&2
+      case "${RIG_AGENT:-claude}" in
+        codex) propose_invocation='$rig-propose' ;;
+        claude) propose_invocation='/rig-propose' ;;
+        *) propose_invocation='the rig-propose workflow' ;;
+      esac
+      echo "Use $propose_invocation to stage a change for human review, or edit manually." >&2
       exit 2
     fi
   done

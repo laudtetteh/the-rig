@@ -28,6 +28,98 @@ else
   RIG_DIR="$REPO/.rig"
 fi
 
+# ── Provider-correct housekeeping reminders ──────────────────────────────────
+# Keep this block identical in prompt-submit.sh and session-start.sh; a test
+# compares the two copies. It reads only local files and Git objects, because
+# UserPromptSubmit must never wait on the network.
+
+# Print a Rig workflow invocation in the active provider's syntax, or a
+# provider-neutral name when the provider is unknown.
+rig_workflow_invocation() {
+  case "${RIG_AGENT:-claude}" in
+    claude) printf '/%s' "$1" ;;
+    codex) printf '$%s' "$1" ;;
+    *) printf 'the %s workflow' "$1" ;;
+  esac
+}
+
+# Print how long ago an ISO-8601 timestamp with a UTC offset was, or nothing.
+rig_merge_age() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 -c '
+import datetime, sys
+try:
+    then = datetime.datetime.fromisoformat(sys.argv[1])
+    if then.tzinfo is None:
+        raise ValueError
+    seconds = int((datetime.datetime.now(datetime.timezone.utc) - then).total_seconds())
+    if seconds < 0:
+        raise ValueError
+    if seconds < 60:
+        print("just now")
+    else:
+        count, unit = ((seconds // 60, "minute") if seconds < 3600 else
+                       (seconds // 3600, "hour") if seconds < 86400 else
+                       (seconds // 86400, "day"))
+        print("%d %s%s ago" % (count, unit, "" if count == 1 else "s"))
+except (ValueError, OverflowError):
+    pass
+' "$1" 2>/dev/null || true
+}
+
+# Print " Merge: <short SHA> (<subject or PR #N: title>) at <time>, <age>."
+# from a .post-merge-pending marker. Marker values are untrusted data: only a
+# hexadecimal SHA is ever passed to Git.
+rig_merge_detail() {
+  local marker="$1" sha merged_at label subject pr title age detail=""
+  sha=$(sed -n 's/^merge_sha=//p' "$marker" 2>/dev/null | head -1)
+  merged_at=$(sed -n 's/^merged_at=//p' "$marker" 2>/dev/null | head -1)
+  [[ "$sha" == unknown ]] && sha=""
+  [[ "$merged_at" == unknown ]] && merged_at=""
+  if [[ -n "$sha" ]]; then
+    label="$sha"
+    if [[ "$sha" =~ ^[0-9a-fA-F]{7,64}$ ]] && git -C "$REPO" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+      label=$(git -C "$REPO" rev-parse --short "$sha" 2>/dev/null || printf '%s' "$sha")
+      subject=$(git -C "$REPO" log -1 --format=%s "$sha" 2>/dev/null || true)
+      pr=$(printf '%s' "$subject" | sed -n 's/^Merge pull request #\([0-9][0-9]*\) .*/\1/p')
+      if [[ -n "$pr" ]]; then
+        title=$(git -C "$REPO" log -1 --format=%b "$sha" 2>/dev/null | sed -n '/[^[:space:]]/{p;q;}')
+        subject="PR #${pr}${title:+: $title}"
+      fi
+      [[ -n "$subject" ]] && label+=" ($subject)"
+    fi
+    detail=" Merge: $label"
+  fi
+  if [[ -n "$merged_at" ]]; then
+    age=$(rig_merge_age "$merged_at")
+    if [[ -n "$detail" ]]; then
+      detail+=" at $merged_at"
+    else
+      detail=" Merged at $merged_at"
+    fi
+    [[ -n "$age" ]] && detail+=", $age"
+  fi
+  [[ -n "$detail" ]] && detail+="."
+  printf '%s' "$detail"
+}
+
+# Print the pending-merge reminder in the active provider's syntax.
+rig_post_merge_warning() {
+  local invocation
+  invocation=$(rig_workflow_invocation post-merge)
+  printf '⚠️ A merge landed since %s was last run.%s Memory may not reflect the merged state. Run %s now — or say '"'"'skip for current task'"'"' to proceed without clearing the reminder.' \
+    "$invocation" "$(rig_merge_detail "$1")" "$invocation"
+}
+
+# Print the missed-wrap reminder in the active provider's syntax.
+rig_wrap_warning() {
+  local invocation
+  invocation=$(rig_workflow_invocation wrap)
+  printf '⚠️ The last session ended without running %s. CONTEXT_SNAPSHOT.md may be stale and PROGRESS.md has unexpanded entries. Run %s now to capture session state before starting new work — or say '"'"'skip wrap'"'"' to proceed anyway.' \
+    "$invocation" "$invocation"
+}
+# ── End provider-correct housekeeping reminders ──────────────────────────────
+
 WRAP_NEEDED="$RIG_DIR/memory/.wrap-needed"
 POST_MERGE_PENDING="$RIG_DIR/memory/.post-merge-pending"
 NUDGE_FLAG="$RIG_DIR/memory/.permission-nudge-offered"
@@ -72,24 +164,22 @@ except (ValueError,TypeError,AttributeError):
 fi
 
 # Fast path: no flags AND nudge already evaluated — exit immediately
-if [[ -z "$WARNINGS" && ! -f "$WRAP_NEEDED" && ! -f "$POST_MERGE_PENDING" && -f "$NUDGE_FLAG" && -f "$HANDOFF_SUGGESTED" ]]; then
+# The permission nudge names a Claude Code built-in; other providers never
+# evaluate it, and must not consume the project-wide once-only flag.
+NUDGE_PENDING=false
+[[ "${RIG_AGENT:-claude}" == claude && ! -f "$NUDGE_FLAG" ]] && NUDGE_PENDING=true
+if [[ -z "$WARNINGS" && ! -f "$WRAP_NEEDED" && ! -f "$POST_MERGE_PENDING" && "$NUDGE_PENDING" == false && -f "$HANDOFF_SUGGESTED" ]]; then
   exit 0
 fi
 
 # Build warning text for housekeeping flags
 if [[ -f "$WRAP_NEEDED" ]]; then
   [[ -n "$WARNINGS" ]] && WARNINGS+=$'\n\n'
-  WARNINGS+="⚠️ The last session ended without running /wrap. CONTEXT_SNAPSHOT.md may be stale and PROGRESS.md has unexpanded entries. Run /wrap now to capture session state before starting new work — or say 'skip wrap' to proceed anyway."
+  WARNINGS+="$(rig_wrap_warning)"
 fi
 if [[ -f "$POST_MERGE_PENDING" ]]; then
   [[ -n "$WARNINGS" ]] && WARNINGS+=$'\n\n'
-  MERGE_SHA=$(sed -n 's/^merge_sha=//p' "$POST_MERGE_PENDING" 2>/dev/null | head -1)
-  MERGED_AT=$(sed -n 's/^merged_at=//p' "$POST_MERGE_PENDING" 2>/dev/null | head -1)
-  MERGE_DETAIL=""
-  [[ -n "$MERGE_SHA" ]] && MERGE_DETAIL=" Merge: ${MERGE_SHA}"
-  [[ -n "$MERGED_AT" ]] && MERGE_DETAIL+=" at ${MERGED_AT}."
-  [[ -n "$MERGE_DETAIL" && "$MERGE_DETAIL" != *. ]] && MERGE_DETAIL+="."
-  WARNINGS+="⚠️ A merge landed since /post-merge was last run.${MERGE_DETAIL} Memory may not reflect the merged state. Run /post-merge now — or say 'skip for current task' to proceed without clearing the reminder."
+  WARNINGS+="$(rig_post_merge_warning "$POST_MERGE_PENDING")"
 fi
 
 # Session-size/cost benchmark — default 2 hours elapsed wall-clock for the
@@ -127,12 +217,12 @@ PYEOF
   if [[ -n "$handoff_age" ]]; then
     touch "$HANDOFF_SUGGESTED" 2>/dev/null || true
     [[ -n "$WARNINGS" ]] && WARNINGS+=$'\n\n'
-    WARNINGS+="Rig handoff suggestion: this session has been active for about $((handoff_age / 60)) minutes. Want to wrap and hand off to a new session? Reply explicitly before I run /handoff-checklist; silence or an ambiguous reply is not consent."
+    WARNINGS+="Rig handoff suggestion: this session has been active for about $((handoff_age / 60)) minutes. Want to wrap and hand off to a new session? Reply explicitly before I run $(rig_workflow_invocation handoff-checklist); silence or an ambiguous reply is not consent."
   fi
 fi
 
 # Permission nudge — once per project when allowlist is sparse
-if [[ ! -f "$NUDGE_FLAG" ]] && command -v python3 >/dev/null 2>&1; then
+if [[ "$NUDGE_PENDING" == true ]] && command -v python3 >/dev/null 2>&1; then
   SETTINGS="$REPO/.claude/settings.json"
   if [[ -f "$SETTINGS" ]]; then
     allowed_count=$(python3 -c "

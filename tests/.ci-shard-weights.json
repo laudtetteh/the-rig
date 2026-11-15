@@ -44,6 +44,7 @@
   "tests/test_precommit_skip_list.bats": 5.0,
   "tests/test_progress_sid_format.bats": 5.0,
   "tests/test_project_conventions.bats": 5.0,
+  "tests/test_provider_reminders.bats": 5.0,
   "tests/test_rig_doctor.bats": 5.0,
   "tests/test_rig_gaps_aggregation.bats": 5.0,
   "tests/test_same_run_creation_tracking.bats": 5.0,
