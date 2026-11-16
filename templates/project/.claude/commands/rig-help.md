@@ -31,6 +31,17 @@ No arguments. Output the table below directly — do not read individual command
 | `/status` | Project state dashboard. Shows current branch, active tasks, backlog count, and recent `PROGRESS.md` entries. |
 | `/session-name` | Derive and set a session name from work completed so far. Uses the same tiered format as `/wrap` and `/post-merge` but callable at any time without triggering a full cycle. |
 
+### Provider-native aids for concurrent conversations
+
+These controls help you distinguish or find provider conversations. Color and provider titles do not directly name or clear Rig records; resuming a conversation can still trigger Rig lifecycle hooks that bind or create a session anchor. Use `/session-name` to name the Rig record, and `/wrap` or `/post-merge` to complete its obligations.
+
+| Provider | When useful | Native control |
+|---|---|---|
+| Claude Code | Several terminal conversations look alike | `/color blue` changes this conversation's prompt-bar color; `/rename <label>` changes its provider title. |
+| Codex CLI | Return to a saved conversation | `codex resume` opens the picker, `codex resume --all` includes other working directories, and `codex resume --last` skips the picker. |
+
+Check the installed CLI's help if a native control is unavailable. See the [Claude Code command reference](https://code.claude.com/docs/en/commands) and [Codex CLI guide](https://learn.chatgpt.com/docs/codex/cli).
+
 ## Research and documentation
 
 | Command | What it does |
@@ -104,3 +115,4 @@ The Rig wires up four mechanisms for controlling what Claude Code can do:
 
 - This table is maintained manually; update it when a new command is added or flags change
 - For full command details, read the relevant `.claude/commands/[name].md` file
+- For Rig storage, identity, and manifest terms, see the [glossary](https://github.com/laudtetteh/the-rig/blob/main/docs/glossary.md)

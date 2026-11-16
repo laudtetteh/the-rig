@@ -233,7 +233,7 @@ echo ".rig/" >> .git/info/exclude
 
 ### Option B — External directory
 
-Install `.rig/` to a path outside the repo entirely. Use `--tracking external` with an optional `--rig-dir` to specify the path:
+To keep Rig data outside the checkout, choose a path outside the project and use `--tracking external` with `--rig-dir`:
 
 ```bash
 ~/tools/the-rig/install.sh --project-only --tracking external --rig-dir ~/.rig/projects/my-project
@@ -241,33 +241,37 @@ Install `.rig/` to a path outside the repo entirely. Use `--tracking external` w
 
 Or choose option 3 in the interactive tracking prompt. The installer will:
 
-1. Install all `.rig/` files to the external path
-2. Write a `.rigpath` file in the project root containing the external path
+1. Install all `.rig/` files to the configured data path
+2. Write a `.rigpath` file in the project root containing the configured data path
 3. Add `.rigpath` to `.git/info/exclude` automatically
 4. Update `CLAUDE.md`'s `@` imports and context-loading paths to use the
-   absolute external location
+   absolute configured location
 5. Update the hooks (`pre-tool.sh`, `post-tool.sh`) to resolve `RIG_DIR` via
    `.rigpath` at runtime — no hardcoded paths
 
-The project root stays clean. The agent finds its memory and rules via
-`.rigpath`. Teammates never see any of it.
+The agent finds memory and rules via `.rigpath`. External mode excludes that
+pointer, but project adapters such as `.claude/` can still appear in Git. The
+installer also accepts an in-project `--rig-dir`; that directory can appear in
+`git status` unless you exclude it. Use stealth mode with a data path outside
+the checkout when no Rig artifacts should appear in the checkout's Git view.
 
-> ⚠️ **Re-clone warning:** when you clone the project on a new machine, the
-> external `.rig/` directory doesn't travel with it. You must manually restore
-> the external directory on the new machine — either by re-running the installer
+> ⚠️ **Re-clone warning:** when the data directory is outside the checkout,
+> cloning the project on a new machine does not copy it. Restore that directory
+> on the new machine — either by re-running the installer
 > with `--tracking external --rig-dir <same-path>`, or by copying it from a backup.
 > See `docs/troubleshooting.md` → "CONTEXT_SNAPSHOT.md is missing after a re-clone"
 > for the full recovery steps.
 
-### Option C — Stealth mode (zero traces in git)
+### Option C — Stealth mode with an outside data path
 
 For multi-contributor repos where teammates must never see any Rig files — not
 even in `git status` — choose **option 4 (Stealth)** in the installer's tracking
-prompt.
+prompt and keep its data path outside the checkout. The default path does this;
+an in-project `--rig-dir` can leave its data directory visible and unignored.
 
 What stealth mode does in a single pass:
 
-1. Installs `.rig/` to an external path (default: `~/.rig/projects/<project-name>/`)
+1. Installs `.rig/` to the configured path (default: `~/.rig/projects/<project-name>/`)
 2. Writes `.rigpath` and adds it to `.git/info/exclude`
 3. Adds all other Rig artifacts to `.git/info/exclude`:
    `CLAUDE.md`, `PROJECT_BRIEF.md`, `.claude/`, `.agents/`, `.codex/`, `.mcp.json`,
@@ -290,9 +294,10 @@ What stealth mode does in a single pass:
 Claude Code still reads `.claude/settings.json` from disk at session start — it
 just isn't tracked by git.
 
-**Important:** stealth files live on disk only. When you clone the project on a new
-machine, re-run the installer with option 4 to restore them. The `.git/info/exclude`
-entries and `.git/hooks/` scripts are per-clone and must be set up on each machine.
+**Important:** with the data path outside the checkout, stealth files stay local
+to the machine. When you clone the project on a new machine, re-run the installer
+with option 4 to restore them. The `.git/info/exclude` entries and `.git/hooks/`
+scripts are per-clone and must be set up on each machine.
 
 ---
 
@@ -467,7 +472,12 @@ path for all upgrades. It:
 ### How it works: the manifest
 
 The installer records the SHA256 hash of each Rig-owned file in
-`.rig/memory/.rig-manifest` on every install. This is committed to the repo.
+`$RIG_DIR/memory/.rig-manifest` on every install. In `repo` mode, `.rig/` is
+eligible for Git tracking; `local` excludes it. In `external` mode, the
+manifest's Git visibility depends on the configured path and ignore rules.
+Stealth mode defaults to a directory outside the checkout and excludes known
+project adapter paths. Keep any custom `--rig-dir` outside the checkout too;
+an arbitrary in-project data directory is not excluded automatically.
 
 On upgrade, for each Rig-owned file:
 
@@ -485,9 +495,9 @@ project's git status. Nothing is ever lost.
 
 ### Manifest metadata and provenance fields
 
-Alongside the plain-text `.rig/memory/.rig-manifest` (hash + path, one line per
+Alongside the plain-text `$RIG_DIR/memory/.rig-manifest` (hash + path, one line per
 file), the installer also writes a JSON companion at
-`.rig/memory/.rig-manifest.json`. If you open it directly, each entry looks
+`$RIG_DIR/memory/.rig-manifest.json`. If you open it directly, each entry looks
 like this:
 
 ```json
