@@ -69,6 +69,16 @@ run_install() {
   [ "$status" -eq 1 ]  # Fresh scaffold still has unfilled project placeholders.
   JSON_OUTPUT="$output" python3 -c 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="pass"'
 
+  mv "$TEST_PROJECT/.rig/memory/.rig-manifest" "$TEST_PROJECT/.rig/memory/.rig-manifest.review-backup"
+  run bash -c 'cd "$1" && bash bin/rig doctor --json' _ "$TEST_PROJECT"
+  [ "$status" -eq 1 ]
+  JSON_OUTPUT="$output" python3 -c 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="pass"'
+
+  mv "$TEST_PROJECT/.rig/memory/.rig-manifest.json" "$TEST_PROJECT/.rig/memory/.rig-manifest.json.review-backup"
+  run bash -c 'cd "$1" && bash bin/rig doctor --json' _ "$TEST_PROJECT"
+  [ "$status" -eq 1 ]
+  JSON_OUTPUT="$output" python3 -c 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="advisory" and "inventory" in c["codex_skill_parity"]["detail"]'
+
   printf '\nPARITY-DRIFT-CANARY\n' >> "$TEST_PROJECT/.agents/skills/doc-feature/references/command.md"
   run bash -c 'cd "$1" && bash bin/rig doctor --json' _ "$TEST_PROJECT"
   [ "$status" -eq 1 ]

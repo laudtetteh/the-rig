@@ -85,12 +85,31 @@ make_generated_skill() {
 
 @test "invalid install-target metadata fails without treating Codex as unselected" {
   local payload
-  for payload in '{broken' '{"schema_version":1,"agents":["unknown"]}'; do
+  for payload in '{broken' '{"schema_version":1,"agents":["unknown"]}' '{"agents":[]}'; do
     printf '%s\n' "$payload" > "$CASE_DIR/.rig/install-targets.json"
     run env CODEX_THREAD_ID=doctor-thread "$CASE_DIR/bin/rig" doctor --json
     [ "$status" -eq 1 ]
     json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["install_targets"]["state"]=="fail"; assert all(c[n]["state"]=="skipped" and "valid install-target" in c[n]["detail"] for n in ("codex_project_instructions","codex_project_target_runtime","codex_session_runtime"))'
   done
+}
+
+@test "Codex target without either manifest keeps source parity but leaves inventory advisory" {
+  printf '{"schema_version":1,"agents":["codex"]}\n' > "$CASE_DIR/.rig/install-targets.json"
+  rm "$CASE_DIR/.rig/memory/.rig-manifest"
+  make_generated_skill task
+  make_generated_skill ship
+  mkdir -p "$CASE_DIR/.codex"
+  printf 'project_doc_fallback_filenames = ["CLAUDE.md"]\n' > "$CASE_DIR/.codex/config.toml"
+  mkdir -p "$CASE_DIR/.agents/skills/extra"
+  printf 'extra\n' > "$CASE_DIR/.agents/skills/extra/SKILL.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="advisory" and "inventory" in c["codex_skill_parity"]["detail"]'
+
+  printf '\nPARITY-DRIFT-CANARY\n' >> "$CASE_DIR/.agents/skills/task/references/command.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="fail" and "task" in c["codex_skill_parity"]["detail"]'
 }
 
 @test "a malformed manifest skips checks that depend on its entries" {
@@ -370,6 +389,20 @@ make_generated_skill() {
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="fail" and "copied skill drift: custom" in c["detail"]'
+}
+
+@test "copied Claude skill names are not allowed slash-command rewrites" {
+  make_generated_skill task
+  make_generated_skill ship
+  mkdir -p "$CASE_DIR/.claude/skills/foo" "$CASE_DIR/.agents/skills/foo"
+  printf 'copied skill\n' > "$CASE_DIR/.claude/skills/foo/SKILL.md"
+  cp "$CASE_DIR/.claude/skills/foo/SKILL.md" "$CASE_DIR/.agents/skills/foo/SKILL.md"
+  printf 'Use /foo\n' >> "$CASE_DIR/.claude/commands/task.md"
+  printf 'Use $foo\n' >> "$CASE_DIR/.agents/skills/task/references/command.md"
+
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="fail" and "task" in c["codex_skill_parity"]["detail"]'
 }
 
 @test "Codex parity is advisory when a generator base branch is unknowable" {

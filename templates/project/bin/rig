@@ -1016,7 +1016,7 @@ else:
         target_data = json.loads(read(target_state))
         if not isinstance(target_data, dict):
             raise ValueError("expected a JSON object")
-        version = target_data.get("schema_version", 1)
+        version = target_data.get("schema_version")
         if type(version) is not int or version != 1:
             raise ValueError("unsupported schema_version (expected 1)")
         target_agents = target_data.get("agents")
@@ -1093,15 +1093,33 @@ elif skills.is_dir():
     command_names = {p.stem for p in command_dir.glob("*.md")}
     skill_names = {p.parent.name for p in skills.glob("*/SKILL.md")}
     skill_dirs = {p.name for p in skills.glob("*") if p.is_dir()}
-    generated_baseline = {parts[2] for path in manifest_paths
-                          if (parts := path.split("/"))[:2] == [".agents", "skills"]
-                          and len(parts) == 5 and parts[3:] == ["references", "command.md"]}
-    expected_generated = generated_baseline if "codex" in target_agents and generated_baseline else command_names
     source_skills = root / ".claude" / "skills"
     copied_names = {p.name for p in source_skills.glob("*") if p.is_dir()}
+    def generated_names(paths):
+        result = set()
+        for path in paths:
+            parts = path.split("/")
+            if (len(parts) == 5 and parts[:2] == [".agents", "skills"] and
+                parts[3:] == ["references", "command.md"]):
+                result.add(parts[2])
+        return result - copied_names
+
+    generated_baseline = generated_names(manifest_paths)
+    if "codex" in target_agents and not generated_baseline:
+        # The structured manifest survives some legacy flat-manifest losses.
+        # Its entry paths still record which command skills were installed.
+        try:
+            metadata = json.loads(read(rig / "memory" / ".rig-manifest.json"))
+            entries = metadata.get("entries") if isinstance(metadata, dict) and metadata.get("schema_version") == 1 else None
+            if isinstance(entries, dict):
+                generated_baseline = generated_names(entries)
+        except ValueError:
+            pass
+    inventory_unverified = not generated_baseline and ("codex" in target_agents or target_metadata_invalid)
+    expected_generated = (generated_baseline | command_names) if generated_baseline else command_names
     missing_skills = sorted(expected_generated - skill_names)
     missing_copied = sorted(copied_names - skill_dirs)
-    extra_skills = sorted(skill_names - expected_generated - copied_names)
+    extra_skills = [] if inventory_unverified else sorted(skill_names - expected_generated - copied_names)
     copied_drift = []
     for name in sorted(copied_names & skill_dirs):
         source_tree, mirror_tree = source_skills / name, skills / name
@@ -1120,14 +1138,16 @@ elif skills.is_dir():
             copied_drift.append(name)
 
     # The generator makes exactly two content changes: [BASE_BRANCH] becomes
-    # the selected branch, and known Rig /name invocations become $name. The
-    # optional names remain in the generator's template directory even when
-    # not selected for this install; keep this set aligned with install.sh's
-    # should_install_codex_command choices. Unknown /name tokens are never an
-    # allowed difference, or a changed path could hide behind normalization.
+    # the selected branch, and source command /name invocations become $name.
+    # Its template directory includes optional commands even when not selected
+    # for this install. Copied Claude skills are never command invocations.
+    # Unknown /name tokens are never an allowed difference.
     optional_commands = {"doc-feature", "doc-list", "feature-context",
                          "refresh-feature-doc", "rig-gaps", "rig-propose"}
-    known_commands = command_names | skill_names | optional_commands
+    # Without a manifest, present non-copied skill names are the only local
+    # evidence for command names omitted from a Codex-only Claude destination.
+    candidate_commands = skill_names - copied_names if inventory_unverified else set()
+    known_commands = command_names | expected_generated | optional_commands | candidate_commands
     names = "|".join(sorted(map(re.escape, known_commands), key=len, reverse=True))
     invocation = re.compile(rf"(?<![A-Za-z0-9_./-])/({names})(?![A-Za-z0-9_-])")
     brain_text = read(root / "CLAUDE.md")
@@ -1175,11 +1195,13 @@ elif skills.is_dir():
         detail += f"; {len(copied_names) - len(set(missing_copied + copied_drift))}/{len(copied_names)} copied Claude skills match"
     if unverified:
         detail += "; content not verified without one base-branch setting: " + ", ".join(unverified)
+    if inventory_unverified:
+        detail += "; generated skill inventory not verified without a manifest baseline"
     if problems:
         detail += "; " + "; ".join(problems)
     check("codex_skill_parity", not problems, detail,
           fix="inspect .claude/commands and .agents/skills for listed names; preview a backed-up /rig-upgrade --scope=project --mode=agent before repair",
-          state=ADVISORY if unverified and not problems else None)
+          state=ADVISORY if (unverified or inventory_unverified) and not problems else None)
 else:
     reason = ("requires valid install-target metadata or present Codex skills" if target_metadata_invalid else
               "Codex mirroring not enabled")

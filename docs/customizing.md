@@ -689,11 +689,19 @@ symlink blocks a required path. Direct `bin/rig worktree bootstrap` also
 reports the blocked path and exits nonzero.
 
 Malformed or unsupported `install-targets.json` fails `install_targets`.
+The file must explicitly declare `schema_version: 1`.
 Checks that need its provider selection skip with that dependency stated;
 checks backed by installed files or the manifest still run. Older installs
 without this file continue to use those available sources.
 
 `codex_skill_parity` names each divergent command, wrapper, or copied skill.
+If the classic manifest is missing, it uses the structured manifest for the
+installed command-skill inventory. If neither baseline exists, inventory is
+advisory while content differences for available command pairs still fail.
+Only command names may receive the generator's slash-to-dollar rewrite;
+copied Claude skill names do not become command names. Without either
+manifest, the comparison can use present non-copied skill names as command
+candidates, so the inventory remains explicitly unverified.
 If a command still contains `[BASE_BRANCH]` and the project brain has no
 unique `base-branch:` value, the content comparison is advisory because its
 expected generated text cannot be determined. Review the two files and the
