@@ -10,6 +10,7 @@ setup() {
   git -C "$CASE_DIR" init -q
   git -C "$CASE_DIR" checkout -q -b feat/sprint
   unset RIG_SESSION_FILE RIG_SESSION_ANCHOR RIG_SESSION_PID
+  unset CLAUDE_CODE_SESSION_ID CLAUDECODE CODEX_THREAD_ID
 }
 
 task() {
