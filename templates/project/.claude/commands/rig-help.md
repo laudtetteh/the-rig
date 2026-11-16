@@ -33,7 +33,7 @@ No arguments. Output the table below directly — do not read individual command
 
 ### Provider-native aids for concurrent conversations
 
-These controls help you distinguish or find provider conversations. They do not set The Rig's session anchor, canonical session name, task, or obligation. Use `/session-name` for the Rig record.
+These controls help you distinguish or find provider conversations. Color and provider titles do not directly name or clear Rig records; resuming a conversation can still trigger Rig lifecycle hooks that bind or create a session anchor. Use `/session-name` to name the Rig record, and `/wrap` or `/post-merge` to complete its obligations.
 
 | Provider | When useful | Native control |
 |---|---|---|

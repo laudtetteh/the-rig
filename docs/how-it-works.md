@@ -248,7 +248,7 @@ Seven files, seven purposes:
 - Accumulates across sessions and machines — the mechanism by which real-world use improves The Rig
 
 ### .rig/memory/.rig-manifest
-- Written by the installer on every install under the effective `$RIG_DIR`; committed only in `repo` tracking mode
+- Written by the installer on every install under the effective `$RIG_DIR`; Git visibility follows the chosen storage path and exclusions (`repo` mode leaves `.rig/` eligible for tracking)
 - Records the SHA256 hash of each Rig-owned file at install time
 - Used by the **Upgrade** strategy to detect user customizations:
   - Hash unchanged since install → safe to auto-update
