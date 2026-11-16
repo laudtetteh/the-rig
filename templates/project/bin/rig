@@ -1063,16 +1063,94 @@ else:
 
 skills = root / ".agents" / "skills"
 if skills.is_dir() and not command_dir.is_dir():
-    check("codex_skill_parity", True, "Claude command source not installed; local name comparison unavailable", state=SKIPPED)
+    check("codex_skill_parity", True, "Claude command source not installed; content comparison unavailable", state=SKIPPED)
 elif skills.is_dir():
     command_names = {p.stem for p in command_dir.glob("*.md")}
     skill_names = {p.parent.name for p in skills.glob("*/SKILL.md")}
+    skill_dirs = {p.name for p in skills.glob("*") if p.is_dir()}
+    source_skills = root / ".claude" / "skills"
+    copied_names = {p.name for p in source_skills.glob("*") if p.is_dir()}
     missing_skills = sorted(command_names - skill_names)
-    extra_skills = sorted(skill_names - command_names)
-    check("codex_skill_parity", not missing_skills and not extra_skills,
-          f"{len(skill_names)}/{len(command_names)} mirrored" if not missing_skills and not extra_skills
-          else "missing skills: " + (", ".join(missing_skills) or "none") + "; extra skills: " + (", ".join(extra_skills) or "none"),
-          fix="ls .claude/commands .agents/skills; then /rig-upgrade --scope=project --mode=agent to regenerate skills")
+    missing_copied = sorted(copied_names - skill_dirs)
+    extra_skills = sorted(skill_names - command_names - copied_names)
+    copied_drift = []
+    for name in sorted(copied_names & skill_dirs):
+        source_tree, mirror_tree = source_skills / name, skills / name
+        source_files = {p.relative_to(source_tree): p for p in source_tree.rglob("*") if p.is_file()}
+        mirror_files = {p.relative_to(mirror_tree): p for p in mirror_tree.rglob("*") if p.is_file()}
+        if source_files.keys() != mirror_files.keys():
+            copied_drift.append(name)
+            continue
+        try:
+            identical = all(not src.is_symlink() and not mirror_files[rel].is_symlink() and
+                            src.read_bytes() == mirror_files[rel].read_bytes()
+                            for rel, src in source_files.items())
+        except OSError:
+            identical = False
+        if not identical:
+            copied_drift.append(name)
+
+    # The generator makes exactly two content changes: [BASE_BRANCH] becomes
+    # the selected branch, and known Rig /name invocations become $name. The
+    # optional names remain in the generator's template directory even when
+    # not selected for this install; keep this set aligned with install.sh's
+    # should_install_codex_command choices. Unknown /name tokens are never an
+    # allowed difference, or a changed path could hide behind normalization.
+    optional_commands = {"doc-feature", "doc-list", "feature-context",
+                         "refresh-feature-doc", "rig-gaps", "rig-propose"}
+    known_commands = command_names | optional_commands
+    names = "|".join(sorted(map(re.escape, known_commands), key=len, reverse=True))
+    invocation = re.compile(rf"(?<![A-Za-z0-9_./-])/({names})(?![A-Za-z0-9_-])")
+    brain_text = read(root / "CLAUDE.md")
+    base_matches = re.findall(r"(?m)^base-branch:\s*([^\s#]+)", brain_text)
+    base_branch = base_matches[0] if len(base_matches) == 1 else None
+
+    def generated_body_matches(source, mirror):
+        allowed = {match.start() for match in invocation.finditer(source)}
+        return len(source) == len(mirror) and all(
+            left == right or (left == "/" and right == "$" and index in allowed)
+            for index, (left, right) in enumerate(zip(source, mirror)))
+
+    reference_drift, wrapper_drift, unverified = [], [], []
+    for name in sorted(command_names & skill_names):
+        command = command_dir / (name + ".md")
+        reference = skills / name / "references" / "command.md"
+        wrapper = skills / name / "SKILL.md"
+        expected_wrapper = ("---\n" + f"name: {name}\n" +
+                            f"description: Run The Rig {name} workflow for this repository.\n" +
+                            "---\n\n" + f"# {name}\n\n" +
+                            "Follow the complete workflow in [the command reference](references/command.md).\n")
+        if wrapper.is_symlink() or read(wrapper) != expected_wrapper:
+            wrapper_drift.append(name)
+        if not reference.is_file() or reference.is_symlink():
+            reference_drift.append(name)
+            continue
+        source = read(command)
+        if "[BASE_BRANCH]" in source:
+            if base_branch is None:
+                unverified.append(name)
+                continue
+            source = source.replace("[BASE_BRANCH]", base_branch)
+        if not generated_body_matches(source, read(reference)):
+            reference_drift.append(name)
+
+    problems = []
+    for label, names in (("missing skills", missing_skills), ("missing copied skills", missing_copied),
+                         ("extra skills", extra_skills), ("copied skill drift", copied_drift),
+                         ("reference drift", reference_drift), ("wrapper drift", wrapper_drift)):
+        if names:
+            problems.append(label + ": " + ", ".join(names))
+    matched = len(command_names) - len(set(missing_skills + reference_drift + wrapper_drift + unverified))
+    detail = f"{matched}/{len(command_names)} generated command pairs match by content"
+    if copied_names:
+        detail += f"; {len(copied_names) - len(set(missing_copied + copied_drift))}/{len(copied_names)} copied Claude skills match"
+    if unverified:
+        detail += "; content not verified without one base-branch setting: " + ", ".join(unverified)
+    if problems:
+        detail += "; " + "; ".join(problems)
+    check("codex_skill_parity", not problems, detail,
+          fix="inspect .claude/commands and .agents/skills for listed names; preview a backed-up /rig-upgrade --scope=project --mode=agent before repair",
+          state=ADVISORY if unverified and not problems else None)
 else:
     check("codex_skill_parity", True, "Codex mirroring not enabled", state=SKIPPED)
 

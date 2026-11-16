@@ -658,7 +658,7 @@ runs these current postflight checks:
 | `stealth_exclusions` | Stealth/external artifacts are excluded from git visibility | Project is not a stealth/external install |
 | `settings_json` | Selected, present, or manifest-recorded Claude settings and present Codex hooks JSON files parse correctly | Neither provider's settings file is selected, present, or recorded |
 | `claude_commands` | Installed Claude command files match the manifest or at least exist when no manifest baseline is present | Claude is not selected or present and no manifest command baseline exists |
-| `codex_skill_parity` | Installed Codex skill names match Claude command names; content parity is not checked | Codex mirroring is not enabled, or Claude command source is absent |
+| `codex_skill_parity` | Installed Codex wrappers and command references match Claude commands after the generator's base-branch and invocation substitutions; copied Claude skill trees match by content | Codex mirroring is not enabled, or Claude command source is absent |
 | `codex_project_instructions` | Codex has an effective `AGENTS*` file or configured `CLAUDE.md` fallback when Codex is an installed target | Codex is not an installed project target |
 | `codex_project_target_runtime` | A live Codex runtime has the project target infrastructure it needs | Codex runtime is not detected |
 | `codex_session_runtime` | A live Codex thread is bound to an active Rig session record | Codex runtime is not detected |
@@ -686,6 +686,13 @@ Add `--confirm` to copy missing artifacts. Automatic repair is limited to
 this check, preserves existing files and symlinks, and reports failure if a
 symlink blocks a required path. Direct `bin/rig worktree bootstrap` also
 reports the blocked path and exits nonzero.
+
+`codex_skill_parity` names each divergent command, wrapper, or copied skill.
+If a command still contains `[BASE_BRANCH]` and the project brain has no
+unique `base-branch:` value, the content comparison is advisory because its
+expected generated text cannot be determined. Review the two files and the
+installer's read-only agent-plan preview before any upgrade; the installer
+backs up changed files and preserves user-owned customizations.
 
 Both new gates diff the most recent pre-flight snapshot (issue #472,
 `.rig-backup/preflight-snapshots/` for tracked installs or the external

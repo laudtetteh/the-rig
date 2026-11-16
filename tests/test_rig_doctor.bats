@@ -21,6 +21,17 @@ json_assert() {
   JSON_OUTPUT="$output" python3 -c "$1"
 }
 
+make_generated_skill() {
+  local name="$1" skill_dir="$CASE_DIR/.agents/skills/$1"
+  mkdir -p "$skill_dir/references"
+  cp "$CASE_DIR/.claude/commands/$name.md" "$skill_dir/references/command.md"
+  printf '%s\n' '---' "name: $name" \
+    "description: Run The Rig $name workflow for this repository." '---' '' \
+    "# $name" '' \
+    'Follow the complete workflow in [the command reference](references/command.md).' \
+    > "$skill_dir/SKILL.md"
+}
+
 @test "healthy doctor emits one JSON object and succeeds" {
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
@@ -105,8 +116,8 @@ json_assert() {
   cp "$CASE_DIR/.rig/memory/.rig-manifest" "$external/memory/.rig-manifest"
   printf '%s\n' "$external" > "$CASE_DIR/.rigpath"
   printf 'CLAUDE.md\nPROJECT_BRIEF.md\n.claude/\n.rigpath\n' > "$CASE_DIR/.git/info/exclude"
-  printf '%s\n' '---' > "$CASE_DIR/.agents/skills/task/SKILL.md"
-  printf '%s\n' '---' > "$CASE_DIR/.agents/skills/ship/SKILL.md"
+  make_generated_skill task
+  make_generated_skill ship
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert not c["stealth_exclusions"]["ok"] and ".agents" in c["stealth_exclusions"]["detail"]; assert c["codex_skill_parity"]["ok"]'
@@ -256,11 +267,89 @@ json_assert() {
 
 @test "Codex skill ambiguity is reported without guessing" {
   mkdir -p "$CASE_DIR/.agents/skills/task" "$CASE_DIR/.agents/skills/unrelated"
-  printf '%s\n' '---' > "$CASE_DIR/.agents/skills/task/SKILL.md"
+  make_generated_skill task
   printf '%s\n' '---' > "$CASE_DIR/.agents/skills/unrelated/SKILL.md"
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert "ship" in c["detail"] and "unrelated" in c["detail"]'
+}
+
+@test "Codex skill parity compares generated content with provider invocation and base-branch transforms" {
+  printf 'base-branch: main\nissue-tracking: none\n' > "$CASE_DIR/CLAUDE.md"
+  printf '# /task on [BASE_BRANCH]; use /rig-gaps; keep /not-a-rig-command\nissue-tracking: none\n' > "$CASE_DIR/.claude/commands/task.md"
+  printf '# /ship on [BASE_BRANCH]\nissue-tracking: none\n' > "$CASE_DIR/.claude/commands/ship.md"
+  make_generated_skill task
+  make_generated_skill ship
+  printf '# $task on main; use $rig-gaps; keep /not-a-rig-command\nissue-tracking: none\n' > "$CASE_DIR/.agents/skills/task/references/command.md"
+  printf '# $ship on main\nissue-tracking: none\n' > "$CASE_DIR/.agents/skills/ship/references/command.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="pass"'
+
+  printf '# $task on main; use $rig-gaps; keep $not-a-rig-command\nissue-tracking: none\n' > "$CASE_DIR/.agents/skills/task/references/command.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="fail" and "task" in c["detail"]'
+  printf '# $task on main; use $rig-gaps; keep /not-a-rig-command\nissue-tracking: none\n' > "$CASE_DIR/.agents/skills/task/references/command.md"
+
+  printf '\nPARITY-DRIFT-CANARY\n' >> "$CASE_DIR/.claude/commands/ship.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="fail" and "ship" in c["detail"]'
+
+  printf '# /ship on [BASE_BRANCH]\nissue-tracking: none\n' > "$CASE_DIR/.claude/commands/ship.md"
+  printf '\nPARITY-DRIFT-CANARY\n' >> "$CASE_DIR/.agents/skills/ship/SKILL.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="fail" and "ship" in c["detail"] and "wrapper" in c["detail"]'
+}
+
+@test "Codex parity accepts a copied Claude skill as an intentional extra" {
+  make_generated_skill task
+  make_generated_skill ship
+  mkdir -p "$CASE_DIR/.claude/skills/custom" "$CASE_DIR/.agents/skills/custom" \
+    "$CASE_DIR/.claude/skills/assets" "$CASE_DIR/.agents/skills/assets"
+  printf '%s\n' '---' 'name: custom' '---' > "$CASE_DIR/.claude/skills/custom/SKILL.md"
+  cp "$CASE_DIR/.claude/skills/custom/SKILL.md" "$CASE_DIR/.agents/skills/custom/SKILL.md"
+  printf 'copied resource\n' > "$CASE_DIR/.claude/skills/assets/notes.txt"
+  cp "$CASE_DIR/.claude/skills/assets/notes.txt" "$CASE_DIR/.agents/skills/assets/notes.txt"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="pass" and "copied" in c["detail"]'
+
+  printf '\nPARITY-DRIFT-CANARY\n' >> "$CASE_DIR/.agents/skills/custom/SKILL.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="fail" and "copied skill drift: custom" in c["detail"]'
+}
+
+@test "Codex parity is advisory when a generator base branch is unknowable" {
+  printf '/task on [BASE_BRANCH]\nissue-tracking: none\n' > "$CASE_DIR/.claude/commands/task.md"
+  make_generated_skill task
+  make_generated_skill ship
+  printf '$task on main\nissue-tracking: none\n' > "$CASE_DIR/.agents/skills/task/references/command.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="advisory" and "base-branch" in c["detail"]'
+}
+
+@test "stealth doctor detects divergent generated reference without changing either file" {
+  local external="$BATS_TEST_TMPDIR/external-rig"
+  mkdir -p "$external/memory"
+  cp "$CASE_DIR/.rig/memory/.rig-manifest" "$external/memory/.rig-manifest"
+  printf '%s\n' "$external" > "$CASE_DIR/.rigpath"
+  printf 'CLAUDE.md\nPROJECT_BRIEF.md\n.claude/\n.agents/\n.rigpath\n' > "$CASE_DIR/.git/info/exclude"
+  make_generated_skill task
+  make_generated_skill ship
+  printf '\nPARITY-DRIFT-CANARY\n' >> "$CASE_DIR/.agents/skills/ship/references/command.md"
+  local before_source before_reference
+  before_source="$(cksum "$CASE_DIR/.claude/commands/ship.md")"
+  before_reference="$(cksum "$CASE_DIR/.agents/skills/ship/references/command.md")"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="fail" and "ship" in c["detail"]'
+  [ "$before_source" = "$(cksum "$CASE_DIR/.claude/commands/ship.md")" ]
+  [ "$before_reference" = "$(cksum "$CASE_DIR/.agents/skills/ship/references/command.md")" ]
 }
 
 @test "Codex target requires an effective project instruction source" {
@@ -312,8 +401,8 @@ json_assert() {
   printf 'project_doc_fallback_filenames = ["CLAUDE.md"]\n' > "$CASE_DIR/.codex/config.toml"
   printf '#!/usr/bin/env bash\n' > "$CASE_DIR/.codex/hooks/rig-adapter.sh"
   chmod +x "$CASE_DIR/.codex/hooks/rig-adapter.sh"
-  printf '%s\n' '---' 'name: task' '---' > "$CASE_DIR/.agents/skills/task/SKILL.md"
-  printf '%s\n' '---' 'name: ship' '---' > "$CASE_DIR/.agents/skills/ship/SKILL.md"
+  make_generated_skill task
+  make_generated_skill ship
 
   run env CODEX_THREAD_ID=doctor-thread "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --source resume --json
   [ "$status" -eq 0 ]
