@@ -3712,6 +3712,10 @@ fi
 [[ "$UPGRADE_TRANSACTION_ACTIVE" == true ]] && finish_upgrade_transaction
 BACKUP_DIR=""
 
+# The global layer runs before the project layer. Keep its skip count so the
+# final guidance offers a project-only route only for project customizations.
+UPGRADE_GLOBAL_SKIPPED_CUSTOMIZED_COUNT="$UPGRADE_SKIPPED_CUSTOMIZED_COUNT"
+
 # ── PROJECT LAYER ─────────────────────────────────────────────────────────────
 if [[ "$DO_PROJECT" == true ]]; then
   bold "── Project layer ──"
@@ -5272,16 +5276,27 @@ if [[ "$COLLISION_STRATEGY" == upgrade && "${UPGRADE_REVIEW_REQUIRED:-0}" -eq 1 
   echo "Your selected strategy was kept."
   # A global-only run has no project target, and guarded convergence covers
   # project files only.
-  if [[ "$DO_PROJECT" == true && -n "${TARGET:-}" && "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" -gt 0 ]]; then
+  if [[ "$DO_PROJECT" == true && -n "${TARGET:-}" &&
+        "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" -gt "$UPGRADE_GLOBAL_SKIPPED_CUSTOMIZED_COUNT" ]]; then
     _route_tracking="$RIG_TRACKING"
     [[ "$_route_tracking" == exclude ]] && _route_tracking=local
-    _route_flags=""
-    [[ -n "$_route_tracking" ]] && _route_flags=" --tracking $_route_tracking"
+    # Print a self-contained command that can be copied from any directory.
+    # Every path is shell-quoted; raw interpolation inside double quotes would
+    # execute command substitutions embedded in a legitimate path name.
+    _route_target="$(cd "$TARGET" && pwd -L)"
+    _route_target="$(printf '%q' "$_route_target")"
+    _route_base_branch="$(printf '%q' "$BASE_BRANCH")"
+    _route_project_agent="$(printf '%q' "$PROJECT_AGENT")"
+    _route_flags=" --base-branch $_route_base_branch --project-agent $_route_project_agent"
+    [[ -n "$_route_tracking" ]] && _route_flags+=" --tracking $_route_tracking"
     if [[ ( "$RIG_TRACKING" == external || "$RIG_TRACKING" == stealth ) && -n "${EXTERNAL_RIG_DIR:-}" ]]; then
-      _route_flags+=" --rig-dir \"$EXTERNAL_RIG_DIR\""
+      _route_rig_dir="$(printf '%q' "$EXTERNAL_RIG_DIR")"
+      _route_flags+=" --rig-dir $_route_rig_dir"
     fi
+    [[ "$SKIP_GIT_HOOKS" == true ]] && _route_flags+=" --skip-git-hooks"
+    _route_installer="$(printf '%q' "$SCRIPT_DIR/install.sh")"
     echo "To converge customized project files with guarded merging, preview with"
-    echo "  ./install.sh --project-only --target \"$TARGET\"${_route_flags} --strategy agent-plan"
+    echo "  $_route_installer --project-only --target $_route_target${_route_flags} --strategy agent-plan"
     echo "then apply the same command with --strategy agent-upgrade (or run /rig-upgrade)."
   else
     echo "Review each listed file, or rerun the installer interactively to decide per file."

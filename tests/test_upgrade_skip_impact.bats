@@ -29,15 +29,23 @@ install_rig() {
 }
 
 @test "a skipped customized enforcement hook is reported as degraded enforcement" {
-  install_rig repo merge
+  # Relative paths and quotes in names must remain copyable in the printed
+  # route, and an explicit non-main base branch must be carried forward.
+  cd "$BATS_TEST_TMPDIR"
+  mv "$TEST_PROJECT" 'project"odd'
+  TEST_PROJECT='project"odd'
+  install_rig repo merge --base-branch develop
   [ "$status" -eq 0 ]
   printf '\n# team note\n' >> "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
-  install_rig repo upgrade
+  install_rig repo upgrade --base-branch develop
   [ "$status" -eq 0 ]
   [[ "$output" == *"- .claude/hooks/pre-tool.sh — protected-path and commit policy still run your customized older copy"* ]] || return 1
   [[ "$DEGRADED" == *"protected-path/commit enforcement (1 customized hook file(s) not updated)"* ]] || return 1
   [[ "$output" == *"not fully converged"* ]] || return 1
   [[ "$output" == *"--strategy agent-plan"* ]] || return 1
+  local expected_target
+  expected_target="$(printf '%q' "$BATS_TEST_TMPDIR/project\"odd")"
+  [[ "$output" == *"$REPO_ROOT/install.sh --project-only --target $expected_target --base-branch develop"* ]] || return 1
   [[ "$output" != *"The Rig upgrade is complete"* ]] || return 1
   [[ "$output" == *"RIG_UPGRADE_REVIEW_REQUIRED=1"* ]] || return 1
 }
@@ -45,10 +53,12 @@ install_rig() {
 # Add Codex to a customized Claude-only install through a classic upgrade.
 assert_codex_retrofit_reports_divergence() {
   local tracking="$1"
-  install_rig "$tracking" merge --project-agent claude
+  shift
+  local -a extra=("$@")
+  install_rig "$tracking" merge --project-agent claude "${extra[@]}"
   [ "$status" -eq 0 ]
   printf '\n<!-- local ship tweak -->\n' >> "$TEST_PROJECT/.claude/commands/ship.md"
-  install_rig "$tracking" upgrade --project-agent both
+  install_rig "$tracking" upgrade --project-agent both "${extra[@]}"
   [ "$status" -eq 0 ]
   [ -f "$TEST_PROJECT/.agents/skills/ship/SKILL.md" ]
   grep -Fq 'local ship tweak' "$TEST_PROJECT/.claude/commands/ship.md"
@@ -61,11 +71,42 @@ assert_codex_retrofit_reports_divergence() {
   assert_codex_retrofit_reports_divergence repo
 }
 
+@test "printed convergence route preserves the selected project agent after metadata conflict" {
+  install_rig repo merge --project-agent claude
+  [ "$status" -eq 0 ]
+  printf '\n<!-- local ship tweak -->\n' >> "$TEST_PROJECT/.claude/commands/ship.md"
+  mv "$TEST_PROJECT/.rig/install-targets.json" "$TEST_PROJECT/.rig/install-targets.real.json"
+  ln -s install-targets.real.json "$TEST_PROJECT/.rig/install-targets.json"
+  install_rig repo upgrade --project-agent both
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Postflight targets: project=both"* ]] || return 1
+  [[ "$output" == *"Preserved conflicting upgrade destination: .rig/install-targets.json (symlink)"* ]] || return 1
+  [[ "$output" == *"--project-agent both --tracking repo --strategy agent-plan"* ]] || return 1
+}
+
 @test "classic Codex retrofit of a customized stealth install reports provider divergence" {
-  assert_codex_retrofit_reports_divergence stealth
+  assert_codex_retrofit_reports_divergence stealth --skip-git-hooks
   # The printed route must reproduce this run's tracking, or agent-plan would
   # re-detect the install and plan the wrong files.
-  [[ "$output" == *"--tracking stealth --rig-dir \"$EXTERNAL_RIG\" --strategy agent-plan"* ]] || return 1
+  [[ "$output" == *"--tracking stealth --rig-dir $EXTERNAL_RIG --skip-git-hooks --strategy agent-plan"* ]] || return 1
+  [ ! -e "$TEST_PROJECT/.git/hooks/pre-commit" ]
+}
+
+@test "a global-only customization in a combined upgrade does not suggest a project-only convergence route" {
+  local fixture_home="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$fixture_home"
+  run env HOME="$fixture_home" bash "$REPO_ROOT/install.sh" \
+    --target "$TEST_PROJECT" --project-name Fixture --tracking repo \
+    --global-agent claude --project-agent claude --strategy merge </dev/null
+  [ "$status" -eq 0 ]
+  printf '\n<!-- custom global skill -->\n' >> "$fixture_home/.claude/skills/explain.md"
+  run env HOME="$fixture_home" bash "$REPO_ROOT/install.sh" \
+    --target "$TEST_PROJECT" --project-name Fixture --tracking repo \
+    --global-agent claude --project-agent claude --strategy upgrade </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skipping customized file: skills/explain.md"* ]] || return 1
+  [[ "$output" != *"To converge customized project files"* ]] || return 1
+  [[ "$output" == *"Review each listed file"* ]] || return 1
 }
 
 @test "a Claude-only customized command is listed without a provider divergence claim" {
