@@ -250,13 +250,14 @@ PY
 }
 
 session_obligation() {
-  local action="${1:-}" kind="" merge_sha="" adopt=false guarded_adopt=false marker_token="" json=false arg resolved file anchor
+  local action="${1:-}" kind="" merge_sha="" merged_at="" adopt=false guarded_adopt=false marker_token="" json=false arg resolved file anchor
   shift || true
   while [[ "$#" -gt 0 ]]; do
     arg="$1"
     case "$arg" in
       --kind) [[ "$#" -ge 2 ]] || { usage_error "--kind requires a value" "$@"; return; }; kind="$2"; shift 2;;
       --merge-sha) [[ "$#" -ge 2 ]] || { usage_error "--merge-sha requires a value" "$@"; return; }; merge_sha="$2"; shift 2;;
+      --merged-at) [[ "$#" -ge 2 ]] || { usage_error "--merged-at requires a value" "$@"; return; }; merged_at="$2"; shift 2;;
       --adopt-legacy) adopt=true; shift;;
       --adopt-legacy-if-marker-token) [[ "$#" -ge 2 ]] || { usage_error "--adopt-legacy-if-marker-token requires a value" "$@"; return; }; guarded_adopt=true; marker_token="$2"; shift 2;;
       --json) json=true; shift;;
@@ -266,17 +267,18 @@ session_obligation() {
   [[ "$action" == mark || "$action" == clear ]] || { usage_error "obligation action must be mark or clear"; return; }
   [[ "$kind" == wrap || "$kind" == post-merge ]] || { usage_error "obligation kind must be wrap or post-merge"; return; }
   [[ "$kind" != post-merge || -n "$merge_sha" ]] || { usage_error "post-merge obligation requires --merge-sha"; return; }
+  [[ -z "$merged_at" || ( "$kind" == post-merge && "$action" == mark && "$merged_at" != *$'\n'* && "$merged_at" != *$'\r'* ) ]] || { usage_error "--merged-at is valid only for a single-line post-merge mark"; return; }
   [[ "$guarded_adopt" == false || ( "$action" == clear && "$kind" == wrap && "$adopt" == false ) ]] || { usage_error "guarded legacy adoption requires wrap clear without --adopt-legacy"; return; }
   resolved=$(session_resolve --json) || return $?
   file=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")')
   anchor=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
   [[ -n "$file" && -n "$anchor" ]] || return "$RIG_EXIT_UNAVAILABLE"
-  RIG_DIR="$(rig_dir)" SESSION_F="$file" SESSION_ANCHOR="$anchor" OBLIGATION_ACTION="$action" OBLIGATION_KIND="$kind" MERGE_SHA="$merge_sha" ADOPT_LEGACY="$adopt" GUARDED_ADOPT="$guarded_adopt" OBSERVED_MARKER_TOKEN="$marker_token" python3 <<'PY'
+  RIG_DIR="$(rig_dir)" SESSION_F="$file" SESSION_ANCHOR="$anchor" OBLIGATION_ACTION="$action" OBLIGATION_KIND="$kind" MERGE_SHA="$merge_sha" MERGED_AT="$merged_at" ADOPT_LEGACY="$adopt" GUARDED_ADOPT="$guarded_adopt" OBSERVED_MARKER_TOKEN="$marker_token" python3 <<'PY'
 import datetime, fcntl, hashlib, json, os, pathlib, re, tempfile, uuid
 rig=pathlib.Path(os.environ["RIG_DIR"]); memory=rig/"memory"; memory.mkdir(parents=True,exist_ok=True)
 p=pathlib.Path(os.environ["SESSION_F"]); anchor=os.environ["SESSION_ANCHOR"]
 action=os.environ["OBLIGATION_ACTION"]; kind=os.environ["OBLIGATION_KIND"]
-merge_sha=os.environ.get("MERGE_SHA",""); adopt=os.environ.get("ADOPT_LEGACY")=="true"
+merge_sha=os.environ.get("MERGE_SHA",""); merged_at=os.environ.get("MERGED_AT",""); adopt=os.environ.get("ADOPT_LEGACY")=="true"
 guarded_adopt=os.environ.get("GUARDED_ADOPT")=="true"; observed_token=os.environ.get("OBSERVED_MARKER_TOKEN","")
 marker=memory/(".wrap-needed" if kind=="wrap" else ".post-merge-pending")
 global_lock=open(memory/".session-obligations.lock","a+"); fcntl.flock(global_lock.fileno(),fcntl.LOCK_EX)
@@ -348,9 +350,12 @@ else:
             key,value=line.split("=",1); values[key]=value
     if action=="mark":
         values.update({"merge_sha":merge_sha,"anchor":anchor})
+        if merged_at: values["merged_at"]=merged_at
     else:
         if not marker.exists() or values.get("merge_sha")!=merge_sha:
             print(json.dumps({"ok":False,"reason":"merge_mismatch","no_write":True})); raise SystemExit(3)
+        if values.get("anchor") and values["anchor"]!=anchor:
+            print(json.dumps({"ok":False,"reason":"marker_owner_mismatch","no_write":True})); raise SystemExit(3)
         values={}
     content="".join(key+"="+values[key]+"\n" for key in ("merge_sha","merged_at","anchor") if values.get(key))
 def write_marker():
@@ -2217,12 +2222,13 @@ PY
 }
 
 session_name_set() {
-  local tentative=false complete=false json=false name="" arg resolved resolve_status=0 writer_status=0 file anchor done_dir dest="" end_options=false
+  local tentative=false complete=false json=false name="" arg resolved resolve_status=0 writer_status=0 file anchor done_dir dest="" end_options=false post_merge_ack_sha="" post_merge_ack_guard=false
   for arg in "$@"; do
     if [[ "$end_options" == false ]]; then
       case "$arg" in
         --) end_options=true; continue;; --tentative) tentative=true; continue;;
         --final) tentative=false; continue;; --complete) complete=true; continue;; --json) json=true; continue;;
+        --post-merge-ack-sha=*) post_merge_ack_sha="${arg#*=}"; post_merge_ack_guard=true; continue;;
         -*) usage_error "unknown session-name option: $arg" "$@"; return;;
       esac
     fi
@@ -2230,6 +2236,9 @@ session_name_set() {
     name="$arg"
   done
   [[ -n "$name" ]] || { usage_error "session name is required" "$@"; return; }
+  if [[ "$post_merge_ack_guard" == true ]]; then
+    [[ "$complete" == true && "$post_merge_ack_sha" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ ]] || { usage_error "--post-merge-ack-sha requires --complete and a full merge SHA" "$@"; return; }
+  fi
   resolved=$(session_resolve --json --verbose) || resolve_status=$?
   if [[ "$resolve_status" -ne 0 ]]; then
     if [[ "$json" == true ]]; then printf '%s\n' "$resolved"
@@ -2241,11 +2250,12 @@ session_name_set() {
   anchor=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
   [[ -n "$file" ]] || return "$RIG_EXIT_UNAVAILABLE"
   if [[ "$complete" == true ]]; then done_dir="$(rig_dir)/memory/sessions/done"; mkdir -p "$done_dir"; dest="$done_dir/session-$(date +%Y%m%d)-${anchor:-unknown}.json"; fi
-  SESSION_F="$file" SESSION_NAME="$name" SESSION_TENTATIVE="$tentative" SESSION_COMPLETE="$complete" SESSION_DEST="$dest" SESSION_EXPECTED="$resolved" SESSION_ROOT="$(rig_root)" SESSION_RIG="$(rig_dir)" SESSION_RESOLVER="$(dirname "${BASH_SOURCE[0]}")/rig-session-resolve.py" SESSION_JSON="$json" python3 <<'PY' || writer_status=$?
+  SESSION_F="$file" SESSION_NAME="$name" SESSION_TENTATIVE="$tentative" SESSION_COMPLETE="$complete" SESSION_POST_MERGE_ACK_SHA="$post_merge_ack_sha" SESSION_DEST="$dest" SESSION_EXPECTED="$resolved" SESSION_ROOT="$(rig_root)" SESSION_RIG="$(rig_dir)" SESSION_RESOLVER="$(dirname "${BASH_SOURCE[0]}")/rig-session-resolve.py" SESSION_JSON="$json" python3 <<'PY' || writer_status=$?
 import fcntl, hashlib, json, os, pathlib, subprocess, sys, tempfile
 p = pathlib.Path(os.environ["SESSION_F"])
 expected = json.loads(os.environ["SESSION_EXPECTED"])
 sessions = pathlib.Path(os.environ["SESSION_RIG"]) / "memory" / "sessions"
+post_merge_ack_sha=os.environ["SESSION_POST_MERGE_ACK_SHA"]
 def refuse(reason,code=3):
     if os.environ["SESSION_JSON"] == "true": print(json.dumps({"ok":False,"reason":reason,"no_write":True}))
     else: print("session name refused: " + reason, file=sys.stderr)
@@ -2254,6 +2264,12 @@ try:
     p.resolve(strict=True).relative_to(sessions.resolve())
     if p.is_symlink() or not p.is_file(): refuse("invalid_session_path")
 except (OSError,ValueError,RuntimeError): refuse("invalid_session_path")
+if post_merge_ack_sha:
+    # The hook and obligation clearer use this lock for marker and record
+    # changes. Hold it through session completion so a later merge cannot
+    # appear between the command's preflight check and this write.
+    obligation_lock=open(sessions.parent/".session-obligations.lock","a+")
+    fcntl.flock(obligation_lock.fileno(),fcntl.LOCK_EX)
 global_lock=open(sessions/".bind.lock","a+"); fcntl.flock(global_lock.fileno(),fcntl.LOCK_EX)
 lock=open(str(p)+".lock","a+"); fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
 try:
@@ -2296,6 +2312,19 @@ if d.get("schema_version") == 1:
     if d.get("anchor") in graph["duplicate_native_anchors"]: refuse("duplicate_native_id",2)
 elif not (expected.get("reason")=="launcher_file" or (expected.get("reason")=="anchor" and os.environ.get("RIG_SESSION_ANCHOR")==d.get("anchor"))) or d.get("status")!="active":
     refuse("migration_required")
+if post_merge_ack_sha:
+    marker=sessions.parent/".post-merge-pending"
+    if os.path.lexists(marker): refuse("post_merge_reminder_pending")
+    obligations=d.get("obligations",{}); flags=d.get("flags",{})
+    if not isinstance(obligations,dict) or not isinstance(flags,dict): refuse("malformed_record",4)
+    obligation=obligations.get("post_merge",{})
+    if not isinstance(obligation,dict): refuse("malformed_record",4)
+    acknowledged=(obligation.get("merge_sha")==post_merge_ack_sha and
+                  obligation.get("pending") is False and obligation.get("acknowledged_at") and
+                  flags.get("post_merge_pending") is not True)
+    no_obligation=(not obligation.get("merge_sha") and obligation.get("pending") is not True and
+                   flags.get("post_merge_pending") is not True)
+    if not (acknowledged or no_obligation): refuse("post_merge_not_acknowledged")
 if d.get("schema_version") == 1:
     names=d.setdefault("names", {})
     if os.environ["SESSION_TENTATIVE"] == "true": names["tentative"] = os.environ["SESSION_NAME"]
@@ -3130,7 +3159,8 @@ never used. Native IDs are redacted unless --verbose is supplied.
 EOF
       ;;
     session:obligation) cat <<'EOF'
-Usage: rig session obligation (mark|clear) --kind post-merge --merge-sha SHA [--adopt-legacy] [--json]
+Usage: rig session obligation mark --kind post-merge --merge-sha SHA [--merged-at TIMESTAMP] [--json]
+       rig session obligation clear --kind post-merge --merge-sha SHA [--json]
        rig session obligation (mark|clear) --kind wrap [--adopt-legacy] [--json]
        rig session obligation clear --kind wrap --adopt-legacy-if-marker-token TOKEN [--json]
 
@@ -3140,7 +3170,7 @@ the reminder in place.
 EOF
       ;;
     session-name:set) cat <<'EOF'
-Usage: rig session-name set [--tentative|--final] [--complete] [--json] [--] <name>
+Usage: rig session-name set [--tentative|--final] [--complete] [--post-merge-ack-sha=SHA] [--json] [--] <name>
 
 Sets the exact current session's name atomically. --final records the final
 name; --complete also moves the record to done/. Use -- before a name that

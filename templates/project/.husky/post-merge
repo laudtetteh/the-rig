@@ -18,7 +18,7 @@ echo ""
 echo "  ✔ Merge complete."
 echo ""
 echo "  → Open Claude Code in this project and run: /post-merge"
-echo "    This pulls latest, updates memory, moves the task file, and surfaces what's next."
+echo "    This verifies the merge, updates memory, moves the task file, and surfaces what's next."
 echo "    Skipping this is how sessions start stale."
 echo ""
 
@@ -61,15 +61,38 @@ if [ -n "$REPO" ]; then
   if [ -d "$RIG_DIR/memory" ]; then
     MERGE_SHA=$(git -C "$REPO" rev-parse HEAD 2>/dev/null || printf 'unknown')
     MERGED_AT=$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || printf 'unknown')
-    PENDING="$RIG_DIR/memory/.post-merge-pending"
-    PENDING_TMP="${PENDING}.tmp.$$"
-    if printf 'merge_sha=%s\nmerged_at=%s\nanchor=%s\n' "$MERGE_SHA" "$MERGED_AT" "${RIG_SESSION_ANCHOR:-}" > "$PENDING_TMP"; then
-      mv "$PENDING_TMP" "$PENDING"
-      if [ -x "$REPO/bin/rig" ] && { [ -n "${RIG_SESSION_FILE:-}" ] || [ -n "${RIG_SESSION_ANCHOR:-}" ]; }; then
-        "$REPO/bin/rig" session obligation mark --kind post-merge --merge-sha "$MERGE_SHA" --json >/dev/null 2>&1 || true
+    # An exact session mark writes both the marker and its session record under
+    # the helper's obligation lock. Do not write the marker first: a clear
+    # between that write and the mark can either erase a newer reminder or
+    # leave an already-acknowledged merge pending again.
+    MARKED=false
+    if [ -x "$REPO/bin/rig" ] && { [ -n "${RIG_SESSION_FILE:-}" ] || [ -n "${RIG_SESSION_ANCHOR:-}" ]; }; then
+      if "$REPO/bin/rig" session obligation mark --kind post-merge \
+          --merge-sha "$MERGE_SHA" --merged-at "$MERGED_AT" --json >/dev/null 2>&1; then
+        MARKED=true
       fi
-    else
-      rm -f "$PENDING_TMP"
+    fi
+    if [ "$MARKED" != true ]; then
+      # An unresolved or ended session still needs a project-level reminder.
+      # Its environment anchor was not verified, so leave this marker unscoped
+      # for a later exact session to acknowledge after housekeeping. Use the
+      # clear helper's lock so a newer merge survives an older clear.
+      python3 - "$RIG_DIR/memory/.post-merge-pending" "$MERGE_SHA" "$MERGED_AT" "" <<'PY' ||
+import fcntl, os, pathlib, sys, tempfile
+marker=pathlib.Path(sys.argv[1]); sha,merged_at,anchor=sys.argv[2:]
+lock=marker.parent/".session-obligations.lock"
+with open(lock,"a+") as handle:
+    fcntl.flock(handle.fileno(),fcntl.LOCK_EX)
+    fd,tmp=tempfile.mkstemp(prefix=marker.name+".tmp.",dir=str(marker.parent))
+    try:
+        with os.fdopen(fd,"w") as out:
+            out.write(f"merge_sha={sha}\nmerged_at={merged_at}\nanchor={anchor}\n")
+            out.flush(); os.fsync(out.fileno())
+        os.replace(tmp,marker)
+    finally:
+        if os.path.exists(tmp): os.unlink(tmp)
+PY
+        echo "WARNING: The Rig could not record the post-merge reminder; inspect $RIG_DIR/memory." >&2
     fi
   fi
 fi

@@ -12,7 +12,7 @@
 
 ---
 
-## Step 1 — Verify state and pull latest [BASE_BRANCH]
+## Step 1 — Verify merged commits without switching the working tree
 
 First, snapshot current state:
 
@@ -21,30 +21,87 @@ git branch --show-current
 git status --short
 ```
 
-If the working tree is not clean, surface the uncommitted changes and resolve them
-before continuing (stash, commit, or discard — ask the user).
+Report the current branch and uncommitted paths. Preserve them. Set
+`POST_MERGE_EXPECTED_SHAS` to the full merge SHA for each PR in the report's
+batch ledger, in ledger order. Fetch the base branch and verify those commits
+without checking out a branch or changing any working-tree file.
 
-Then pull:
-
-```bash
-git checkout [BASE_BRANCH] && git pull origin [BASE_BRANCH]
-```
-
-Confirm the expected merge commit is at HEAD:
+### Read-only merge verification
 
 ```bash
-git log --oneline -3
+[[ "${#POST_MERGE_EXPECTED_SHAS[@]}" -gt 0 ]] || {
+  echo "No exact merge SHA was supplied by the post-merge report." >&2
+  exit 1
+}
+git fetch --no-tags origin [BASE_BRANCH] || exit 1
+POST_MERGE_BASE_REF=refs/remotes/origin/[BASE_BRANCH]
+POST_MERGE_ACK_SHA=""
+for EXPECTED_MERGE_SHA in "${POST_MERGE_EXPECTED_SHAS[@]}"; do
+  git cat-file -e "${EXPECTED_MERGE_SHA}^{commit}" 2>/dev/null || {
+    echo "Merge commit is unavailable: $EXPECTED_MERGE_SHA" >&2
+    exit 1
+  }
+  git merge-base --is-ancestor "$EXPECTED_MERGE_SHA" "$POST_MERGE_BASE_REF" || {
+    echo "Merge commit is not on origin/[BASE_BRANCH]: $EXPECTED_MERGE_SHA" >&2
+    exit 1
+  }
+  git show -s --oneline "$EXPECTED_MERGE_SHA"
+  POST_MERGE_ACK_SHA="$EXPECTED_MERGE_SHA"
+done
 ```
 
-State the HEAD commit. If it doesn't match the expected merge, stop and flag it.
+Use GitHub's merged PR metadata to cross-check each PR number, merge SHA,
+base branch and closed issue list. A later commit at `HEAD` is expected when
+more than one PR has merged; ancestry on `origin/[BASE_BRANCH]` is the gate.
+Keep the exact `POST_MERGE_ACK_SHA` from this verified ledger for Step 7;
+reassign it from that value when using a new tool-call shell. Never derive it
+from whichever pending marker happens to exist later.
 
 Resolve `REPO=$(git rev-parse --show-toplevel)`, run
 `"$REPO/bin/rig" task inventory --json`, and take its `rig_dir` field as
-`RIG_DIR`. If the state is `omitted`, continue
-shared memory and PR cleanup without a task move or handoff retirement. If the
-state is `ambiguous` or `ok` is false, stop and report the inventory `reason`
-as an error. An installed
-missing directory is not an empty task list.
+`RIG_DIR`. If the state is `omitted`, continue shared memory and PR cleanup
+without a task move or handoff retirement. If the state is `ambiguous` or `ok`
+is false, stop and report the inventory `reason`. An installed missing
+directory is not an empty task list.
+
+Before the first memory write, check whether this checkout would need a
+tracked housekeeping commit. A dirty or non-base checkout may complete
+post-merge when Rig memory and tasks are external or gitignored. If either is
+stageable inside this checkout, stop before writing and use an already clean
+base checkout for the tracked housekeeping. Do not stash, discard, switch this
+checkout, or commit housekeeping onto its feature branch. In a clean base
+checkout with stageable Rig files, `git pull --ff-only origin [BASE_BRANCH]`
+before Step 2, then recheck ancestry for every SHA; a failed pull stops before
+memory writes. This leaves the original dirty checkout untouched.
+
+```bash
+CURRENT_BRANCH=$(git branch --show-current)
+CURRENT_DIRTY=$(git status --porcelain)
+RIG_REL=$(REPO="$REPO" RIG_DIR="$RIG_DIR" python3 -c '
+import os
+repo=os.path.realpath(os.environ["REPO"])
+rig=os.path.realpath(os.environ["RIG_DIR"])
+print(os.path.relpath(rig,repo) if os.path.commonpath([repo,rig])==repo else "")')
+RIG_STAGEABLE=false
+if [[ -n "$RIG_REL" ]]; then
+  if ! git check-ignore -q -- "$RIG_REL/memory/PROGRESS.md" ||
+     ! git check-ignore -q -- "$RIG_REL/tasks/active/.gitkeep" ||
+     [[ -n "$(git ls-files -- "$RIG_REL/tasks/")" ]]; then
+    RIG_STAGEABLE=true
+  fi
+fi
+if [[ "$RIG_STAGEABLE" == true &&
+      ( "$CURRENT_BRANCH" != '[BASE_BRANCH]' || -n "$CURRENT_DIRTY" ) ]]; then
+  echo "Tracked Rig housekeeping needs a clean [BASE_BRANCH] checkout; this working tree was left untouched." >&2
+  exit 1
+fi
+if [[ "$RIG_STAGEABLE" == true ]]; then
+  git pull --ff-only origin [BASE_BRANCH] || exit 1
+  for EXPECTED_MERGE_SHA in "${POST_MERGE_EXPECTED_SHAS[@]}"; do
+    git merge-base --is-ancestor "$EXPECTED_MERGE_SHA" HEAD || exit 1
+  done
+fi
+```
 
 ---
 
@@ -201,7 +258,26 @@ If PROGRESS.md and the task file were already part of the PR, skip this step ent
 
 ---
 
-## Step 7 — Suggest a session name
+## Step 7 — Acknowledge the exact processed merge
+
+After Steps 2–6 have succeeded and the workflow lock is released, clear the
+pending reminder for `POST_MERGE_ACK_SHA`, the exact latest SHA in the verified
+batch ledger. This is independent of session naming or name confirmation. The
+session resolver must still select the same exact active session recorded in
+the post-merge report. If identity is degraded, leave the reminder in place and
+report that exact-session acknowledgement is pending. If a newer merge changed
+the marker, the clear refuses it; preserve the newer reminder, leave the
+session active, and process that merge before final session completion.
+
+Never read the current marker's SHA into `POST_MERGE_ACK_SHA`. For a batch,
+clear only after every ledger row, task row and shared memory update is done.
+The `session obligation clear` helper compares the expected SHA and marker
+under its lock. A mismatch or owner conflict is a stopping condition, not a
+reason to clear the newer marker.
+
+---
+
+## Step 8 — Suggest a session name
 
 After the housekeeping commit, derive a session name from this session's work using
 the same logic as `/session-name`. Do **not** apply it automatically — present it
@@ -236,14 +312,19 @@ Then invite the user to apply it:
 > To apply: run `/session-name` or say "use that name".
 
 After the user confirms, use `bin/rig session-name set --final --complete` with the
-confirmed name as one opaque argument. Session names belong in session files; never
-write them to `CONTEXT_SNAPSHOT.md`.
+confirmed name as one opaque argument only after Step 7 acknowledged this
+session's processed SHA. Recheck that no newer `.post-merge-pending` reminder
+appeared during name confirmation; if one did, leave the session active until
+that merge has been processed. Pass `--post-merge-ack-sha=SHA` to the shared
+session-name writer when completing the session; it checks the marker and
+record while holding the obligation lock. Session names belong in session
+files; never write them to `CONTEXT_SNAPSHOT.md`.
 
 If no meaningful work shipped (pure housekeeping, no PRs), skip this step silently.
 
 ---
 
-## Step 8 — Surface what's next
+## Step 9 — Surface what's next
 
 Read the updated `$RIG_DIR/memory/CONTEXT_SNAPSHOT.md` and state the next priority.
 Ask the user: **"What's next?"**
