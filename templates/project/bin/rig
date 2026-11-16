@@ -3,6 +3,11 @@ set -euo pipefail
 
 readonly RIG_EXIT_USAGE=64
 readonly RIG_EXIT_UNAVAILABLE=69
+# Keep bootstrap and doctor's completeness check on the same source paths.
+# These fixed relative names contain no whitespace; Python splits on spaces.
+readonly RIG_WORKTREE_BOOTSTRAP_PATHS=".rigpath CLAUDE.md PROJECT_BRIEF.md .gitleaks.toml \
+  bin/rig bin/rig-session-resolve.py bin/rig-snapshot.py .claude .agents .codex \
+  .mcp.json .playwright-mcp .github docs/INDEX.md docs/features/README.md"
 
 usage() { cat <<'EOF'
 Usage: rig <command> [subcommand] [options]
@@ -217,13 +222,10 @@ worktree_bootstrap() {
   common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || { echo "Not a Git worktree." >&2; return "$RIG_EXIT_UNAVAILABLE"; }
   primary="$(dirname "$common")"
   [[ "$root" != "$primary" && -f "$primary/.rigpath" ]] || { echo "No primary stealth worktree found." >&2; return "$RIG_EXIT_UNAVAILABLE"; }
-  python3 - "$primary" "$root" <<'PY'
-import pathlib, shutil, sys
+  RIG_BOOTSTRAP_PATHS="$RIG_WORKTREE_BOOTSTRAP_PATHS" python3 - "$primary" "$root" <<'PY'
+import os, pathlib, shutil, sys
 source, target = map(pathlib.Path, sys.argv[1:])
-paths = [".rigpath","CLAUDE.md","PROJECT_BRIEF.md",".gitleaks.toml","bin/rig",
-         "bin/rig-session-resolve.py","bin/rig-snapshot.py",
-         ".claude",".agents",".codex",".mcp.json",".playwright-mcp",".github",
-         "docs/INDEX.md","docs/features/README.md"]
+paths = os.environ["RIG_BOOTSTRAP_PATHS"].split()
 # Linked worktrees live under the primary's own .claude/worktrees/ (see the
 # stealth CLAUDE.md's off-limits note on that path), so copying ".claude"
 # whole would recurse into every sibling worktree checkout nested there --
@@ -901,7 +903,7 @@ doctor() {
   for arg in "$@"; do
     [[ "$arg" == --json ]] || { usage_error "unknown doctor option: $arg" "$@"; return; }
   done
-  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" python3 - "$@" <<'PY'
+  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" RIG_BOOTSTRAP_PATHS="$RIG_WORKTREE_BOOTSTRAP_PATHS" python3 - "$@" <<'PY'
 import hashlib, json, os, pathlib, re, shlex, stat, subprocess, sys
 
 try:
@@ -957,7 +959,8 @@ common = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"])
 if common is not None and common.returncode == 0:
     primary = pathlib.Path(common.stdout.strip()).parent
     if primary != root and (primary / ".rigpath").exists():
-        required = [".rigpath", "CLAUDE.md", "bin/rig", "bin/rig-session-resolve.py", "bin/rig-snapshot.py", ".claude"]
+        required = [rel for rel in os.environ["RIG_BOOTSTRAP_PATHS"].split()
+                    if (primary / rel).exists() and not (primary / rel).is_symlink()]
         missing = [p for p in required if not (root / p).exists()]
         recovery = f"cd {shlex.quote(str(root))} && {shlex.quote(str(primary / 'bin/rig'))} worktree bootstrap"
         check("worktree_bootstrap", not missing, "complete" if not missing else "missing: " + ", ".join(missing) + "; recover: " + recovery,
@@ -1004,10 +1007,29 @@ else:
 # Target metadata is read before provider checks so a deliberately absent
 # provider does not produce a false failure for its settings or commands.
 target_state = rig / "install-targets.json"
-try:
-    target_agents = json.loads(read(target_state)).get("agents", [])
-except (AttributeError, TypeError, ValueError):
+target_metadata_invalid = False
+if not target_state.exists() and not target_state.is_symlink():
     target_agents = []
+    check("install_targets", True, "legacy install: no target metadata; infer providers from present files and manifest", state=SKIPPED)
+else:
+    try:
+        target_data = json.loads(read(target_state))
+        if not isinstance(target_data, dict):
+            raise ValueError("expected a JSON object")
+        version = target_data.get("schema_version", 1)
+        if type(version) is not int or version != 1:
+            raise ValueError("unsupported schema_version (expected 1)")
+        target_agents = target_data.get("agents")
+        if (not isinstance(target_agents, list) or
+            any(agent not in ("claude", "codex") for agent in target_agents) or
+            len(target_agents) != len(set(target_agents))):
+            raise ValueError("agents must be a unique list of claude and/or codex")
+        check("install_targets", True, "valid project target metadata")
+    except (TypeError, ValueError) as exc:
+        target_agents = []
+        target_metadata_invalid = True
+        check("install_targets", False, f"{target_state}: {exc}",
+              fix=f"inspect {target_state} (restore valid install-target metadata from a backup or rerun the installer)")
 
 # Legacy installs can lack target metadata while their manifest still records
 # required Claude settings. Use that evidence before deciding to skip JSON.
@@ -1036,7 +1058,9 @@ if json_files:
     check("settings_json", not bad_json, "valid" if not bad_json else "; ".join(bad_json),
           fix="python3 -m json.tool " + " ".join(shlex.quote(str(path.relative_to(root))) for path in json_files))
 else:
-    check("settings_json", True, "no Claude or Codex settings selected or present", state=SKIPPED)
+    reason = ("requires valid install-target metadata or present settings evidence" if target_metadata_invalid else
+              "no Claude or Codex settings selected or present")
+    check("settings_json", True, reason, state=SKIPPED)
 
 # The per-install manifest records exactly which optional commands were selected.
 expected = []
@@ -1050,7 +1074,8 @@ if expected:
     detail = f"{len(expected) - len(missing)}/{len(expected)} manifest commands present"
 elif "claude" not in target_agents and not command_dir.is_dir():
     missing = []
-    detail = "Claude commands not selected or present"
+    detail = ("requires valid install-target metadata or present command evidence" if target_metadata_invalid else
+              "Claude commands not selected or present")
 else:
     present = sorted(command_dir.glob("*.md")) if command_dir.is_dir() else []
     missing = [] if present else [".claude/commands/*.md"]
@@ -1068,11 +1093,15 @@ elif skills.is_dir():
     command_names = {p.stem for p in command_dir.glob("*.md")}
     skill_names = {p.parent.name for p in skills.glob("*/SKILL.md")}
     skill_dirs = {p.name for p in skills.glob("*") if p.is_dir()}
+    generated_baseline = {parts[2] for path in manifest_paths
+                          if (parts := path.split("/"))[:2] == [".agents", "skills"]
+                          and len(parts) == 5 and parts[3:] == ["references", "command.md"]}
+    expected_generated = generated_baseline if "codex" in target_agents and generated_baseline else command_names
     source_skills = root / ".claude" / "skills"
     copied_names = {p.name for p in source_skills.glob("*") if p.is_dir()}
-    missing_skills = sorted(command_names - skill_names)
+    missing_skills = sorted(expected_generated - skill_names)
     missing_copied = sorted(copied_names - skill_dirs)
-    extra_skills = sorted(skill_names - command_names - copied_names)
+    extra_skills = sorted(skill_names - expected_generated - copied_names)
     copied_drift = []
     for name in sorted(copied_names & skill_dirs):
         source_tree, mirror_tree = source_skills / name, skills / name
@@ -1098,7 +1127,7 @@ elif skills.is_dir():
     # allowed difference, or a changed path could hide behind normalization.
     optional_commands = {"doc-feature", "doc-list", "feature-context",
                          "refresh-feature-doc", "rig-gaps", "rig-propose"}
-    known_commands = command_names | optional_commands
+    known_commands = command_names | skill_names | optional_commands
     names = "|".join(sorted(map(re.escape, known_commands), key=len, reverse=True))
     invocation = re.compile(rf"(?<![A-Za-z0-9_./-])/({names})(?![A-Za-z0-9_-])")
     brain_text = read(root / "CLAUDE.md")
@@ -1152,12 +1181,16 @@ elif skills.is_dir():
           fix="inspect .claude/commands and .agents/skills for listed names; preview a backed-up /rig-upgrade --scope=project --mode=agent before repair",
           state=ADVISORY if unverified and not problems else None)
 else:
-    check("codex_skill_parity", True, "Codex mirroring not enabled", state=SKIPPED)
+    reason = ("requires valid install-target metadata or present Codex skills" if target_metadata_invalid else
+              "Codex mirroring not enabled")
+    check("codex_skill_parity", True, reason, state=SKIPPED)
 
 # Codex target metadata makes project-instruction visibility a required health
 # check. AGENTS.override.md and AGENTS.md take precedence; CLAUDE.md is effective
 # only when the project config names it as a fallback.
-if "codex" in target_agents:
+if target_metadata_invalid:
+    check("codex_project_instructions", True, "requires valid install-target metadata", state=SKIPPED)
+elif "codex" in target_agents:
     agents_file = next((name for name in ("AGENTS.override.md", "AGENTS.md")
                         if (root / name).is_file()), None)
     fallback_ok = False
@@ -1196,7 +1229,10 @@ else:
     check("codex_project_instructions", True, "Codex project target not enabled", state=SKIPPED)
 
 codex_runtime_id = os.environ.get("CODEX_THREAD_ID", "")
-if codex_runtime_id:
+if target_metadata_invalid:
+    check("codex_project_target_runtime", True, "requires valid install-target metadata", state=SKIPPED)
+    check("codex_session_runtime", True, "requires valid install-target metadata", state=SKIPPED)
+elif codex_runtime_id:
     if "codex" not in target_agents:
         selected = ",".join(target_agents) if target_agents else "none"
         check("codex_project_target_runtime", True,

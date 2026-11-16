@@ -83,6 +83,16 @@ make_generated_skill() {
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["settings_json"]["state"]=="fail" and ".claude/settings.json" in c["settings_json"]["detail"]'
 }
 
+@test "invalid install-target metadata fails without treating Codex as unselected" {
+  local payload
+  for payload in '{broken' '{"schema_version":1,"agents":["unknown"]}'; do
+    printf '%s\n' "$payload" > "$CASE_DIR/.rig/install-targets.json"
+    run env CODEX_THREAD_ID=doctor-thread "$CASE_DIR/bin/rig" doctor --json
+    [ "$status" -eq 1 ]
+    json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["install_targets"]["state"]=="fail"; assert all(c[n]["state"]=="skipped" and "valid install-target" in c[n]["detail"] for n in ("codex_project_instructions","codex_project_target_runtime","codex_session_runtime"))'
+  done
+}
+
 @test "a malformed manifest skips checks that depend on its entries" {
   printf '{bad\n' > "$CASE_DIR/.rig/memory/.rig-manifest.json"
   run "$CASE_DIR/bin/rig" doctor --json
@@ -166,6 +176,18 @@ make_generated_skill() {
   [ "$status" -eq 0 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="worktree_bootstrap"); assert c["ok"] and c["detail"]=="complete"'
 
+  rm "$linked/.gitleaks.toml"
+  run bash -c "cd '$linked' && '$linked/bin/rig' doctor --json"
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="worktree_bootstrap"); assert c["state"]=="fail" and ".gitleaks.toml" in c["detail"]'
+  run bash -c "cd '$linked' && '$linked/bin/rig' doctor fix --check worktree_bootstrap --json"
+  [ "$status" -eq 0 ]
+  [ ! -e "$linked/.gitleaks.toml" ]
+  run bash -c "cd '$linked' && '$linked/bin/rig' doctor fix --check worktree_bootstrap --confirm --json"
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); assert d["status"]=="applied"'
+  [ -f "$linked/.gitleaks.toml" ]
+
   rm "$linked/bin/rig-snapshot.py"
   run bash -c "cd '$linked' && '$linked/bin/rig' doctor --json"
   [ "$status" -eq 1 ]
@@ -194,6 +216,33 @@ make_generated_skill() {
   run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' doctor fix --check worktree_bootstrap --confirm --json"
   [ "$status" -eq 1 ]
   [ ! -e "$BATS_TEST_TMPDIR/outside-bin/rig" ]
+}
+
+@test "linked Codex-only worktree requires present primary artifacts but not absent Claude assets" {
+  local external="$BATS_TEST_TMPDIR/external-rig"
+  local linked="$BATS_TEST_TMPDIR/linked"
+  rm -rf "$CASE_DIR/.claude"
+  mkdir -p "$external/memory" "$CASE_DIR/.codex" "$CASE_DIR/.agents/skills"
+  printf '%s\n' "$external" > "$CASE_DIR/.rigpath"
+  printf '{"hooks":{}}\n' > "$CASE_DIR/.codex/hooks.json"
+  printf 'CLAUDE.md\nPROJECT_BRIEF.md\n.claude/\n.codex/\n.agents/\n.rigpath\n' > "$CASE_DIR/.git/info/exclude"
+  printf 'seed\n' > "$CASE_DIR/README.md"
+  git -C "$CASE_DIR" config user.email test@example.com
+  git -C "$CASE_DIR" config user.name Test
+  git -C "$CASE_DIR" add README.md
+  git -C "$CASE_DIR" commit -qm seed
+  git -C "$CASE_DIR" worktree add -q -b linked-test "$linked"
+
+  run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' worktree bootstrap"
+  [ "$status" -eq 0 ]
+  run bash -c "cd '$linked' && '$linked/bin/rig' doctor --json"
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="worktree_bootstrap"); assert c["state"]=="pass" and ".claude" not in c["detail"]'
+
+  rm -rf "$linked/.codex"
+  run bash -c "cd '$linked' && '$linked/bin/rig' doctor --json"
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="worktree_bootstrap"); assert c["state"]=="fail" and ".codex" in c["detail"]'
 }
 
 @test "linked stealth worktree bootstrap restores session queries through an external .rigpath" {

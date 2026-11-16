@@ -652,16 +652,17 @@ runs these current postflight checks:
 
 | Gate | What it verifies | Degrades to "skipped" (not "failed") when |
 |---|---|---|
-| `worktree_bootstrap` | A linked worktree has the expected stealth artifacts copied from the primary checkout | Not a linked worktree with a primary `.rigpath` |
+| `worktree_bootstrap` | A linked worktree has every copyable stealth artifact present in the primary checkout, including `.gitleaks.toml` when present | Not a linked worktree with a primary `.rigpath` |
 | `rig_directory` | The resolved Rig directory exists and has a readable `memory/` directory | Never; missing Rig state is a failure |
 | `rigpath` | `.rigpath` is a single non-empty line resolving to a usable Rig directory, or local `.rig/` is selected | Never; malformed path state is a failure |
 | `stealth_exclusions` | Stealth/external artifacts are excluded from git visibility | Project is not a stealth/external install |
+| `install_targets` | Present project target metadata is valid and names only supported agents | Metadata is absent in a legacy install; provider checks infer from files and the manifest |
 | `settings_json` | Selected, present, or manifest-recorded Claude settings and present Codex hooks JSON files parse correctly | Neither provider's settings file is selected, present, or recorded |
 | `claude_commands` | Installed Claude command files match the manifest or at least exist when no manifest baseline is present | Claude is not selected or present and no manifest command baseline exists |
-| `codex_skill_parity` | Installed Codex wrappers and command references match Claude commands after the generator's base-branch and invocation substitutions; copied Claude skill trees match by content | Codex mirroring is not enabled, or Claude command source is absent |
-| `codex_project_instructions` | Codex has an effective `AGENTS*` file or configured `CLAUDE.md` fallback when Codex is an installed target | Codex is not an installed project target |
-| `codex_project_target_runtime` | A live Codex runtime has the project target infrastructure it needs | Codex runtime is not detected |
-| `codex_session_runtime` | A live Codex thread is bound to an active Rig session record | Codex runtime is not detected |
+| `codex_skill_parity` | Manifest-recorded Codex skill inventory is present; wrappers and references for available Claude commands match after the generator's substitutions; copied Claude skill trees match by content | Codex mirroring is not enabled, or Claude command source is absent |
+| `codex_project_instructions` | Codex has an effective `AGENTS*` file or configured `CLAUDE.md` fallback when Codex is an installed target | Codex is not an installed project target, or present target metadata is invalid |
+| `codex_project_target_runtime` | A live Codex runtime has the project target infrastructure it needs | Codex runtime is not detected, or present target metadata is invalid |
+| `codex_session_runtime` | A live Codex thread is bound to an active Rig session record | Codex runtime is not detected, or present target metadata is invalid |
 | `issue_tracking` | `CLAUDE.md` has at most one supported `issue-tracking:` value | Never; unsupported tracker configuration is a failure |
 | `github_auth` | GitHub authentication is available when `issue-tracking: github` | A non-GitHub or invalid tracker is configured |
 | `tracker_command_guidance` | `/task` and `/ship` guidance covers the configured tracker | Tracker configuration is invalid, or either command source is absent |
@@ -686,6 +687,11 @@ Add `--confirm` to copy missing artifacts. Automatic repair is limited to
 this check, preserves existing files and symlinks, and reports failure if a
 symlink blocks a required path. Direct `bin/rig worktree bootstrap` also
 reports the blocked path and exits nonzero.
+
+Malformed or unsupported `install-targets.json` fails `install_targets`.
+Checks that need its provider selection skip with that dependency stated;
+checks backed by installed files or the manifest still run. Older installs
+without this file continue to use those available sources.
 
 `codex_skill_parity` names each divergent command, wrapper, or copied skill.
 If a command still contains `[BASE_BRANCH]` and the project brain has no

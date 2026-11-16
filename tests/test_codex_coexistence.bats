@@ -59,6 +59,22 @@ run_install() {
   [ -f "$TEST_PROJECT/.agents/skills/rig-propose/SKILL.md" ]
 }
 
+@test "Codex-only feature-doc install passes doctor parity and detects an altered optional reference" {
+  run_install codex merge --feature-docs
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_PROJECT/.claude/commands/doc-feature.md" ]
+  [ ! -f "$TEST_PROJECT/.claude/commands/ship.md" ]
+
+  run bash -c 'cd "$1" && bash bin/rig doctor --json' _ "$TEST_PROJECT"
+  [ "$status" -eq 1 ]  # Fresh scaffold still has unfilled project placeholders.
+  JSON_OUTPUT="$output" python3 -c 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="pass"'
+
+  printf '\nPARITY-DRIFT-CANARY\n' >> "$TEST_PROJECT/.agents/skills/doc-feature/references/command.md"
+  run bash -c 'cd "$1" && bash bin/rig doctor --json' _ "$TEST_PROJECT"
+  [ "$status" -eq 1 ]
+  JSON_OUTPUT="$output" python3 -c 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="fail" and "doc-feature" in c["codex_skill_parity"]["detail"]'
+}
+
 @test "known Rig invocations are rewritten without changing paths or unknown commands" {
   source_dir="$TEST_ROOT/commands"
   output_dir="$TEST_ROOT/output"
