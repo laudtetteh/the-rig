@@ -69,12 +69,24 @@ run_install() {
   [ "$status" -eq 1 ]  # Fresh scaffold still has unfilled project placeholders.
   JSON_OUTPUT="$output" python3 -c 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="pass"'
 
+  cp "$TEST_PROJECT/.rig/memory/.rig-manifest" "$TEST_PROJECT/.rig/memory/.rig-manifest.original"
+  python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_text("".join(line for line in p.read_text().splitlines(keepends=True) if ".agents/skills/ship/references/command.md" not in line))' "$TEST_PROJECT/.rig/memory/.rig-manifest"
+  run bash -c 'cd "$1" && bash bin/rig doctor --json' _ "$TEST_PROJECT"
+  [ "$status" -eq 1 ]
+  JSON_OUTPUT="$output" python3 -c 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="pass"'
+  mv "$TEST_PROJECT/.rig/memory/.rig-manifest.original" "$TEST_PROJECT/.rig/memory/.rig-manifest"
+
   mv "$TEST_PROJECT/.rig/memory/.rig-manifest" "$TEST_PROJECT/.rig/memory/.rig-manifest.review-backup"
   run bash -c 'cd "$1" && bash bin/rig doctor --json' _ "$TEST_PROJECT"
   [ "$status" -eq 1 ]
   JSON_OUTPUT="$output" python3 -c 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="pass"'
 
   mv "$TEST_PROJECT/.rig/memory/.rig-manifest.json" "$TEST_PROJECT/.rig/memory/.rig-manifest.json.review-backup"
+  run bash -c 'cd "$1" && bash bin/rig doctor --json' _ "$TEST_PROJECT"
+  [ "$status" -eq 1 ]
+  JSON_OUTPUT="$output" python3 -c 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="advisory" and "inventory" in c["codex_skill_parity"]["detail"]'
+
+  mv "$TEST_PROJECT/.rig/install-targets.json" "$TEST_PROJECT/.rig/install-targets.json.review-backup"
   run bash -c 'cd "$1" && bash bin/rig doctor --json' _ "$TEST_PROJECT"
   [ "$status" -eq 1 ]
   JSON_OUTPUT="$output" python3 -c 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="advisory" and "inventory" in c["codex_skill_parity"]["detail"]'

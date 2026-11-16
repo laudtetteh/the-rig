@@ -1105,17 +1105,16 @@ elif skills.is_dir():
         return result - copied_names
 
     generated_baseline = generated_names(manifest_paths)
-    if "codex" in target_agents and not generated_baseline:
-        # The structured manifest survives some legacy flat-manifest losses.
-        # Its entry paths still record which command skills were installed.
-        try:
-            metadata = json.loads(read(rig / "memory" / ".rig-manifest.json"))
-            entries = metadata.get("entries") if isinstance(metadata, dict) and metadata.get("schema_version") == 1 else None
-            if isinstance(entries, dict):
-                generated_baseline = generated_names(entries)
-        except ValueError:
-            pass
-    inventory_unverified = not generated_baseline and ("codex" in target_agents or target_metadata_invalid)
+    # Either manifest can retain a selected skill entry that the other lost.
+    # Read both independently even when target metadata is missing.
+    try:
+        metadata = json.loads(read(rig / "memory" / ".rig-manifest.json"))
+        entries = metadata.get("entries") if isinstance(metadata, dict) and metadata.get("schema_version") == 1 else None
+        if isinstance(entries, dict):
+            generated_baseline |= generated_names(entries)
+    except ValueError:
+        pass
+    inventory_unverified = not generated_baseline
     expected_generated = (generated_baseline | command_names) if generated_baseline else command_names
     missing_skills = sorted(expected_generated - skill_names)
     missing_copied = sorted(copied_names - skill_dirs)
@@ -1377,19 +1376,26 @@ else:
 if not tracker_valid:
     check("recent_commit_references", True, "requires a valid issue-tracking setting", state=SKIPPED)
 else:
-    log = run(["git", "log", "-20", "--pretty=%s"])
-    subjects = log.stdout.splitlines() if log is not None and log.returncode == 0 else []
+    log = run(["git", "log", "-20", "--format=%P%x09%s"])
+    commits = [line.split("\t", 1) for line in log.stdout.splitlines()] if log is not None and log.returncode == 0 else []
+    authored = [subject for parents, subject in commits if len(parents.split()) <= 1]
+    merge_count = len(commits) - len(authored)
     if tracker == "github": pattern = re.compile(r"\[#\d+\]")
     elif tracker == "linear": pattern = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")
     elif tracker == "trello": pattern = re.compile(r"\btrello:[A-Za-z0-9_-]+\b", re.I)
     elif tracker == "gus": pattern = re.compile(r"\bW-\d+\b", re.I)
     else: pattern = None
-    if pattern and subjects:
-        drift = [subject for subject in subjects if not pattern.search(subject)]
-        check("recent_commit_references", not drift, f"{len(subjects)-len(drift)}/{len(subjects)} match {tracker}; first drift: {drift[0]}" if drift else f"{len(subjects)}/{len(subjects)} match {tracker}",
-              fix="git log -20 --pretty=%s")
+    if pattern and authored:
+        drift = [subject for subject in authored if not pattern.search(subject)]
+        detail = f"{len(authored)-len(drift)}/{len(authored)} authored commits match {tracker}; {merge_count} merge commits excluded"
+        if drift:
+            detail += f"; first drift: {drift[0]}"
+        check("recent_commit_references", not drift, detail,
+              fix="git log -20 --format='%P%x09%s'")
     else:
-        check("recent_commit_references", True, "no convention required" if pattern is None else "no commits to inspect",
+        detail = ("no convention required" if pattern is None else
+                  f"no authored commits to inspect; {merge_count} merge commits excluded")
+        check("recent_commit_references", True, detail,
               state=SKIPPED)
 
 # Query PRs only when this is a GitHub-backed checkout and auth already passed;

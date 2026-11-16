@@ -666,7 +666,7 @@ runs these current postflight checks:
 | `issue_tracking` | `CLAUDE.md` has at most one supported `issue-tracking:` value | Never; unsupported tracker configuration is a failure |
 | `github_auth` | GitHub authentication is available when `issue-tracking: github` | A non-GitHub or invalid tracker is configured |
 | `tracker_command_guidance` | `/task` and `/ship` guidance covers the configured tracker | Tracker configuration is invalid, or either command source is absent |
-| `recent_commit_references` | Recent commits follow the configured tracker reference convention | Tracker configuration is invalid or `none`, or there are no commits to inspect |
+| `recent_commit_references` | Recent authored commits follow the configured tracker reference convention; multi-parent merge commits are excluded | Tracker configuration is invalid or `none`, or there are no authored commits to inspect |
 | `recent_pr_references` | Recent GitHub PRs contain issue references or close keywords | Invalid or non-GitHub tracker, non-GitHub remote, or unavailable GitHub auth |
 | `connector_declarations` | Optional connector dependency declarations have the expected public envelope | No connector declaration file exists |
 | `template_placeholder_content` | Core project docs are not still showing raw scaffold placeholder content | Never; unfilled content is a failure, but its cause is not assumed |
@@ -695,8 +695,8 @@ checks backed by installed files or the manifest still run. Older installs
 without this file continue to use those available sources.
 
 `codex_skill_parity` names each divergent command, wrapper, or copied skill.
-If the classic manifest is missing, it uses the structured manifest for the
-installed command-skill inventory. If neither baseline exists, inventory is
+It combines the classic and structured manifest entries for the installed
+command-skill inventory. If neither baseline exists, inventory is
 advisory while content differences for available command pairs still fail.
 Only command names may receive the generator's slash-to-dollar rewrite;
 copied Claude skill names do not become command names. Without either

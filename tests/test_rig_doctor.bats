@@ -30,6 +30,9 @@ make_generated_skill() {
     "# $name" '' \
     'Follow the complete workflow in [the command reference](references/command.md).' \
     > "$skill_dir/SKILL.md"
+  if [ -f "$CASE_DIR/.rig/memory/.rig-manifest" ]; then
+    printf 'hash .agents/skills/%s/references/command.md\n' "$name" >> "$CASE_DIR/.rig/memory/.rig-manifest"
+  fi
 }
 
 @test "healthy doctor emits one JSON object and succeeds" {
@@ -102,6 +105,24 @@ make_generated_skill() {
   printf 'project_doc_fallback_filenames = ["CLAUDE.md"]\n' > "$CASE_DIR/.codex/config.toml"
   mkdir -p "$CASE_DIR/.agents/skills/extra"
   printf 'extra\n' > "$CASE_DIR/.agents/skills/extra/SKILL.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="advisory" and "inventory" in c["codex_skill_parity"]["detail"]'
+
+  printf '\nPARITY-DRIFT-CANARY\n' >> "$CASE_DIR/.agents/skills/task/references/command.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="fail" and "task" in c["codex_skill_parity"]["detail"]'
+}
+
+@test "absent target metadata and manifests leave extra Codex inventory unverified" {
+  make_generated_skill task
+  make_generated_skill ship
+  rm "$CASE_DIR/.rig/memory/.rig-manifest"
+  mkdir -p "$CASE_DIR/.agents/skills/status/references"
+  printf '%s\n' '---' 'name: status' '---' > "$CASE_DIR/.agents/skills/status/SKILL.md"
+  printf 'status\n' > "$CASE_DIR/.agents/skills/status/references/command.md"
+
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
   json_assert 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="advisory" and "inventory" in c["codex_skill_parity"]["detail"]'
@@ -532,6 +553,20 @@ SH
   run env PATH="$FAKE_BIN:$PATH" "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["github_auth"]["ok"] and c["recent_commit_references"]["ok"] and c["recent_pr_references"]["ok"]'
+
+  local base_branch
+  base_branch="$(git -C "$CASE_DIR" branch --show-current)"
+  git -C "$CASE_DIR" checkout -qb feature
+  printf 'side\n' > "$CASE_DIR/side"
+  git -C "$CASE_DIR" add side
+  git -C "$CASE_DIR" commit -qm 'feat: side [#12]'
+  git -C "$CASE_DIR" checkout -q "$base_branch"
+  git -C "$CASE_DIR" merge --no-ff -qm 'Merge pull request #42 from example/feature' feature
+  [ "$(git -C "$CASE_DIR" rev-list --parents -n 1 HEAD | wc -w | tr -d ' ')" -eq 3 ]
+  run env PATH="$FAKE_BIN:$PATH" "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["recent_commit_references"]["state"]=="pass" and "merge" in c["recent_commit_references"]["detail"]'
+
   printf x > "$CASE_DIR/drift" && git -C "$CASE_DIR" add drift && git -C "$CASE_DIR" commit -qm 'feat: missing reference'
   run env PATH="$FAKE_BIN:$PATH" "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
