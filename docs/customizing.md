@@ -656,7 +656,7 @@ runs these current postflight checks:
 | `rig_directory` | The resolved Rig directory exists and has a readable `memory/` directory | Never; missing Rig state is a failure |
 | `rigpath` | `.rigpath` is a single non-empty line resolving to a usable Rig directory, or local `.rig/` is selected | Never; malformed path state is a failure |
 | `stealth_exclusions` | Stealth/external artifacts are excluded from git visibility | Project is not a stealth/external install |
-| `settings_json` | Selected Claude settings and present Codex hooks JSON files parse correctly | Neither provider's settings file is selected or present |
+| `settings_json` | Selected, present, or manifest-recorded Claude settings and present Codex hooks JSON files parse correctly | Neither provider's settings file is selected, present, or recorded |
 | `claude_commands` | Installed Claude command files match the manifest or at least exist when no manifest baseline is present | Claude is not selected or present and no manifest command baseline exists |
 | `codex_skill_parity` | Installed Codex skill names match Claude command names; content parity is not checked | Codex mirroring is not enabled, or Claude command source is absent |
 | `codex_project_instructions` | Codex has an effective `AGENTS*` file or configured `CLAUDE.md` fallback when Codex is an installed target | Codex is not an installed project target |
@@ -684,7 +684,8 @@ executes it. For a linked stealth worktree,
 `bin/rig doctor fix --check worktree_bootstrap --json` previews the missing paths and recovery command.
 Add `--confirm` to copy missing artifacts. Automatic repair is limited to
 this check, preserves existing files and symlinks, and reports failure if a
-symlink blocks a required path.
+symlink blocks a required path. Direct `bin/rig worktree bootstrap` also
+reports the blocked path and exits nonzero.
 
 Both new gates diff the most recent pre-flight snapshot (issue #472,
 `.rig-backup/preflight-snapshots/` for tracked installs or the external

@@ -240,20 +240,35 @@ paths = [".rigpath","CLAUDE.md","PROJECT_BRIEF.md",".gitleaks.toml","bin/rig",
 # it is always excluded from every directory copy here, not just ".claude"'s.
 ignore_worktrees = shutil.ignore_patterns("worktrees")
 copied=[]
-def parent_is_symlink(rel):
+blocked=[]
+def symlink_parent(rel):
     cursor = target
     for part in pathlib.Path(rel).parts[:-1]:
         cursor = cursor / part
         if cursor.is_symlink():
-            return True
-    return False
+            return cursor
+    return None
 for rel in paths:
     src, dst = source/rel, target/rel
-    if (not src.exists() or src.is_symlink() or dst.exists() or
-            dst.is_symlink() or parent_is_symlink(rel)): continue
+    if not src.exists() or src.is_symlink(): continue
+    parent_link = symlink_parent(rel)
+    if parent_link is not None:
+        blocked.append(f"{rel} (parent {parent_link} is a symlink)")
+        continue
+    if dst.is_symlink():
+        if not dst.exists():
+            blocked.append(f"{rel} (dangling symlink)")
+        continue
+    if dst.exists(): continue
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src,dst,ignore=ignore_worktrees) if src.is_dir() else shutil.copy2(src,dst)
     copied.append(rel)
+if blocked:
+    if copied:
+        print("Bootstrapped linked worktree: " + ", ".join(copied))
+    print("Cannot bootstrap symlink-blocked path(s): " + "; ".join(blocked) +
+          ". Inspect and repair those paths manually, then rerun rig worktree bootstrap.", file=sys.stderr)
+    raise SystemExit(3)
 print("Bootstrapped linked worktree: " + (", ".join(copied) if copied else "already complete"))
 PY
 }
@@ -994,10 +1009,20 @@ try:
 except (AttributeError, TypeError, ValueError):
     target_agents = []
 
+# Legacy installs can lack target metadata while their manifest still records
+# required Claude settings. Use that evidence before deciding to skip JSON.
+manifest = rig / "memory" / ".rig-manifest"
+manifest_lines = read(manifest).splitlines()
+manifest_paths = set()
+for line in manifest_lines:
+    fields = line.split(None, 1)
+    if len(fields) == 2:
+        manifest_paths.add(fields[1])
+
 json_files = []
 claude_settings = root / ".claude" / "settings.json"
 codex_hooks = root / ".codex" / "hooks.json"
-if "claude" in target_agents or claude_settings.exists():
+if "claude" in target_agents or claude_settings.exists() or ".claude/settings.json" in manifest_paths:
     json_files.append(claude_settings)
 if codex_hooks.exists():
     json_files.append(codex_hooks)
@@ -1014,9 +1039,8 @@ else:
     check("settings_json", True, "no Claude or Codex settings selected or present", state=SKIPPED)
 
 # The per-install manifest records exactly which optional commands were selected.
-manifest = rig / "memory" / ".rig-manifest"
 expected = []
-for line in read(manifest).splitlines():
+for line in manifest_lines:
     fields = line.split(None, 1)
     if len(fields) == 2 and fields[1].startswith(".claude/commands/") and fields[1].endswith(".md"):
         expected.append(fields[1])

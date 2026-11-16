@@ -59,6 +59,19 @@ json_assert() {
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert all(c[n]["state"]=="skipped" for n in ("claude_commands","codex_skill_parity","tracker_command_guidance")); assert c["settings_json"]["state"]==c["codex_project_instructions"]["state"]=="pass"'
 }
 
+@test "legacy manifest requires Claude settings when target metadata is absent or malformed" {
+  rm "$CASE_DIR/.claude/settings.json"
+  printf 'hash .claude/settings.json\nhash .claude/commands/task.md\nhash .claude/commands/ship.md\n' > "$CASE_DIR/.rig/memory/.rig-manifest"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["settings_json"]["state"]=="fail" and ".claude/settings.json" in c["settings_json"]["detail"]; assert c["claude_commands"]["state"]=="pass"'
+
+  printf '{broken\n' > "$CASE_DIR/.rig/install-targets.json"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["settings_json"]["state"]=="fail" and ".claude/settings.json" in c["settings_json"]["detail"]'
+}
+
 @test "a malformed manifest skips checks that depend on its entries" {
   printf '{bad\n' > "$CASE_DIR/.rig/memory/.rig-manifest.json"
   run "$CASE_DIR/bin/rig" doctor --json
@@ -153,6 +166,9 @@ json_assert() {
 
   rm "$linked/bin/rig-snapshot.py"
   ln -s "$BATS_TEST_TMPDIR/outside-snapshot" "$linked/bin/rig-snapshot.py"
+  run bash -c "cd '$linked' && '$linked/bin/rig' worktree bootstrap"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"bin/rig-snapshot.py"* && "$output" == *"symlink"* ]] || return 1
   run bash -c "cd '$linked' && '$linked/bin/rig' doctor fix --check worktree_bootstrap --confirm --json"
   [ "$status" -eq 1 ]
   [ -L "$linked/bin/rig-snapshot.py" ]
@@ -161,6 +177,9 @@ json_assert() {
   rm -rf "$linked/bin"
   mkdir -p "$BATS_TEST_TMPDIR/outside-bin"
   ln -s "$BATS_TEST_TMPDIR/outside-bin" "$linked/bin"
+  run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' worktree bootstrap"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"symlink"* ]] || return 1
   run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' doctor fix --check worktree_bootstrap --confirm --json"
   [ "$status" -eq 1 ]
   [ ! -e "$BATS_TEST_TMPDIR/outside-bin/rig" ]
