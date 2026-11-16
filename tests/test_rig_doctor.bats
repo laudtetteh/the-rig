@@ -25,12 +25,45 @@ json_assert() {
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 1 ]
-  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); assert d["ok"] is True and d["command"] == "doctor"'
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); assert d["ok"] is True and d["command"] == "doctor"; c={x["name"]:x for x in d["checks"]}; assert all(c[n]["state"]=="skipped" for n in ("idempotence","worktree_bootstrap","connector_declarations")); assert d["summary"]["skipped"] >= 3'
 
   run "$CASE_DIR/bin/rig" doctor
   [ "$status" -eq 0 ]
   [[ "$output" == *"PASS  rig_directory:"* ]] || return 1
   [[ "$output" == *"Rig doctor: healthy"* ]] || return 1
+}
+
+@test "doctor skips dependent tracker guidance when command sources are missing" {
+  rm "$CASE_DIR/.claude/commands/task.md" "$CASE_DIR/.claude/commands/ship.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["claude_commands"]["state"]=="fail"; assert c["tracker_command_guidance"]["state"]=="skipped" and "task.md" in c["tracker_command_guidance"]["detail"]'
+}
+
+@test "doctor skips tracker-dependent checks when issue-tracking configuration is ambiguous" {
+  printf 'issue-tracking: github\nissue-tracking: linear\n' > "$CASE_DIR/CLAUDE.md"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["issue_tracking"]["state"]=="fail"; assert all(c[n]["state"]=="skipped" for n in ("github_auth","tracker_command_guidance","recent_commit_references","recent_pr_references"))'
+}
+
+@test "Codex-only project does not fail checks for absent Claude artifacts" {
+  rm -rf "$CASE_DIR/.claude"
+  rm "$CASE_DIR/.rig/memory/.rig-manifest"
+  printf '{"schema_version":1,"agents":["codex"]}\n' > "$CASE_DIR/.rig/install-targets.json"
+  mkdir -p "$CASE_DIR/.codex"
+  printf '{"hooks":{}}\n' > "$CASE_DIR/.codex/hooks.json"
+  printf 'project_doc_fallback_filenames = ["CLAUDE.md"]\n' > "$CASE_DIR/.codex/config.toml"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert all(c[n]["state"]=="skipped" for n in ("claude_commands","codex_skill_parity","tracker_command_guidance")); assert c["settings_json"]["state"]==c["codex_project_instructions"]["state"]=="pass"'
+}
+
+@test "a malformed manifest skips checks that depend on its entries" {
+  printf '{bad\n' > "$CASE_DIR/.rig/memory/.rig-manifest.json"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["manifest_mode_hash"]["state"]=="fail"; assert c["stale_manifest_entries"]["state"]=="skipped" and "manifest" in c["stale_manifest_entries"]["detail"]'
 }
 
 @test "doctor validates connector declarations without claiming session callability" {
@@ -89,8 +122,16 @@ json_assert() {
   [[ "$output" == *"worktree bootstrap"* ]] || return 1
   printf 'linked customization\nissue-tracking: none\n' > "$linked/CLAUDE.md"
 
-  run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' worktree bootstrap"
+  run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' doctor fix --check worktree_bootstrap --json"
   [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); assert d["status"]=="preview" and d["check"]=="worktree_bootstrap" and "worktree bootstrap" in d["command"]'
+  [ ! -e "$linked/.rigpath" ]
+  run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' doctor fix --check manifest_mode_hash --confirm --json"
+  [ "$status" -eq 64 ]
+  [ ! -e "$linked/.rigpath" ]
+  run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' doctor fix --check worktree_bootstrap --confirm --json"
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); assert d["status"]=="applied" and d["check"]=="worktree_bootstrap"'
   grep -q '^linked customization$' "$linked/CLAUDE.md"
   [ -f "$linked/.rigpath" ]
   [ -x "$linked/bin/rig" ]
@@ -105,10 +146,24 @@ json_assert() {
   run bash -c "cd '$linked' && '$linked/bin/rig' doctor --json"
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="worktree_bootstrap"); assert not c["ok"] and "bin/rig-snapshot.py" in c["detail"]'
-  run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' worktree bootstrap"
+  run bash -c "cd '$linked' && '$linked/bin/rig' doctor fix --check worktree_bootstrap --confirm --json"
   [ "$status" -eq 0 ]
   run bash -c "cd '$linked' && '$linked/bin/rig' doctor --json"
   [ "$status" -eq 0 ]
+
+  rm "$linked/bin/rig-snapshot.py"
+  ln -s "$BATS_TEST_TMPDIR/outside-snapshot" "$linked/bin/rig-snapshot.py"
+  run bash -c "cd '$linked' && '$linked/bin/rig' doctor fix --check worktree_bootstrap --confirm --json"
+  [ "$status" -eq 1 ]
+  [ -L "$linked/bin/rig-snapshot.py" ]
+  [ ! -e "$BATS_TEST_TMPDIR/outside-snapshot" ]
+
+  rm -rf "$linked/bin"
+  mkdir -p "$BATS_TEST_TMPDIR/outside-bin"
+  ln -s "$BATS_TEST_TMPDIR/outside-bin" "$linked/bin"
+  run bash -c "cd '$linked' && '$CASE_DIR/bin/rig' doctor fix --check worktree_bootstrap --confirm --json"
+  [ "$status" -eq 1 ]
+  [ ! -e "$BATS_TEST_TMPDIR/outside-bin/rig" ]
 }
 
 @test "linked stealth worktree bootstrap restores session queries through an external .rigpath" {

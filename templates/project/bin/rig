@@ -9,6 +9,7 @@ Usage: rig <command> [subcommand] [options]
 
 Commands:
   rig doctor                Diagnose a Rig installation
+  rig doctor fix            Preview or apply an allowlisted doctor repair
   rig connector preflight   Check declared connector dependencies
   rig worktree bootstrap    Restore missing stealth artifacts in a linked worktree
   rig session resolve       Resolve the current session identity
@@ -64,7 +65,7 @@ version() {
 }
 command_help() {
   case "$1" in
-    doctor) printf 'Usage: rig doctor [--json]\n';;
+    doctor) printf 'Usage: rig doctor [--json]\n       rig doctor fix --check worktree_bootstrap [--confirm] [--json]\n\nDoctor is read-only. The fix subcommand previews by default and only copies\nmissing stealth worktree artifacts after --confirm. Other checks have\nmanual fix previews but no automatic repair.\n';;
     connector) printf 'Usage: rig connector preflight --skill ID [--evidence FILE|-] [--refresh] [--json]\n';;
     worktree) printf 'Usage: rig worktree bootstrap\n';;
     upgrade) printf 'Usage: rig upgrade rollback (--last | --id ID) [--dry-run | --confirm ID] [--json]\n\nUndoes one completed upgrade using the report that run wrote.\nRestores only the paths that upgrade changed, and refuses anything\nedited since. For an interrupted upgrade, use install.sh --recover.\n\nExit codes: 0 fully undone, 3 some paths refused, 70 a restore failed.\n';;
@@ -239,9 +240,17 @@ paths = [".rigpath","CLAUDE.md","PROJECT_BRIEF.md",".gitleaks.toml","bin/rig",
 # it is always excluded from every directory copy here, not just ".claude"'s.
 ignore_worktrees = shutil.ignore_patterns("worktrees")
 copied=[]
+def parent_is_symlink(rel):
+    cursor = target
+    for part in pathlib.Path(rel).parts[:-1]:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            return True
+    return False
 for rel in paths:
     src, dst = source/rel, target/rel
-    if not src.exists() or src.is_symlink() or dst.exists(): continue
+    if (not src.exists() or src.is_symlink() or dst.exists() or
+            dst.is_symlink() or parent_is_symlink(rel)): continue
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src,dst,ignore=ignore_worktrees) if src.is_dir() else shutil.copy2(src,dst)
     copied.append(rel)
@@ -791,7 +800,88 @@ memory_workflow_lock() {
   python3 "$(dirname "${BASH_SOURCE[0]}")/rig-snapshot.py" workflow-lock "$@" --rig-dir "$(rig_dir)"
 }
 
+doctor_fix_emit() {
+  local result_status="$1" report="$2" json_output="$3"
+  DOCTOR_FIX_STATUS="$result_status" DOCTOR_FIX_REPORT="$report" DOCTOR_FIX_JSON="$json_output" python3 <<'PY'
+import json, os
+try:
+    report = json.loads(os.environ["DOCTOR_FIX_REPORT"])
+    item = next((x for x in report.get("checks", []) if x.get("name") == "worktree_bootstrap"), None)
+except (TypeError, ValueError):
+    item = None
+status = os.environ["DOCTOR_FIX_STATUS"]
+payload = {"ok": status in ("preview", "applied", "already_complete"),
+           "check": "worktree_bootstrap", "status": status,
+           "detail": item.get("detail") if item else "not a linked stealth worktree"}
+if item and item.get("fix"):
+    payload["command"] = item["fix"]
+if os.environ["DOCTOR_FIX_JSON"] == "true":
+    print(json.dumps(payload, separators=(",", ":")))
+else:
+    print("Doctor fix " + status + ": " + payload["detail"])
+    if payload.get("command"):
+        print("  command: " + payload["command"])
+PY
+}
+
+doctor_fix() {
+  local check_name="" confirm=false json_output=false report state result
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --check)
+        [[ "$#" -ge 2 ]] || { usage_error "--check requires a value"; return; }
+        check_name="$2"; shift 2 ;;
+      --confirm) confirm=true; shift ;;
+      --json) json_output=true; shift ;;
+      --help|-h) command_help doctor; return 0 ;;
+      *) usage_error "unknown doctor fix option: $1"; return ;;
+    esac
+  done
+  [[ "$check_name" == worktree_bootstrap ]] || {
+    usage_error "automatic doctor fix is available only for worktree_bootstrap"; return;
+  }
+  report="$(doctor --json)" || true
+  state="$(DOCTOR_FIX_REPORT="$report" python3 -c '
+import json, os
+try:
+    item=next((x for x in json.loads(os.environ["DOCTOR_FIX_REPORT"]).get("checks", []) if x.get("name")=="worktree_bootstrap"), None)
+    print(item.get("state", "missing") if item else "missing")
+except (TypeError, ValueError): print("missing")')"
+  case "$state" in
+    missing|skipped|advisory)
+      doctor_fix_emit not_applicable "$report" "$json_output"
+      return 3 ;;
+    pass)
+      doctor_fix_emit already_complete "$report" "$json_output"
+      return 0 ;;
+    fail) ;;
+    *) usage_error "doctor returned an invalid worktree_bootstrap state"; return ;;
+  esac
+  if [[ "$confirm" != true ]]; then
+    doctor_fix_emit preview "$report" "$json_output"
+    return 0
+  fi
+  if ! result="$(worktree_bootstrap bootstrap 2>&1)"; then
+    doctor_fix_emit failed "$report" "$json_output"
+    return 1
+  fi
+  report="$(doctor --json)" || true
+  state="$(DOCTOR_FIX_REPORT="$report" python3 -c '
+import json, os
+try:
+    item=next((x for x in json.loads(os.environ["DOCTOR_FIX_REPORT"]).get("checks", []) if x.get("name")=="worktree_bootstrap"), None)
+    print(item.get("state", "missing") if item else "missing")
+except (TypeError, ValueError): print("missing")')"
+  if [[ "$state" == pass ]]; then
+    doctor_fix_emit applied "$report" "$json_output"
+    return 0
+  fi
+  doctor_fix_emit failed "$report" "$json_output"
+  return 1
+}
+
 doctor() {
+  if [[ "${1:-}" == fix ]]; then shift; doctor_fix "$@"; return; fi
   local arg
   for arg in "$@"; do
     [[ "$arg" == --json ]] || { usage_error "unknown doctor option: $arg" "$@"; return; }
@@ -857,6 +947,11 @@ if common is not None and common.returncode == 0:
         recovery = f"cd {shlex.quote(str(root))} && {shlex.quote(str(primary / 'bin/rig'))} worktree bootstrap"
         check("worktree_bootstrap", not missing, "complete" if not missing else "missing: " + ", ".join(missing) + "; recover: " + recovery,
               fix=recovery)
+    else:
+        reason = "not a linked worktree" if primary == root else "primary checkout is not a stealth install"
+        check("worktree_bootstrap", True, reason, state=SKIPPED)
+else:
+    check("worktree_bootstrap", True, "not a Git worktree", state=SKIPPED)
 
 # Path resolution must be both usable and recognisably a Rig data directory.
 marker = rig / "memory"
@@ -891,17 +986,32 @@ if rigpath.exists():
 else:
     check("stealth_exclusions", True, "not a stealth install", state=SKIPPED)
 
-json_files = [root / ".claude" / "settings.json"]
-hooks = root / ".codex" / "hooks.json"
-if hooks.exists(): json_files.append(hooks)
+# Target metadata is read before provider checks so a deliberately absent
+# provider does not produce a false failure for its settings or commands.
+target_state = rig / "install-targets.json"
+try:
+    target_agents = json.loads(read(target_state)).get("agents", [])
+except (AttributeError, TypeError, ValueError):
+    target_agents = []
+
+json_files = []
+claude_settings = root / ".claude" / "settings.json"
+codex_hooks = root / ".codex" / "hooks.json"
+if "claude" in target_agents or claude_settings.exists():
+    json_files.append(claude_settings)
+if codex_hooks.exists():
+    json_files.append(codex_hooks)
 bad_json = []
 for path in json_files:
     try:
         with path.open() as handle: json.load(handle)
     except (OSError, ValueError) as exc:
         bad_json.append(f"{path.relative_to(root)}: {exc}")
-check("settings_json", not bad_json, "valid" if not bad_json else "; ".join(bad_json),
-      fix="python3 -m json.tool " + " ".join(shlex.quote(str(path.relative_to(root))) for path in json_files))
+if json_files:
+    check("settings_json", not bad_json, "valid" if not bad_json else "; ".join(bad_json),
+          fix="python3 -m json.tool " + " ".join(shlex.quote(str(path.relative_to(root))) for path in json_files))
+else:
+    check("settings_json", True, "no Claude or Codex settings selected or present", state=SKIPPED)
 
 # The per-install manifest records exactly which optional commands were selected.
 manifest = rig / "memory" / ".rig-manifest"
@@ -914,15 +1024,23 @@ command_dir = root / ".claude" / "commands"
 if expected:
     missing = [item for item in expected if not (root / item).is_file()]
     detail = f"{len(expected) - len(missing)}/{len(expected)} manifest commands present"
+elif "claude" not in target_agents and not command_dir.is_dir():
+    missing = []
+    detail = "Claude commands not selected or present"
 else:
     present = sorted(command_dir.glob("*.md")) if command_dir.is_dir() else []
     missing = [] if present else [".claude/commands/*.md"]
     detail = f"{len(present)} commands present (no manifest baseline)"
-check("claude_commands", not missing, detail if not missing else "missing: " + ", ".join(missing),
-      fix="/rig-upgrade --scope=project --mode=agent (restores Rig-owned command files)")
+if not expected and "claude" not in target_agents and not command_dir.is_dir():
+    check("claude_commands", True, detail, state=SKIPPED)
+else:
+    check("claude_commands", not missing, detail if not missing else "missing: " + ", ".join(missing),
+          fix="/rig-upgrade --scope=project --mode=agent (restores Rig-owned command files)")
 
 skills = root / ".agents" / "skills"
-if skills.is_dir():
+if skills.is_dir() and not command_dir.is_dir():
+    check("codex_skill_parity", True, "Claude command source not installed; local name comparison unavailable", state=SKIPPED)
+elif skills.is_dir():
     command_names = {p.stem for p in command_dir.glob("*.md")}
     skill_names = {p.parent.name for p in skills.glob("*/SKILL.md")}
     missing_skills = sorted(command_names - skill_names)
@@ -937,11 +1055,6 @@ else:
 # Codex target metadata makes project-instruction visibility a required health
 # check. AGENTS.override.md and AGENTS.md take precedence; CLAUDE.md is effective
 # only when the project config names it as a fallback.
-target_state = rig / "install-targets.json"
-try:
-    target_agents = json.loads(read(target_state)).get("agents", [])
-except (AttributeError, TypeError, ValueError):
-    target_agents = []
 if "codex" in target_agents:
     agents_file = next((name for name in ("AGENTS.override.md", "AGENTS.md")
                         if (root / name).is_file()), None)
@@ -1067,50 +1180,63 @@ claude_md = read(root / "CLAUDE.md")
 matches = re.findall(r"(?m)^issue-tracking:\s*([^\s#]+)", claude_md)
 tracker = matches[-1].lower() if matches else "github"
 supported = {"github", "linear", "trello", "gus", "none"}
-check("issue_tracking", len(matches) <= 1 and tracker in supported,
+tracker_valid = len(matches) <= 1 and tracker in supported
+check("issue_tracking", tracker_valid,
       (f"configured: {tracker}" if len(matches) <= 1 else f"{len(matches)} issue-tracking lines; last wins: {tracker}")
       if tracker in supported else f"unsupported: {tracker}",
       fix="grep -n '^issue-tracking:' CLAUDE.md (keep exactly one of: " + ", ".join(sorted(supported)) + ")")
 
-if tracker == "github":
+authenticated = False
+if not tracker_valid:
+    check("github_auth", True, "requires a valid issue-tracking setting", state=SKIPPED)
+elif tracker == "github":
     auth = run(["gh", "auth", "status"])
     authenticated = auth is not None and auth.returncode == 0
     check("github_auth", authenticated, "authenticated" if authenticated else "gh authentication unavailable",
           fix="gh auth status")
 else:
-    authenticated = False
     check("github_auth", True, f"not required for {tracker}", state=SKIPPED)
 
 # Command guidance is checked separately from repository history: command files
 # must describe the selected tracker, while commits use the generic reference
 # syntax. PR titles are not required to carry commit-only [#N] suffixes.
-guidance = read(command_dir / "task.md") + "\n" + read(command_dir / "ship.md")
+guidance_paths = [command_dir / "task.md", command_dir / "ship.md"]
 tokens = {"github": "issue-tracking: github", "linear": "issue-tracking: linear",
           "trello": "issue-tracking: trello", "gus": "issue-tracking: gus", "none": "issue-tracking: none"}
-check("tracker_command_guidance", tokens.get(tracker, "") in guidance,
-      f"command guidance covers {tracker}" if tokens.get(tracker, "") in guidance else f"command guidance missing {tracker}",
-      fix="grep -n 'issue-tracking:' .claude/commands/task.md .claude/commands/ship.md")
-
-log = run(["git", "log", "-20", "--pretty=%s"])
-subjects = log.stdout.splitlines() if log is not None and log.returncode == 0 else []
-if tracker == "github": pattern = re.compile(r"\[#\d+\]")
-elif tracker == "linear": pattern = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")
-elif tracker == "trello": pattern = re.compile(r"\btrello:[A-Za-z0-9_-]+\b", re.I)
-elif tracker == "gus": pattern = re.compile(r"\bW-\d+\b", re.I)
-else: pattern = None
-if pattern and subjects:
-    drift = [subject for subject in subjects if not pattern.search(subject)]
-    check("recent_commit_references", not drift, f"{len(subjects)-len(drift)}/{len(subjects)} match {tracker}; first drift: {drift[0]}" if drift else f"{len(subjects)}/{len(subjects)} match {tracker}",
-          fix="git log -20 --pretty=%s")
+if not tracker_valid:
+    check("tracker_command_guidance", True, "requires a valid issue-tracking setting", state=SKIPPED)
+elif not all(path.is_file() for path in guidance_paths):
+    missing_guidance = [str(path.relative_to(root)) for path in guidance_paths if not path.is_file()]
+    check("tracker_command_guidance", True, "requires command source: " + ", ".join(missing_guidance), state=SKIPPED)
 else:
-    check("recent_commit_references", True, "no convention required" if pattern is None else "no commits to inspect",
-          state=SKIPPED)
+    guidance = "\n".join(read(path) for path in guidance_paths)
+    check("tracker_command_guidance", tokens[tracker] in guidance,
+          f"command guidance covers {tracker}" if tokens[tracker] in guidance else f"command guidance missing {tracker}",
+          fix="grep -n 'issue-tracking:' .claude/commands/task.md .claude/commands/ship.md")
+
+if not tracker_valid:
+    check("recent_commit_references", True, "requires a valid issue-tracking setting", state=SKIPPED)
+else:
+    log = run(["git", "log", "-20", "--pretty=%s"])
+    subjects = log.stdout.splitlines() if log is not None and log.returncode == 0 else []
+    if tracker == "github": pattern = re.compile(r"\[#\d+\]")
+    elif tracker == "linear": pattern = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")
+    elif tracker == "trello": pattern = re.compile(r"\btrello:[A-Za-z0-9_-]+\b", re.I)
+    elif tracker == "gus": pattern = re.compile(r"\bW-\d+\b", re.I)
+    else: pattern = None
+    if pattern and subjects:
+        drift = [subject for subject in subjects if not pattern.search(subject)]
+        check("recent_commit_references", not drift, f"{len(subjects)-len(drift)}/{len(subjects)} match {tracker}; first drift: {drift[0]}" if drift else f"{len(subjects)}/{len(subjects)} match {tracker}",
+              fix="git log -20 --pretty=%s")
+    else:
+        check("recent_commit_references", True, "no convention required" if pattern is None else "no commits to inspect",
+              state=SKIPPED)
 
 # Query PRs only when this is a GitHub-backed checkout and auth already passed;
 # this avoids surprising network activity in ordinary local/non-GitHub projects.
 remote = run(["git", "remote", "get-url", "origin"])
 remote_url = remote.stdout.strip() if remote is not None and remote.returncode == 0 else ""
-if tracker == "github" and "github.com" in remote_url and authenticated:
+if tracker_valid and tracker == "github" and "github.com" in remote_url and authenticated:
     prs = run(["gh", "pr", "list", "--state", "all", "--limit", "20", "--json", "title,body"])
     try:
         pr_data = json.loads(prs.stdout) if prs is not None and prs.returncode == 0 else None
@@ -1129,7 +1255,9 @@ if tracker == "github" and "github.com" in remote_url and authenticated:
               f"{len(pr_data)-len(unlinked)}/{len(pr_data)} linked; first drift: {unlinked[0]}" if unlinked else f"{len(pr_data)}/{len(pr_data)} linked",
               fix="gh pr list --state all --limit 20 --json title,body")
 else:
-    if tracker != "github":
+    if not tracker_valid:
+        reason = "requires a valid issue-tracking setting"
+    elif tracker != "github":
         reason = f"not required for {tracker}"
     elif "github.com" not in remote_url:
         reason = "not a GitHub remote"
@@ -1154,6 +1282,8 @@ if connector_declaration.exists():
     check("connector_declarations", connector_ok,
           "configured; session evidence required for schema visibility and callability" if connector_ok else "invalid declaration",
           fix=f"inspect {connector_declaration} (schema, schema_version 1, skills, providers, smoke_checks)")
+else:
+    check("connector_declarations", True, "no connector declaration file present", state=SKIPPED)
 
 # CLAUDE.md/PROJECT_BRIEF.md placeholder gate: a historical installer bug
 # (v1.10.0, fixed v1.10.1 / commit 28b8756, issue #140) could silently reset
@@ -1161,8 +1291,9 @@ if connector_declaration.exists():
 # yet. A git-tracked project shows this in `git status`; a stealth/external
 # install (CLAUDE.md/PROJECT_BRIEF.md are git-excluded there) has no such
 # signal at all. This gate can't tell "never filled in" from "reset by that
-# bug" — both look identical on disk — so it reports as a soft, advisory
-# finding rather than claiming certainty. See docs/lessons-learned.md #14.
+# bug" — both look identical on disk. The unfilled content is a failure
+# regardless of its cause; the detail avoids claiming a cause. See
+# docs/lessons-learned.md #14.
 _placeholder_markers = {
     "CLAUDE.md": "[One paragraph: what it does, who it's for, and why it exists.]",
     "PROJECT_BRIEF.md": '[What does this product do? Complete this sentence: "A tool that helps [who] [do what]."]',
@@ -1335,8 +1466,7 @@ if manifest_metadata.is_file():
     if manifest_entries is None:
         check("manifest_mode_hash", False, "manifest metadata file is not valid JSON",
               fix=f"python3 -m json.tool {shlex.quote(str(manifest_metadata))}")
-        check("stale_manifest_entries", False, "manifest metadata file is not valid JSON",
-              fix=f"python3 -m json.tool {shlex.quote(str(manifest_metadata))}")
+        check("stale_manifest_entries", True, "requires valid manifest metadata entries", state=SKIPPED)
     else:
         def path_is_safe(rel):
             return isinstance(rel, str) and rel and not rel.startswith("/") and ".." not in rel.split("/")
