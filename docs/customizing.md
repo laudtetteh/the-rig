@@ -252,8 +252,8 @@ Or choose option 3 in the interactive tracking prompt. The installer will:
 The agent finds memory and rules via `.rigpath`. External mode excludes that
 pointer, but project adapters such as `.claude/` can still appear in Git. The
 installer also accepts an in-project `--rig-dir`; that directory can appear in
-`git status` unless you exclude it. Choose stealth mode below when no Rig
-artifacts should appear in the checkout's Git view.
+`git status` unless you exclude it. Use stealth mode with a data path outside
+the checkout when no Rig artifacts should appear in the checkout's Git view.
 
 > ⚠️ **Re-clone warning:** when the data directory is outside the checkout,
 > cloning the project on a new machine does not copy it. Restore that directory
@@ -262,15 +262,16 @@ artifacts should appear in the checkout's Git view.
 > See `docs/troubleshooting.md` → "CONTEXT_SNAPSHOT.md is missing after a re-clone"
 > for the full recovery steps.
 
-### Option C — Stealth mode (zero traces in git)
+### Option C — Stealth mode with an outside data path
 
 For multi-contributor repos where teammates must never see any Rig files — not
 even in `git status` — choose **option 4 (Stealth)** in the installer's tracking
-prompt.
+prompt and keep its data path outside the checkout. The default path does this;
+an in-project `--rig-dir` can leave its data directory visible and unignored.
 
 What stealth mode does in a single pass:
 
-1. Installs `.rig/` to an external path (default: `~/.rig/projects/<project-name>/`)
+1. Installs `.rig/` to the configured path (default: `~/.rig/projects/<project-name>/`)
 2. Writes `.rigpath` and adds it to `.git/info/exclude`
 3. Adds all other Rig artifacts to `.git/info/exclude`:
    `CLAUDE.md`, `PROJECT_BRIEF.md`, `.claude/`, `.agents/`, `.codex/`, `.mcp.json`,
@@ -293,9 +294,10 @@ What stealth mode does in a single pass:
 Claude Code still reads `.claude/settings.json` from disk at session start — it
 just isn't tracked by git.
 
-**Important:** stealth files live on disk only. When you clone the project on a new
-machine, re-run the installer with option 4 to restore them. The `.git/info/exclude`
-entries and `.git/hooks/` scripts are per-clone and must be set up on each machine.
+**Important:** with the data path outside the checkout, stealth files stay local
+to the machine. When you clone the project on a new machine, re-run the installer
+with option 4 to restore them. The `.git/info/exclude` entries and `.git/hooks/`
+scripts are per-clone and must be set up on each machine.
 
 ---
 
