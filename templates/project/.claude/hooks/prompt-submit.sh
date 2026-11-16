@@ -195,7 +195,7 @@ except (ValueError, TypeError, AttributeError):
     return 0
   fi
   target="<branch>"
-  [[ "$recorded" != HEAD ]] && target="$recorded"
+  [[ "$recorded" != HEAD ]] && target="$(printf '%q' "$recorded")"
   [[ -f "$REPO/.rigpath" ]] && bootstrap='run `bin/rig worktree bootstrap` there, then '
   printf '⚠️ Branch changed under this session: it was bound on %s, but this checkout is now on %s. Another session or terminal may have switched the shared checkout. Confirm which branch this work belongs on before editing or committing. For parallel work, give each session its own worktree: `git worktree add <path> %s`, then %sstart the session there with %s.' \
     "$(rig_branch_label "$recorded" recorded)" "$(rig_branch_label "$current" current)" "$target" "$bootstrap" "$(rig_session_launcher)"

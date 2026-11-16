@@ -124,6 +124,17 @@ if raw:
   [[ "$CONTEXT" == *"detached HEAD at $short"* ]] || return 1
 }
 
+@test "worktree suggestion shell-quotes a branch with command substitution syntax" {
+  local unusual='feat/$(echo${IFS}X)'
+  git -C "$CASE_DIR" checkout -q -b "$unusual"
+  bind_session claude claude-unusual
+  switch_to feat/beta
+  submit_prompt claude claude-unusual
+  local quoted
+  quoted="$(printf '%q' "$unusual")"
+  [[ "$CONTEXT" == *"git worktree add <path> $quoted"* ]] || return 1
+}
+
 @test "no warning when the payload carries no session ID" {
   bind_session claude claude-other
   switch_to feat/beta
