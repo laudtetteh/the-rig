@@ -13,6 +13,10 @@
 # documented threshold, suggest /handoff-checklist once. This is a consent
 # gate only; the hook never runs /wrap, /post-merge, or any checklist step.
 #
+# Branch drift: when the exact session named by the payload's session_id was
+# bound on a different branch than the checkout's current HEAD, warn once per
+# change and suggest a dedicated worktree.
+#
 # Must be fast: UserPromptSubmit has a 30-second timeout.
 # When no flags are set and the nudge has already been offered, exits immediately.
 #
@@ -126,6 +130,78 @@ NUDGE_FLAG="$RIG_DIR/memory/.permission-nudge-offered"
 HANDOFF_SUGGESTED="$RIG_DIR/memory/.handoff-suggested"
 WARNINGS=""
 
+# ── Branch change under the exact active session ─────────────────────────────
+# Another terminal or session can switch a shared checkout's branch. Compare the
+# exactly resolved session's recorded branch with HEAD and warn once per change.
+# The acknowledged branch lives in a per-session marker beside the session
+# records (sessions/ is gitignored and only session-*.json is ever scanned), so
+# this hook never rewrites the schema-v1 record or contends for its revision.
+
+# Print how to start a session in the active provider's syntax.
+rig_session_launcher() {
+  case "${RIG_AGENT:-claude}" in
+    claude) printf '`bin/rig claude`' ;;
+    codex) printf '`bin/rig codex`' ;;
+    *) printf 'a new agent session' ;;
+  esac
+}
+
+# Print a branch name for people, naming a detached HEAD explicitly.
+rig_branch_label() {
+  local short
+  if [[ "$1" != HEAD ]]; then
+    printf '%s' "$1"
+  elif [[ "$2" == current ]] && short=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null); then
+    printf 'detached HEAD at %s' "$short"
+  else
+    printf 'a detached HEAD'
+  fi
+}
+
+# Print the branch-change warning for a resolver JSON result, at most once per
+# change, and record the acknowledged branch. Prints nothing otherwise.
+rig_branch_change_warning() {
+  local fields anchor recorded current marker acknowledged tmp target bootstrap=""
+  fields=$(printf '%s' "$1" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    anchor, branch = d.get("anchor"), d.get("branch")
+    if (d.get("confidence") == "exact" and isinstance(anchor, str) and isinstance(branch, str)
+            and anchor and branch and not any(c in anchor + branch for c in "\t\n\r")):
+        print(anchor + "\t" + branch)
+except (ValueError, TypeError, AttributeError):
+    pass
+' 2>/dev/null) || return 0
+  [[ -n "$fields" ]] || return 0
+  anchor="${fields%%$'\t'*}"
+  recorded="${fields#*$'\t'}"
+  [[ "$anchor" =~ ^[A-Za-z0-9._-]+$ && "$recorded" != unknown ]] || return 0
+  current=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null) || return 0
+  [[ -n "$current" ]] || return 0
+  marker="$RIG_DIR/memory/sessions/.branch-ack-$anchor"
+  if [[ "$current" == "$recorded" ]]; then
+    # Back on the recorded branch: re-arm the warning for a later change.
+    [[ -e "$marker" ]] && rm -f "$marker" 2>/dev/null
+    return 0
+  fi
+  if [[ -f "$marker" ]]; then
+    IFS= read -r acknowledged < "$marker" 2>/dev/null || true
+    [[ "$acknowledged" == "$current" ]] && return 0
+  fi
+  tmp=$(mktemp "$RIG_DIR/memory/sessions/.branch-ack.tmp.XXXXXX" 2>/dev/null) || return 0
+  if ! { printf '%s\n' "$current" > "$tmp" && mv -f "$tmp" "$marker"; } 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    return 0
+  fi
+  target="<branch>"
+  [[ "$recorded" != HEAD ]] && target="$(printf '%q' "$recorded")"
+  [[ -f "$REPO/.rigpath" ]] && bootstrap='run `bin/rig worktree bootstrap` there, then '
+  printf '⚠️ Branch changed under this session: it was bound on %s, but this checkout is now on %s. Another session or terminal may have switched the shared checkout. Confirm which branch this work belongs on before editing or committing. For parallel work, give each session its own worktree: `git worktree add <path> %s`, then %sstart the session there with %s.' \
+    "$(rig_branch_label "$recorded" recorded)" "$(rig_branch_label "$current" current)" "$target" "$bootstrap" "$(rig_session_launcher)"
+}
+# ── End branch change under the exact active session ─────────────────────────
+
 # Some clients resume an already-loaded thread without another SessionStart.
 # UserPromptSubmit still carries the exact native session ID. Attach it once,
 # or start a continuation after a completed wrap, before the flag fast path.
@@ -159,6 +235,9 @@ except (ValueError,TypeError,AttributeError):
       else
         WARNINGS="Rig session identity is unresolved ($RESOLVE_REASON); stop before naming or completing a session record."
       fi
+    else
+      BRANCH_WARNING=$(rig_branch_change_warning "$RESOLVED")
+      [[ -n "$BRANCH_WARNING" ]] && WARNINGS="$BRANCH_WARNING"
     fi
   fi
 fi
