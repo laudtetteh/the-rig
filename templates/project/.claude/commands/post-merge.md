@@ -430,7 +430,8 @@ Use the shared atomic writer, passing the confirmed name as one opaque argument.
 
 ```bash
 # Final completion is separate from the already performed exact-SHA merge
-# acknowledgement. Confirm that this session record still shows it.
+# acknowledgement. Confirm that this session record still shows it and that
+# no newer reminder arrived while the user considered the suggested name.
 CURRENT_JSON=$("$REPO/bin/rig" session current --json) || {
   exit 1
 }
@@ -444,13 +445,16 @@ import json,os,sys
 record=json.load(open(os.environ["SESSION_F"]))
 obligation=record.get("obligations",{}).get("post_merge",{})
 marker=os.path.join(os.environ["RIG_DIR"],"memory",".post-merge-pending")
+if os.path.lexists(marker):
+    sys.exit("A merge reminder appeared after acknowledgement; leave this session active.")
 acknowledged=(obligation.get("merge_sha")==os.environ["MERGE_SHA"] and
               obligation.get("pending") is False and obligation.get("acknowledged_at"))
-no_obligation=(not os.path.lexists(marker) and obligation.get("pending") is not True and
+no_obligation=(not obligation.get("merge_sha") and obligation.get("pending") is not True and
                record.get("flags",{}).get("post_merge_pending") is not True)
 if not (acknowledged or no_obligation):
     sys.exit("Exact processed merge is not acknowledged; leave this session active.")' || exit 1
-"$REPO/bin/rig" session-name set --final --complete "$CONFIRMED_NAME"
+"$REPO/bin/rig" session-name set --final --complete \
+  --post-merge-ack-sha="$POST_MERGE_ACK_SHA" "$CONFIRMED_NAME"
 ```
 
 If this is a continuation after `/wrap`, name only the post-merge work in this

@@ -2222,12 +2222,13 @@ PY
 }
 
 session_name_set() {
-  local tentative=false complete=false json=false name="" arg resolved resolve_status=0 writer_status=0 file anchor done_dir dest="" end_options=false
+  local tentative=false complete=false json=false name="" arg resolved resolve_status=0 writer_status=0 file anchor done_dir dest="" end_options=false post_merge_ack_sha="" post_merge_ack_guard=false
   for arg in "$@"; do
     if [[ "$end_options" == false ]]; then
       case "$arg" in
         --) end_options=true; continue;; --tentative) tentative=true; continue;;
         --final) tentative=false; continue;; --complete) complete=true; continue;; --json) json=true; continue;;
+        --post-merge-ack-sha=*) post_merge_ack_sha="${arg#*=}"; post_merge_ack_guard=true; continue;;
         -*) usage_error "unknown session-name option: $arg" "$@"; return;;
       esac
     fi
@@ -2235,6 +2236,9 @@ session_name_set() {
     name="$arg"
   done
   [[ -n "$name" ]] || { usage_error "session name is required" "$@"; return; }
+  if [[ "$post_merge_ack_guard" == true ]]; then
+    [[ "$complete" == true && "$post_merge_ack_sha" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ ]] || { usage_error "--post-merge-ack-sha requires --complete and a full merge SHA" "$@"; return; }
+  fi
   resolved=$(session_resolve --json --verbose) || resolve_status=$?
   if [[ "$resolve_status" -ne 0 ]]; then
     if [[ "$json" == true ]]; then printf '%s\n' "$resolved"
@@ -2246,11 +2250,12 @@ session_name_set() {
   anchor=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
   [[ -n "$file" ]] || return "$RIG_EXIT_UNAVAILABLE"
   if [[ "$complete" == true ]]; then done_dir="$(rig_dir)/memory/sessions/done"; mkdir -p "$done_dir"; dest="$done_dir/session-$(date +%Y%m%d)-${anchor:-unknown}.json"; fi
-  SESSION_F="$file" SESSION_NAME="$name" SESSION_TENTATIVE="$tentative" SESSION_COMPLETE="$complete" SESSION_DEST="$dest" SESSION_EXPECTED="$resolved" SESSION_ROOT="$(rig_root)" SESSION_RIG="$(rig_dir)" SESSION_RESOLVER="$(dirname "${BASH_SOURCE[0]}")/rig-session-resolve.py" SESSION_JSON="$json" python3 <<'PY' || writer_status=$?
+  SESSION_F="$file" SESSION_NAME="$name" SESSION_TENTATIVE="$tentative" SESSION_COMPLETE="$complete" SESSION_POST_MERGE_ACK_SHA="$post_merge_ack_sha" SESSION_DEST="$dest" SESSION_EXPECTED="$resolved" SESSION_ROOT="$(rig_root)" SESSION_RIG="$(rig_dir)" SESSION_RESOLVER="$(dirname "${BASH_SOURCE[0]}")/rig-session-resolve.py" SESSION_JSON="$json" python3 <<'PY' || writer_status=$?
 import fcntl, hashlib, json, os, pathlib, subprocess, sys, tempfile
 p = pathlib.Path(os.environ["SESSION_F"])
 expected = json.loads(os.environ["SESSION_EXPECTED"])
 sessions = pathlib.Path(os.environ["SESSION_RIG"]) / "memory" / "sessions"
+post_merge_ack_sha=os.environ["SESSION_POST_MERGE_ACK_SHA"]
 def refuse(reason,code=3):
     if os.environ["SESSION_JSON"] == "true": print(json.dumps({"ok":False,"reason":reason,"no_write":True}))
     else: print("session name refused: " + reason, file=sys.stderr)
@@ -2259,6 +2264,12 @@ try:
     p.resolve(strict=True).relative_to(sessions.resolve())
     if p.is_symlink() or not p.is_file(): refuse("invalid_session_path")
 except (OSError,ValueError,RuntimeError): refuse("invalid_session_path")
+if post_merge_ack_sha:
+    # The hook and obligation clearer use this lock for marker and record
+    # changes. Hold it through session completion so a later merge cannot
+    # appear between the command's preflight check and this write.
+    obligation_lock=open(sessions.parent/".session-obligations.lock","a+")
+    fcntl.flock(obligation_lock.fileno(),fcntl.LOCK_EX)
 global_lock=open(sessions/".bind.lock","a+"); fcntl.flock(global_lock.fileno(),fcntl.LOCK_EX)
 lock=open(str(p)+".lock","a+"); fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
 try:
@@ -2301,6 +2312,19 @@ if d.get("schema_version") == 1:
     if d.get("anchor") in graph["duplicate_native_anchors"]: refuse("duplicate_native_id",2)
 elif not (expected.get("reason")=="launcher_file" or (expected.get("reason")=="anchor" and os.environ.get("RIG_SESSION_ANCHOR")==d.get("anchor"))) or d.get("status")!="active":
     refuse("migration_required")
+if post_merge_ack_sha:
+    marker=sessions.parent/".post-merge-pending"
+    if os.path.lexists(marker): refuse("post_merge_reminder_pending")
+    obligations=d.get("obligations",{}); flags=d.get("flags",{})
+    if not isinstance(obligations,dict) or not isinstance(flags,dict): refuse("malformed_record",4)
+    obligation=obligations.get("post_merge",{})
+    if not isinstance(obligation,dict): refuse("malformed_record",4)
+    acknowledged=(obligation.get("merge_sha")==post_merge_ack_sha and
+                  obligation.get("pending") is False and obligation.get("acknowledged_at") and
+                  flags.get("post_merge_pending") is not True)
+    no_obligation=(not obligation.get("merge_sha") and obligation.get("pending") is not True and
+                   flags.get("post_merge_pending") is not True)
+    if not (acknowledged or no_obligation): refuse("post_merge_not_acknowledged")
 if d.get("schema_version") == 1:
     names=d.setdefault("names", {})
     if os.environ["SESSION_TENTATIVE"] == "true": names["tentative"] = os.environ["SESSION_NAME"]
@@ -3146,7 +3170,7 @@ the reminder in place.
 EOF
       ;;
     session-name:set) cat <<'EOF'
-Usage: rig session-name set [--tentative|--final] [--complete] [--json] [--] <name>
+Usage: rig session-name set [--tentative|--final] [--complete] [--post-merge-ack-sha=SHA] [--json] [--] <name>
 
 Sets the exact current session's name atomically. --final records the final
 name; --complete also moves the record to done/. Use -- before a name that

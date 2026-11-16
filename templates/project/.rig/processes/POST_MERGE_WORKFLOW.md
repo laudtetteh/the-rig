@@ -313,8 +313,12 @@ Then invite the user to apply it:
 
 After the user confirms, use `bin/rig session-name set --final --complete` with the
 confirmed name as one opaque argument only after Step 7 acknowledged this
-session's processed SHA. Session names belong in session files; never write
-them to `CONTEXT_SNAPSHOT.md`.
+session's processed SHA. Recheck that no newer `.post-merge-pending` reminder
+appeared during name confirmation; if one did, leave the session active until
+that merge has been processed. Pass `--post-merge-ack-sha=SHA` to the shared
+session-name writer when completing the session; it checks the marker and
+record while holding the obligation lock. Session names belong in session
+files; never write them to `CONTEXT_SNAPSHOT.md`.
 
 If no meaningful work shipped (pure housekeeping, no PRs), skip this step silently.
 

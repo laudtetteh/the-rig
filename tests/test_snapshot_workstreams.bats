@@ -292,6 +292,41 @@ PY
   [ ! -e "$CASE_DIR/.rig/memory/.post-merge-pending" ]
 }
 
+@test "post-merge final naming refuses a newer marker after the processed merge was acknowledged" {
+  local anchor marker="$CASE_DIR/.rig/memory/.post-merge-pending" sha_a sha_b
+  anchor="$(SESSION_F="$file_a" python3 -c 'import json,os; print(json.load(open(os.environ["SESSION_F"]))["anchor"])')"
+  sha_a=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  sha_b=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  post_merge_block '## Exact merge acknowledgement' > "$BATS_TEST_TMPDIR/ack.sh"
+  post_merge_completion_block > "$BATS_TEST_TMPDIR/complete.sh"
+  printf 'merge_sha=%s\nmerged_at=2026-11-15T10:00:00-08:00\n' "$sha_a" > "$marker"
+  run env RIG_SESSION_FILE="$file_a" "$rig" session obligation mark --kind post-merge --merge-sha "$sha_a" --json
+  [ "$status" -eq 0 ]
+  run env REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" RIG_SESSION_FILE="$file_a" POST_MERGE_SESSION_ANCHOR="$anchor" POST_MERGE_ACK_SHA="$sha_a" bash "$BATS_TEST_TMPDIR/ack.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$marker" ]
+  printf 'merge_sha=%s\nmerged_at=2026-11-15T11:00:00-08:00\nanchor=\n' "$sha_b" > "$marker"
+  run env REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" RIG_SESSION_FILE="$file_a" SESSION_FILE="$file_a" SESSION_UUID="$anchor" POST_MERGE_ACK_SHA="$sha_a" CONFIRMED_NAME='merge A only' bash "$BATS_TEST_TMPDIR/complete.sh"
+  [ "$status" -ne 0 ]
+  grep -Fxq "merge_sha=$sha_b" "$marker"
+  SESSION_F="$file_a" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["lifecycle"]["state"]=="active"'
+  run env RIG_SESSION_FILE="$file_a" "$rig" session-name set --final --complete --post-merge-ack-sha="$sha_a" --json 'merge A only'
+  [ "$status" -eq 3 ]
+  [[ "$output" == *post_merge_reminder_pending* ]] || return 1
+  [ -e "$marker" ]
+  rm "$marker"
+  run env RIG_SESSION_FILE="$file_a" "$rig" session obligation mark --kind post-merge --merge-sha "$sha_b" --json
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$file_a" "$rig" session obligation clear --kind post-merge --merge-sha "$sha_b" --json
+  [ "$status" -eq 0 ]
+  [ ! -e "$marker" ]
+  run env RIG_SESSION_FILE="$file_a" "$rig" session-name set --final --complete --post-merge-ack-sha="$sha_a" --json 'merge A only'
+  [ "$status" -eq 3 ]
+  [[ "$output" == *post_merge_not_acknowledged* ]] || return 1
+  run env RIG_SESSION_FILE="$file_a" "$rig" session-name set --final --complete --post-merge-ack-sha="$sha_b" --json 'merge A and B'
+  [ "$status" -eq 0 ]
+}
+
 @test "sequential session snapshots preserve both owned task handoffs" {
   candidate "$BATS_TEST_TMPDIR/a.md" feat/a task-a
   candidate "$BATS_TEST_TMPDIR/b.md" feat/b task-b
