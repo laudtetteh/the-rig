@@ -467,7 +467,8 @@ path for all upgrades. It:
 ### How it works: the manifest
 
 The installer records the SHA256 hash of each Rig-owned file in
-`.rig/memory/.rig-manifest` on every install. This is committed to the repo.
+`$RIG_DIR/memory/.rig-manifest` on every install. It is committed only in
+`repo` tracking mode; other modes keep it local or external.
 
 On upgrade, for each Rig-owned file:
 
@@ -485,9 +486,9 @@ project's git status. Nothing is ever lost.
 
 ### Manifest metadata and provenance fields
 
-Alongside the plain-text `.rig/memory/.rig-manifest` (hash + path, one line per
+Alongside the plain-text `$RIG_DIR/memory/.rig-manifest` (hash + path, one line per
 file), the installer also writes a JSON companion at
-`.rig/memory/.rig-manifest.json`. If you open it directly, each entry looks
+`$RIG_DIR/memory/.rig-manifest.json`. If you open it directly, each entry looks
 like this:
 
 ```json

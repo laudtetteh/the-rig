@@ -26,8 +26,7 @@ The shared `.rig` workflow is provider-neutral. Claude commands/hooks and Codex 
 
 ## What it ships
 
-The Rig is actively developed, currently at v1.29.0. These are the shipped
-components:
+The Rig is actively developed; the current release is recorded in [`VERSION`](VERSION). These are the shipped components:
 
 ### Installer (`install.sh`)
 - Single-file Bash installer with seven strategies: merge (new install), skip,
@@ -45,7 +44,7 @@ components:
 - Non-interactive mode (`--strategy`, `--target`, `--tracking`, `--base-branch`
   flags, plus repair/recovery and feature toggles) for scripting and CI
 - Self-install detection, `[BASE_BRANCH]` and `[REPO_ROOT]` placeholder substitution
-- 853 bats tests across 61 files
+- A Bats test suite, sharded in hosted CI
 
 ### Project layer (scaffolded into target projects)
 - **Memory system**: `PROGRESS.md` (auto-logged by post-commit hook), `ERRORS.md`, `CONTEXT_SNAPSHOT.md` (written by `/wrap`), `DECISIONS.md`, `RIG_GAPS.md`
@@ -115,14 +114,14 @@ components:
 
 **Must NOT use:** Runtime dependencies in `install.sh` beyond standard POSIX utils + `git`, `gh`, `gitleaks` (optional)
 
-**Existing code:** This IS the existing code — `install.sh` at v1.29.0.
+**Existing code:** This IS the existing code — `install.sh` in this repository.
 
 ---
 
 ## Success metrics
 
 - Upgrade path never breaks an existing install
-- All 853 bats tests pass on every commit through hosted CI, the authoritative
+- The complete Bats suite passes on every commit through hosted CI, the authoritative
   complete-suite gate
 - A new user can install The Rig and complete a first Claude `/task` → `/ship` or Codex `$task` → `$ship` cycle without reading docs
 - Memory survives context compaction — next session picks up exactly where the last one left off

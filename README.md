@@ -113,7 +113,7 @@ git init
 
 # Run the installer from your permanent Rig location
 ~/tools/the-rig/install.sh --project-only
-# Default: stealth mode — all Rig files stored outside the repo (no .rig/ committed)
+# Default: stealth mode — .rig data outside the repo; local adapters git-excluded
 # Choose option 1 at the tracking prompt to store .rig/ in the repo instead.
 
 # Then open Claude Code and run /kickoff, or open Codex and run $kickoff
@@ -290,6 +290,8 @@ project's `.rig/`; in stealth or external tracking it is the path stored in
 
 On every user prompt, `prompt-submit.sh` re-checks for pending flag warnings and re-injects them if still present. No re-briefing. No repeating context. Every session picks up exactly where the last one left off.
 
+When several conversations are open, Claude Code's `/color` and `/rename` or the Codex CLI `codex resume` picker can help distinguish them. These are provider controls; `/session-name` writes The Rig's session name. See `/rig-help` or the Codex `$rig-help` skill for the commands.
+
 Feature tips use only local project signals (such as recorded errors, workflow
 gaps, branch history, sessions, and issue references). A shared deterministic
 catalog selects the highest-priority applicable tip, suppresses commands that
@@ -420,7 +422,7 @@ titles, transcripts, or singleton state.
 
 ## Documentation
 
-See [docs/INDEX.md](docs/INDEX.md) for the canonical documentation index.
+See [docs/INDEX.md](docs/INDEX.md) for the canonical documentation index, including the [glossary](docs/glossary.md).
 
 ---
 

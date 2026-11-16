@@ -2,7 +2,7 @@
 
 > Coexistence: The Rig’s shared `.rig` processes run across Claude Code and Codex. Provider adapters expose the same workflows through Claude commands/hooks and Codex skills/hooks; provider-specific mechanics below are labeled explicitly.
 
-A technical deep-dive into the architecture, components, and session lifecycle.
+A technical deep-dive into the architecture, components, and session lifecycle. For short definitions of recurring terms, see the [glossary](glossary.md).
 
 ---
 
@@ -248,7 +248,7 @@ Seven files, seven purposes:
 - Accumulates across sessions and machines — the mechanism by which real-world use improves The Rig
 
 ### .rig/memory/.rig-manifest
-- Written by the installer on every install; committed to the repo
+- Written by the installer on every install under the effective `$RIG_DIR`; committed only in `repo` tracking mode
 - Records the SHA256 hash of each Rig-owned file at install time
 - Used by the **Upgrade** strategy to detect user customizations:
   - Hash unchanged since install → safe to auto-update
