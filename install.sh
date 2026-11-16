@@ -1022,6 +1022,9 @@ UPGRADE_SKIPPED_UNTRACKED_COUNT=0
 UPGRADE_SKIPPED_CUSTOMIZED_FILES=()
 UPGRADE_SKIPPED_CONFLICT_COUNT=0
 UPGRADE_SKIPPED_CONFLICT_FILES=()
+# Paths whose customized content agent-upgrade merged this run. Their manifest
+# baseline is the incoming Rig template, never the merged result (#636).
+UPGRADE_CONVERGED_FILES=()
 UPGRADE_REMOVED_COUNT=0
 UPGRADE_STALE_COUNT=0
 # Subset of UPGRADE_STALE_COUNT that --repair-stale did not (and, for
@@ -1081,7 +1084,10 @@ record_upgrade_result() {
   case "$result" in
     updated) UPGRADE_UPDATED_COUNT=$((UPGRADE_UPDATED_COUNT + 1)) ;;
     merged) UPGRADE_MERGED_COUNT=$((UPGRADE_MERGED_COUNT + 1)) ;;
-    converged) UPGRADE_CONVERGED_COUNT=$((UPGRADE_CONVERGED_COUNT + 1)) ;;
+    converged)
+      UPGRADE_CONVERGED_COUNT=$((UPGRADE_CONVERGED_COUNT + 1))
+      UPGRADE_CONVERGED_FILES[${#UPGRADE_CONVERGED_FILES[@]}]="$rel"
+      ;;
     skipped-customized)
       UPGRADE_SKIPPED_CUSTOMIZED_COUNT=$((UPGRADE_SKIPPED_CUSTOMIZED_COUNT + 1))
       UPGRADE_SKIPPED_CUSTOMIZED_FILES[${#UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]}]="$rel"
@@ -1187,13 +1193,31 @@ upgrade_skipped_path() {
   return 1
 }
 
+# Succeed when agent-upgrade converged REL this run. Post-copy passes may still
+# substitute or chmod such a file, but must keep its manifest baseline on the
+# incoming template: recording the merged customization as the baseline would
+# make the next upgrade treat it as unmodified Rig content and replace it.
+upgrade_converged_path() {
+  local rel="$1" converged
+  for converged in ${UPGRADE_CONVERGED_FILES[@]+"${UPGRADE_CONVERGED_FILES[@]}"}; do
+    [[ "$converged" == "$rel" ]] && return 0
+  done
+  return 1
+}
+
 refresh_executable_manifest_entry() {
   local path="$1" rel="$2"
   [[ "$AGENT_DRY_RUN" == true ]] && return 0
   [[ -f "$path" && ! -L "$path" ]] || return 0
   [[ -n "$(read_manifest_hash "$rel")" ]] || return 0
   upgrade_skipped_path "$rel" "$path" && return 0
-  write_manifest_entry "$(sha256_file "$path")" "$rel" "$MANIFEST_FILE" "$path"
+  if upgrade_converged_path "$rel"; then
+    # Chmod changed the on-disk mode, so refresh JSON mode metadata while
+    # preserving the incoming template hash as the customization baseline.
+    write_manifest_entry "$(read_manifest_hash "$rel")" "$rel" "$MANIFEST_FILE" "$path"
+  else
+    write_manifest_entry "$(sha256_file "$path")" "$rel" "$MANIFEST_FILE" "$path"
+  fi
   # The chmod +x above happens AFTER _upgrade_write() recorded this file's
   # after-state, so the report's recorded mode is the pre-chmod one and
   # rollback refuses the file as "mode changed since the upgrade". This is the
@@ -3197,7 +3221,20 @@ PYEOF
       if _converged_output="$(attempt_convergence_merge "$src" "$dest" "$rel" "$manifest_hash")"; then
         if [[ "$AGENT_DRY_RUN" != true ]]; then
           _upgrade_write "$_converged_output" "$dest" "$base"
-          write_manifest_entry "$(sha256_file "$dest")" "$rel" "$manifest_file" "$dest"
+          # Baseline = what Rig itself would install here, so the merged
+          # customization stays detectable as customized (#636). Only the
+          # named workflow files receive post-copy [BASE_BRANCH] substitution;
+          # other templates may mention placeholders as literal documentation
+          # (bin/rig mentions [Project Name]) and are copied verbatim.
+          local _converged_baseline
+          case "$rel" in
+            .claude/commands/ship.md|.claude/commands/post-merge.md|.rig/processes/SHIP_WORKFLOW.md|.rig/processes/POST_MERGE_WORKFLOW.md)
+              _converged_baseline="$(rendered_project_template_hash "$src" "${base:-}" "$rel")"
+              [[ -n "$_converged_baseline" ]] || _converged_baseline="$new_hash"
+              ;;
+            *) _converged_baseline="$new_hash" ;;
+          esac
+          write_manifest_entry "$_converged_baseline" "$rel" "$manifest_file" "$dest"
         fi
         rm -f "$_converged_output"
         success "Converged: ${rel}"
@@ -4471,7 +4508,8 @@ PYEOF
     # containing [BASE_BRANCH]) kept their pre-substitution hash in both
     # manifest files despite fresh on-disk content, misclassifying an
     # untouched file as "customized" on the very next upgrade. Issue #498.
-    write_manifest_entry "$(sha256_file "$f")" "$rel" "$MANIFEST_FILE" "$f"
+    upgrade_converged_path "$rel" || \
+      write_manifest_entry "$(sha256_file "$f")" "$rel" "$MANIFEST_FILE" "$f"
     # The durable upgrade report goes stale here for exactly the same reason
     # (issue #562). _upgrade_write() recorded this file's after-state before
     # the substitution above, so a later `rig upgrade rollback` would compare
