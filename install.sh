@@ -1049,6 +1049,31 @@ PROJECT_CLAUDE_PRESERVED_USER=false
 # issue #444 lane 444-C.
 UPGRADE_ARTIFACT_RECORDS=()
 
+# Describe what a skipped customized Rig-owned file leaves outdated, so the
+# classic upgrade summary states the impact instead of only listing a path.
+# Echoes "<category>|<sentence>"; category is enforcement, parity or other.
+skipped_customized_impact() {
+  local rel="$1" name
+  case "$rel" in
+    .claude/hooks/pre-tool.sh|.claude/hooks/permission-request.sh|.codex/hooks/rig-adapter.sh|.codex/hooks.json|.husky/pre-commit|.husky/commit-msg|.git/hooks/pre-commit|.git/hooks/commit-msg|*rules/protected-paths.txt)
+      printf 'enforcement|protected-path and commit policy still run your customized older copy'
+      ;;
+    .claude/commands/*.md)
+      name="${rel##*/}"
+      name="${name%.md}"
+      if has_agent "${PROJECT_AGENT:-claude}" codex && \
+         ! upgrade_skipped_path ".agents/skills/${name}/SKILL.md" ""; then
+        printf 'parity|Claude /%s keeps your customized copy, but the Codex $%s skill was generated from current Rig source, so the two providers may now behave differently' "$name" "$name"
+      else
+        printf 'other|Claude /%s keeps your customized older copy' "$name"
+      fi
+      ;;
+    *)
+      printf 'other|keeps your customized older copy'
+      ;;
+  esac
+}
+
 record_upgrade_result() {
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
   local result="$1" rel="${2:-}" detail="${3:-}"
@@ -1140,9 +1165,26 @@ upgrade_set_executable_bits() {
   # agent-plan: classification only, never change file modes.
   [[ "$AGENT_DRY_RUN" == true ]] && return 0
   while IFS= read -r -d '' path; do
+    # A skipped customized file keeps the mode the user left, too.
+    upgrade_skipped_path "${rel}$(basename "$path")" "$path" && continue
     chmod +x "$path"
     refresh_executable_manifest_entry "$path" "${rel}$(basename "$path")"
   done < <(find -P "$directory" -maxdepth 1 -type f -name "$pattern" -print0)
+}
+
+# Succeed when this run left REL (at PATH) untouched as customized or
+# conflicting. Post-copy passes must not refresh such a path's manifest hash:
+# recording the user's content as the Rig baseline would make the next upgrade
+# treat the customization as unmodified Rig content and replace it. A file this
+# run wrote is never "skipped", even if a later manifest conflict recorded it.
+upgrade_skipped_path() {
+  local rel="$1" path="$2" skipped
+  was_written_this_run "$path" && return 1
+  for skipped in ${UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]+"${UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]}"} \
+                 ${UPGRADE_SKIPPED_CONFLICT_FILES[@]+"${UPGRADE_SKIPPED_CONFLICT_FILES[@]}"}; do
+    [[ "$skipped" == "$rel" ]] && return 0
+  done
+  return 1
 }
 
 refresh_executable_manifest_entry() {
@@ -1150,6 +1192,7 @@ refresh_executable_manifest_entry() {
   [[ "$AGENT_DRY_RUN" == true ]] && return 0
   [[ -f "$path" && ! -L "$path" ]] || return 0
   [[ -n "$(read_manifest_hash "$rel")" ]] || return 0
+  upgrade_skipped_path "$rel" "$path" && return 0
   write_manifest_entry "$(sha256_file "$path")" "$rel" "$MANIFEST_FILE" "$path"
   # The chmod +x above happens AFTER _upgrade_write() recorded this file's
   # after-state, so the report's recorded mode is the pre-chmod one and
@@ -3669,6 +3712,10 @@ fi
 [[ "$UPGRADE_TRANSACTION_ACTIVE" == true ]] && finish_upgrade_transaction
 BACKUP_DIR=""
 
+# The global layer runs before the project layer. Keep its skip count so the
+# final guidance offers a project-only route only for project customizations.
+UPGRADE_GLOBAL_SKIPPED_CUSTOMIZED_COUNT="$UPGRADE_SKIPPED_CUSTOMIZED_COUNT"
+
 # ── PROJECT LAYER ─────────────────────────────────────────────────────────────
 if [[ "$DO_PROJECT" == true ]]; then
   bold "── Project layer ──"
@@ -4408,6 +4455,10 @@ PYEOF
     if [[ "$rel" == "CLAUDE.md" && "$PROJECT_CLAUDE_PRESERVED_USER" == true ]]; then
       return 0
     fi
+    # A customized or conflicting file this run skipped is not substituted and
+    # its manifest baseline is not refreshed. Check before the destination
+    # guard, which backs the file up and marks it as written this run.
+    upgrade_skipped_path "$rel" "$f" && return 0
     guard_destination_before_write "$base" "$f" "$rel" || return 0
     # agent-plan: classification only, never substitute placeholders.
     [[ "$AGENT_DRY_RUN" == true ]] && return 0
@@ -4723,7 +4774,8 @@ PYEOF
       record_upgrade_destination_conflict 'bin/rig' symlink
     elif [[ -f "$RIG_DISPATCHER" ]]; then
       # agent-plan: classification only, never change file modes.
-      [[ "$AGENT_DRY_RUN" == true ]] || chmod +x "$RIG_DISPATCHER"
+      # A skipped customized dispatcher keeps the mode the user left.
+      [[ "$AGENT_DRY_RUN" == true ]] || upgrade_skipped_path bin/rig "$RIG_DISPATCHER" || chmod +x "$RIG_DISPATCHER"
       refresh_executable_manifest_entry "$RIG_DISPATCHER" "bin/rig"
       success "Set executable bit on bin/rig"
     fi
@@ -5136,12 +5188,26 @@ if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
       echo "  - $_stale_file"
     done
   fi
+  _SKIP_DEGRADED=""
   if [[ "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" -gt 0 ]]; then
     UPGRADE_REVIEW_REQUIRED=1
+    _skip_enforcement=0
+    _skip_parity=0
     echo "Customized files requiring manual review:"
     for _skipped_file in "${UPGRADE_SKIPPED_CUSTOMIZED_FILES[@]}"; do
-      echo "  - $_skipped_file"
+      _skip_impact="$(skipped_customized_impact "$_skipped_file")"
+      case "${_skip_impact%%|*}" in
+        enforcement) _skip_enforcement=$((_skip_enforcement + 1)) ;;
+        parity) _skip_parity=$((_skip_parity + 1)) ;;
+      esac
+      echo "  - $_skipped_file — ${_skip_impact#*|}"
     done
+    [[ "$_skip_enforcement" -gt 0 ]] && \
+      _SKIP_DEGRADED="protected-path/commit enforcement (${_skip_enforcement} customized hook file(s) not updated)"
+    if [[ "$_skip_parity" -gt 0 ]]; then
+      [[ -n "$_SKIP_DEGRADED" ]] && _SKIP_DEGRADED+=", "
+      _SKIP_DEGRADED+="Claude/Codex workflow parity (${_skip_parity} customized command(s))"
+    fi
   fi
   if [[ "$UPGRADE_SKIPPED_CONFLICT_COUNT" -gt 0 ]]; then
     UPGRADE_REVIEW_REQUIRED=1
@@ -5169,8 +5235,9 @@ d=json.load(sys.stdin)
 missing=[x["id"] for x in d["dependencies"] if x["status"] != "ok" and x["classification"] != "optional"]
 print("Selected agents: global=%s project=%s" % (sys.argv[1], sys.argv[2]))
 print("Missing prerequisites: " + (", ".join(missing) or "none"))
-print("Degraded/skipped capabilities: " + (", ".join(d["degraded_features"]) or "none"))
-print("Exact next steps: " + ("; ".join(d["next_steps"]) or "none"))' "$GLOBAL_AGENT" "$PROJECT_AGENT" <<< "$_preflight_json"
+degraded=list(d["degraded_features"]) + ([sys.argv[3]] if sys.argv[3] else [])
+print("Degraded/skipped capabilities: " + (", ".join(degraded) or "none"))
+print("Exact next steps: " + ("; ".join(d["next_steps"]) or "none"))' "$GLOBAL_AGENT" "$PROJECT_AGENT" "${_SKIP_DEGRADED:-}" <<< "$_preflight_json"
   [[ "$DO_GLOBAL" == true ]] && echo "Global smoke tests (expected signal: passed): ${_global_smoke:-none}"
   [[ "$DO_PROJECT" == true ]] && echo "Project smoke tests (expected signal: passed): ${_project_smoke:-none}"
   blank
@@ -5204,7 +5271,38 @@ fi
 [[ -n "${PREVIOUS_GLOBAL_AGENT:-}" && "$PREVIOUS_GLOBAL_AGENT" != "$GLOBAL_AGENT" ]] && echo "Preserved prior global target files: $PREVIOUS_GLOBAL_AGENT."
 [[ -n "${PREVIOUS_PROJECT_AGENT:-}" && "$PREVIOUS_PROJECT_AGENT" != "$PROJECT_AGENT" ]] && echo "Preserved prior project target files: $PREVIOUS_PROJECT_AGENT."
 [[ "$COLLISION_STRATEGY" != upgrade ]] && echo "Postflight smoke results: manifest-derived checks passed."
-if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+if [[ "$COLLISION_STRATEGY" == upgrade && "${UPGRADE_REVIEW_REQUIRED:-0}" -eq 1 ]]; then
+  echo "The Rig upgrade finished but is not fully converged: the files listed above need review."
+  echo "Your selected strategy was kept."
+  # A global-only run has no project target, and guarded convergence covers
+  # project files only.
+  if [[ "$DO_PROJECT" == true && -n "${TARGET:-}" &&
+        "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" -gt "$UPGRADE_GLOBAL_SKIPPED_CUSTOMIZED_COUNT" ]]; then
+    _route_tracking="$RIG_TRACKING"
+    [[ "$_route_tracking" == exclude ]] && _route_tracking=local
+    # Print a self-contained command that can be copied from any directory.
+    # Every path is shell-quoted; raw interpolation inside double quotes would
+    # execute command substitutions embedded in a legitimate path name.
+    _route_target="$(cd "$TARGET" && pwd -L)"
+    _route_target="$(printf '%q' "$_route_target")"
+    _route_base_branch="$(printf '%q' "$BASE_BRANCH")"
+    _route_project_agent="$(printf '%q' "$PROJECT_AGENT")"
+    _route_flags=" --base-branch $_route_base_branch --project-agent $_route_project_agent"
+    [[ -n "$_route_tracking" ]] && _route_flags+=" --tracking $_route_tracking"
+    if [[ ( "$RIG_TRACKING" == external || "$RIG_TRACKING" == stealth ) && -n "${EXTERNAL_RIG_DIR:-}" ]]; then
+      _route_rig_dir="$(printf '%q' "$EXTERNAL_RIG_DIR")"
+      _route_flags+=" --rig-dir $_route_rig_dir"
+    fi
+    [[ "$SKIP_GIT_HOOKS" == true ]] && _route_flags+=" --skip-git-hooks"
+    _route_installer="$(printf '%q' "$SCRIPT_DIR/install.sh")"
+    echo "To converge customized project files with guarded merging, preview with"
+    echo "  $_route_installer --project-only --target $_route_target${_route_flags} --strategy agent-plan"
+    echo "then apply the same command with --strategy agent-upgrade (or run /rig-upgrade)."
+  else
+    echo "Review each listed file, or rerun the installer interactively to decide per file."
+  fi
+  echo "Other next steps:"
+elif [[ "$COLLISION_STRATEGY" == upgrade ]]; then
   echo "The Rig upgrade is complete. Next steps:"
 else
   echo "The Rig is installed. Next steps:"

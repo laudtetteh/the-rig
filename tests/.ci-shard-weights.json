@@ -7,6 +7,8 @@
   "tests/test_convergence_engine.bats": 290.0,
   "tests/test_upgrade_historical_base.bats": 225.0,
   "tests/test_install_d.bats": 201.5,
+  "tests/test_upgrade_customized_executables.bats": 160.0,
+  "tests/test_upgrade_skip_impact.bats": 160.0,
   "tests/test_hook_lifecycle.bats": 138.2,
   "tests/test_install_e.bats": 123.3,
   "tests/test_install_b.bats": 112.1,
