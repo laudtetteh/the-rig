@@ -47,6 +47,14 @@ assert_preserved() {
   grep -Fq "# user customization of $rel" "$TEST_PROJECT/$rel" || \
     { echo "upgrade erased customization of $rel" >&3; return 1; }
   assert_baseline "$memory" "$rel" "$expected" || return 1
+  if [ "$rel" = .claude/hooks/pre-tool.sh ]; then
+    python3 -c '
+import json, os, sys
+mode = format(os.stat(sys.argv[1]).st_mode & 0o777, "o")
+recorded = str(json.load(open(sys.argv[2]))["entries"][sys.argv[3]]["mode"])
+assert mode == recorded == "755", (mode, recorded)
+' "$TEST_PROJECT/$rel" "$memory/.rig-manifest.json" "$rel" || return 1
+  fi
 }
 
 assert_converged() {
@@ -72,6 +80,9 @@ exercise_converged_baseline() {
   for rel in "${paths[@]}"; do
     baselines+=("$(file_hash "$TEST_PROJECT/$rel")")
     assert_baseline "$memory" "$rel" "${baselines[${#baselines[@]}-1]}" || return 1
+    if [ "$rel" = .claude/hooks/pre-tool.sh ]; then
+      chmod 644 "$TEST_PROJECT/$rel"
+    fi
     printf '\n# user customization of %s\n' "$rel" >> "$TEST_PROJECT/$rel"
   done
 

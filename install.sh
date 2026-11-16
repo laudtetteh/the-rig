@@ -1211,8 +1211,13 @@ refresh_executable_manifest_entry() {
   [[ -f "$path" && ! -L "$path" ]] || return 0
   [[ -n "$(read_manifest_hash "$rel")" ]] || return 0
   upgrade_skipped_path "$rel" "$path" && return 0
-  upgrade_converged_path "$rel" || \
+  if upgrade_converged_path "$rel"; then
+    # Chmod changed the on-disk mode, so refresh JSON mode metadata while
+    # preserving the incoming template hash as the customization baseline.
+    write_manifest_entry "$(read_manifest_hash "$rel")" "$rel" "$MANIFEST_FILE" "$path"
+  else
     write_manifest_entry "$(sha256_file "$path")" "$rel" "$MANIFEST_FILE" "$path"
+  fi
   # The chmod +x above happens AFTER _upgrade_write() recorded this file's
   # after-state, so the report's recorded mode is the pre-chmod one and
   # rollback refuses the file as "mode changed since the upgrade". This is the
