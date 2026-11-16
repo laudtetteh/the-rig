@@ -116,7 +116,8 @@ all workflow files. If you need to change it after install, update the
 base-branch: integration
 ```
 
-Then manually update `git checkout [BASE_BRANCH]` references in:
+Then manually update the old base-branch name in the installed workflow files,
+including fetch, ancestry and PR-target examples in:
 - `.rig/processes/POST_MERGE_WORKFLOW.md`
 - `.rig/processes/SHIP_WORKFLOW.md`
 - `.claude/commands/ship.md`

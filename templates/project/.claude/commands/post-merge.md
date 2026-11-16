@@ -3,7 +3,8 @@
 Trigger this command immediately after a PR is merged to main.
 
 `/post-merge` runs the housekeeping that keeps the system clean between sessions:
-pulls latest main, updates memory, moves the task file, and surfaces what's next.
+verifies the merge on the base branch, updates memory, moves the task file, and
+surfaces what's next.
 It takes about 5 minutes and prevents the drift that accumulates when post-merge
 hygiene is skipped.
 
@@ -26,15 +27,16 @@ closed issue set, and task row separately, then print one batch summary.
 
 Follows `.rig/processes/POST_MERGE_WORKFLOW.md`:
 
-1. Pulls latest `main` and confirms the expected commit is at HEAD
+1. Fetches `main` and verifies each expected merge SHA without switching the working tree
 2. Adds an entry at the top of `.rig/memory/PROGRESS.md` for the merged PR
 3. When task lifecycle is installed, moves the task file from `$RIG_DIR/tasks/active/` → `$RIG_DIR/tasks/done/` and marks `**Status**` as `done`
 4. Refreshes `.rig/memory/CONTEXT_SNAPSHOT.md` without replacing task handoffs
 5. **Checks feature doc freshness** — detects if merged changes overlap with documented features (see below)
 6. Checks `.rig/memory/ERRORS.md` and `.rig/memory/RIG_GAPS.md` — prompts you to log anything unexpected or any workflow friction observed
 7. Makes a housekeeping commit if memory updates weren't included in the PR
-8. **Suggests a session name** based on the merged PR via `/session-name` logic (see below)
-9. Surfaces the next priority and asks: **"What's next?"**
+8. Acknowledges the exact processed merge SHA after housekeeping, independently of session naming
+9. **Suggests a session name** based on the merged PR via `/session-name` logic (see below)
+10. Surfaces the next priority and asks: **"What's next?"**
 
 ---
 
@@ -83,15 +85,21 @@ git log --oneline -3
 
 Report briefly:
 
-> "Branch: `[BASE_BRANCH]` | Clean working tree | HEAD: `abc1234 feat: merged PR #N`"
+> "Branch: `[current branch]` | Working tree: `[clean | dirty: paths]` | HEAD: `abc1234` | Expected merge: `def5678`"
 
-**If the working tree is not clean:** surface any uncommitted changes and ask
-the user whether to stash, commit, or discard them before proceeding.
+Report the current branch and uncommitted paths. Preserve both. A dirty or
+shared feature checkout can verify a merged PR without switching branches:
+POST_MERGE_WORKFLOW Step 1 fetches `[BASE_BRANCH]` and checks each exact merge
+SHA for ancestry on `origin/[BASE_BRANCH]`. A later `HEAD` is normal when two
+PRs merged. Set `POST_MERGE_EXPECTED_SHAS` from the report's full-SHA batch
+ledger, oldest first, and retain the last verified SHA as
+`POST_MERGE_ACK_SHA` in the working context.
 
-Do not acquire the memory workflow lock while waiting for this answer.
-
-**If not on `[BASE_BRANCH]`:** note the current branch. The POST_MERGE_WORKFLOW Step 1
-will `git checkout [BASE_BRANCH] && git pull`, but flag it now so the user is aware.
+Before acquiring the memory workflow lock, use Step 1's stageability gate. If
+Rig memory or task files need a tracked housekeeping commit from a dirty or
+non-base checkout, report the clean-base-checkout next action and stop before
+memory writes. Do not stash, discard or switch the user's checkout. External
+and gitignored Rig memory can proceed without changing tracked project files.
 
 ---
 
@@ -107,7 +115,7 @@ writing memory.
 
 Gather all findings silently — no output yet:
 
-1. **Merged PR** — title, number, branch name (from context or `git log --oneline -1`)
+1. **Merged PR** — title, number, branch name and exact merge SHA from context or merged PR metadata; `HEAD` may be a different commit
    If the user names several merged PRs, collect each PR with its merge SHA and
    closed issue list.
 2. **"This session" summary** — from conversation context: all PRs merged or opened, tasks completed, issues resolved this session. Conversation context is the primary signal; PROGRESS.md markers are cross-reference only.
@@ -158,24 +166,25 @@ If `/post-merge` is skipped, print instead:
 ```
 ## Post-merge report — skipped — [date]
 
-**Reason:** [no merged PR | not on merge commit | working tree dirty | other concrete reason]
-**Next action:** [merge a PR first | commit/stash changes | run /wrap only | other concrete action]
+**Reason:** [no merged PR | expected SHA not on origin/[BASE_BRANCH] | tracked Rig housekeeping needs a clean base checkout | other concrete reason]
+**Next action:** [merge a PR first | use a clean base checkout without changing this worktree | run /wrap only | other concrete action]
 ```
 
 If the collection phase finds no applicable merged PR, print the skipped report
-and stop before acquiring the workflow lock. Do the same when the dirty-tree
-gate prevents execution.
+and stop before acquiring the workflow lock. Do the same when Step 1's
+tracked-housekeeping gate prevents execution.
 
 ### Execution
 
-After printing the report, **execute POST_MERGE_WORKFLOW steps 1–8 automatically**:
+After printing the report, **execute POST_MERGE_WORKFLOW steps 1–9 automatically**:
 
-- Pull latest [BASE_BRANCH] and confirm each expected merge SHA
+- Fetch [BASE_BRANCH] and confirm each expected merge SHA is in its history
 - Update PROGRESS.md, one entry per PR or an explicit combined batch summary
 - Move an installed task file to `$RIG_DIR/tasks/done/` only when its batch ledger rows are terminal; skip this step when task lifecycle was omitted
 - Refresh the shared CONTEXT_SNAPSHOT.md header with `bin/rig memory write-snapshot --shared-only`
 - Add inferred ERRORS.md entries (if any)
 - Make a housekeeping commit only for stageable in-repo memory or task changes
+- Acknowledge the exact processed merge SHA before session naming
 - Apply session name — only if user says "use that" or equivalent
 
 All steps execute automatically. The session name is the only action requiring explicit user input.
@@ -184,6 +193,9 @@ In degraded mode for `not_found` or `ended_record`, continue project-level
 post-merge housekeeping and write `CONTEXT_SNAPSHOT.md`, but do not fabricate a
 session UUID, do not move any session record to `sessions/done/`, and do not
 clear exact-session obligations that require a resolvable active session.
+Record the exact session anchor selected during collection as
+`POST_MERGE_SESSION_ANCHOR` only when resolution is exact; keep it unset in
+degraded mode.
 
 Acquire the workflow lock after the report and skip gates, before the first
 POST_MERGE_WORKFLOW step. If a later verification step stops execution, release
@@ -271,9 +283,14 @@ that are covered by an existing feature doc.
 
 1. Resolve `$RIG_DIR` and `$DOCS_DIR` (see RIG_DIR resolution block above).
 2. If `$DOCS_DIR` doesn't exist or has no `.md` files (other than `README.md`): skip this step silently.
-3. Get the set of files changed in the merged commit:
+3. Get changed files from each verified merge SHA in
+   `POST_MERGE_EXPECTED_SHAS`, using its first parent as the before state.
+   This also works for a squash commit's sole parent. Never use this
+   checkout's `HEAD`, which may be on an unrelated feature branch:
    ```bash
-   git diff --name-only HEAD~1 HEAD
+   for EXPECTED_MERGE_SHA in "${POST_MERGE_EXPECTED_SHAS[@]}"; do
+     git diff --name-only "${EXPECTED_MERGE_SHA}^1" "$EXPECTED_MERGE_SHA" || exit 1
+   done
    ```
 4. For each `.md` file in `$DOCS_DIR` (excluding `README.md`):
    - Read its `## Entry points` section and collect all file paths mentioned.
@@ -287,18 +304,67 @@ that are covered by an existing feature doc.
 
 ---
 
-## Session naming step
+## Exact merge acknowledgement
 
 Release the workflow lock after memory housekeeping and the housekeeping commit,
-before presenting a session name for confirmation. Another session can then
-start its own memory housekeeping while the user decides.
+before acknowledging the processed merge and presenting a session name. Another
+session can then start its own memory housekeeping while the user decides.
 
 ```bash
 "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json || exit 1
 ```
 
-After the housekeeping commit (step 7), derive a session name suggestion using the
-same logic as `/session-name`. The merged PR number is always known here, which
+Set `POST_MERGE_ACK_SHA` to the last full SHA from Step 1's verified batch
+ledger in this shell. Do not read `.post-merge-pending` to choose it. This
+block runs immediately after Steps 2–6 succeed and lock release, whether or
+not the user chooses a final session name. A newer marker or a different
+session owner remains pending; stop before completing this session.
+
+```bash
+[[ -n "${POST_MERGE_ACK_SHA:-}" ]] || {
+  echo "No verified merge SHA to acknowledge." >&2
+  exit 1
+}
+if [[ -n "${POST_MERGE_SESSION_ANCHOR:-}" ]]; then
+  ACK_SESSION_JSON=$("$REPO/bin/rig" session resolve --json) || {
+    echo "Exact session resolution changed; merge reminder retained." >&2
+    exit 1
+  }
+  ACK_SESSION_ANCHOR=$(printf '%s' "$ACK_SESSION_JSON" | \
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")')
+  [[ "$ACK_SESSION_ANCHOR" == "$POST_MERGE_SESSION_ANCHOR" ]] || {
+    echo "Session owner changed; merge reminder retained." >&2
+    exit 1
+  }
+  if [[ -e "$RIG_DIR/memory/.post-merge-pending" || -L "$RIG_DIR/memory/.post-merge-pending" ]]; then
+    "$REPO/bin/rig" session obligation clear --kind post-merge \
+      --merge-sha "$POST_MERGE_ACK_SHA" --json || {
+        echo "Exact merge acknowledgement refused; the newer or differently owned reminder remains pending." >&2
+        exit 1
+      }
+  else
+    ACK_SESSION_FILE=$(printf '%s' "$ACK_SESSION_JSON" | \
+      python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")')
+    ACK_PENDING=$(SESSION_F="$ACK_SESSION_FILE" python3 -c '
+import json,os
+d=json.load(open(os.environ["SESSION_F"]))
+print("true" if d.get("obligations",{}).get("post_merge",{}).get("pending") is True or d.get("flags",{}).get("post_merge_pending") is True else "false")') || exit 1
+    [[ "$ACK_PENDING" == false ]] || {
+      echo "Session still records a pending merge but its marker is missing; stop for recovery." >&2
+      exit 1
+    }
+    echo "No post-merge marker; exact session has no pending merge obligation."
+  fi
+else
+  echo "Exact session identity unavailable; merge reminder retained for recovery."
+fi
+```
+
+## Session naming step
+
+After the housekeeping commit (Step 6) and exact acknowledgement (Step 7),
+derive a session name suggestion using the same logic as `/session-name`.
+The merged PR number is always known here, which
 makes this the most reliable naming signal in the system. Do **not** apply it
 automatically — present it for the user to confirm or tweak.
 
@@ -363,8 +429,8 @@ Keep under ~100 characters.
 Use the shared atomic writer, passing the confirmed name as one opaque argument.
 
 ```bash
-# Acknowledge only the pending merge SHA while this exact active record remains
-# resolvable. A changed SHA fails closed and leaves the reminder visible.
+# Final completion is separate from the already performed exact-SHA merge
+# acknowledgement. Confirm that this session record still shows it.
 CURRENT_JSON=$("$REPO/bin/rig" session current --json) || {
   exit 1
 }
@@ -373,9 +439,17 @@ CURRENT_UUID=$(printf '%s' "$CURRENT_JSON" | python3 -c 'import json,sys; print(
   echo "Session identity changed; stop before clearing or completing it." >&2
   exit 1
 }
-PENDING_MERGE_SHA=$(sed -n 's/^merge_sha=//p' "$RIG_DIR/memory/.post-merge-pending" 2>/dev/null | head -1)
-[[ -n "$PENDING_MERGE_SHA" ]] && \
-  "$REPO/bin/rig" session obligation clear --kind post-merge --merge-sha "$PENDING_MERGE_SHA" --json
+SESSION_F="$SESSION_FILE" MERGE_SHA="$POST_MERGE_ACK_SHA" RIG_DIR="$RIG_DIR" python3 -c '
+import json,os,sys
+record=json.load(open(os.environ["SESSION_F"]))
+obligation=record.get("obligations",{}).get("post_merge",{})
+marker=os.path.join(os.environ["RIG_DIR"],"memory",".post-merge-pending")
+acknowledged=(obligation.get("merge_sha")==os.environ["MERGE_SHA"] and
+              obligation.get("pending") is False and obligation.get("acknowledged_at"))
+no_obligation=(not os.path.lexists(marker) and obligation.get("pending") is not True and
+               record.get("flags",{}).get("post_merge_pending") is not True)
+if not (acknowledged or no_obligation):
+    sys.exit("Exact processed merge is not acknowledged; leave this session active.")' || exit 1
 "$REPO/bin/rig" session-name set --final --complete "$CONFIRMED_NAME"
 ```
 
@@ -390,14 +464,14 @@ If no meaningful work shipped (pure exploration, no merges), skip this step sile
 
 ## Flag cleanup
 
-The exact merge acknowledgement is recorded in Step 5 before the session
-record moves to done/. The workflow lock was released before session naming.
+The exact merge acknowledgement is recorded after housekeeping and before any
+session-name confirmation. The workflow lock was released before both actions.
 
 The `.post-merge-pending` flag is written by `.husky/post-merge` after every merge
 with the triggering merge SHA and timestamp, then detected by freshness hooks.
 Saying “skip for current task” leaves the reminder and its merge metadata intact;
 the exact-session acknowledgement confirms `/post-merge` ran successfully for
-that merge SHA. A mismatch leaves the reminder intact. The
+that verified merge SHA. A mismatch leaves the newer reminder intact. The
 owner-recorded workflow lock is released to unblock any
 concurrent `/wrap` or `/post-merge` waiting to run.
 

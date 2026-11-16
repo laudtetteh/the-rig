@@ -54,6 +54,62 @@ print(content[start:end])
 PY
 }
 
+post_merge_block() {
+  local heading="$1"
+  python3 - "$BATS_TEST_DIRNAME/../templates/project/.claude/commands/post-merge.md" "$heading" <<'PY'
+import pathlib, sys
+content = pathlib.Path(sys.argv[1]).read_text()
+section = content.index(sys.argv[2])
+start = content.index('```bash\n[[ -n "${POST_MERGE_ACK_SHA:-}" ]]', section) + len('```bash\n')
+end = content.index('\n```', start)
+print(content[start:end].replace('[BASE_BRANCH]', 'main'))
+PY
+}
+
+post_merge_completion_block() {
+  python3 - "$BATS_TEST_DIRNAME/../templates/project/.claude/commands/post-merge.md" <<'PY'
+import pathlib, sys
+content = pathlib.Path(sys.argv[1]).read_text()
+section = content.index('### Step 5 — After confirmation: write to session file')
+start = content.index('```bash\n', section) + len('```bash\n')
+end = content.index('\n```', start)
+print(content[start:end])
+PY
+}
+
+post_merge_verify_block() {
+  python3 - "$BATS_TEST_DIRNAME/../templates/project/.rig/processes/POST_MERGE_WORKFLOW.md" <<'PY'
+import pathlib, sys
+content = pathlib.Path(sys.argv[1]).read_text()
+section = content.index('Read-only merge verification')
+start = content.index('```bash\n', section) + len('```bash\n')
+end = content.index('\n```', start)
+print(content[start:end].replace('[BASE_BRANCH]', 'main'))
+PY
+}
+
+post_merge_gate_block() {
+  python3 - "$BATS_TEST_DIRNAME/../templates/project/.rig/processes/POST_MERGE_WORKFLOW.md" <<'PY'
+import pathlib, sys
+content = pathlib.Path(sys.argv[1]).read_text()
+section = content.index('Before the first memory write')
+start = content.index('```bash\nCURRENT_BRANCH=$(git branch --show-current)', section) + len('```bash\n')
+end = content.index('\n```', start)
+print(content[start:end].replace('[BASE_BRANCH]', 'main'))
+PY
+}
+
+post_merge_feature_diff_block() {
+  python3 - "$BATS_TEST_DIRNAME/../templates/project/.claude/commands/post-merge.md" <<'PY'
+import pathlib, sys
+content = pathlib.Path(sys.argv[1]).read_text()
+section = content.index('## Feature doc freshness step')
+start = content.index('```bash\n', section) + len('```bash\n')
+end = content.index('\n   ```', start)
+print(content[start:end])
+PY
+}
+
 @test "wrap acquires only after the dirty-file gate and report, then releases before prompts" {
   run python3 - "$BATS_TEST_DIRNAME/../templates/project/.claude/commands/wrap.md" <<'PY'
 import pathlib, sys
@@ -79,14 +135,15 @@ PY
 import pathlib, sys
 s = pathlib.Path(sys.argv[1]).read_text()
 git = s.index('## Git state check')
-dirty = s.index('ask\nthe user whether to stash')
+gate = s.index("Before acquiring the memory workflow lock, use Step 1's stageability gate")
 report = s.index('## Post-merge report step')
 skip = s.index('stop before acquiring the workflow lock')
 acquire = s.index('## Concurrent session guard')
 snapshot = s.index('For the snapshot step, write')
 release = s.index('"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json || exit 1')
+ack = s.index('"$REPO/bin/rig" session obligation clear --kind post-merge')
 name_prompt = s.index('### Step 4 — Present and confirm')
-assert git < dirty < report < skip < acquire < snapshot < release < name_prompt
+assert git < gate < report < skip < acquire < snapshot < release < ack < name_prompt
 assert 'before the first\nPOST_MERGE_WORKFLOW step' in s[report:acquire]
 PY
   [ "$status" -eq 0 ]
@@ -112,6 +169,127 @@ PY
   [ "$status" -eq 0 ]
   run "$rig" memory workflow-lock acquire --owner-anchor next --json
   [ "$status" -eq 0 ]
+}
+
+@test "post-merge verifies a merged SHA from a dirty shared checkout without changing its branch or files" {
+  local project="$BATS_TEST_TMPDIR/merge-project" remote="$BATS_TEST_TMPDIR/remote.git" linked="$BATS_TEST_TMPDIR/linked"
+  mkdir -p "$project"
+  git init -q --bare "$remote"
+  git -C "$project" init -q -b main
+  git -C "$project" config user.name Fixture
+  git -C "$project" config user.email fixture@example.com
+  git -C "$project" remote add origin "$remote"
+  printf 'seed\n' > "$project/README.md"
+  git -C "$project" add README.md
+  git -C "$project" commit -qm seed
+  git -C "$project" checkout -q -b feat/one
+  printf 'one\n' > "$project/one.txt"
+  git -C "$project" add one.txt
+  git -C "$project" commit -qm one
+  git -C "$project" checkout -q main
+  git -C "$project" merge -q --no-ff feat/one -m 'Merge one'
+  local merge_sha
+  merge_sha="$(git -C "$project" rev-parse HEAD)"
+  git -C "$project" checkout -q -b feat/two
+  printf 'two\n' > "$project/two.txt"
+  git -C "$project" add two.txt
+  git -C "$project" commit -qm two
+  git -C "$project" checkout -q main
+  git -C "$project" merge -q --no-ff feat/two -m 'Merge two'
+  local merge_sha_two
+  merge_sha_two="$(git -C "$project" rev-parse HEAD)"
+  printf 'later\n' > "$project/later.txt"
+  git -C "$project" add later.txt
+  git -C "$project" commit -qm later
+  git -C "$project" push -q origin main
+  git -C "$project" worktree add -q -b feat/shared "$linked" main
+  printf 'unrelated\n' > "$linked/local.txt"
+  local before
+  before="$(git -C "$linked" status --porcelain)"
+  post_merge_verify_block > "$BATS_TEST_TMPDIR/verify.sh"
+  run bash -c 'cd "$1" && POST_MERGE_EXPECTED_SHAS=("$2" "$3") && source "$4"' _ "$linked" "$merge_sha" "$merge_sha_two" "$BATS_TEST_TMPDIR/verify.sh"
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$linked" branch --show-current)" = feat/shared ]
+  [ "$(git -C "$linked" status --porcelain)" = "$before" ]
+
+  post_merge_feature_diff_block > "$BATS_TEST_TMPDIR/feature-diff.sh"
+  run bash -c 'cd "$1" && POST_MERGE_EXPECTED_SHAS=("$2" "$3") && source "$4"' _ "$linked" "$merge_sha" "$merge_sha_two" "$BATS_TEST_TMPDIR/feature-diff.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *one.txt* && "$output" == *two.txt* ]] || return 1
+  [[ "$output" != *later.txt* ]] || return 1
+  run bash -c 'cd "$1" && POST_MERGE_EXPECTED_SHAS=("deadbeef") && source "$2"' _ "$linked" "$BATS_TEST_TMPDIR/verify.sh"
+  [ "$status" -ne 0 ]
+  [ "$(git -C "$linked" status --porcelain)" = "$before" ]
+
+  post_merge_gate_block > "$BATS_TEST_TMPDIR/gate.sh"
+  local external="$BATS_TEST_TMPDIR/external-rig"
+  mkdir -p "$external/memory"
+  run env REPO="$linked" RIG_DIR="$external" bash -c 'cd "$1" && POST_MERGE_EXPECTED_SHAS=("$2") && source "$3"' _ "$linked" "$merge_sha" "$BATS_TEST_TMPDIR/gate.sh"
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$linked" status --porcelain)" = "$before" ]
+  run env REPO="$linked" RIG_DIR="$linked/.rig" bash -c 'cd "$1" && POST_MERGE_EXPECTED_SHAS=("$2") && source "$3"' _ "$linked" "$merge_sha" "$BATS_TEST_TMPDIR/gate.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"clean main checkout"* ]] || return 1
+  [ "$(git -C "$linked" status --porcelain)" = "$before" ]
+}
+
+@test "post-merge acknowledges its verified SHA before naming but preserves a newer merge" {
+  local marker="$CASE_DIR/.rig/memory/.post-merge-pending" anchor sha_a sha_b
+  anchor="$(SESSION_F="$file_a" python3 -c 'import json,os; print(json.load(open(os.environ["SESSION_F"]))["anchor"])')"
+  sha_a=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  sha_b=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  post_merge_block '## Exact merge acknowledgement' > "$BATS_TEST_TMPDIR/ack.sh"
+  printf 'merge_sha=%s\nmerged_at=2026-11-15T10:00:00-08:00\n' "$sha_a" > "$marker"
+  run env RIG_SESSION_FILE="$file_a" "$rig" session obligation mark --kind post-merge --merge-sha "$sha_a" --json
+  [ "$status" -eq 0 ]
+  run env REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" RIG_SESSION_FILE="$file_a" POST_MERGE_SESSION_ANCHOR="$anchor" POST_MERGE_ACK_SHA="$sha_a" bash "$BATS_TEST_TMPDIR/ack.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$marker" ]
+  SESSION_F="$file_a" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["obligations"]["post_merge"]["merge_sha"]=="a"*40 and d["obligations"]["post_merge"]["acknowledged_at"]'
+
+  printf 'merge_sha=%s\nmerged_at=2026-11-15T11:00:00-08:00\n' "$sha_a" > "$marker"
+  run env RIG_SESSION_FILE="$file_a" "$rig" session obligation mark --kind post-merge --merge-sha "$sha_a" --json
+  [ "$status" -eq 0 ]
+  printf 'merge_sha=%s\nmerged_at=2026-11-15T12:00:00-08:00\n' "$sha_b" > "$marker"
+  run env RIG_SESSION_FILE="$file_a" "$rig" session obligation mark --kind post-merge --merge-sha "$sha_b" --json
+  [ "$status" -eq 0 ]
+  run env REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" RIG_SESSION_FILE="$file_a" POST_MERGE_SESSION_ANCHOR="$anchor" POST_MERGE_ACK_SHA="$sha_a" bash "$BATS_TEST_TMPDIR/ack.sh"
+  [ "$status" -ne 0 ]
+  grep -Fxq "merge_sha=$sha_b" "$marker"
+  SESSION_F="$file_a" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["obligations"]["post_merge"]["merge_sha"]=="b"*40 and d["obligations"]["post_merge"]["pending"] is True'
+  run env REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" RIG_SESSION_FILE="$file_a" POST_MERGE_SESSION_ANCHOR="$anchor" POST_MERGE_ACK_SHA="$sha_b" bash "$BATS_TEST_TMPDIR/ack.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$marker" ]
+}
+
+@test "hookless post-merge can finish only when its exact session has no pending obligation" {
+  local marker="$CASE_DIR/.rig/memory/.post-merge-pending" anchor
+  anchor="$(SESSION_F="$file_a" python3 -c 'import json,os; print(json.load(open(os.environ["SESSION_F"]))["anchor"])')"
+  post_merge_block '## Exact merge acknowledgement' > "$BATS_TEST_TMPDIR/ack.sh"
+  run env REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" RIG_SESSION_FILE="$file_a" POST_MERGE_SESSION_ANCHOR="$anchor" POST_MERGE_ACK_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bash "$BATS_TEST_TMPDIR/ack.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$marker" ]
+  SESSION_F="$file_a" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d.get("obligations",{}).get("post_merge",{}).get("pending") is not True'
+
+  printf 'merge_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$marker"
+  run env RIG_SESSION_FILE="$file_a" "$rig" session obligation mark --kind post-merge --merge-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --json
+  [ "$status" -eq 0 ]
+  rm "$marker"
+  run env REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" RIG_SESSION_FILE="$file_a" POST_MERGE_SESSION_ANCHOR="$anchor" POST_MERGE_ACK_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bash "$BATS_TEST_TMPDIR/ack.sh"
+  [ "$status" -ne 0 ]
+  SESSION_F="$file_a" python3 -c 'import json,os; d=json.load(open(os.environ["SESSION_F"])); assert d["obligations"]["post_merge"]["pending"] is True'
+}
+
+@test "hookless post-merge final naming succeeds after verified housekeeping without a marker" {
+  local anchor
+  anchor="$(SESSION_F="$file_a" python3 -c 'import json,os; print(json.load(open(os.environ["SESSION_F"]))["anchor"])')"
+  post_merge_block '## Exact merge acknowledgement' > "$BATS_TEST_TMPDIR/ack.sh"
+  post_merge_completion_block > "$BATS_TEST_TMPDIR/complete.sh"
+  run env REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" RIG_SESSION_FILE="$file_a" POST_MERGE_SESSION_ANCHOR="$anchor" POST_MERGE_ACK_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bash "$BATS_TEST_TMPDIR/ack.sh"
+  [ "$status" -eq 0 ]
+  run env REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" RIG_SESSION_FILE="$file_a" SESSION_FILE="$file_a" SESSION_UUID="$anchor" POST_MERGE_ACK_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa CONFIRMED_NAME='fix hookless merge #607' bash "$BATS_TEST_TMPDIR/complete.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$CASE_DIR/.rig/memory/.post-merge-pending" ]
 }
 
 @test "sequential session snapshots preserve both owned task handoffs" {

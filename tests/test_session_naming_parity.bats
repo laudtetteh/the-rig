@@ -60,6 +60,13 @@ PY
   grep -Fq 'Session: unresolved — no final session-file write performed' "$TEST_PROJECT/.agents/skills/wrap/references/command.md"
   grep -Fq 'Codex `$post-merge` skill' "$TEST_PROJECT/.agents/skills/post-merge/references/command.md"
   grep -Fq 'Post-merge report — skipped' "$TEST_PROJECT/.agents/skills/post-merge/references/command.md"
+  for surface in "$TEST_PROJECT/.claude/commands/post-merge.md" \
+    "$TEST_PROJECT/.agents/skills/post-merge/references/command.md"; do
+    grep -Fq '## Exact merge acknowledgement' "$surface"
+    grep -Fq 'POST_MERGE_ACK_SHA' "$surface"
+    grep -Fq 'tracked-housekeeping gate' "$surface"
+    if grep -Fq 'PENDING_MERGE_SHA=$(sed' "$surface"; then return 1; fi
+  done
 }
 
 @test "adversarial cross-session evidence admits only current conversation and UUID" {
