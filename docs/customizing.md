@@ -663,30 +663,61 @@ runs these current postflight checks:
 
 | Gate | What it verifies | Degrades to "skipped" (not "failed") when |
 |---|---|---|
-| `worktree_bootstrap` | A linked worktree has the expected stealth artifacts copied from the primary checkout | Not a linked worktree with a primary `.rigpath` |
+| `worktree_bootstrap` | A linked worktree has every copyable stealth artifact present in the primary checkout, including `.gitleaks.toml` when present | Not a linked worktree with a primary `.rigpath` |
 | `rig_directory` | The resolved Rig directory exists and has a readable `memory/` directory | Never; missing Rig state is a failure |
 | `rigpath` | `.rigpath` is a single non-empty line resolving to a usable Rig directory, or local `.rig/` is selected | Never; malformed path state is a failure |
 | `stealth_exclusions` | Stealth/external artifacts are excluded from git visibility | Project is not a stealth/external install |
-| `settings_json` | Claude settings and Codex hooks JSON files parse correctly | Never; invalid JSON is a failure |
-| `claude_commands` | Installed Claude command files match the manifest or at least exist when no manifest baseline is present | Never; missing commands are a failure |
-| `codex_skill_parity` | Installed Codex skill names match Claude command names; content parity is not checked | Codex mirroring is not enabled |
-| `codex_project_instructions` | Codex has an effective `AGENTS*` file or configured `CLAUDE.md` fallback when Codex is an installed target | Codex is not an installed project target |
-| `codex_project_target_runtime` | A live Codex runtime has the project target infrastructure it needs | Codex runtime is not detected |
-| `codex_session_runtime` | A live Codex thread is bound to an active Rig session record | Codex runtime is not detected |
+| `install_targets` | Present project target metadata is valid and names only supported agents | Metadata is absent in a legacy install; provider checks infer from files and the manifest |
+| `settings_json` | Selected, present, or manifest-recorded Claude settings and present Codex hooks JSON files parse correctly | Neither provider's settings file is selected, present, or recorded |
+| `claude_commands` | Installed Claude command files match the manifest or at least exist when no manifest baseline is present | Claude is not selected or present and no manifest command baseline exists |
+| `codex_skill_parity` | Manifest-recorded Codex skill inventory is present; wrappers and references for available Claude commands match after the generator's substitutions; copied Claude skill trees match by content | Codex mirroring is not enabled, or Claude command source is absent |
+| `codex_project_instructions` | Codex has an effective `AGENTS*` file or configured `CLAUDE.md` fallback when Codex is an installed target | Codex is not an installed project target, or present target metadata is invalid |
+| `codex_project_target_runtime` | A live Codex runtime has the project target infrastructure it needs | Codex runtime is not detected, or present target metadata is invalid |
+| `codex_session_runtime` | A live Codex thread is bound to an active Rig session record | Codex runtime is not detected, or present target metadata is invalid |
 | `issue_tracking` | `CLAUDE.md` has at most one supported `issue-tracking:` value | Never; unsupported tracker configuration is a failure |
-| `github_auth` | GitHub authentication is available when `issue-tracking: github` | A non-GitHub tracker is configured |
-| `tracker_command_guidance` | `/task` and `/ship` guidance covers the configured tracker | Never; stale command guidance is a failure |
-| `recent_commit_references` | Recent commits follow the configured tracker reference convention | Tracker is `none` or there are no commits to inspect |
-| `recent_pr_references` | Recent GitHub PRs contain issue references or close keywords | Non-GitHub tracker, non-GitHub remote, or unavailable GitHub auth |
+| `github_auth` | GitHub authentication is available when `issue-tracking: github` | A non-GitHub or invalid tracker is configured |
+| `tracker_command_guidance` | `/task` and `/ship` guidance covers the configured tracker | Tracker configuration is invalid, or either command source is absent |
+| `recent_commit_references` | Recent authored commits follow the configured tracker reference convention; multi-parent merge commits are excluded | Tracker configuration is invalid or `none`, or there are no authored commits to inspect |
+| `recent_pr_references` | Recent GitHub PRs contain issue references or close keywords | Invalid or non-GitHub tracker, non-GitHub remote, or unavailable GitHub auth |
 | `connector_declarations` | Optional connector dependency declarations have the expected public envelope | No connector declaration file exists |
-| `template_placeholder_content` | Core project docs are not still showing raw scaffold placeholder content | Never; placeholder content is an advisory failure |
+| `template_placeholder_content` | Core project docs are not still showing raw scaffold placeholder content | Never; unfilled content is a failure, but its cause is not assumed |
 | `manifest_provenance` | Every `.rig-manifest.json` entry's `owner`/`source`/`generator`/`provider`/`type` value is within its known vocabulary | No manifest metadata file exists, or `installer/validate-manifest-provenance.py` isn't colocated (only true for a Rig-dogfooding checkout, not an ordinary downstream install) |
 | `stealth_status` | No Rig-generated artifact is tracked by git or visible-and-unignored in a stealth/external install | The project isn't a stealth/external install, or `installer/audit-stealth.py` isn't colocated |
 | `manifest_mode_hash` | Every Rig-owned artifact's file mode and content hash still match what the manifest recorded (catches hand-edits outside the installer) | No manifest metadata file exists |
 | `stale_manifest_entries` | No manifest entry points at a path that no longer exists on disk | No manifest metadata file exists |
-| `idempotence` | Not verified live by `doctor` itself (a read-only command has no safe way to mutate and roll back a real project tree) — always reports the documented procedure: run `bats tests/test_install_idempotence.bats` | Never fails on its own; it's a pointer to the real check, not a live result |
+| `idempotence` | Not verified live by `doctor` itself (a read-only command has no safe way to mutate and roll back a real project tree) — reports the documented procedure: run `bats tests/test_install_idempotence.bats` | Always; it is a pointer to the real check, not a live result |
 | `upgrade_pattern_blanked_file` | `CLAUDE.md`/`PROJECT_BRIEF.md` didn't revert to raw, unsubstituted template content (i.e. reintroduce the `[Project Name]` placeholder) since the last pre-flight snapshot — the signature of lessons-learned #14 | No pre-flight snapshot exists yet (issue #472 hasn't taken one — e.g. no upgrade-family run has happened on this project since the check shipped) |
 | `upgrade_pattern_symlink_replaced` | No path that was a symlink in the last pre-flight snapshot now exists as a regular file — the signature of a symlink-refusal guard being bypassed (lessons-learned #15) | No pre-flight snapshot exists yet |
+
+Each check reports `state: pass`, `fail`, `skipped`, or `advisory` in JSON.
+Only failures make `doctor` exit nonzero. Failure entries include a `fix`
+preview that names a command or file to inspect; ordinary `doctor` never
+executes it. For a linked stealth worktree,
+`bin/rig doctor fix --check worktree_bootstrap --json` previews the missing paths and recovery command.
+Add `--confirm` to copy missing artifacts. Automatic repair is limited to
+this check, preserves existing files and symlinks, and reports failure if a
+symlink blocks a required path. Direct `bin/rig worktree bootstrap` also
+reports the blocked path and exits nonzero.
+
+Malformed or unsupported `install-targets.json` fails `install_targets`.
+The file must explicitly declare `schema_version: 1`.
+Checks that need its provider selection skip with that dependency stated;
+checks backed by installed files or the manifest still run. Older installs
+without this file continue to use those available sources.
+
+`codex_skill_parity` names each divergent command, wrapper, or copied skill.
+It combines the classic and structured manifest entries for the installed
+command-skill inventory. If neither baseline exists, inventory is
+advisory while content differences for available command pairs still fail.
+Only command names may receive the generator's slash-to-dollar rewrite;
+copied Claude skill names do not become command names. Without either
+manifest, the comparison can use present non-copied skill names as command
+candidates, so the inventory remains explicitly unverified.
+If a command still contains `[BASE_BRANCH]` and the project brain has no
+unique `base-branch:` value, the content comparison is advisory because its
+expected generated text cannot be determined. Review the two files and the
+installer's read-only agent-plan preview before any upgrade; the installer
+backs up changed files and preserves user-owned customizations.
 
 Both new gates diff the most recent pre-flight snapshot (issue #472,
 `.rig-backup/preflight-snapshots/` for tracked installs or the external
