@@ -132,3 +132,51 @@ PY
   [ "$status" -eq 64 ]
   [[ "$output" == *"worktree_bootstrap and codex_skill_parity"* ]] || return 1
 }
+
+@test "parity repair: copied skills are byte copies, so CRLF content converges" {
+  mkdir -p "$PROJECT/.claude/skills/crlf" "$PROJECT/.agents/skills/crlf"
+  printf 'a\r\nb\r\n' > "$PROJECT/.claude/skills/crlf/SKILL.md"
+  printf 'a\nb\n' > "$PROJECT/.agents/skills/crlf/SKILL.md"
+  fix --confirm --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status":"applied"'* ]] || return 1
+  cmp -s "$PROJECT/.claude/skills/crlf/SKILL.md" "$PROJECT/.agents/skills/crlf/SKILL.md"
+  fix --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status":"already_complete"'* ]] || return 1
+}
+
+@test "parity repair: a user-added command neither changes Rig rewrites nor gets a generated skill" {
+  printf '# local\n' > "$PROJECT/.claude/commands/tmp.md"
+  printf '\nlocal edit\n' >> "$PROJECT/.agents/skills/recon/references/command.md"
+  fix --confirm
+  [ "$status" -eq 3 ]
+  cmp -s "$PRISTINE/.agents/skills/recon/references/command.md" "$PROJECT/.agents/skills/recon/references/command.md"
+  [ ! -e "$PROJECT/.agents/skills/tmp" ]
+  [[ "$output" == *"refused: .agents/skills/tmp (command is not a Rig-generated skill"* ]] || return 1
+}
+
+@test "parity repair: without an install manifest generated skills are refused, not guessed" {
+  rm -f "$PROJECT/.rig/memory/.rig-manifest" "$PROJECT/.rig/memory/.rig-manifest.json"
+  printf '\nlocal edit\n' >> "$PROJECT/.agents/skills/wrap/references/command.md"
+  local before
+  before="$(shasum < "$PROJECT/.agents/skills/wrap/references/command.md")"
+  fix --confirm
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"refused: .agents/skills/wrap (no install manifest records the generated skill inventory"* ]] || return 1
+  [ "$(shasum < "$PROJECT/.agents/skills/wrap/references/command.md")" = "$before" ]
+}
+
+@test "parity repair: works from a subdirectory and refuses a non-file target without leftovers" {
+  mkdir -p "$PROJECT/sub"
+  printf '\nlocal edit\n' >> "$PROJECT/.agents/skills/wrap/references/command.md"
+  rm "$PROJECT/.agents/skills/ship/SKILL.md"
+  mkdir "$PROJECT/.agents/skills/ship/SKILL.md"
+  run bash -c 'cd "$1/sub" && ../bin/rig doctor fix --check codex_skill_parity --confirm' _ "$PROJECT"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"replace: .agents/skills/wrap/references/command.md"* ]] || return 1
+  [[ "$output" == *"refused: .agents/skills/ship/SKILL.md (target exists but is not a regular file"* ]] || return 1
+  [[ "$output" == *"codex_skill_parity is fail"* ]] || return 1
+  cmp -s "$PRISTINE/.agents/skills/wrap/references/command.md" "$PROJECT/.agents/skills/wrap/references/command.md"
+  [ -z "$(find "$PROJECT/.agents" -name '*.rig-fix-*')" ]
+}

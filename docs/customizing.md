@@ -715,16 +715,21 @@ candidates, so the inventory remains explicitly unverified.
 
 `bin/rig doctor fix --check codex_skill_parity` previews the files a repair
 would write: drifted or missing generated `references/command.md` and
-`SKILL.md` files, regenerated from `.claude/commands` exactly as the installer
-generates them, and drifted copied skill files re-copied from `.claude/skills`.
+`SKILL.md` files for Rig commands recorded in the install manifest,
+regenerated from `.claude/commands` exactly as the installer generates them,
+and drifted copied skill files re-copied byte for byte from `.claude/skills`.
+User-added commands are never generated, and without an install manifest
+generated files are refused rather than guessed.
 Add `--confirm` to apply. Each replaced file is backed up first under
 `$RIG_DIR/backups/doctor-fix/<timestamp>/` with a `manifest.json` listing
 previous and new hashes; a file that changed after the plan was made is
 refused. Repair never deletes anything: skills without a Claude source, extra
 files in a Codex copy, symlinked targets, and base-branch content when
 `base-branch:` is not set exactly once are reported as refusals and left in
-place. It then re-runs doctor and exits 0 only when the check passes; refusals
-or a remaining failure exit 3. The manifest is not rewritten, so a later
+place, as are targets that are not regular files. It then re-runs doctor and
+exits 0 only when the check passes; refusals or a remaining failure exit 3, and
+a write failure or unreadable doctor report exits 1 with the completed writes
+listed. The manifest is not rewritten, so a later
 upgrade may still report a regenerated file whose installed baseline differs.
 These are the only two checks with automatic repair.
 If a command still contains `[BASE_BRANCH]` and the project brain has no
