@@ -25,7 +25,7 @@ No arguments. Output the table below directly — do not read individual command
 
 | Command | What it does |
 |---|---|
-| `/wrap` | End a session. Writes `CONTEXT_SNAPSHOT.md`, expands `PROGRESS.md` stubs, captures in-flight task state, names the session. |
+| `/wrap` | End a session. Writes `CONTEXT_SNAPSHOT.md`, expands `PROGRESS.md` stubs, captures in-flight task state, names the session. Use `/wrap --checkpoint` to save memory and handoffs while the exact session remains active; a later ordinary wrap still finalizes. |
 | `/handoff-checklist` | Consent-gated wrap-and-handoff routine for large or costly sessions. Asks before doing any checklist work. |
 | `/post-merge` | Post-merge housekeeping. Fetches the base branch and verifies each exact merge SHA before logging the PR to `PROGRESS.md`, moving the task file to done, refreshing `CONTEXT_SNAPSHOT.md`, checking feature doc freshness, and surfacing what's next. A clean base checkout is fast-forwarded only when tracked housekeeping needs it. |
 | `/status` | Project state dashboard. Shows current branch, active tasks, backlog count, and recent `PROGRESS.md` entries. |

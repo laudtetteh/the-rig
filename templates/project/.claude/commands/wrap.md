@@ -1,10 +1,12 @@
 # Command: /wrap
 
 Trigger this command before ending a session or when approaching a context limit.
+Use `/wrap --checkpoint` to save a handoff while the exact session remains active.
 
 ## What this does
 
-Performs the session-end housekeeping that prevents state loss between sessions:
+With no arguments, performs the session-end housekeeping that prevents state loss
+between sessions:
 
 1. Refreshes `.rig/memory/CONTEXT_SNAPSHOT.md` while preserving other sessions' task handoffs
 2. Ensures `.rig/memory/PROGRESS.md` is up to date — expands any auto-stubbed entries
@@ -30,16 +32,107 @@ If a PR was merged and the session is also ending, run `/post-merge` first for
 the merged project, then run `/wrap` for this project. Do not combine their
 memory writes under one inferred session identity.
 
-If the user asks for multiple actions and wrap in the same turn, finish all
-non-wrap implementation, verification, and reporting work first. Then run the
-wrap housekeeping. The final assistant response for that turn must be the Wrap report,
-even if internal wrap collection happened earlier. Do not end with an implementation report after a requested wrap.
+If the user asks for multiple actions and an argument-free final wrap in the
+same turn, finish all non-wrap implementation, verification, and reporting work
+first. Then run the wrap housekeeping. The final assistant response for that
+turn must be the Wrap report, even if internal wrap collection happened earlier.
+Do not end with an implementation report after a requested final wrap. For an
+explicit `--checkpoint`, finish the other work first and end with the
+Checkpoint report and saved-handoff result.
 
 ## Usage
 
 ```
 /wrap
+/wrap --checkpoint
 ```
+
+`--checkpoint` is the only accepted option. It must be explicit: an ordinary
+request to wrap follows the final wrap path. In checkpoint mode, follow the
+Checkpoint route below and stop at its exit; do not continue into final wrap.
+The generated Codex `$wrap --checkpoint` skill follows the same route.
+
+## Checkpoint route — preserve the exact active session
+
+Run this route only for `/wrap --checkpoint`. It saves current Rig memory and a
+resumable handoff without clearing obligations, finalizing a name, or completing
+the session. A real provider SessionEnd can still end the record later; a later
+native resume may then create a continuation anchor. Run an ordinary `/wrap`
+later to perform all finalization gates.
+
+1. Run `git branch --show-current`, `git status --short`, and
+   `git log --oneline -3`. Report the branch, last commit, and every dirty path.
+   Include dirty files in the handoff; do not prompt for a commit or make one
+   merely to checkpoint. Resolve `REPO` and `RIG_DIR` with:
+
+   ```bash
+   REPO=$(git rev-parse --show-toplevel) || exit 1
+   TASK_INVENTORY_JSON=$("$REPO/bin/rig" task inventory --json) || exit 1
+   RIG_DIR=$(printf '%s' "$TASK_INVENTORY_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok") and d.get("state") in ("installed", "omitted"); print(d["rig_dir"])') || exit 1
+   ```
+
+   Stop on ambiguous inventory or missing shared memory components. When task
+   lifecycle is omitted, save shared memory only and report task handoffs as
+   unavailable.
+2. Before any write, run `"$REPO/bin/rig" session current --json`. Require
+   `ok: true`, `confidence: exact`, `state: active`, a nonempty `anchor`, and a
+   nonempty `session_file`. If it is unresolved, ended, ambiguous, or unsafe,
+   report the reason and stop without writing. Do not use ordinary wrap's
+   degraded mode or create a new record as part of a checkpoint. Extract the
+   returned anchor as `CHECKPOINT_ANCHOR` and path as `CHECKPOINT_FILE`. Keep
+   those exact values for the entire route; do not reuse an inherited launcher
+   file hint if the resolver returned a continuation.
+3. Gather the current project's progress, errors, decisions, Rig gaps and
+   active-task handoffs from conversation context and Rig memory. Print a
+   **Checkpoint report** before changing any file with this exact set of fields:
+   project/branch/last commit, dirty paths, exact active anchor, session work
+   summary, planned PROGRESS/ERRORS/DECISIONS/RIG_GAPS updates, trim and
+   session-end marker counts, and owned active task handoffs (or omitted task
+   lifecycle). Omit `Session` and `Final session name` fields from the ordinary
+   Wrap report. Do not propose or confirm a final name.
+4. Acquire the owner-recorded memory workflow lock using
+   `"$REPO/bin/rig" memory workflow-lock acquire --owner-anchor "$CHECKPOINT_ANCHOR" --json`,
+   where `CHECKPOINT_ANCHOR` is the exact anchor from step 2. Extract and save
+   the returned `token` across tool calls. Observe the same busy/stale-lock
+   rules as the Concurrent session guard below. Immediately re-run
+   `session current --json` with
+   `RIG_SESSION_FILE="$CHECKPOINT_FILE" RIG_SESSION_ANCHOR="$CHECKPOINT_ANCHOR"`
+   in that tool-call shell; if the anchor, file, exact confidence, or active
+   state changed, release that token and stop before other writes.
+5. Under that lock, perform the shared memory work in this command: expand
+   this session's auto-stubbed PROGRESS entries, add any missing session-tagged
+   progress, trim PROGRESS if needed, prune stale session-end markers, log real
+   ERRORS and adopted DECISIONS, record Rig gaps, and trim ERRORS if needed.
+   Use the existing sections below for each operation. Keep every entry's
+   provenance and preserve other sessions' content.
+6. Build the Active tasks snapshot draft below with a current shared project
+   header, the exact session's task handoffs and dirty-path list. Use
+   `memory write-snapshot` with `--owned-task` for each owned section and
+   `RIG_SESSION_FILE`/`RIG_SESSION_ANCHOR` set to the exact values from step 2.
+   If no task handoff is owned, use `--shared-only`. The writer preserves other
+   owners' sections. On a writer error, release the lock and keep the draft for
+   retry. In the shell executing the snapshot block, set
+   `WRAP_SNAPSHOT_MODE=checkpoint`, `RIG_SESSION_FILE="$CHECKPOINT_FILE"`,
+   `RIG_SESSION_ANCHOR="$CHECKPOINT_ANCHOR"`, `CHECKPOINT_FILE`, and
+   `CHECKPOINT_ANCHOR` for the entire block, including
+   its `session current --json` recheck. Re-run that check before the write; if
+   it no longer identifies the same exact active anchor and file, release the
+   lock and stop. Reassign these saved values in each new tool-call shell;
+   shell variables and exports do not persist between tool calls.
+7. Release the exact workflow-lock token with
+   `"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json`.
+   Report the saved snapshot and the
+   still-active anchor. **Stop here.** Do not run PR freshness, final naming,
+   obligation clear, session completion, orphan scan, flag or compact-checkpoint
+   cleanup, transcript pruning, permission scan, or the ordinary "What's next?"
+   prompt. Leave wrap and post-merge reminders, record bytes, names, and
+   continuation lineage untouched. A later ordinary `/wrap` still performs
+   every finalization gate.
+
+If any checkpoint step fails after lock acquisition, release only the exact
+token this invocation received. Never infer a replacement owner from another
+session's lock or snapshot. Repeated checkpoints update this owner's handoff
+through the same writer and preserve unrelated handoffs.
 
 > **RIG_DIR resolution:** After the Git state check, before reading or writing
 > any `.rig/` path, use the inventory helper's resolved `rig_dir`. It handles
@@ -452,8 +545,12 @@ which are pending.
 Build a draft under `$RIG_DIR/memory/` containing the current shared project
 header and only this session's `## Resuming from` sections. Use the token from
 the concurrent session guard to name the draft
-`.snapshot-draft-${SNAP_LOCK_TOKEN}.md`. For a session with no exact active
-record, write the shared header only and report that task handoffs could not be
+`.snapshot-draft-${SNAP_LOCK_TOKEN}.md`. For an ordinary final wrap, set
+`WRAP_SNAPSHOT_MODE=final` in the shell that runs the writer block, even if an
+earlier checkpoint exported another value. The explicit checkpoint route sets
+`WRAP_SNAPSHOT_MODE=checkpoint` and its saved exact anchor/file instead. For a
+session with no exact active record, write the shared header only and report
+that task handoffs could not be
 updated without an owner. Then run the owner-aware writer:
 
 ```bash
@@ -463,20 +560,41 @@ snapshot_write_failed() {
   echo "Snapshot update failed; draft preserved at $SNAP_DRAFT" >&2
   exit 1
 }
+checkpoint_verify_snapshot_identity() {
+  case "${WRAP_SNAPSHOT_MODE:-}" in
+    final) return 0 ;;
+    checkpoint) ;;
+    *) return 1 ;;
+  esac
+  [[ -n "${CHECKPOINT_ANCHOR:-}" && -n "${CHECKPOINT_FILE:-}" ]] || return 1
+  local current
+  current=$(RIG_SESSION_FILE="$CHECKPOINT_FILE" RIG_SESSION_ANCHOR="$CHECKPOINT_ANCHOR" \
+    "$REPO/bin/rig" session current --json) || return 1
+  printf '%s' "$current" | python3 -c 'import json,sys; d=json.load(sys.stdin); ok=d.get("ok") is True and d.get("confidence")=="exact" and d.get("state")=="active" and d.get("anchor")==sys.argv[1] and d.get("session_file")==sys.argv[2]; sys.exit(0 if ok else 1)' \
+    "$CHECKPOINT_ANCHOR" "$CHECKPOINT_FILE"
+}
+checkpoint_verify_snapshot_identity || snapshot_write_failed
 OWNED_TASKS=()
 while IFS= read -r task; do OWNED_TASKS+=("$task"); done \
   < <(sed -n 's/^## Resuming from: //p' "$SNAP_DRAFT")
 SNAP_ARGS=(--file "$SNAP_DRAFT" --json)
 if [[ "${#OWNED_TASKS[@]}" -eq 0 ]]; then
   SNAP_ARGS+=(--shared-only)
+  checkpoint_verify_snapshot_identity || snapshot_write_failed
   "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || snapshot_write_failed
 else
-  CURRENT_JSON=$("$REPO/bin/rig" session current --json) || snapshot_write_failed
+  if [[ "$WRAP_SNAPSHOT_MODE" == checkpoint ]]; then
+    CURRENT_JSON=$(RIG_SESSION_FILE="$CHECKPOINT_FILE" RIG_SESSION_ANCHOR="$CHECKPOINT_ANCHOR" \
+      "$REPO/bin/rig" session current --json) || snapshot_write_failed
+  else
+    CURRENT_JSON=$("$REPO/bin/rig" session current --json) || snapshot_write_failed
+  fi
   CURRENT_FILE=$(printf '%s' "$CURRENT_JSON" | \
     python3 -c 'import json,sys; print(json.load(sys.stdin).get("session_file") or "")') || snapshot_write_failed
   CURRENT_ANCHOR=$(printf '%s' "$CURRENT_JSON" | \
     python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")') || snapshot_write_failed
   [[ -n "$CURRENT_FILE" && -n "$CURRENT_ANCHOR" ]] || snapshot_write_failed
+  checkpoint_verify_snapshot_identity || snapshot_write_failed
   for task in "${OWNED_TASKS[@]}"; do SNAP_ARGS+=(--owned-task "$task"); done
   RIG_SESSION_FILE="$CURRENT_FILE" RIG_SESSION_ANCHOR="$CURRENT_ANCHOR" \
     "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || snapshot_write_failed
