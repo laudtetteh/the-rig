@@ -12,8 +12,8 @@ setup() {
 @test "naming guidance uses a tracker-neutral REF instead of GitHub-only #N" {
   local file
   for file in "$COMMANDS/wrap.md" "$COMMANDS/session-name.md" "$COMMANDS/post-merge.md" "$PROCESS"; do
-    ! grep -Fq 'short-desc #N' "$file" || { echo "GitHub-only format in $file" >&3; return 1; }
-    ! grep -Fq '#A–#B' "$file" || { echo "GitHub-only range in $file" >&3; return 1; }
+    if grep -Fq 'short-desc #N' "$file"; then echo "GitHub-only format in $file" >&3; return 1; fi
+    if grep -Fq '#A–#B' "$file"; then echo "GitHub-only range in $file" >&3; return 1; fi
     grep -Fq 'type short-desc REF' "$file" || { echo "no REF format in $file" >&3; return 1; }
   done
 }
