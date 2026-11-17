@@ -358,6 +358,15 @@ normal writer or a reviewed manual edit to change it.
 | Wrap completed | Record moves to `sessions/done/` with `lifecycle.state: complete` | Its final name stays with that work segment. |
 | Later work in the same native thread | A new active record with `lineage.kind: continuation` and `parent_anchor` | The parent name is not copied. New work can be named and wrapped independently. |
 
+Invoke Claude `/wrap --checkpoint` or Codex `$wrap --checkpoint` explicitly to
+save a mid-session handoff. It requires an exact active Rig record, reports
+dirty files and memory changes before writing, then updates project memory and
+the session's owned snapshot sections under the workflow lock. It leaves the
+record, name, lineage and wrap/post-merge obligations untouched. Repeated
+checkpoints preserve other sessions' handoffs. A later plain `/wrap` runs the
+normal finalization gates. A real provider SessionEnd can still end the record;
+a subsequent native resume may create a continuation anchor.
+
 ### Cross-project Rig record index
 
 `bin/rig session index --json` searches Rig session records in the current

@@ -896,7 +896,7 @@ PY
   printf '# New shared context\n' > "$draft"
   printf '<!-- rig:handoff-start broken -->\n' > "$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
   snapshot_command_block wrap > "$BATS_TEST_TMPDIR/wrap-snapshot.sh"
-  run env REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" SNAP_LOCK_TOKEN="$token" bash "$BATS_TEST_TMPDIR/wrap-snapshot.sh"
+  run env WRAP_SNAPSHOT_MODE=final REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" SNAP_LOCK_TOKEN="$token" bash "$BATS_TEST_TMPDIR/wrap-snapshot.sh"
   [ "$status" -ne 0 ]
   [ -f "$draft" ]
   [ ! -e "$CASE_DIR/.rig/memory/.memory-workflow-in-progress" ]
@@ -922,13 +922,163 @@ PY
   draft="$CASE_DIR/.rig/memory/.snapshot-draft-${token}.md"
   candidate "$draft" feat/continuation task-a
   snapshot_command_block wrap > "$BATS_TEST_TMPDIR/wrap-continuation.sh"
-  run env RIG_SESSION_FILE="$file_a" RIG_SESSION_ANCHOR="$original_anchor" \
+  run env WRAP_SNAPSHOT_MODE=final RIG_SESSION_FILE="$file_a" RIG_SESSION_ANCHOR="$original_anchor" \
     REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" SNAP_LOCK_TOKEN="$token" \
     bash "$BATS_TEST_TMPDIR/wrap-continuation.sh"
   [ "$status" -eq 0 ]
   snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
   grep -Fq "task=task-a owner=$continuation_anchor" "$snapshot"
   [ ! -e "$draft" ]
+}
+
+@test "checkpoint snapshot preserves exact record and obligations across repeated owned handoffs" {
+  local anchor_a anchor_b token draft snapshot before_record before_marker
+  local before_record_b before_post_merge marker_sha resume
+  anchor_a=$(printf '%s' "$a" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  anchor_b=$(printf '%s' "$b" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')
+  run env RIG_SESSION_FILE="$file_a" RIG_SESSION_ANCHOR="$anchor_a" \
+    "$rig" session obligation mark --kind wrap --json
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$file_b" RIG_SESSION_ANCHOR="$anchor_b" \
+    "$rig" session obligation mark --kind wrap --json
+  [ "$status" -eq 0 ]
+  marker_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  printf 'merge_sha=%s\nmerged_at=2026-11-16T10:00:00-08:00\n' "$marker_sha" > \
+    "$CASE_DIR/.rig/memory/.post-merge-pending"
+  run env RIG_SESSION_FILE="$file_b" RIG_SESSION_ANCHOR="$anchor_b" \
+    "$rig" session obligation mark --kind post-merge --merge-sha "$marker_sha" --json
+  [ "$status" -eq 0 ]
+  before_record=$(shasum -a 256 "$file_a")
+  before_record_b=$(shasum -a 256 "$file_b")
+  before_marker=$(shasum -a 256 "$CASE_DIR/.rig/memory/.wrap-needed")
+  before_post_merge=$(shasum -a 256 "$CASE_DIR/.rig/memory/.post-merge-pending")
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  snapshot_command_block wrap > "$BATS_TEST_TMPDIR/checkpoint-snapshot.sh"
+
+  token=$($rig memory workflow-lock acquire --owner-anchor "$anchor_b" --json | \
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  draft="$CASE_DIR/.rig/memory/.snapshot-draft-${token}.md"
+  candidate "$draft" feat/other task-b
+  run env WRAP_SNAPSHOT_MODE=checkpoint CHECKPOINT_FILE="$file_b" CHECKPOINT_ANCHOR="$anchor_b" \
+    RIG_SESSION_FILE="$file_b" RIG_SESSION_ANCHOR="$anchor_b" \
+    REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" SNAP_LOCK_TOKEN="$token" \
+    bash "$BATS_TEST_TMPDIR/checkpoint-snapshot.sh"
+  [ "$status" -eq 0 ]
+  run "$rig" memory workflow-lock release --token "$token" --json
+  [ "$status" -eq 0 ]
+  [ "$(shasum -a 256 "$file_b")" = "$before_record_b" ]
+  [ "$(shasum -a 256 "$CASE_DIR/.rig/memory/.wrap-needed")" = "$before_marker" ]
+  [ "$(shasum -a 256 "$CASE_DIR/.rig/memory/.post-merge-pending")" = "$before_post_merge" ]
+
+  for branch in feat/checkpoint-one feat/checkpoint-two; do
+    token=$($rig memory workflow-lock acquire --owner-anchor "$anchor_a" --json | \
+      python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+    draft="$CASE_DIR/.rig/memory/.snapshot-draft-${token}.md"
+    candidate "$draft" "$branch" task-a
+    run env WRAP_SNAPSHOT_MODE=checkpoint CHECKPOINT_FILE="$file_a" CHECKPOINT_ANCHOR="$anchor_a" \
+      RIG_SESSION_FILE="$file_a" RIG_SESSION_ANCHOR="$anchor_a" \
+      REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" SNAP_LOCK_TOKEN="$token" \
+      bash "$BATS_TEST_TMPDIR/checkpoint-snapshot.sh"
+    [ "$status" -eq 0 ]
+    run "$rig" memory workflow-lock release --token "$token" --json
+    [ "$status" -eq 0 ]
+    grep -Fq "task=task-b owner=$anchor_b" "$snapshot"
+    grep -Fq "task=task-a owner=$anchor_a" "$snapshot"
+    [ "$(shasum -a 256 "$file_a")" = "$before_record" ]
+    [ "$(shasum -a 256 "$CASE_DIR/.rig/memory/.wrap-needed")" = "$before_marker" ]
+    [ "$(shasum -a 256 "$CASE_DIR/.rig/memory/.post-merge-pending")" = "$before_post_merge" ]
+  done
+  grep -Fq 'feat/checkpoint-two' "$snapshot"
+
+  token=$($rig memory workflow-lock acquire --owner-anchor "$anchor_a" --json | \
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  draft="$CASE_DIR/.rig/memory/.snapshot-draft-${token}.md"
+  printf '# Shared-only candidate\n' > "$draft"
+  run env WRAP_SNAPSHOT_MODE=checkpoint CHECKPOINT_ANCHOR="$anchor_a" CHECKPOINT_FILE="$file_b" \
+    RIG_SESSION_FILE="$file_b" RIG_SESSION_ANCHOR="$anchor_b" \
+    REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" SNAP_LOCK_TOKEN="$token" \
+    bash "$BATS_TEST_TMPDIR/checkpoint-snapshot.sh"
+  [ "$status" -ne 0 ]
+  [ -f "$draft" ]
+  [ ! -e "$CASE_DIR/.rig/memory/.memory-workflow-in-progress" ]
+  grep -Fq 'feat/checkpoint-two' "$snapshot"
+
+  token=$($rig memory workflow-lock acquire --owner-anchor "$anchor_a" --json | \
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  draft="$CASE_DIR/.rig/memory/.snapshot-draft-${token}.md"
+  candidate "$draft" feat/missing-mode task-a
+  run env -u WRAP_SNAPSHOT_MODE CHECKPOINT_ANCHOR="$anchor_a" CHECKPOINT_FILE="$file_a" \
+    RIG_SESSION_FILE="$file_a" RIG_SESSION_ANCHOR="$anchor_a" \
+    REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" SNAP_LOCK_TOKEN="$token" \
+    bash "$BATS_TEST_TMPDIR/checkpoint-snapshot.sh"
+  [ "$status" -ne 0 ]
+  [ -f "$draft" ]
+  [ ! -e "$CASE_DIR/.rig/memory/.memory-workflow-in-progress" ]
+  grep -Fq 'feat/checkpoint-two' "$snapshot"
+
+  token=$($rig memory workflow-lock acquire --owner-anchor "$anchor_a" --json | \
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  draft="$CASE_DIR/.rig/memory/.snapshot-draft-${token}.md"
+  candidate "$draft" feat/invalid-owner task-a
+  run env WRAP_SNAPSHOT_MODE=checkpoint CHECKPOINT_ANCHOR="$anchor_a" CHECKPOINT_FILE="$file_b" \
+    RIG_SESSION_FILE="$file_b" RIG_SESSION_ANCHOR="$anchor_b" \
+    REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" SNAP_LOCK_TOKEN="$token" \
+    bash "$BATS_TEST_TMPDIR/checkpoint-snapshot.sh"
+  [ "$status" -ne 0 ]
+  [ -f "$draft" ]
+  [ ! -e "$CASE_DIR/.rig/memory/.memory-workflow-in-progress" ]
+  grep -Fq 'feat/checkpoint-two' "$snapshot"
+
+  token=$($rig memory workflow-lock acquire --owner-anchor "$anchor_a" --json | \
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  draft="$CASE_DIR/.rig/memory/.snapshot-draft-${token}.md"
+  printf '# Missing identity candidate\n' > "$draft"
+  run env WRAP_SNAPSHOT_MODE=checkpoint RIG_SESSION_FILE="$file_a" RIG_SESSION_ANCHOR="$anchor_a" \
+    REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" SNAP_LOCK_TOKEN="$token" \
+    bash "$BATS_TEST_TMPDIR/checkpoint-snapshot.sh"
+  [ "$status" -ne 0 ]
+  [ -f "$draft" ]
+  [ ! -e "$CASE_DIR/.rig/memory/.memory-workflow-in-progress" ]
+  grep -Fq 'feat/checkpoint-two' "$snapshot"
+
+  token=$($rig memory workflow-lock acquire --owner-anchor "$anchor_a" --json | \
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  draft="$CASE_DIR/.rig/memory/.snapshot-draft-${token}.md"
+  candidate "$draft" feat/checkpoint-two task-a
+  run env WRAP_SNAPSHOT_MODE=final CHECKPOINT_ANCHOR=ambient-wrong CHECKPOINT_FILE=/ambient/wrong \
+    RIG_SESSION_FILE="$file_a" RIG_SESSION_ANCHOR="$anchor_a" \
+    REPO="$CASE_DIR" RIG_DIR="$CASE_DIR/.rig" SNAP_LOCK_TOKEN="$token" \
+    bash "$BATS_TEST_TMPDIR/checkpoint-snapshot.sh"
+  [ "$status" -eq 0 ]
+  run "$rig" memory workflow-lock release --token "$token" --json
+  [ "$status" -eq 0 ]
+
+  resume=$(env RIG_SESSION_FILE="$file_b" RIG_SESSION_ANCHOR="$anchor_b" \
+    "$rig" session bind --agent codex --native-session-id thread-b --source resume)
+  [ "$(printf '%s' "$resume" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anchor"])')" = "$anchor_b" ]
+
+  run env RIG_SESSION_FILE="$file_a" RIG_SESSION_ANCHOR="$anchor_a" \
+    "$rig" session obligation clear --kind wrap --json
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$file_a" RIG_SESSION_ANCHOR="$anchor_a" \
+    "$rig" session-name set --final --complete 'Checkpointed work'
+  [ "$status" -eq 0 ]
+  local done_records=("$CASE_DIR/.rig/memory/sessions/done/"*"$anchor_a"*.json)
+  [ -f "${done_records[0]}" ]
+  grep -Fxq "anchor=$anchor_b" "$CASE_DIR/.rig/memory/.wrap-needed"
+  grep -Fxq "anchor=$anchor_b" "$CASE_DIR/.rig/memory/.post-merge-pending"
+  run env RIG_SESSION_FILE="$file_b" RIG_SESSION_ANCHOR="$anchor_b" \
+    "$rig" session obligation clear --kind wrap --json
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$file_b" RIG_SESSION_ANCHOR="$anchor_b" \
+    "$rig" session obligation clear --kind post-merge --merge-sha "$marker_sha" --json
+  [ "$status" -eq 0 ]
+  run env RIG_SESSION_FILE="$file_b" RIG_SESSION_ANCHOR="$anchor_b" \
+    "$rig" session-name set --final --complete --post-merge-ack-sha="$marker_sha" 'Codex checkpointed work'
+  [ "$status" -eq 0 ]
+  local done_codex=("$CASE_DIR/.rig/memory/sessions/done/"*"$anchor_b"*.json)
+  [ -f "${done_codex[0]}" ]
+  grep -Fq "task=task-b owner=$anchor_b" "$snapshot"
 }
 
 @test "post-merge releases its workflow lock when a malformed snapshot blocks the write" {

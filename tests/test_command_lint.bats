@@ -80,6 +80,27 @@ _fail_with_list() {
   grep -q "## Wrap report step" "$COMMAND_DIR/wrap.md"
 }
 
+@test "wrap checkpoint has an explicit exact-active route that stops before finalization" {
+  run python3 - "$COMMAND_DIR/wrap.md" <<'PY'
+import pathlib, sys
+s = pathlib.Path(sys.argv[1]).read_text()
+route = s[s.index('## Checkpoint route'):s.index('> **RIG_DIR resolution:**')]
+for required in ('/wrap --checkpoint', 'confidence: exact', 'state: active',
+                 'Checkpoint report', 'before changing any file',
+                 'memory workflow-lock acquire --owner-anchor',
+                 'memory write-snapshot', 'memory workflow-lock release --token',
+                 '**Stop here.**', 'A later ordinary `/wrap`'):
+    assert required in route, required
+assert route.index('Checkpoint report') < route.index('memory workflow-lock acquire') < route.index('memory write-snapshot') < route.index('memory workflow-lock release') < route.index('**Stop here.**')
+for skipped in ('obligation clear', 'session completion', 'transcript pruning',
+                'permission scan', 'PR freshness'):
+    assert skipped in route[route.index('**Stop here.**'):], skipped
+assert 'do not prompt for a commit' in route
+assert 'If it is unresolved, ended, ambiguous, or unsafe' in route
+PY
+  [ "$status" -eq 0 ]
+}
+
 @test "wrap.md: Wrap report step defines collection phase and report format" {
   grep -q "Collection phase" "$COMMAND_DIR/wrap.md"
   grep -q "This session" "$COMMAND_DIR/wrap.md"
@@ -90,9 +111,21 @@ _fail_with_list() {
 }
 
 @test "wrap.md: combined-task wrap report is final response" {
-  grep -Fq 'multiple actions and wrap in the same turn' "$COMMAND_DIR/wrap.md"
-  grep -Fq 'final assistant response for that turn must be the Wrap report' "$COMMAND_DIR/wrap.md"
-  grep -Fq 'Do not end with an implementation report after a requested wrap' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'multiple actions and an argument-free final wrap' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'turn must be the Wrap report' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'Do not end with an implementation report after a requested final wrap' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'Checkpoint report and saved-handoff result' "$COMMAND_DIR/wrap.md"
+}
+
+@test "generated Codex wrap reference preserves the explicit checkpoint route" {
+  local generated="$BATS_TEST_TMPDIR/generated"
+  run python3 "$REPO_ROOT/installer/generate-codex-skills.py" \
+    --output "$generated" --base-branch main "$COMMAND_DIR/wrap.md"
+  [ "$status" -eq 0 ]
+  [ -f "$generated/wrap/SKILL.md" ]
+  grep -Fq '$wrap --checkpoint' "$generated/wrap/references/command.md"
+  grep -Fq '## Checkpoint route — preserve the exact active session' "$generated/wrap/references/command.md"
+  grep -Fq 'checkpoint_verify_snapshot_identity' "$generated/wrap/references/command.md"
 }
 
 @test "wrap.md: documents project-only scope and unresolved-session degraded mode" {

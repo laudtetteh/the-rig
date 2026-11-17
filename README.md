@@ -302,8 +302,9 @@ reset one tip, remove its `.rig/memory/tips/.tip-<id>-shown` file; remove the
 
 **At session end**, provider hook adapters bind lifecycle work to the exact native
 session record. `stop.sh` maintains the checkpoint and wrap obligation for the
-exact root session. Run Claude `/wrap` or Codex `$wrap` before closing for a full
-snapshot — hooks are a safety net, not a replacement.
+exact root session. Use Claude `/wrap --checkpoint` or Codex `$wrap --checkpoint`
+to save an active-session handoff. Run plain `/wrap` or `$wrap` before closing
+for a full snapshot — hooks are a safety net, not a replacement.
 
 ---
 
