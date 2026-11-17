@@ -99,14 +99,14 @@ These flags are preserved across upgrades: once a feature is installed, it is au
 
 ## Permission management
 
-The Rig wires up four mechanisms for controlling what Claude Code can do:
+For Claude Code, the project wiring and bundled Claude Code commands provide four permission controls:
 
 | Mechanism | What it does | How to configure |
 |---|---|---|
 | `permission-request.sh` | Runtime hook — intercepts unapproved tool requests; auto-approves writes to `$RIG_DIR` | Installed automatically; edit to add custom auto-approvals |
 | `/permissions` | Claude Code built-in — pre-approves or pre-denies specific tool patterns before a session starts | Run `/permissions` in Claude Code |
 | `settings.json` `allow`/`deny` | Persistent per-project rules loaded at every session; no prompt for matched patterns | Edit `.claude/settings.json` directly |
-| `/fewer-permission-prompts` | Rig skill — scans transcripts for frequent patterns and bulk-adds them to `settings.json` `allow` | Run `/fewer-permission-prompts` |
+| `/fewer-permission-prompts` | Claude Code bundled skill (Claude only) — scans transcripts for frequent patterns and bulk-adds them to `settings.json` `allow` | Run in Claude Code; this slash skill is unavailable in Codex |
 
 **Baseline deny patterns** (shipped in `settings.json`): `rm -rf *`, `git push --force*`, `git push -f*`. Add project-specific shell-command patterns to the `deny` array as needed.
 

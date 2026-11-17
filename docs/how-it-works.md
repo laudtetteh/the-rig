@@ -53,7 +53,7 @@ Three locations work together. The installer repo produces the other two:
                 ▼                         ▼
 ┌──────────────────────────┐  ┌───────────────────────────────────┐
 │  GLOBAL LAYER            │  │  PROJECT LAYER                    │
-│  (~/.claude/)            │  │  (per-repo, version-controlled)   │
+│  (~/.claude/)            │  │  (tracking configurable)          │
 │  Once per machine.       │  │  Once per project.                │
 │                          │  │                                   │
 │  ~/.claude/CLAUDE.md     │  │  CLAUDE.md       ← project brain  │
@@ -159,7 +159,7 @@ Agent is oriented. Hooks are live. Ready to work.
      │
      │  After the agent's final message each turn:
      │  └─ stop.sh (Stop)
-     │       Appends a UUID-tagged session-end marker to PROGRESS.md
+     │       Appends a session-end marker to PROGRESS.md (UUID-tagged when the anchor is available)
      │       Leaves an existing shared snapshot unchanged
      │       (lightweight; idempotent — safe to run after every response)
      │
@@ -216,7 +216,7 @@ Seven files, seven purposes:
 ### .rig/memory/PROGRESS.md
 - Append-only build log, one entry per meaningful unit of work
 - Auto-stubbed by Git's `post-commit` hook after a guarded agent commit; PostToolUse uses a matching Git result as a fallback when that hook does not log
-- `stop.sh` appends UUID-tagged session-end markers for housekeeping. Naming never uses legacy marker ranges, snapshots, unrelated session files, or project history; current conversation context is authoritative and only the resolved current session's UUID-tagged entries may cross-check it.
+- `stop.sh` appends session-end markers for housekeeping, UUID-tagged when the anchor is available. Naming never uses legacy marker ranges, snapshots, unrelated session files, or project history; current conversation context is authoritative and only the resolved current session's UUID-tagged entries may cross-check it.
 - Most recent entry at the top
 - **Trim convention:** capped at 20 entries. `/wrap` moves older entries to `.rig/memory/PROGRESS_archive.md` (gitignored, disk-only) when the cap is exceeded. Keeps session startup cost low indefinitely.
 
@@ -274,12 +274,13 @@ Seven files, seven purposes:
 
 ## The process system
 
-Six workflow files and two process contracts define step-by-step behaviour at
-each phase:
+Nine process files define step-by-step behaviour across task intake, work
+modes, sprint planning, shipping, debugging, connector preflight, upgrades,
+post-merge housekeeping, and Rig gaps triage. Examples:
 
 ### NEW_TASK_WORKFLOW
 ```
-Step 0: GitHub issue first — /task wizard enforces this at intake time
+Step 0: Configured tracker reference first (GitHub by default; skip for `none`) — /task enforces this at intake
 Step 1: Confirm working directory (main repo root, never a worktree path)
 Step 2: Orient (read SNAPSHOT → PROGRESS if needed → ERRORS → task file)
 Step 3: Confirm understanding — restate goal, files, risks. Wait for approval.
@@ -292,7 +293,7 @@ Step 7: Wrap up — audit plan vs. reality; structured Done notes; move task; up
 
 ### SHIP_WORKFLOW
 ```
-Step 0:   Create GitHub issue FIRST — commit must reference [#N]
+Step 0:   For GitHub tracking, create the issue before code; commit references [#N]. Skip for `none`.
 Step 1:   Pre-ship checklist (AC, no debug code, no secrets, Docker verification)
 Step 2:   Self-review — does this do ONLY what was asked?
 Step 2.4: Derive and run 1–5 task-specific live checks; record results, skips, and risk
@@ -498,7 +499,7 @@ Every tool call
      │
      ├─► pre-tool.sh (PreToolUse)
      │     Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
-     │     Logs call to /tmp/the-rig-session.log
+     │     Logs call to RIG_SESSION_LOG or /tmp/the-rig-session-<project>.log
      │     Worktree redirect: Write/Edit/NotebookEdit targeting .claude/worktrees/
      │       → rewrites path to main-repo equivalent via hookSpecificOutput.updatedInput
      │     Checks RIG_PROTECTED: blocks writes to governance files
@@ -545,7 +546,8 @@ Agent finishes response each turn
            minimal checkpoint through the snapshot writer when wrap is needed
            and no snapshot exists
            If PROGRESS.md exists:
-             Append <!-- session-end YYYY-MM-DD HH:MM --> boundary marker
+             Append <!-- session-end YYYY-MM-DD HH:MM sid:UUID --> when anchored,
+             or <!-- session-end YYYY-MM-DD HH:MM --> without an anchor
              (idempotent: skips if last non-blank line is already a marker)
            Dispatches on `source` field from JSON stdin:
              Empty source (Stop event): appends a PROGRESS marker; preserves the shared snapshot

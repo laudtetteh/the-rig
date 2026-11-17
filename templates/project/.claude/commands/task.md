@@ -213,7 +213,7 @@ identifies it when rollback also fails, preserving the user's work for recovery.
 1. Create a task file in `.rig/tasks/backlog/` using the task template.
 2. Fill in `## Goal`, `## Context`, and `## Operating mode` from the wizard answers.
 3. Move the task file to `.rig/tasks/active/`.
-4. Follow `.rig/processes/NEW_TASK_WORKFLOW.md` from Step 0 (GitHub issue first).
+4. Follow `.rig/processes/NEW_TASK_WORKFLOW.md` from Step 0 (configured tracker reference first; skip when `issue-tracking: none`).
 5. Execute according to the configured autonomy level.
 
 When this workflow records completion in `.rig/memory/PROGRESS.md`, insert the new
