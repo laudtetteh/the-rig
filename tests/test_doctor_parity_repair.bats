@@ -180,3 +180,32 @@ PY
   cmp -s "$PRISTINE/.agents/skills/wrap/references/command.md" "$PROJECT/.agents/skills/wrap/references/command.md"
   [ -z "$(find "$PROJECT/.agents" -name '*.rig-fix-*')" ]
 }
+
+@test "parity repair: a missing base-branch skill is refused while other repairs still run" {
+  python3 - "$PROJECT/CLAUDE.md" <<'PY'
+import pathlib, re, sys
+path = pathlib.Path(sys.argv[1])
+path.write_text(re.sub(r"(?m)^base-branch:.*\n", "", path.read_text()))
+PY
+  rm -rf "$PROJECT/.agents/skills/rig-upgrade"
+  printf '\nlocal edit\n' >> "$PROJECT/.agents/skills/wrap/references/command.md"
+  fix --confirm
+  [ "$status" -eq 3 ]
+  [[ "$output" != *"Traceback"* && "$output" != *"TypeError"* ]] || return 1
+  [[ "$output" == *"refused: .agents/skills/rig-upgrade (base-branch is not set exactly once"* ]] || return 1
+  cmp -s "$PRISTINE/.agents/skills/wrap/references/command.md" "$PROJECT/.agents/skills/wrap/references/command.md"
+  [ ! -e "$PROJECT/.agents/skills/rig-upgrade" ]
+}
+
+@test "parity repair: doctor's optional command list covers every template command not installed by default" {
+  python3 - "$BATS_TEST_DIRNAME/../templates/project/.claude/commands" "$INSTALLED/.claude/commands" "$BATS_TEST_DIRNAME/../templates/project/bin/rig" <<'PY'
+import pathlib, re, sys
+template = {p.stem for p in pathlib.Path(sys.argv[1]).glob("*.md")}
+installed = {p.stem for p in pathlib.Path(sys.argv[2]).glob("*.md")}
+source = pathlib.Path(sys.argv[3]).read_text()
+block = re.search(r"optional_commands = \{(.*?)\}", source, re.S).group(1)
+optional = set(re.findall(r'"([a-z-]+)"', block))
+assert template - installed <= optional, sorted(template - installed - optional)
+assert optional <= template, sorted(optional - template)
+PY
+}

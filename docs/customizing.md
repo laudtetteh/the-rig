@@ -727,9 +727,10 @@ refused. Repair never deletes anything: skills without a Claude source, extra
 files in a Codex copy, symlinked targets, and base-branch content when
 `base-branch:` is not set exactly once are reported as refusals and left in
 place, as are targets that are not regular files. It then re-runs doctor and
-exits 0 only when the check passes; refusals or a remaining failure exit 3, and
-a write failure or unreadable doctor report exits 1 with the completed writes
-listed. The manifest is not rewritten, so a later
+exits 0 only when the check passes; refusals or a remaining failure exit 3
+(including a post-repair doctor run that cannot be read, reported as
+`check_after: unknown`). A write failure, or a doctor report that cannot be
+read before repair, exits 1 with any completed writes listed. The manifest is not rewritten, so a later
 upgrade may still report a regenerated file whose installed baseline differs.
 These are the only two checks with automatic repair.
 If a command still contains `[BASE_BRANCH]` and the project brain has no

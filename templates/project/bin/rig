@@ -1393,6 +1393,10 @@ elif skills.is_dir():
                 refusals.append({"path": f".claude/commands/{name}.md", "reason": "command source cannot be read"})
                 continue
             if "[BASE_BRANCH]" in source:
+                if base_branch is None:
+                    refusals.append({"path": f".agents/skills/{name}",
+                                     "reason": "base-branch is not set exactly once in CLAUDE.md; content cannot be generated"})
+                    continue
                 source = source.replace("[BASE_BRANCH]", base_branch)
             generated = rig_invocation.sub(r"$\1", source) if rig_invocation else source
             wrapper_text = ("---\n" + f"name: {name}\n" +
