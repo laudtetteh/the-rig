@@ -71,7 +71,7 @@ version() {
 }
 command_help() {
   case "$1" in
-    doctor) printf 'Usage: rig doctor [--json]\n       rig doctor fix --check worktree_bootstrap [--confirm] [--json]\n\nDoctor is read-only. The fix subcommand previews by default and only copies\nmissing stealth worktree artifacts after --confirm. Other checks have\nmanual fix previews but no automatic repair.\n';;
+    doctor) printf 'Usage: rig doctor [--json]\n       rig doctor fix --check worktree_bootstrap|codex_skill_parity [--confirm] [--json]\n\nDoctor is read-only. The fix subcommand previews by default and writes only\nafter --confirm. worktree_bootstrap copies missing stealth worktree artifacts.\ncodex_skill_parity regenerates drifted Codex skills from .claude/commands and\n.claude/skills, backs up every replaced file under RIG_DIR/backups/doctor-fix/,\nnever deletes extra or user-owned files, and refuses files changed since the\npreview. Other checks have manual fix previews but no automatic repair.\n';;
     connector) printf 'Usage: rig connector preflight --skill ID [--evidence FILE|-] [--refresh] [--json]\n';;
     worktree) printf 'Usage: rig worktree bootstrap\n';;
     upgrade) printf 'Usage: rig upgrade rollback (--last | --id ID) [--dry-run | --confirm ID] [--json]\n\nUndoes one completed upgrade using the report that run wrote.\nRestores only the paths that upgrade changed, and refuses anything\nedited since. For an interrupted upgrade, use install.sh --recover.\n\nExit codes: 0 fully undone, 3 some paths refused, 70 a restore failed.\n';;
@@ -1224,6 +1224,137 @@ else:
 PY
 }
 
+# Preview or apply the codex_skill_parity repair plan (#604). The plan comes
+# from doctor; apply re-checks every target hash, backs up each replaced file
+# under $RIG_DIR/backups/doctor-fix/, writes only planned files, never deletes,
+# and re-runs doctor to report the resulting check state.
+doctor_fix_parity() {
+  local confirm="$1" json_output="$2" report_file script status
+  script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+  report_file="$(mktemp)" || { usage_error "cannot create a temporary report file"; return; }
+  RIG_DOCTOR_PARITY_PLAN=1 doctor --json > "$report_file" || true
+  status=0
+  DOCTOR_FIX_REPORT_FILE="$report_file" DOCTOR_FIX_CONFIRM="$confirm" DOCTOR_FIX_JSON="$json_output" \
+    RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" RIG_SCRIPT="$script" python3 <<'PY' || status=$?
+import base64, datetime, hashlib, json, os, pathlib, subprocess, sys
+
+root = pathlib.Path(os.environ["RIG_ROOT"]).resolve()
+rig = pathlib.Path(os.environ["RIG_DIR"])
+as_json = os.environ["DOCTOR_FIX_JSON"] == "true"
+
+
+def parity_item(text):
+    """The codex_skill_parity entry from a doctor JSON report; raises ValueError if unusable."""
+    report = json.loads(text)
+    if not isinstance(report, dict) or not isinstance(report.get("checks"), list):
+        raise ValueError("doctor report has no checks list")
+    return next((x for x in report["checks"] if isinstance(x, dict) and x.get("name") == "codex_skill_parity"), None)
+
+
+def passing(item):
+    """Whether the check is healthy: pass, or advisory with no listed problems."""
+    return bool(item) and item.get("state") in ("pass", "advisory") and item.get("ok") is not False
+
+
+def emit(status, detail, actions=(), refusals=(), extra=None, code=0):
+    """Print the result and exit with the documented code."""
+    payload = {"ok": code == 0, "check": "codex_skill_parity", "status": status, "detail": detail,
+               "actions": [{k: a[k] for k in ("path", "action", "reason")} for a in actions],
+               "refusals": list(refusals)}
+    payload.update(extra or {})
+    if as_json:
+        print(json.dumps(payload, separators=(",", ":")))
+    else:
+        print(f"Doctor fix {status}: {detail}")
+        for action in payload["actions"]:
+            print(f"  {action['action']}: {action['path']} ({action['reason']})")
+        for refusal in payload["refusals"]:
+            print(f"  refused: {refusal['path']} ({refusal['reason']})")
+        for key, value in (extra or {}).items():
+            print(f"  {key}: {value}")
+    sys.exit(code)
+
+
+try:
+    item = parity_item(pathlib.Path(os.environ["DOCTOR_FIX_REPORT_FILE"]).read_text())
+except (OSError, ValueError) as exc:
+    emit("failed", f"doctor did not produce a readable report ({exc.__class__.__name__}); run bin/rig doctor --json",
+         code=1)
+if item is None or item.get("state") == "skipped":
+    emit("not_applicable", item.get("detail") if item else "doctor did not report codex_skill_parity", code=3)
+plan = item.get("repair_plan") or {"actions": [], "refusals": []}
+actions, refusals = plan["actions"], plan["refusals"]
+if not actions:
+    if passing(item) and not refusals:
+        emit("already_complete", item["detail"])
+    emit("refused", "nothing can be repaired automatically: " + item["detail"], refusals=refusals, code=3)
+if os.environ["DOCTOR_FIX_CONFIRM"] != "true":
+    emit("preview", f"{len(actions)} file(s) would be written; re-run with --confirm to apply with backups",
+         actions, refusals)
+
+stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+backup_root = rig / "backups" / "doctor-fix" / f"{stamp}-{os.getpid()}"
+written, skipped = [], list(refusals)
+temporary = None
+try:
+    for action in actions:
+        target = root / action["path"]
+        parent = target.parent.resolve() if target.parent.exists() else None
+        if target.is_symlink() or (parent is not None and root not in (parent, *parent.parents)):
+            skipped.append({"path": action["path"], "reason": "target resolves outside the project; not written"})
+            continue
+        if target.exists() and not target.is_file():
+            skipped.append({"path": action["path"], "reason": "target is not a regular file; not written"})
+            continue
+        current = target.read_bytes() if target.exists() else None
+        if (hashlib.sha256(current).hexdigest() if current is not None else None) != action["current_sha256"]:
+            skipped.append({"path": action["path"], "reason": "changed since the plan was made; not written"})
+            continue
+        entry = {"path": action["path"], "action": action["action"], "reason": action["reason"],
+                 "previous_sha256": action["current_sha256"]}
+        if current is not None:
+            backup = backup_root / action["path"]
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            backup.write_bytes(current)
+            entry["backup"] = backup.as_posix()
+        content = base64.b64decode(action["content_b64"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(target.name + f".rig-fix-{os.getpid()}")
+        temporary.write_bytes(content)
+        os.replace(temporary, target)
+        temporary = None
+        entry["new_sha256"] = hashlib.sha256(content).hexdigest()
+        written.append(entry)
+except OSError as exc:
+    emit("failed", f"write failed at {action['path']} ({exc.__class__.__name__}); earlier writes are listed",
+         written, skipped, extra={"written": len(written), "backups": backup_root.as_posix()}, code=1)
+finally:
+    if temporary is not None and temporary.exists():
+        temporary.unlink()
+    if written:
+        backup_root.mkdir(parents=True, exist_ok=True)
+        (backup_root / "manifest.json").write_text(json.dumps(
+            {"check": "codex_skill_parity", "created": stamp, "files": written}, indent=2) + "\n")
+
+after = subprocess.run(["bash", os.environ["RIG_SCRIPT"], "doctor", "--json"], cwd=root,
+                       capture_output=True, text=True)
+try:
+    item_after = parity_item(after.stdout)
+except ValueError:
+    item_after = None
+state_after = (item_after or {}).get("state", "unknown")
+extra = {"written": len(written), "check_after": state_after}
+if written:
+    extra["backups"] = backup_root.as_posix()
+if passing(item_after) and not skipped:
+    emit("applied", f"wrote {len(written)} file(s); codex_skill_parity now reports {state_after}", written, extra=extra)
+emit("partial", f"wrote {len(written)} file(s); codex_skill_parity is {state_after}", written, skipped,
+     extra=extra, code=3)
+PY
+  rm -f "$report_file"
+  return "$status"
+}
+
 doctor_fix() {
   local check_name="" confirm=false json_output=false report state result
   while [[ "$#" -gt 0 ]]; do
@@ -1237,9 +1368,11 @@ doctor_fix() {
       *) usage_error "unknown doctor fix option: $1"; return ;;
     esac
   done
-  [[ "$check_name" == worktree_bootstrap ]] || {
-    usage_error "automatic doctor fix is available only for worktree_bootstrap"; return;
-  }
+  case "$check_name" in
+    worktree_bootstrap) ;;
+    codex_skill_parity) doctor_fix_parity "$confirm" "$json_output"; return ;;
+    *) usage_error "automatic doctor fix is available only for worktree_bootstrap and codex_skill_parity"; return ;;
+  esac
   report="$(doctor --json)" || true
   state="$(DOCTOR_FIX_REPORT="$report" python3 -c '
 import json, os
@@ -1584,6 +1717,101 @@ elif skills.is_dir():
     check("codex_skill_parity", not problems, detail,
           fix="inspect .claude/commands and .agents/skills for listed names; preview a backed-up /rig-upgrade --scope=project --mode=agent before repair",
           state=ADVISORY if (unverified or inventory_unverified) and not problems else None)
+    if os.environ.get("RIG_DOCTOR_PARITY_PLAN") == "1":
+        # Repair plan for `rig doctor fix --check codex_skill_parity` (#604).
+        # Doctor itself stays read-only; the fix command applies this plan.
+        # Content must match the installer byte for byte: generated files use
+        # generate-codex-skills.py's text transform with only Rig command
+        # names, and copied skills are raw byte copies.
+        import base64
+        actions, refusals = [], []
+        rig_command_names = (generated_baseline | optional_commands) if generated_baseline else set()
+        rig_names_pattern = "|".join(sorted(map(re.escape, rig_command_names), key=len, reverse=True))
+        rig_invocation = (re.compile(rf"(?<![A-Za-z0-9_./-])/({rig_names_pattern})(?![A-Za-z0-9_-])")
+                          if rig_names_pattern else None)
+
+        def plan_write(path, content, reason):
+            relative = path.relative_to(root).as_posix()
+            parents = [root / parent for parent in path.relative_to(root).parents if (root / parent) != root]
+            if path.is_symlink() or any(parent.is_symlink() for parent in parents):
+                refusals.append({"path": relative, "reason": "symlinked target or parent; repair manually"})
+                return
+            if path.exists() and not path.is_file():
+                refusals.append({"path": relative, "reason": "target exists but is not a regular file; repair manually"})
+                return
+            try:
+                current = path.read_bytes() if path.exists() else None
+            except OSError:
+                refusals.append({"path": relative, "reason": "target exists but cannot be read"})
+                return
+            if current == content:
+                return
+            actions.append({"path": relative, "action": "create" if current is None else "replace", "reason": reason,
+                            "current_sha256": hashlib.sha256(current).hexdigest() if current is not None else None,
+                            "content_b64": base64.b64encode(content).decode("ascii")})
+
+        for name in sorted(set(reference_drift + wrapper_drift + missing_skills) - set(unverified)):
+            command = command_dir / (name + ".md")
+            if not generated_baseline:
+                refusals.append({"path": f".agents/skills/{name}",
+                                 "reason": "no install manifest records the generated skill inventory; "
+                                           "use /rig-upgrade --scope=project --mode=agent"})
+                continue
+            if name not in generated_baseline:
+                refusals.append({"path": f".agents/skills/{name}",
+                                 "reason": "command is not a Rig-generated skill in the install manifest; not generated"})
+                continue
+            if not command.is_file() or command.is_symlink():
+                refusals.append({"path": f".agents/skills/{name}",
+                                 "reason": "Claude command source is missing; restore it with /rig-upgrade first"})
+                continue
+            try:
+                source = command.read_text()
+            except (OSError, UnicodeDecodeError):
+                refusals.append({"path": f".claude/commands/{name}.md", "reason": "command source cannot be read"})
+                continue
+            if "[BASE_BRANCH]" in source:
+                if base_branch is None:
+                    refusals.append({"path": f".agents/skills/{name}",
+                                     "reason": "base-branch is not set exactly once in CLAUDE.md; content cannot be generated"})
+                    continue
+                source = source.replace("[BASE_BRANCH]", base_branch)
+            generated = rig_invocation.sub(r"$\1", source) if rig_invocation else source
+            wrapper_text = ("---\n" + f"name: {name}\n" +
+                            f"description: Run The Rig {name} workflow for this repository.\n" +
+                            "---\n\n" + f"# {name}\n\n" +
+                            "Follow the complete workflow in [the command reference](references/command.md).\n")
+            plan_write(skills / name / "references" / "command.md", generated.encode(),
+                       "generated reference differs from the Claude command")
+            plan_write(skills / name / "SKILL.md", wrapper_text.encode(),
+                       "generated wrapper differs from the expected wrapper")
+        for name in sorted(unverified):
+            refusals.append({"path": f".agents/skills/{name}",
+                             "reason": "base-branch is not set exactly once in CLAUDE.md; content cannot be generated"})
+        for name in sorted(set(missing_copied + copied_drift)):
+            source_tree, mirror_tree = source_skills / name, skills / name
+            for source_file in sorted(p for p in source_tree.rglob("*") if p.is_file()):
+                relative = source_file.relative_to(source_tree)
+                if source_file.is_symlink():
+                    refusals.append({"path": source_file.relative_to(root).as_posix(),
+                                     "reason": "symlinked source file; repair manually"})
+                    continue
+                try:
+                    content = source_file.read_bytes()
+                except OSError:
+                    refusals.append({"path": source_file.relative_to(root).as_posix(),
+                                     "reason": "copied skill source cannot be read"})
+                    continue
+                plan_write(mirror_tree / relative, content, "copied skill file differs from .claude/skills")
+            if mirror_tree.is_dir():
+                for extra in sorted(p for p in mirror_tree.rglob("*") if p.is_file()):
+                    if not (source_tree / extra.relative_to(mirror_tree)).exists():
+                        refusals.append({"path": extra.relative_to(root).as_posix(),
+                                         "reason": "extra file in the Codex copy is left in place (never deleted)"})
+        for name in extra_skills:
+            refusals.append({"path": f".agents/skills/{name}",
+                             "reason": "skill has no Claude source; left in place because it may be user-owned"})
+        checks[-1]["repair_plan"] = {"actions": actions, "refusals": refusals}
 else:
     reason = ("requires valid install-target metadata or present Codex skills" if target_metadata_invalid else
               "Codex mirroring not enabled")
