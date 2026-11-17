@@ -305,10 +305,11 @@ scripts are per-clone and must be set up on each machine.
 ## Scaling to a team
 
 > **Concurrent-session boundary:** Implementation sessions should use isolated
-> worktrees and distinct task/status files. Shared snapshot writes remain serialized:
-> `/wrap` and `/post-merge` use `.snapshot-write-in-progress` and fail closed while
-> another live writer owns it. Session naming also fails closed for write-capable
-> workflows when the current launch cannot be resolved unambiguously.
+> worktrees and distinct task/status files. `/wrap` and `/post-merge` coordinate
+> through `rig memory workflow-lock`; the snapshot writer serializes writes under
+> `.snapshot-write.lock` and records `.snapshot-write-in-progress` during a write.
+> Session naming also fails closed for write-capable workflows when the current
+> launch cannot be resolved unambiguously.
 
 The Rig was designed for solo or small-team use. For larger teams:
 

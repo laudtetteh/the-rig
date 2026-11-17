@@ -327,7 +327,7 @@ snapshot — hooks are a safety net, not a replacement.
 ```
 /code-review   →  review current diff for bugs, regressions, risk, and missing tests
 /connector-preflight → verify connector readiness before MCP/app-dependent work
-/ship         →  pre-commit cleanup + checklist + commit + open or update PR
+/ship         →  pre-commit cleanup + checklist + commit + PR; review metadata and verify merge when authorized
 /debug        →  hypothesis-first diagnosis, mandatory ERRORS.md entry
 /handoff-checklist → prepare a durable handoff when work transfers sessions or agents
 ```
@@ -357,7 +357,7 @@ snapshot — hooks are a safety net, not a replacement.
 
 **Governance and housekeeping**
 ```
-/post-merge        →  post-merge hygiene: pull main, update memory, move task file, housekeeping commit
+/post-merge        →  verify exact merge SHA on fetched base, update memory and task file, then housekeeping
 /rig-propose       →  submit a change to governance files for human approval before anything is touched
 /session-name      →  derive a name strictly from the current conversation/session and present it as a suggestion
 /wrap              →  write CONTEXT_SNAPSHOT, capture in-flight task state, ensure memory is current
@@ -378,7 +378,7 @@ snapshot — hooks are a safety net, not a replacement.
 | Hook | Event | What it does |
 |---|---|---|
 | `session-start.sh` | `SessionStart` | Injects `CONTEXT_SNAPSHOT.md` and pending flag warnings before the first user turn |
-| `prompt-submit.sh` | `UserPromptSubmit` | Re-checks `.wrap-needed`/`.post-merge-pending` on every prompt; re-injects warnings when present |
+| `prompt-submit.sh` | `UserPromptSubmit` | Re-checks pending flags and warns once per branch change for the exact active session |
 | `permission-request.sh` | `PermissionRequest` | Auto-approves safe read-only tool patterns to reduce permission-prompt noise |
 | `pre-tool.sh` | `PreToolUse` (every tool call) | Blocks structured writes and visible unmarked Bash commits; checks approval for marked visible commits, consuming it before execution when no Rig `commit-msg` hook is active; redirects worktree writes |
 | `commit-msg` | Guarded Git commit | Consumes one-use approval and checks the prepared subject and target branch |

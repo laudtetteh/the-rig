@@ -1715,7 +1715,7 @@ elif skills.is_dir():
     if problems:
         detail += "; " + "; ".join(problems)
     check("codex_skill_parity", not problems, detail,
-          fix="inspect .claude/commands and .agents/skills for listed names; preview a backed-up /rig-upgrade --scope=project --mode=agent before repair",
+          fix="inspect listed paths; preview bin/rig doctor fix --check codex_skill_parity --json, then add --confirm after review",
           state=ADVISORY if (unverified or inventory_unverified) and not problems else None)
     if os.environ.get("RIG_DOCTOR_PARITY_PLAN") == "1":
         # Repair plan for `rig doctor fix --check codex_skill_parity` (#604).

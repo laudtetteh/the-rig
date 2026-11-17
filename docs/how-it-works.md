@@ -130,7 +130,8 @@ Agent is oriented. Hooks are live. Ready to work.
      │
      │  On every user prompt:
      │  └─ prompt-submit.sh (UserPromptSubmit)
-     │       Re-checks .wrap-needed / .post-merge-pending; re-injects warnings
+     │       Re-checks pending flags and re-injects warnings
+     │       Warns on an exact session's branch change
      │
      │  On every permission request:
      │  └─ permission-request.sh (PermissionRequest)
@@ -314,7 +315,7 @@ Step 6: Log — ERRORS.md entry, always
 
 ### POST_MERGE_WORKFLOW
 ```
-Step 1: Pull latest main
+Step 1: Fetch base and verify each exact merge SHA; fast-forward only for tracked housekeeping
 Step 2: Update PROGRESS.md
 Step 3: Move task file active/ → done/
 Step 4: Refresh the shared CONTEXT_SNAPSHOT.md header while preserving task handoffs
@@ -346,10 +347,11 @@ When a client supplies neither a native ID environment variable nor a launcher
 hint to those shells, a standalone `rig session current` remains unresolved.
 The hook event can still create the exact record; a later caller must supply
 exact identity before naming or completing it. A direct stdio app-server probe
-with Codex CLI 0.166.0 completed two turns and resumed the loaded thread without
-emitting `SessionStart` or `UserPromptSubmit`, even with those hooks configured
-for the probe; `codex exec` did emit both and bind the session. This observation
-does not establish how every app-server client behaves. An app-server client
+with Codex CLI 0.169.0 and `CODEX_THREAD_ID` unset completed a turn and resumed
+the same persisted thread in both the loaded server and a fresh server process.
+The native thread ID stayed the same, but neither resume created a Rig session
+record automatically. This direct stdio result does not establish how every
+app-server client handles hooks or native ID environment variables. A client
 that knows the thread ID can recover explicitly with
 `bin/rig session retrofit --agent codex --native-session-id <thread-id> --source resume --json`.
 Subsequent shell calls must pass the same exact hint, for example
@@ -365,8 +367,10 @@ RIG_SESSION_ANCHOR='<anchor from retrofit JSON>' \
 ```
 
 Pass both values again in each separate tool-call shell. An explicit retrofit
-refuses an ID that conflicts with a native provider ID already in the shell.
-Automatic recovery on app-server reattach remains unverified.
+succeeded in the probe, and `session current` resolved the same exact ID.
+Retrofit refuses an ID that conflicts with a native provider ID already in the
+shell. Automatic Rig binding on a direct stdio reattach was not observed;
+behavior in other app-server clients remains unverified.
 
 The name writer rechecks anchor, project identity, provider, native ID and
 active state after locking the record. Legacy PID records remain readable; a
@@ -417,6 +421,7 @@ User submits a prompt
            Attaches an unbound resumed thread from its exact event session_id
            Re-checks .wrap-needed / .post-merge-pending on every prompt
            Re-injects warnings when flags are present
+           Warns once per branch change for the exact active session
            (ensures flags surface even mid-session without repeating session-start)
 
 Agent requests a permission
@@ -747,7 +752,7 @@ skills covering the full development lifecycle:
 ### Governance and housekeeping
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/post-merge` | `POST_MERGE_WORKFLOW` | Post-merge hygiene: pull base branch, update PROGRESS, move task file, refresh the shared snapshot without removing other task handoffs, housekeeping commit, suggest session name, surface next priority |
+| `/post-merge` | `POST_MERGE_WORKFLOW` | Fetch the base branch and verify each exact merge SHA; fast-forward a clean base checkout only when tracked housekeeping requires it, then update PROGRESS, move the task file, refresh the shared snapshot without removing other task handoffs, suggest a session name, and surface the next priority |
 | `/rig-propose` | Governance gate | Writes change proposal to `/tmp/`, shows before/after diff, waits for approval before touching any governance file |
 | `/session-name` | Session naming | Derives a name from current conversation/session evidence only; unrelated snapshots, markers, session records, and project history are rejected |
 | `/wrap` | Session-end sequence | Refreshes the snapshot header and owned task handoffs, preserves other sessions' handoffs, updates PROGRESS, trims PROGRESS/ERRORS, suggests session name, and surfaces next priority. The owner-aware writer protects snapshot updates. |

@@ -167,6 +167,7 @@ Check runtime flag files:
 ```bash
 WRAP_FLAG="$RIG_DIR/memory/.wrap-needed"
 MERGE_FLAG="$RIG_DIR/memory/.post-merge-pending"
+WORKFLOW_FLAG="$RIG_DIR/memory/.memory-workflow-in-progress"
 LOCK_FLAG="$RIG_DIR/memory/.snapshot-write-in-progress"
 NUDGE_FLAG="$RIG_DIR/memory/.permission-nudge-offered"
 ```
@@ -178,7 +179,8 @@ For each:
 Explanations:
 - `.wrap-needed` SET → "last session didn't run /wrap; run it before starting new work"
 - `.post-merge-pending` SET → "a merge landed; run /post-merge to sync memory"
-- `.snapshot-write-in-progress` SET → "a /wrap or /post-merge is in progress (or crashed)"
+- `.memory-workflow-in-progress` SET → "a /wrap or /post-merge memory workflow owns the lock (or was interrupted)"
+- `.snapshot-write-in-progress` SET → "the snapshot writer is active or was interrupted; a fresh empty legacy marker blocks writes"
 - `.permission-nudge-offered` — this is informational, not a problem; skip in output
 
 Output section heading: `**Pending flags:**`
