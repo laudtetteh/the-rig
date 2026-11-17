@@ -67,6 +67,26 @@ PY
   grep -Fq 'Use the agent upgrade path when you want semantic convergence' "$REPO_ROOT/README.md"
 }
 
+@test "post-merge descriptions require exact SHA verification and conditional base update" {
+  python3 - "$REPO_ROOT" <<'PY'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+for relative in (
+    "README.md",
+    "docs/how-it-works.md",
+    "templates/project/.claude/commands/rig-help.md",
+):
+    content = (root / relative).read_text().lower()
+    for stale in ("pull main", "pulls main", "pull base branch", "step 1: pull latest main"):
+        if stale in content:
+            raise SystemExit(f"stale unconditional post-merge pull in {relative}: {stale}")
+    if "exact merge sha" not in content:
+        raise SystemExit(f"missing exact merge verification in {relative}")
+PY
+}
+
 @test "provider brain spike records Claude and Codex load order" {
   local doc="$REPO_ROOT/docs/provider-neutral-project-brain.md"
   grep -Fq '## Provider Load Order Findings' "$doc"

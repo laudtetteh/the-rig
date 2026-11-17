@@ -415,6 +415,34 @@ When made, this commit goes on the same PR branch before the PR is merged.
 
 ---
 
+## Step 8 — Review PR metadata at the merge boundary
+
+After the last commit is pushed and the user asks to merge, fetch the PR's
+`number,state,isDraft,headRefOid,title,body,labels,commits` with
+`gh pr view --json` into a temporary JSON file. Read `issue-tracking:` from
+`CLAUDE.md`, defaulting to `github` when absent. Only for GitHub tracking, fetch
+the PR's closing issue references with `gh api graphql`; if that fetch fails,
+report that the reviewer will use closing keywords from the body. Run
+`bin/rig pr review-metadata --pr FILE --issue-tracking TRACKING --payload-out FILE`
+with the configured tracker value, `--closing FILE` when available,
+`--issue NUMBER` for every scoped issue,
+`--not-closing NUMBER` for partial issues, and `--require-label LABEL` for each
+required `area:` label. This review is read-only.
+
+Exit 0 means the metadata is clean: show the reviewed head SHA and final commits,
+then confirm the PR body still describes those commits. On findings (exit 3),
+show each proposed change and obtain explicit approval before any external PR
+edit; rerun the review after an approved edit. On invalid input (exit 64), fix
+the fetch and rerun. If the head changes, repeat the review.
+
+Merge only after CI is green and the user has explicitly approved this specific
+merge. Use `gh pr merge` with `--match-head-commit` set to the reviewed SHA. If
+the merge command exits nonzero, check `gh pr view --json state,mergedAt` before
+retrying: a merged PR with a nonempty `mergedAt` succeeded despite local cleanup
+failure. Preserve any linked worktree branch; clean it up separately.
+
+---
+
 ## Post-batch audit
 
 Run this checklist after every group of related PRs merges — not after every single commit.

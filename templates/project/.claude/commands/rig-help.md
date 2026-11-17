@@ -18,7 +18,7 @@ No arguments. Output the table below directly — do not read individual command
 |---|---|
 | `/task` | Start a new unit of work. Runs the intake wizard: goal, area, constraints, issue number, operating mode (autonomy / check-ins / risk). Creates a task file in `.rig/tasks/`. |
 | `/run` | Work through the task backlog. Surveys ready tasks, proposes an execution order, and drives them to completion in the configured autonomy mode. Accepts an optional `[task-slug]` to run one specific task. Surfaces the operating mode wizard if `## Operating mode` is absent from the task file. |
-| `/ship` | Commit and close a task. Sequential hard gate: task ID → issue → labels → branch → pre-commit cleanup → checklist → dependency impact → testing pause → commit message → commit → post-housekeeping → PR. |
+| `/ship` | Commit and close a task. Sequential hard gate: task ID → issue → labels → branch → pre-commit cleanup → checklist → dependency impact → testing pause → commit message → commit → post-housekeeping → PR → final merge-boundary metadata review → merge verification when authorized. |
 | `/sprint` | Execute a batch of tasks with conflict detection and wave-based ordering to minimize merge friction. Accepts `[slug ...]` to target specific tasks or `--issues #N ...` to resolve by GitHub issue number. Use `/run` for simple sequential execution without conflict analysis. |
 
 ## Session management
@@ -27,7 +27,7 @@ No arguments. Output the table below directly — do not read individual command
 |---|---|
 | `/wrap` | End a session. Writes `CONTEXT_SNAPSHOT.md`, expands `PROGRESS.md` stubs, captures in-flight task state, names the session. |
 | `/handoff-checklist` | Consent-gated wrap-and-handoff routine for large or costly sessions. Asks before doing any checklist work. |
-| `/post-merge` | Post-merge housekeeping. Run immediately after a PR lands: pulls main, logs the PR to `PROGRESS.md`, moves the task file to done, refreshes `CONTEXT_SNAPSHOT.md`, checks feature doc freshness, and surfaces what's next. |
+| `/post-merge` | Post-merge housekeeping. Fetches the base branch and verifies each exact merge SHA before logging the PR to `PROGRESS.md`, moving the task file to done, refreshing `CONTEXT_SNAPSHOT.md`, checking feature doc freshness, and surfacing what's next. A clean base checkout is fast-forwarded only when tracked housekeeping needs it. |
 | `/status` | Project state dashboard. Shows current branch, active tasks, backlog count, and recent `PROGRESS.md` entries. |
 | `/session-name` | Derive and set a session name from work completed so far. Uses the same tiered format as `/wrap` and `/post-merge` but callable at any time without triggering a full cycle. |
 
