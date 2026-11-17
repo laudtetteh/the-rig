@@ -669,6 +669,7 @@ runs these current postflight checks:
 | `stealth_exclusions` | Stealth/external artifacts are excluded from git visibility | Project is not a stealth/external install |
 | `install_targets` | Present project target metadata is valid and names only supported agents | Metadata is absent in a legacy install; provider checks infer from files and the manifest |
 | `settings_json` | Selected, present, or manifest-recorded Claude settings and present Codex hooks JSON files parse correctly | Neither provider's settings file is selected, present, or recorded |
+| `content_file_types` | Files read for doctor checks are regular files; named pipes, symlinks, devices, and directories are refused before opening | Never; a non-regular content input fails |
 | `claude_commands` | Installed Claude command files match the manifest or at least exist when no manifest baseline is present | Claude is not selected or present and no manifest command baseline exists |
 | `codex_skill_parity` | Manifest-recorded Codex skill inventory is present; wrappers and references for available Claude commands match after the generator's substitutions; copied Claude skill trees match by content | Codex mirroring is not enabled, or Claude command source is absent |
 | `codex_project_instructions` | Codex has an effective `AGENTS*` file or configured `CLAUDE.md` fallback when Codex is an installed target | Codex is not an installed project target, or present target metadata is invalid |
