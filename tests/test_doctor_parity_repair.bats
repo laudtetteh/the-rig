@@ -176,6 +176,18 @@ PY
   fi
 }
 
+@test "parity repair: a long copied-skill filename fits the temporary write name" {
+  mkdir -p "$PROJECT/.claude/skills/copied" "$PROJECT/.agents/skills/copied"
+  local name
+  name=$(python3 -c 'print("a" * 220 + ".md")')
+  printf 'source\n' > "$PROJECT/.claude/skills/copied/$name"
+  printf 'mirror\n' > "$PROJECT/.agents/skills/copied/$name"
+  fix --confirm --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status":"applied"'* ]] || return 1
+  cmp -s "$PROJECT/.claude/skills/copied/$name" "$PROJECT/.agents/skills/copied/$name"
+}
+
 @test "parity repair: without Codex skills the fix is not applicable" {
   rm -rf "$PROJECT/.agents"
   fix --json

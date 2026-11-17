@@ -1352,7 +1352,7 @@ try:
                 backup.write_bytes(current)
                 entry["backup"] = backup.as_posix()
             content = base64.b64decode(action["content_b64"])
-            temporary_name = f".{name}.rig-fix-{os.getpid()}-{uuid.uuid4().hex}"
+            temporary_name = f".rig-fix-{os.getpid()}-{uuid.uuid4().hex}"
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
             fd = os.open(temporary_name, flags, 0o666, dir_fd=parent_fd)
             with os.fdopen(fd, "wb") as handle:
