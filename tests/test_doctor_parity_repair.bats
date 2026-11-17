@@ -120,6 +120,62 @@ PY
   [ "$(cat "$BATS_TEST_TMPDIR/outside.md")" = outside ]
 }
 
+@test "parity repair: a target raced to a FIFO is refused without blocking" {
+  mkdir -p "$PROJECT/.claude/skills/copied" "$PROJECT/.agents/skills/copied" "$BATS_TEST_TMPDIR/race-hook"
+  printf 'source\n' > "$PROJECT/.claude/skills/copied/SKILL.md"
+  printf 'mirror\n' > "$PROJECT/.agents/skills/copied/SKILL.md"
+  cat > "$BATS_TEST_TMPDIR/race-hook/sitecustomize.py" <<'PY'
+import os, pathlib
+if os.environ.get("DOCTOR_FIX_CONFIRM") == "true":
+    target = os.environ["RACE_TARGET"]
+    swapped = False
+    def swap():
+        global swapped
+        if not swapped:
+            os.replace(target, target + ".saved")
+            os.mkfifo(target)
+            swapped = True
+    original_is_file = pathlib.Path.is_file
+    def is_file(self):
+        result = original_is_file(self)
+        if result and str(self) == target:
+            swap()
+        return result
+    pathlib.Path.is_file = is_file
+    original_open = os.open
+    def open_file(path, flags, mode=0o777, *, dir_fd=None):
+        if dir_fd is not None and path == os.path.basename(target):
+            swap()
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+    os.open = open_file
+PY
+  run python3 - "$PROJECT" "$BATS_TEST_TMPDIR/race-hook" <<'PY'
+import json, os, signal, stat, subprocess, sys
+project, hook = sys.argv[1:]
+target = project + "/.agents/skills/copied/SKILL.md"
+environment = os.environ.copy()
+environment.update(PYTHONPATH=hook, RACE_TARGET=target)
+process = subprocess.Popen([project + "/bin/rig", "doctor", "fix", "--check",
+                            "codex_skill_parity", "--confirm", "--json"],
+                           cwd=project, env=environment, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, text=True, start_new_session=True)
+try:
+    output, error = process.communicate(timeout=4)
+except subprocess.TimeoutExpired:
+    os.killpg(process.pid, signal.SIGKILL)
+    process.communicate()
+    raise AssertionError("parity repair blocked on a raced FIFO")
+result = json.loads(output)
+assert process.returncode == 3 and result["status"] == "partial", (process.returncode, result, error)
+assert any(item["path"] == ".agents/skills/copied/SKILL.md" for item in result["refusals"]), result
+assert os.path.exists(target + ".saved") and stat.S_ISFIFO(os.stat(target).st_mode)
+PY
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    return 1
+  fi
+}
+
 @test "parity repair: without Codex skills the fix is not applicable" {
   rm -rf "$PROJECT/.agents"
   fix --json
