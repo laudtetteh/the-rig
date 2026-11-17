@@ -38,9 +38,11 @@ The Rig is actively developed; the current release is recorded in [`VERSION`](VE
   `base_revision`) — upgrade strategy detects user customizations before
   overwriting; historical merge bases are proven by SHA256 equality against
   release-tagged template content, while `base_revision` only orders the scan
-- Stealth mode: all Rig artifacts excluded from git; `.rig/` at external path;
-  hooks in `.git/hooks/` (manifest-tracked and backed up, with a safe lifecycle
-  under agent-driven upgrades)
+- Stealth mode: Rig runtime/config paths (`.rig/`, `.claude/`, `.agents/`,
+  `.codex/`) are git-excluded; `.rig/` is external by default, while an
+  explicit in-checkout `--rig-dir` keeps it in the project. Public files such
+  as `PROJECT_BRIEF.md` and `.github/` may remain tracked. Hooks in
+  `.git/hooks/` are manifest-tracked and backed up under agent-driven upgrades
 - Non-interactive mode (`--strategy`, `--target`, `--tracking`, `--base-branch`
   flags, plus repair/recovery and feature toggles) for scripting and CI
 - Self-install detection, `[BASE_BRANCH]` and `[REPO_ROOT]` placeholder substitution
@@ -48,9 +50,9 @@ The Rig is actively developed; the current release is recorded in [`VERSION`](VE
 
 ### Project layer (scaffolded into target projects)
 - **Memory system**: `PROGRESS.md` (auto-logged by post-commit hook), `ERRORS.md`, `CONTEXT_SNAPSHOT.md` (written by `/wrap`), `DECISIONS.md`, `RIG_GAPS.md`
-- **Processes**: six workflow files plus two process contracts covering task
-  intake, work modes, sprint planning, shipping, debugging, connector
-  preflight, upgrades, and post-merge housekeeping
+- **Processes**: nine process files covering task intake, work modes, sprint
+  planning, shipping, debugging, connector preflight, upgrades, post-merge
+  housekeeping, and Rig gaps triage
 - **Command/skill adapters**: Claude slash commands are generated as corresponding Codex `$name` skills from one canonical source
 - **Agent hooks**: canonical Claude handlers plus a Codex hook manifest/adapter enforce the same safety and lifecycle contracts
 - **Git hooks**: `pre-commit` (gitleaks secret scanning), `commit-msg` + `post-commit` (tool footer removal), `post-merge` (post-merge-pending flag)
@@ -100,7 +102,7 @@ The Rig is actively developed; the current release is recorded in [`VERSION`](VE
 
 | Layer | Choice |
 |---|---|
-| Installer | Bash — single file, no runtime dependencies, `set -euo pipefail` |
+| Installer | Bash entry point with Python 3 helpers for structured merges and generation; `set -euo pipefail` |
 | Templates | Markdown (commands, processes, rules) + Bash (hooks) |
 | Tests | bats-core |
 | CI | GitHub Actions |
@@ -112,7 +114,7 @@ The Rig is actively developed; the current release is recorded in [`VERSION`](VE
 
 **Timeline:** Ongoing — shipped, actively maintained
 
-**Must NOT use:** Runtime dependencies in `install.sh` beyond standard POSIX utils + `git`, `gh`, `gitleaks` (optional)
+**Must NOT use:** Runtime dependencies beyond Bash, Python 3, standard command-line utilities, and `git`; `gh` and `gitleaks` are optional for their respective workflows
 
 **Existing code:** This IS the existing code — `install.sh` in this repository.
 

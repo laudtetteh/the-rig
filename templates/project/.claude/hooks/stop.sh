@@ -4,7 +4,8 @@
 # Handles two Claude Code hook events in one script:
 #
 #   Stop (fires after every agent turn)
-#     Appends a session-end comment to PROGRESS.md (used by /wrap for naming).
+#     Appends a session-end comment to PROGRESS.md for housekeeping; session
+#     naming uses the exact active session and current conversation.
 #     The snapshot timestamp belongs to the atomic snapshot writer; Stop must
 #     not rewrite a shared snapshot from a stale read.
 #

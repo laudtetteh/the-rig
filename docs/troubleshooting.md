@@ -189,49 +189,53 @@ grep -c "^## " .rig/memory/PROGRESS.md
 
 ---
 
-## 4. /wrap session boundary is wrong — names the wrong session
+## 4. /wrap suggests the wrong session name
 
-**Symptom:** `/wrap` suggests a session name that includes work from a previous
-session, or misses work from the current one.
+**Symptom:** `/wrap` suggests a name containing work from another session or
+omitting work from the current one.
 
-**Cause:** The `<!-- session-end -->` boundary markers in PROGRESS.md are missing,
-stale, or the wrong one was identified as "most recent."
+**Cause:** The current conversation or exact session record was resolved
+incorrectly, or evidence from another session entered the suggestion.
 
-**How the boundary works:** `stop.sh` appends `<!-- session-end YYYY-MM-DD HH:MM -->`
-to PROGRESS.md automatically after every agent response. `/wrap` looks for the most
-recent such marker and treats everything above it as "this session."
+**How naming works:** The current conversation is authoritative. `/wrap` resolves
+the exact active Rig session and may cross-check only PROGRESS entries tagged with
+that session's UUID and a compact checkpoint with the matching anchor. Legacy
+`<!-- session-end -->` ranges and snapshot dates are housekeeping signals, not
+naming boundaries.
 
 **Fixes:**
 
-- If `stop.sh` wasn't wired yet (new install), there are no markers. `/wrap` falls
-  back to the `**Last updated:**` date from CONTEXT_SNAPSHOT.md. Make sure that date
-  reflects when the previous session ended.
-
-- If the markers are present but `/wrap` is naming the wrong session, check for
-  stale markers from previous sessions that weren't pruned. `/wrap` should prune
-  all but the most recent marker after each run. If markers have accumulated,
-  manually inspect `.rig/memory/PROGRESS.md` and remove the stale ones.
-
-- After a re-clone on a new machine, PROGRESS.md travels with the repo but
-  CONTEXT_SNAPSHOT.md doesn't. Run `/wrap` at the start of the first session on
-  the new machine to re-establish the snapshot baseline.
+- Check `bin/rig session current --json` and `bin/rig session doctor --json` for
+  unresolved identity or ambiguous records. Repair the reported identity problem
+  before completing a session record.
+- Compare the proposed name with work actually done in this conversation. Discard
+  unrelated PROGRESS entries, checkpoints, and project history as naming evidence.
+- If exact recovery is unavailable, `/wrap` may refresh shared project memory
+  and `CONTEXT_SNAPSHOT.md` but skips final session-record mutation. Ambiguous,
+  duplicate, malformed, or unsafe records stop the write workflow entirely.
+  Pruning markers or changing a snapshot date will not repair session identity.
 
 ---
 
 ## 5. Finding and reading the session log
 
-The hooks write a session log to `/tmp/the-rig-session.log`. This is the first place
-to look when something isn't behaving as expected.
+The hooks write a project-qualified session log to
+`/tmp/the-rig-session-<project>.log` by default. Set `RIG_SESSION_LOG` to override
+that path. This is the first place to look when a hook misbehaves.
 
 ```bash
+# Resolve the same default path used by the hooks, unless overridden
+REPO=$(git rev-parse --show-toplevel)
+SESSION_LOG=${RIG_SESSION_LOG:-/tmp/the-rig-session-$(basename "$REPO").log}
+
 # Read the full log
-cat /tmp/the-rig-session.log
+cat "$SESSION_LOG"
 
 # Watch it live during a session
-tail -f /tmp/the-rig-session.log
+tail -f "$SESSION_LOG"
 
 # Find the last time the commit sentinel was created or deleted
-grep -i "commit\|sentinel" /tmp/the-rig-session.log
+grep -i "commit\|sentinel" "$SESSION_LOG"
 ```
 
 The log is ephemeral — it doesn't persist across machine reboots. It's written by
@@ -413,7 +417,7 @@ only this variable preserves other proxy variables that unrelated tools may need
 
 ## Still stuck?
 
-Check the session log first (`/tmp/the-rig-session.log`). If the log shows the hook
+Check the session log first (see the project-qualified path in section 5). If the log shows the hook
 firing but the wrong behaviour happening, read the relevant hook script directly —
 they're in `.claude/hooks/` and are plain bash.
 

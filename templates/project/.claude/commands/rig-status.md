@@ -219,8 +219,8 @@ For each expected hook event (`PreToolUse`, `PostToolUse`, `Stop`, `SessionStart
 
 For `permissions.allow`:
 - ✓ `[N] allowed permission patterns` — if N ≥ 5
-- `[N] allowed permission patterns (only baseline — run /fewer-permission-prompts to expand)` — if N > 0 but < 8
-- ✗ `0 allowed permission patterns — run /fewer-permission-prompts` — if N == 0
+- `[N] allowed permission patterns (only baseline — in Claude Code, run /fewer-permission-prompts to expand)` — if N > 0 but < 8
+- ✗ `0 allowed permission patterns — review provider permission settings; in Claude Code, run /fewer-permission-prompts` — if N == 0
 
 Output section heading: `**settings.json:**`
 

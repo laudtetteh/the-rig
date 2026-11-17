@@ -39,7 +39,7 @@ The Rig has two layers that load in sequence at every session start:
                              │ loaded first at every session
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  PROJECT LAYER  (per-repo, version-controlled)                  │
+│  PROJECT LAYER  (tracking mode configurable)                    │
 │  Scaffolded per project. Defines project-specific behaviour.    │
 │                                                                 │
 │  CLAUDE.md          ← project identity, stack, conventions      │
@@ -75,7 +75,7 @@ The Rig has two layers that load in sequence at every session start:
 | Git hooks | `templates/project/.husky/` | Secret scanning (gitleaks) + auto-injected tool footer removal |
 | GitHub templates | `templates/project/.github/` | PR template + 3 issue templates |
 | Installer | `install.sh` | Interactive setup script — handles both layers |
-| CI | `.github/workflows/ci.yml` | Runs bats test suite on every push and PR |
+| CI | `.github/workflows/ci.yml` | Runs the sharded Bats suite on pushes to main and PRs targeting main |
 
 ---
 
@@ -141,7 +141,7 @@ cd ~/code/my-project
 Claude Code asks for confirmation on many tool calls. The Rig seeds a baseline
 allowlist for common read-only git operations in `.claude/settings.json` automatically.
 
-To expand it based on your actual session activity, run:
+To expand it based on your actual session activity, run Claude Code's bundled skill:
 
 ```
 /fewer-permission-prompts
@@ -350,6 +350,7 @@ for a full snapshot — hooks are a safety net, not a replacement.
 
 **Orientation and docs**
 ```
+bin/rig session index [--json] → read-only, bounded search of Rig session records across installed projects
 /status       →  project dashboard: branch, active tasks, backlog count, recent progress, pending flags
 /doc-list     →  show docs/INDEX.md without loading full doc files
 /rig-help     →  print all Rig commands with descriptions and key flags
@@ -388,7 +389,7 @@ for a full snapshot — hooks are a safety net, not a replacement.
 | `pre-compact.sh` | `PreCompact` | Writes compact checkpoint + `compactionSummary` before context compaction |
 | `post-compact.sh` | `PostCompact` | Injects checkpoint content as `additionalContext` after compaction |
 | `subagent-start.sh` | `SubagentStart` | Optional with `--subagents`; injects project name, branch, active task, and key conventions into spawned subagents |
-| `stop.sh` | `Stop`, `SessionEnd` | Appends session-end boundary to `PROGRESS.md` and handles session-end checkpoint/flag cases; snapshot timestamps change only when the snapshot writer updates project state |
+| `stop.sh` | `Stop`, `SessionEnd` | Appends a session-end housekeeping marker to `PROGRESS.md` and handles session-end checkpoint/flag cases; snapshot timestamps change only when the snapshot writer updates project state |
 
 ### Codex hooks
 
@@ -415,7 +416,7 @@ titles, transcripts, or singleton state.
 | [Claude Code](https://docs.anthropic.com/claude-code) or [Codex](https://developers.openai.com/codex/) | At least one supported coding-agent CLI; both may be installed |
 | bash 3.2+ | For `install.sh` and hook scripts |
 | git | For hooks and version control |
-| python3 | Required by `pre-tool.sh` for JSON parsing. Standard on macOS 12+ and most Linux distros. |
+| python3 | Required by the installer, CLI helpers, and hooks for structured file handling and JSON parsing. |
 | [gitleaks](https://github.com/gitleaks/gitleaks) | Secret scanning (`brew install gitleaks`) |
 | npm / npx | For Husky initialization (optional if not using Node projects) |
 

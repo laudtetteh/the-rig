@@ -382,7 +382,7 @@ session touched files covered by documented features.
 
 1. Resolve `$RIG_DIR` and `$DOCS_DIR` (see RIG_DIR resolution block above).
 2. If `$DOCS_DIR` doesn't exist or has no `.md` files (other than `README.md`): skip silently.
-3. Get commits from this session — use the same session boundary logic as the Session naming step (session-end markers or snapshot date).
+3. For this advisory feature-doc check only, bound the legacy commit sweep by the most recent session-end marker or prior snapshot date when needed. These bounds are not session naming evidence; name the session from the current conversation and exact session UUID evidence.
 4. Collect all files changed across those commits:
    ```bash
    git log --name-only --format="" <boundary>..HEAD | sort -u
@@ -1030,7 +1030,7 @@ fi
 ```
 
 To enable: `touch "$RIG_DIR/memory/.fewer-prompts-enabled"` (per-machine, gitignored).
-The `/fewer-permission-prompts` skill remains available for one-off manual scans.
+In Claude Code, its bundled `/fewer-permission-prompts` skill remains available for one-off manual scans. Codex does not provide this slash skill.
 
 ---
 
