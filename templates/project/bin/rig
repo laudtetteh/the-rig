@@ -34,6 +34,7 @@ Commands:
   rig memory append-gap     Append one structured Rig gap
   rig memory append-progress Append one dated progress entry
   rig memory write-snapshot Atomically update CONTEXT_SNAPSHOT.md; preserve owned task handoffs
+  rig memory restore-snapshot Restore missing task handoffs from a verified snapshot backup
   rig memory workflow-lock Acquire or release an owner-recorded memory workflow lock
   rig upgrade rollback      Undo one completed Rig upgrade
   rig codex                 Launch Codex with Rig context
@@ -108,7 +109,7 @@ EOF
       ;;
     task) printf 'Usage: rig task inventory [--json]\n\nReads the install manifest to classify task lifecycle availability.\nAn installed task component with a missing task directory, or an uncertain\nmanifest, exits 3. An intentionally omitted component exits 0.\n';;
     memory) cat <<'EOF'
-Usage: rig memory <validate|repair-markers|append-gap|append-progress|write-snapshot|workflow-lock> [options]
+Usage: rig memory <validate|repair-markers|append-gap|append-progress|write-snapshot|restore-snapshot|workflow-lock> [options]
 
 Append helpers resolve .rigpath before writing and use atomic file replacement
 where replacement is required.
@@ -121,6 +122,8 @@ the prior snapshot. workflow-lock accepts
 acquire or release, with --owner-anchor and --provider-pid for acquisition;
 --recover-stale explicitly takes over an aged tool-sourced lock,
 and --token for release. Both commands support --json.
+restore-snapshot lists writer backups or previews missing handoff sections;
+--confirm restores only absent sections and backs up the current snapshot.
 EOF
       ;;
     codex) printf 'Usage: rig codex [-- <codex arguments>]\n';;
@@ -1198,6 +1201,10 @@ memory_write_snapshot() {
 
 memory_workflow_lock() {
   python3 "$(dirname "${BASH_SOURCE[0]}")/rig-snapshot.py" workflow-lock "$@" --rig-dir "$(rig_dir)"
+}
+
+memory_restore_snapshot() {
+  python3 "$(dirname "${BASH_SOURCE[0]}")/rig-snapshot.py" restore-snapshot "$@" --rig-dir "$(rig_dir)"
 }
 
 doctor_fix_emit() {
@@ -4355,6 +4362,15 @@ task handoffs. Retiring a handoff requires a matched done task file; the
 prior snapshot is backed up first.
 EOF
       ;;
+    memory:restore-snapshot) cat <<'EOF'
+Usage: rig memory restore-snapshot (--list | --from BACKUP [--section TASK] [--confirm]) [--json]
+
+Lists verified writer backups, or previews task handoffs absent from the current
+CONTEXT_SNAPSHOT.md. --confirm restores only missing sections under the writer
+lock and first backs up the current snapshot. Existing sections and the shared
+header are preserved.
+EOF
+      ;;
     memory:workflow-lock) cat <<'EOF'
 Usage: rig memory workflow-lock acquire [--owner-anchor ANCHOR] [--provider-pid PID] [--recover-stale] [--json]
        rig memory workflow-lock release --token TOKEN [--json]
@@ -4424,7 +4440,7 @@ main() {
       subcommand="${1:-}"; shift || true
       # Help never runs the subcommand, so it cannot resolve, bind or write.
       if help_requested "$@" && subcommand_help "$command" "$subcommand"; then return; fi
-      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:legacy) session_legacy "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; memory:workflow-lock) memory_workflow_lock "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
+      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:legacy) session_legacy "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; memory:restore-snapshot) memory_restore_snapshot "$@";; memory:workflow-lock) memory_workflow_lock "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
     *) shift; usage_error "unknown command: $command" "$@";;
   esac
 }

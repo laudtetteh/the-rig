@@ -594,6 +594,142 @@ PY
   grep -Fq '## Resuming from: task-a' "$backup"
 }
 
+@test "restore-snapshot previews and restores only a missing handoff from a retired backup" {
+  candidate "$BATS_TEST_TMPDIR/a.md" feat/a task-a
+  candidate "$BATS_TEST_TMPDIR/b.md" feat/b task-b
+  env RIG_SESSION_FILE="$file_a" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json >/dev/null
+  env RIG_SESSION_FILE="$file_b" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/b.md" --owned-task task-b --json >/dev/null
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  mkdir -p "$CASE_DIR/.rig/tasks/done"
+  printf '# Completed task A\n' > "$CASE_DIR/.rig/tasks/done/TASK_task-a.md"
+  printf '# Current shared header\n' > "$BATS_TEST_TMPDIR/shared.md"
+  run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only \
+    --retire-task task-a --done-task-file "$CASE_DIR/.rig/tasks/done/TASK_task-a.md" --json
+  [ "$status" -eq 0 ]
+  backup=$(find "$CASE_DIR/.rig/memory/snapshot-backups" -type f -name 'retired-*.md' | head -1)
+  [ -n "$backup" ]
+  printf '# Current shared header\n\n## Resuming from: task-b\n\nCurrent B remains.\n' > "$BATS_TEST_TMPDIR/current-b.md"
+  env RIG_SESSION_FILE="$file_b" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/current-b.md" \
+    --owned-task task-b --json >/dev/null
+  before=$(cksum "$snapshot")
+  cp "$snapshot" "$BATS_TEST_TMPDIR/pre-restore.md"
+  run "$rig" memory restore-snapshot --list --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$(basename "$backup")"* && "$output" == *'"valid":true'* ]] || return 1
+  run "$rig" memory restore-snapshot --from "$backup" --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"restore_sections":["task-a"]'* && "$output" == *'"present_sections":["task-b"]'* ]] || return 1
+  run "$rig" memory restore-snapshot --from "$backup" --section task-a --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status":"preview"'* && "$output" == *'"restore_sections":["task-a"]'* ]] || return 1
+  run "$rig" memory restore-snapshot --from "$backup" --section missing-task --confirm --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *section_missing* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
+
+  touch "$CASE_DIR/.rig/memory/.snapshot-write-in-progress"
+  run "$rig" memory restore-snapshot --from "$backup" --confirm --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *legacy_lock_active* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
+  rm "$CASE_DIR/.rig/memory/.snapshot-write-in-progress"
+
+  mkdir -p "$BATS_TEST_TMPDIR/restore-fault"
+  cat > "$BATS_TEST_TMPDIR/restore-fault/sitecustomize.py" <<'PY'
+import os
+if os.environ.get("RIG_FAIL_RESTORE_SNAPSHOT") == "1":
+    original = os.replace
+    def fail_snapshot(src, dst, *args, **kwargs):
+        if str(dst).endswith("/CONTEXT_SNAPSHOT.md"):
+            raise OSError("injected snapshot replacement failure")
+        return original(src, dst, *args, **kwargs)
+    os.replace = fail_snapshot
+PY
+  run env PYTHONPATH="$BATS_TEST_TMPDIR/restore-fault" RIG_FAIL_RESTORE_SNAPSHOT=1 \
+    "$rig" memory restore-snapshot --from "$backup" --confirm --json
+  [ "$status" -eq 3 ]
+  OUTPUT="$output" python3 -c 'import json,os; d=json.loads(os.environ["OUTPUT"]); assert d["reason"]=="snapshot_write_failed" and d["no_write"] is True'
+  [ "$before" = "$(cksum "$snapshot")" ]
+  [ ! -e "$CASE_DIR/.rig/memory/.snapshot-write-in-progress" ]
+  prior=$(find "$CASE_DIR/.rig/memory/snapshot-backups" -type f -name 'restore-*.md' | head -1)
+  [ -n "$prior" ]
+
+  run "$rig" memory restore-snapshot --from "$backup" --confirm --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status":"restored"'* && "$output" == *'"restore_sections":["task-a"]'* ]] || return 1
+  grep -Fq '# Current shared header' "$snapshot"
+  grep -Fq '## Resuming from: task-a' "$snapshot"
+  grep -Fq '## Resuming from: task-b' "$snapshot"
+  grep -Fq 'Current B remains.' "$snapshot"
+  [ "$(grep -c '^## Resuming from:' "$snapshot")" -eq 2 ]
+  CURRENT="$snapshot" PRIOR="$BATS_TEST_TMPDIR/pre-restore.md" python3 -c 'import os,pathlib; assert pathlib.Path(os.environ["CURRENT"]).read_bytes().startswith(pathlib.Path(os.environ["PRIOR"]).read_bytes())'
+  [ ! -e "$CASE_DIR/.rig/memory/.snapshot-write-in-progress" ]
+  prior=$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["pre_restore_backup"])')
+  [ -f "$prior" ]
+  if grep -Fq '## Resuming from: task-a' "$prior"; then return 1; fi
+  grep -Fq '## Resuming from: task-b' "$prior"
+  before=$(cksum "$snapshot")
+  run "$rig" memory restore-snapshot --from "$backup" --confirm --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status":"already_present"'* && "$output" == *'"no_write":true'* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
+}
+
+@test "restore-snapshot preserves a later shared header when recovering an old legacy section" {
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  printf '# Original header\n\n## Resuming from: legacy-task (issue #5, blocked)\n\nKeep this handoff.\n' > "$snapshot"
+  printf '# Updated header\n' > "$BATS_TEST_TMPDIR/shared.md"
+  "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only --json >/dev/null
+  backup=$(find "$CASE_DIR/.rig/memory/snapshot-backups" -type f -name 'legacy-*.md' | head -1)
+  mkdir -p "$CASE_DIR/.rig/tasks/done"
+  printf '# Done\n' > "$CASE_DIR/.rig/tasks/done/TASK_legacy-task.md"
+  printf '# Latest header\n' > "$BATS_TEST_TMPDIR/latest.md"
+  "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/latest.md" --shared-only \
+    --retire-task legacy-task --done-task-file "$CASE_DIR/.rig/tasks/done/TASK_legacy-task.md" --json >/dev/null
+  printf 'Extra header detail  \n\n## Resuming from: current-task\n\nKeep B with Markdown break.  \n\n\n' >> "$snapshot"
+  cp "$snapshot" "$BATS_TEST_TMPDIR/legacy-pre-restore.md"
+  run "$rig" memory restore-snapshot --from "$backup" --confirm --json
+  [ "$status" -eq 0 ]
+  CURRENT="$snapshot" PRIOR="$BATS_TEST_TMPDIR/legacy-pre-restore.md" python3 -c 'import os,pathlib; current=pathlib.Path(os.environ["CURRENT"]).read_bytes(); prior=pathlib.Path(os.environ["PRIOR"]).read_bytes(); shared, existing=prior.split(b"## Resuming from: current-task",1); assert current.startswith(shared); assert b"## Resuming from: current-task"+existing in current'
+  grep -Fq '# Latest header' "$snapshot"
+  grep -Fq '## Resuming from: legacy-task (issue #5, blocked)' "$snapshot"
+  grep -Fq '## Resuming from: current-task' "$snapshot"
+  grep -Fq 'Keep this handoff.' "$snapshot"
+}
+
+@test "restore-snapshot refuses a tampered or symlinked backup without changing the view" {
+  candidate "$BATS_TEST_TMPDIR/a.md" feat/a task-a
+  env RIG_SESSION_FILE="$file_a" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/a.md" --owned-task task-a --json >/dev/null
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  mkdir -p "$CASE_DIR/.rig/tasks/done"
+  printf '# Done\n' > "$CASE_DIR/.rig/tasks/done/TASK_task-a.md"
+  printf '# Current\n' > "$BATS_TEST_TMPDIR/shared.md"
+  "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only \
+    --retire-task task-a --done-task-file "$CASE_DIR/.rig/tasks/done/TASK_task-a.md" --json >/dev/null
+  backup=$(find "$CASE_DIR/.rig/memory/snapshot-backups" -type f -name 'retired-*.md' | head -1)
+  before=$(cksum "$snapshot")
+  printf 'tampered\n' >> "$backup"
+  run "$rig" memory restore-snapshot --list --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"valid":false,"reason":"hash_mismatch"'* ]] || return 1
+  run "$rig" memory restore-snapshot --from "$backup" --confirm --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *backup_hash_mismatch* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
+  mv "$backup" "$BATS_TEST_TMPDIR/tampered-backup.md"
+  ln -s "$BATS_TEST_TMPDIR/tampered-backup.md" "$backup"
+  run "$rig" memory restore-snapshot --from "$backup" --confirm --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *invalid_snapshot_path* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
+  mv "$CASE_DIR/.rig/memory/snapshot-backups" "$BATS_TEST_TMPDIR/outside-backups"
+  ln -s "$BATS_TEST_TMPDIR/outside-backups" "$CASE_DIR/.rig/memory/snapshot-backups"
+  run "$rig" memory restore-snapshot --list --json
+  [ "$status" -eq 3 ]
+  [[ "$output" == *invalid_backup_path* ]] || return 1
+  [ "$before" = "$(cksum "$snapshot")" ]
+}
+
 @test "legacy task ownership requires explicit adoption and keeps the original backup" {
   snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
   printf '# Old context\n\n## Resuming from: task-a\n\n**Next action:** Old work.\n' > "$snapshot"
@@ -641,6 +777,19 @@ PY
   [ ! -e "$CASE_DIR/.rig" ]
   [ -f "$CASE_DIR/dirty.txt" ]
   [ "$(grep -c '^## Resuming from:' "$external/memory/CONTEXT_SNAPSHOT.md")" -eq 2 ]
+  mkdir -p "$external/tasks/done"
+  printf '# Done\n' > "$external/tasks/done/TASK_task-a.md"
+  printf '# Stealth header\n' > "$BATS_TEST_TMPDIR/shared.md"
+  run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only \
+    --retire-task task-a --done-task-file "$external/tasks/done/TASK_task-a.md" --json
+  [ "$status" -eq 0 ]
+  backup=$(find "$external/memory/snapshot-backups" -type f -name 'retired-*.md' | head -1)
+  run "$rig" memory restore-snapshot --from "$(basename "$backup")" --confirm --json
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^## Resuming from:' "$external/memory/CONTEXT_SNAPSHOT.md")" -eq 2 ]
+  grep -Fq '# Stealth header' "$external/memory/CONTEXT_SNAPSHOT.md"
+  [ -f "$CASE_DIR/dirty.txt" ]
+  [ ! -e "$CASE_DIR/.rig" ]
 }
 
 @test "stealth installer ships and manifests the snapshot helper" {
