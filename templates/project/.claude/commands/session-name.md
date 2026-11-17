@@ -12,7 +12,8 @@ suggestion. Can be run at any point in the session — not just at wrap time.
 2. Resolves this session with `bin/rig session current --json` using exact native
    identity or a launcher hint; unresolved raw launches use conversation context only
 3. Reads any existing `tentative_name` from the resolved current session file
-4. Derives a name in the standard `type short-desc #N | ...` format using conversation
+4. Derives a name in the standard `type short-desc REF | ...` format, with `REF` in the
+   project's `issue-tracking:` reference format, using conversation
    context as the primary signal and UUID-tagged PROGRESS entries as cross-reference
 5. Presents it as output — does **not** run anything automatically
 6. After you confirm, writes the name to the session file (`tentative_name` if called
@@ -108,18 +109,43 @@ Read `tentative_name` from the session file (step 0 above).
 Use a **tiered format** based on how many meaningful units of work this session produced.
 Count one "unit" per merged PR, completed task, or significant fix.
 
+#### Ticket references
+
+Ticket references follow the project's tracker. Read it before writing a name:
+
+```bash
+REPO=$(git rev-parse --show-toplevel)
+TRACKING=$(grep "^issue-tracking:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+echo "${TRACKING:-github}"
+```
+
+`REF` is one ticket reference in that tracker's format, without brackets, and
+`RANGE` is the lowest-to-highest span of references, or a short list for
+trackers whose IDs are not ordered:
+
+| `issue-tracking:` | `REF` example | `RANGE` example |
+|---|---|---|
+| `github` (or absent) | `#184` | `#130–#152` |
+| `linear` | `ENG-184` | `ENG-130–ENG-152` |
+| `trello` | `trello:a1B2c3` | up to three card references, then `+N more` |
+| `gus` | `W-1234567` | `W-1234501–W-1234567` |
+| `none` | omit it | omit it |
+
+A merged pull request may still be named as `PR 12` under any tracker.
+
 #### Tier 1 — ≤5 units (list format)
 
 ```
-type short-desc #N | type short-desc #N | ...
+type short-desc REF | type short-desc REF | ...
 ```
 
 - `type` matches a git commit type: `fix`, `feat`, `chore`, `refactor`, `devops`, `docs`, `test`
 - `short-desc` is 3–6 words — enough to identify the work at a glance
-- Include the PR or issue number when known
+- Include the ticket `REF` (or `PR N`) when known
 - Keep under ~100 characters
 
-Example: `fix step accordion layout #184 | feat custom-permissions #152`
+Examples: `fix step accordion layout #184 | feat custom-permissions #152` (github);
+`fix step accordion layout ENG-184 | feat custom-permissions ENG-152` (linear)
 
 #### Tier 2 — 6–15 units (grouped format)
 
@@ -139,25 +165,27 @@ Example: `feat(auth, dashboard) | fix(billing x4, ui) | chore x3`
 #### Tier 3 — 16+ units (sprint summary format)
 
 ```
-sprint: N issues · feat/X fix/Y chore/Z · #A–#B
+sprint: N issues · feat/X fix/Y chore/Z · RANGE
 ```
 
 - `N` is the total issue/PR count
 - `feat/X fix/Y chore/Z` shows the count per dominant type (omit types with 0)
-- `#A–#B` is the issue number range (lowest to highest)
+- `RANGE` is the ticket reference range in the tracker's format (omit for `none`)
 - Keep to one line
 
-Example: `sprint: 23 issues · feat/4 fix/15 chore/4 · #130–#152`
+Example: `sprint: 23 issues · feat/4 fix/15 chore/4 · #130–#152` (github;
+`ENG-130–ENG-152` for linear)
 
 If the session covered a named milestone or sprint, use the milestone name as a
-prefix: `milestone: Sprint 3 · 23 issues · feat/4 fix/15 · #130–#152`
+prefix: `milestone: Sprint 3 · 23 issues · feat/4 fix/15 · #130–#152` (github;
+`ENG-130–ENG-152` for linear)
 
 ### 4 — Present the suggestion
 
 Output the name as plain text:
 
 > **Suggested session name:**
-> `feat user-auth magic-link flow #91`
+> `feat user-auth magic-link flow #91` (github; `ENG-91` for linear)
 
 Then invite the user to apply it:
 

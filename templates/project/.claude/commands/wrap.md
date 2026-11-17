@@ -143,7 +143,7 @@ Print a single structured report before executing anything:
 **Active tasks:** [task-slug | none]
 **Post-merge:** [skipped — reason and next action | not requested]
 
-**Session:** [anchor: UUID | tentative: "..." | suggested final: "type desc #N | type desc #N" | exact recovery pending | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
+**Session:** [anchor: UUID | tentative: "..." | suggested final: "type desc REF | type desc REF" | exact recovery pending | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
 **Final session name:** [confirmed final: "..." | suggested final: "..." awaiting confirmation | unresolved — reliable name could not be set | nothing meaningful shipped, skipped]
 ```
 
@@ -607,18 +607,43 @@ If a `tentative_name` exists: use it as the base. If the session delivered exact
 what it described, confirm it (drop `[tentative]`). If scope changed, update it.
 If no tentative name: derive from scratch.
 
-Count one "unit" per merged PR, completed task, or significant fix. Use the tiered format:
+Count one "unit" per merged PR, completed task, or significant fix.
 
-- **≤5 units:** `type short-desc #N | type short-desc #N | ...`
+Ticket references follow the project's tracker. Read it before writing a name:
+
+```bash
+REPO=$(git rev-parse --show-toplevel)
+TRACKING=$(grep "^issue-tracking:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+echo "${TRACKING:-github}"
+```
+
+`REF` is one ticket reference in that tracker's format, without brackets, and
+`RANGE` is the lowest-to-highest span of references, or a short list for
+trackers whose IDs are not ordered:
+
+| `issue-tracking:` | `REF` example | `RANGE` example |
+|---|---|---|
+| `github` (or absent) | `#184` | `#130–#152` |
+| `linear` | `ENG-184` | `ENG-130–ENG-152` |
+| `trello` | `trello:a1B2c3` | up to three card references, then `+N more` |
+| `gus` | `W-1234567` | `W-1234501–W-1234567` |
+| `none` | omit it | omit it |
+
+A merged pull request may still be named as `PR 12` under any tracker.
+
+Use the tiered format:
+
+- **≤5 units:** `type short-desc REF | type short-desc REF | ...`
 - **6–15 units:** `type(area, area) | type(area) x3 | type x2`
-- **16+ units:** `sprint: N issues · feat/X fix/Y chore/Z · #A–#B`
+- **16+ units:** `sprint: N issues · feat/X fix/Y chore/Z · RANGE`
 
 Keep under ~100 characters.
 
 ### Step 4 — Present and confirm
 
 > **Suggested session name:**
-> `fix(mobile): Expo Go runtime fixes + PR #360 merge [#359]`
+> `fix mobile Expo Go runtime fixes #359 | chore merge PR 360` (github)
+> `fix mobile Expo Go runtime fixes ENG-359 | chore merge PR 360` (linear)
 
 > To apply: say "use that name", "ship it", or "lgtm".
 

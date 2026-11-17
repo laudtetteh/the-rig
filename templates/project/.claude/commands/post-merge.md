@@ -146,7 +146,7 @@ Print a single structured report before executing POST_MERGE_WORKFLOW:
 **Cross-project work:** [none | other projects mentioned: project-a, project-b — not updated here]
 
 **Merged:** PR #N — type(scope): description
-**Batch ledger:** [single PR | PR #N sha abc123 closes #X | PR #M sha def456 closes #Y,#Z]
+**Batch ledger:** [single PR | PR #N sha abc123 closes REF | PR #M sha def456 closes REF, REF] (REF in the `issue-tracking:` format; `none` → omit `closes`)
 
 **This session:**
 - PR #N merged: type(scope): description
@@ -157,7 +157,7 @@ Print a single structured report before executing POST_MERGE_WORKFLOW:
 **Feature docs:** [⚠ overlap — run /refresh-feature-doc X | no overlaps]
 **Task file:** [TASK_N_slug.md → moving to done/ | no active task found | task lifecycle omitted]
 
-**Session name:** [suggested: "type desc #N | type desc #N" | already set — appending: "..." | exact recovery pending | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
+**Session name:** [suggested: "type desc REF | type desc REF" | already set — appending: "..." | exact recovery pending | unresolved — no final session-file write performed | nothing meaningful shipped, skipped]
 **Final session name:** [confirmed final: "..." | suggested final: "..." awaiting confirmation | unresolved — reliable name could not be set | nothing meaningful shipped, skipped]
 ```
 
@@ -409,18 +409,40 @@ project history as naming evidence. An unresolved raw launch fails closed before
 
 ### Step 3 — Build the name
 
-Use the **tiered format** from `/session-name` (same logic — see that command for full detail):
+Ticket references follow the project's tracker. Read it before writing a name:
 
-- **≤5 units:** `type short-desc #N | type short-desc #N | ...`
+```bash
+REPO=$(git rev-parse --show-toplevel)
+TRACKING=$(grep "^issue-tracking:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+echo "${TRACKING:-github}"
+```
+
+`REF` is one ticket reference in that tracker's format, without brackets, and
+`RANGE` is the lowest-to-highest span of references, or a short list for
+trackers whose IDs are not ordered:
+
+| `issue-tracking:` | `REF` example | `RANGE` example |
+|---|---|---|
+| `github` (or absent) | `#184` | `#130–#152` |
+| `linear` | `ENG-184` | `ENG-130–ENG-152` |
+| `trello` | `trello:a1B2c3` | up to three card references, then `+N more` |
+| `gus` | `W-1234567` | `W-1234501–W-1234567` |
+| `none` | omit it | omit it |
+
+A merged pull request may still be named as `PR 12` under any tracker.
+
+Use the **tiered format** from `/session-name`:
+
+- **≤5 units:** `type short-desc REF | type short-desc REF | ...`
 - **6–15 units:** `type(area, area) | type(area) x3 | type x2`
-- **16+ units:** `sprint: N issues · feat/X fix/Y chore/Z · #A–#B`
+- **16+ units:** `sprint: N issues · feat/X fix/Y chore/Z · RANGE`
 
 Keep under ~100 characters.
 
 ### Step 4 — Present and confirm
 
 > **Suggested session name:**
-> `feat user-auth magic-link flow #91`
+> `feat user-auth magic-link flow #91` (github; `ENG-91` for linear)
 
 > To apply: say "use that name" or "lgtm".
 
