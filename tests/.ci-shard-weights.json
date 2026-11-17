@@ -25,6 +25,7 @@
   "tests/test_doctor_upgrade_patterns.bats": 32.4,
   "tests/test_install_idempotence.bats": 28.2,
   "tests/test_session_legacy_flat.bats": 30.0,
+  "tests/test_doctor_parity_repair.bats": 25.0,
   "tests/test_base_branch_manifest_freshness.bats": 5.0,
   "tests/test_bats_assertion_safety.bats": 5.0,
   "tests/test_branch_case_rename.bats": 5.0,

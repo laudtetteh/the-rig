@@ -694,9 +694,8 @@ Only failures make `doctor` exit nonzero. Failure entries include a `fix`
 preview that names a command or file to inspect; ordinary `doctor` never
 executes it. For a linked stealth worktree,
 `bin/rig doctor fix --check worktree_bootstrap --json` previews the missing paths and recovery command.
-Add `--confirm` to copy missing artifacts. Automatic repair is limited to
-this check, preserves existing files and symlinks, and reports failure if a
-symlink blocks a required path. Direct `bin/rig worktree bootstrap` also
+Add `--confirm` to copy missing artifacts. That repair preserves existing
+files and symlinks, and reports failure if a symlink blocks a required path. Direct `bin/rig worktree bootstrap` also
 reports the blocked path and exits nonzero.
 
 Malformed or unsupported `install-targets.json` fails `install_targets`.
@@ -713,6 +712,21 @@ Only command names may receive the generator's slash-to-dollar rewrite;
 copied Claude skill names do not become command names. Without either
 manifest, the comparison can use present non-copied skill names as command
 candidates, so the inventory remains explicitly unverified.
+
+`bin/rig doctor fix --check codex_skill_parity` previews the files a repair
+would write: drifted or missing generated `references/command.md` and
+`SKILL.md` files, regenerated from `.claude/commands` exactly as the installer
+generates them, and drifted copied skill files re-copied from `.claude/skills`.
+Add `--confirm` to apply. Each replaced file is backed up first under
+`$RIG_DIR/backups/doctor-fix/<timestamp>/` with a `manifest.json` listing
+previous and new hashes; a file that changed after the plan was made is
+refused. Repair never deletes anything: skills without a Claude source, extra
+files in a Codex copy, symlinked targets, and base-branch content when
+`base-branch:` is not set exactly once are reported as refusals and left in
+place. It then re-runs doctor and exits 0 only when the check passes; refusals
+or a remaining failure exit 3. The manifest is not rewritten, so a later
+upgrade may still report a regenerated file whose installed baseline differs.
+These are the only two checks with automatic repair.
 If a command still contains `[BASE_BRANCH]` and the project brain has no
 unique `base-branch:` value, the content comparison is advisory because its
 expected generated text cannot be determined. Review the two files and the
