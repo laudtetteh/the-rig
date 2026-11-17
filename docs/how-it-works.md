@@ -326,6 +326,26 @@ Step 8: Surface next priority — ask "What's next?"
 
 ---
 
+## Snapshot handoff recovery
+
+The snapshot writer saves a content-hashed backup when it retires or transfers
+a task handoff or migrates a legacy snapshot. To recover a missing handoff,
+list the backups, preview the section, then confirm the restore:
+
+```bash
+bin/rig memory restore-snapshot --list --json
+bin/rig memory restore-snapshot --from retired-<digest>.md --section TASK --json
+bin/rig memory restore-snapshot --from retired-<digest>.md --section TASK --confirm --json
+```
+
+The restore verifies the backup hash and runs under the snapshot writer lock.
+It inserts only sections absent from the current snapshot; it keeps the current
+shared header and every existing handoff. Before applying, it saves the current
+view as a `restore-<digest>.md` backup. A section already present requires the
+normal writer or a reviewed manual edit to change it.
+
+---
+
 ## Session identity and continuation
 
 | Moment | Record state | Naming and obligation rule |

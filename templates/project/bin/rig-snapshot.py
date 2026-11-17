@@ -2,10 +2,12 @@
 """Write the shared snapshot without discarding another session's handoff."""
 
 import argparse
+import contextlib
 import datetime
 import errno
 import fcntl
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -21,6 +23,7 @@ HEADING_RE = re.compile(r"^## Resuming from: ([^\n]+)$", re.M)
 ANNOTATED_TASK_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*) \(([^()\n]+)\)$")
 START_RE = re.compile(r"^<!-- rig:handoff-start task=([^ ]+) owner=([^ ]+) -->$", re.M)
 END_MARKER = "<!-- rig:handoff-end -->"
+BACKUP_RE = re.compile(r"^(retired|transferred|legacy|restore)-([0-9a-f]{64})\.md$")
 
 
 def fail(reason, **detail):
@@ -102,6 +105,18 @@ def render(shared, sections):
     return normalize(output)
 
 
+def render_preserving_shared(shared, sections):
+    """Mark legacy sections while retaining the current shared header byte for byte."""
+    output = shared
+    for task, entry in sections.items():
+        if output and not output.endswith("\n\n"):
+            output += "\n" if output.endswith("\n") else "\n\n"
+        owner = entry["owner"] or "legacy"
+        output += f"<!-- rig:handoff-start task={task} owner={owner} -->\n"
+        output += normalize(entry["body"]) + END_MARKER + "\n"
+    return output
+
+
 def atomic_write(path, content, mode):
     fd, tmp = tempfile.mkstemp(prefix=".snapshot-", suffix=".tmp", dir=str(path.parent))
     try:
@@ -125,6 +140,47 @@ def atomic_write(path, content, mode):
             os.unlink(tmp)
         except FileNotFoundError:
             pass
+
+
+def read_regular_text(path, missing_ok=False, quiet=False, anchor=None):
+    """Read through pinned directories without following symlinks or pipes."""
+    def reject(reason):
+        if quiet:
+            raise ValueError(reason)
+        fail(reason, file=str(path))
+
+    anchor = anchor or path.parent
+    try:
+        relative = path.relative_to(anchor)
+    except ValueError:
+        reject("invalid_snapshot_path")
+    directory_flags = (os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) |
+                       getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    directory_fd = None
+    try:
+        directory_fd = os.open(str(anchor), directory_flags)
+        for part in relative.parts[:-1]:
+            next_fd = os.open(part, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        fd = os.open(relative.parts[-1], file_flags, dir_fd=directory_fd)
+    except FileNotFoundError:
+        if missing_ok:
+            return None
+        reject("snapshot_file_missing")
+    except OSError:
+        reject("invalid_snapshot_path")
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            reject("invalid_snapshot_path")
+        try:
+            return handle.read().decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            reject("invalid_snapshot_content")
 
 
 def project_identity(root):
@@ -230,11 +286,148 @@ def backup_snapshot(memory, content, kind):
     if backup.is_symlink():
         fail("invalid_backup_path")
     if backup.exists():
-        if backup.read_text() != content:
+        if read_regular_text(backup, anchor=memory.parent) != content:
             fail("backup_conflict")
     else:
         atomic_write(backup, content, 0o600)
     return str(backup)
+
+
+def restore_snapshot_main(argv):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--rig-dir", required=True)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--list", action="store_true")
+    selection.add_argument("--from", dest="backup_name")
+    parser.add_argument("--section")
+    parser.add_argument("--confirm", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    if args.list and (args.section or args.confirm):
+        fail("invalid_restore_options")
+    if args.section and not valid_task(args.section):
+        fail("invalid_task")
+
+    rig_dir = pathlib.Path(args.rig_dir).resolve()
+    memory = rig_dir / "memory"
+    if memory.is_symlink() or not memory.is_dir():
+        fail("invalid_memory_path")
+    backups = memory / "snapshot-backups"
+    if backups.is_symlink() or (backups.exists() and not backups.is_dir()):
+        fail("invalid_backup_path")
+    lock_path = memory / ".snapshot-write.lock"
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        lock_fd = os.open(str(lock_path), flags, 0o600)
+    except OSError:
+        fail("invalid_lock_path")
+    with os.fdopen(lock_fd, "r+") as lock:
+        if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
+            fail("invalid_lock_path")
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        if args.list:
+            entries = []
+            if backups.is_dir():
+                for backup in sorted(backups.glob("*.md")):
+                    match = BACKUP_RE.fullmatch(backup.name)
+                    if not match:
+                        continue
+                    valid, reason = True, None
+                    try:
+                        content = read_regular_text(backup, quiet=True, anchor=rig_dir)
+                    except ValueError:
+                        valid, reason, content = False, "unsafe_or_unreadable", ""
+                    if valid and hashlib.sha256(content.encode()).hexdigest() != match.group(2):
+                        valid, reason = False, "hash_mismatch"
+                    if valid:
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            try:
+                                split_marked(content)
+                            except SystemExit:
+                                valid, reason = False, "invalid_snapshot_content"
+                    entries.append({"name": backup.name, "kind": match.group(1),
+                                    "valid": valid, "reason": reason})
+            result = {"ok": True, "backups": entries}
+        else:
+            named = pathlib.Path(args.backup_name)
+            if ((named.is_absolute() and named.parent.resolve() != backups)
+                    or (not named.is_absolute() and named.name != args.backup_name)
+                    or not BACKUP_RE.fullmatch(named.name)):
+                fail("invalid_backup_name")
+            backup = backups / named.name
+            if not backups.is_dir():
+                fail("backup_missing")
+            content = read_regular_text(backup, anchor=rig_dir)
+            if hashlib.sha256(content.encode()).hexdigest() != BACKUP_RE.fullmatch(backup.name).group(2):
+                fail("backup_hash_mismatch")
+            _, old_sections, _ = split_marked(content)
+            if args.section and args.section not in old_sections:
+                fail("section_missing", section=args.section)
+            selected = {task: entry for task, entry in old_sections.items()
+                        if args.section is None or task == args.section}
+            snapshot = memory / "CONTEXT_SNAPSHOT.md"
+            current = read_regular_text(snapshot, missing_ok=True, anchor=rig_dir) or ""
+            shared, current_sections, legacy_current = split_marked(current)
+            present = sorted(set(selected) & set(current_sections))
+            missing = sorted(set(selected) - set(current_sections))
+            result = {"ok": True, "status": "preview" if missing else "already_present",
+                      "file": str(snapshot), "from": str(backup), "restore_sections": missing,
+                      "present_sections": present, "no_write": True}
+            if args.confirm and missing:
+                sentinel = memory / ".snapshot-write-in-progress"
+                if sentinel.is_symlink():
+                    fail("invalid_lock_path")
+                if sentinel.exists():
+                    marker = read_regular_text(sentinel, anchor=rig_dir)
+                    if not marker and datetime.datetime.now().timestamp() - sentinel.stat().st_mtime < 1800:
+                        fail("legacy_lock_active")
+                    if marker:
+                        try:
+                            state = json.loads(marker)
+                        except (ValueError, TypeError):
+                            fail("invalid_lock_path")
+                        if not isinstance(state, dict) or not state.get("token"):
+                            fail("invalid_lock_path")
+                token = str(uuid.uuid4())
+                try:
+                    try:
+                        atomic_write(sentinel, json.dumps({"token": token, "anchor": None,
+                                     "pid": os.getpid(), "started_at": datetime.datetime.now(
+                                         datetime.timezone.utc).isoformat()}) + "\n", 0o600)
+                    except OSError:
+                        fail("invalid_lock_path")
+                    try:
+                        prior_backup = backup_snapshot(memory, current, "restore")
+                    except OSError:
+                        fail("backup_write_failed")
+                    additions = {task: selected[task] for task in missing}
+                    if current and not legacy_current:
+                        separator = "" if current.endswith("\n\n") else ("\n" if current.endswith("\n") else "\n\n")
+                        updated = current + separator + render("", additions)
+                    else:
+                        current_sections.update(additions)
+                        updated = render_preserving_shared(shared, current_sections)
+                    mode = stat.S_IMODE(snapshot.stat().st_mode) if snapshot.exists() else 0o644
+                    try:
+                        atomic_write(snapshot, updated, mode)
+                    except OSError:
+                        observed = read_regular_text(snapshot, missing_ok=True, anchor=rig_dir)
+                        fail("snapshot_write_failed", no_write=(observed or "") == current)
+                    result.update(status="restored", restore_sections=missing,
+                                  pre_restore_backup=prior_backup, no_write=False)
+                finally:
+                    try:
+                        if json.loads(read_regular_text(sentinel, quiet=True, anchor=rig_dir)).get("token") == token:
+                            sentinel.unlink()
+                    except (OSError, ValueError, TypeError, SystemExit):
+                        pass
+    if args.json:
+        print(json.dumps(result, separators=(",", ":")))
+    elif args.list:
+        for item in result["backups"]:
+            print(item["name"] + ("" if item["valid"] else f" (invalid: {item['reason']})"))
+    else:
+        print(f"{result['status']}: {', '.join(result['restore_sections']) or 'no missing sections'}")
 
 
 def main():
@@ -486,5 +679,7 @@ def workflow_lock_main(argv):
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "workflow-lock":
         workflow_lock_main(sys.argv[2:])
+    elif len(sys.argv) > 1 and sys.argv[1] == "restore-snapshot":
+        restore_snapshot_main(sys.argv[2:])
     else:
         main()
