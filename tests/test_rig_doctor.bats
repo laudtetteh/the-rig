@@ -35,6 +35,80 @@ make_generated_skill() {
   fi
 }
 
+assert_bounded_doctor_rejects() {
+  local path="$1"
+  run python3 - "$CASE_DIR" "$path" <<'PY'
+import json, os, signal, subprocess, sys
+project, path = sys.argv[1:]
+process = subprocess.Popen([project + "/bin/rig", "doctor", "--json"], cwd=project,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                           start_new_session=True)
+try:
+    output, error = process.communicate(timeout=4)
+except subprocess.TimeoutExpired:
+    os.killpg(process.pid, signal.SIGKILL)
+    process.communicate()
+    raise AssertionError("doctor blocked on " + path)
+assert process.returncode == 1, (process.returncode, output, error)
+checks = json.loads(output)["checks"]
+unsafe = next(item for item in checks if item["name"] == "content_file_types")
+assert unsafe["state"] == "fail" and path in unsafe["detail"], (path, unsafe)
+PY
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    return 1
+  fi
+}
+
+@test "doctor refuses named pipes in every content-reading skill surface" {
+  make_generated_skill task
+  make_generated_skill ship
+  mkdir -p "$CASE_DIR/.claude/skills/copied" "$CASE_DIR/.agents/skills/copied"
+  printf 'source\n' > "$CASE_DIR/.claude/skills/copied/SKILL.md"
+  printf 'mirror\n' > "$CASE_DIR/.agents/skills/copied/SKILL.md"
+  local relative original
+  for relative in .agents/skills/task/SKILL.md \
+                  .agents/skills/task/references/command.md \
+                  .claude/commands/task.md \
+                  .agents/skills/copied/SKILL.md \
+                  .claude/skills/copied/SKILL.md \
+                  .claude/settings.json; do
+    original="$BATS_TEST_TMPDIR/original-content-file"
+    mv "$CASE_DIR/$relative" "$original"
+    mkfifo "$CASE_DIR/$relative"
+    assert_bounded_doctor_rejects "$relative"
+    rm "$CASE_DIR/$relative"
+    mv "$original" "$CASE_DIR/$relative"
+  done
+}
+
+@test "doctor parity repair returns a refusal instead of blocking on a named pipe" {
+  make_generated_skill task
+  make_generated_skill ship
+  mv "$CASE_DIR/.agents/skills/task/SKILL.md" "$BATS_TEST_TMPDIR/original-wrapper"
+  mkfifo "$CASE_DIR/.agents/skills/task/SKILL.md"
+  run python3 - "$CASE_DIR" <<'PY'
+import json, os, signal, subprocess, sys
+project = sys.argv[1]
+process = subprocess.Popen([project + "/bin/rig", "doctor", "fix", "--check",
+                            "codex_skill_parity", "--json"], cwd=project,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                           start_new_session=True)
+try:
+    output, error = process.communicate(timeout=4)
+except subprocess.TimeoutExpired:
+    os.killpg(process.pid, signal.SIGKILL)
+    process.communicate()
+    raise AssertionError("doctor parity repair blocked on a named pipe")
+result = json.loads(output)
+assert process.returncode == 3 and result["status"] == "refused", (process.returncode, result, error)
+PY
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+    return 1
+  fi
+}
+
 @test "healthy doctor emits one JSON object and succeeds" {
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]

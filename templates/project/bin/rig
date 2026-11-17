@@ -1451,11 +1451,75 @@ def check(name, ok, detail, fix=None, state=None):
         item["fix"] = str(fix)
     checks.append(item)
 
-def read(path):
+unsafe_content_inputs = set()
+
+def note_nonregular(path, mode):
     try:
-        return path.read_text(errors="replace")
+        display = path.relative_to(root)
+    except ValueError:
+        display = path
+    kind = ("named pipe" if stat.S_ISFIFO(mode) else "symlink" if stat.S_ISLNK(mode)
+            else "directory" if stat.S_ISDIR(mode) else "non-regular file")
+    unsafe_content_inputs.add(f"{display}: {kind}")
+
+def regular_content_file(path):
+    """Refuse pipes, devices and symlinks before any doctor content open."""
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return False
     except OSError:
+        return False
+    if stat.S_ISREG(mode):
+        return True
+    note_nonregular(path, mode)
+    return False
+
+def content_candidate(path):
+    try:
+        return not stat.S_ISDIR(path.lstat().st_mode)
+    except OSError:
+        return False
+
+def open_regular_content(path, binary=False):
+    if not regular_content_file(path):
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        regular_content_file(path)
+        return None
+    try:
+        mode = os.fstat(fd).st_mode
+        if not stat.S_ISREG(mode):
+            note_nonregular(path, mode)
+            os.close(fd)
+            return None
+        return os.fdopen(fd, "rb") if binary else os.fdopen(fd, "r", errors="replace")
+    except BaseException:
+        os.close(fd)
+        raise
+
+def read(path):
+    handle = open_regular_content(path)
+    if handle is None:
         return ""
+    with handle:
+        try:
+            return handle.read()
+        except OSError:
+            return ""
+
+def read_bytes_regular(path):
+    handle = open_regular_content(path, binary=True)
+    if handle is None:
+        return None
+    with handle:
+        try:
+            return handle.read()
+        except OSError:
+            return None
 
 def run(command):
     try:
@@ -1567,7 +1631,10 @@ if codex_hooks.exists():
 bad_json = []
 for path in json_files:
     try:
-        with path.open() as handle: json.load(handle)
+        handle = open_regular_content(path)
+        if handle is None:
+            raise ValueError("not a regular file")
+        with handle: json.load(handle)
     except (OSError, ValueError) as exc:
         bad_json.append(f"{path.relative_to(root)}: {exc}")
 if json_files:
@@ -1638,17 +1705,17 @@ elif skills.is_dir():
     copied_drift = []
     for name in sorted(copied_names & skill_dirs):
         source_tree, mirror_tree = source_skills / name, skills / name
-        source_files = {p.relative_to(source_tree): p for p in source_tree.rglob("*") if p.is_file()}
-        mirror_files = {p.relative_to(mirror_tree): p for p in mirror_tree.rglob("*") if p.is_file()}
+        source_files = {p.relative_to(source_tree): p for p in source_tree.rglob("*") if content_candidate(p)}
+        mirror_files = {p.relative_to(mirror_tree): p for p in mirror_tree.rglob("*") if content_candidate(p)}
         if source_files.keys() != mirror_files.keys():
             copied_drift.append(name)
             continue
-        try:
-            identical = all(not src.is_symlink() and not mirror_files[rel].is_symlink() and
-                            src.read_bytes() == mirror_files[rel].read_bytes()
-                            for rel, src in source_files.items())
-        except OSError:
-            identical = False
+        identical = True
+        for rel, src in source_files.items():
+            source_bytes = read_bytes_regular(src)
+            mirror_bytes = read_bytes_regular(mirror_files[rel])
+            if source_bytes is None or mirror_bytes is None or source_bytes != mirror_bytes:
+                identical = False
         if not identical:
             copied_drift.append(name)
 
@@ -1686,7 +1753,7 @@ elif skills.is_dir():
                             "Follow the complete workflow in [the command reference](references/command.md).\n")
         if wrapper.is_symlink() or read(wrapper) != expected_wrapper:
             wrapper_drift.append(name)
-        if not reference.is_file() or reference.is_symlink():
+        if not regular_content_file(reference):
             reference_drift.append(name)
             continue
         source = read(command)
@@ -1740,9 +1807,12 @@ elif skills.is_dir():
                 refusals.append({"path": relative, "reason": "target exists but is not a regular file; repair manually"})
                 return
             try:
-                current = path.read_bytes() if path.exists() else None
+                current = read_bytes_regular(path) if path.exists() else None
             except OSError:
                 refusals.append({"path": relative, "reason": "target exists but cannot be read"})
+                return
+            if path.exists() and current is None:
+                refusals.append({"path": relative, "reason": "target exists but cannot be read safely"})
                 return
             if current == content:
                 return
@@ -1766,7 +1836,11 @@ elif skills.is_dir():
                                  "reason": "Claude command source is missing; restore it with /rig-upgrade first"})
                 continue
             try:
-                source = command.read_text()
+                handle = open_regular_content(command)
+                if handle is None:
+                    raise OSError("command source cannot be read safely")
+                with handle:
+                    source = handle.read()
             except (OSError, UnicodeDecodeError):
                 refusals.append({"path": f".claude/commands/{name}.md", "reason": "command source cannot be read"})
                 continue
@@ -1797,7 +1871,9 @@ elif skills.is_dir():
                                      "reason": "symlinked source file; repair manually"})
                     continue
                 try:
-                    content = source_file.read_bytes()
+                    content = read_bytes_regular(source_file)
+                    if content is None:
+                        raise OSError("copied skill source cannot be read safely")
                 except OSError:
                     refusals.append({"path": source_file.relative_to(root).as_posix(),
                                      "reason": "copied skill source cannot be read"})
@@ -1830,10 +1906,15 @@ elif "codex" in target_agents:
     config_path = root / ".codex" / "config.toml"
     if tomllib is not None and os.environ.get("_RIG_TEST_NO_TOMLLIB") != "1":
         try:
-            with config_path.open("rb") as handle:
+            if not regular_content_file(config_path):
+                raise ValueError("not a regular file")
+            handle = open_regular_content(config_path, binary=True)
+            if handle is None:
+                raise ValueError("not a regular file")
+            with handle:
                 fallback_names = tomllib.load(handle).get("project_doc_fallback_filenames", [])
             fallback_ok = isinstance(fallback_names, list) and "CLAUDE.md" in fallback_names and (root / "CLAUDE.md").is_file()
-        except (OSError, tomllib.TOMLDecodeError) as exc:
+        except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
             config_error = str(exc)
     else:
         config_text = read(config_path)
@@ -2275,9 +2356,13 @@ if manifest_metadata.is_file():
                 drift.append(f"{rel}: missing")
                 continue
             expected_hash = entry.get("sha256")
-            if expected_hash and artifact.is_file() and not artifact.is_symlink():
+            if not regular_content_file(artifact):
+                drift.append(f"{rel}: not a regular file")
+                continue
+            if expected_hash:
                 try:
-                    actual_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+                    content = read_bytes_regular(artifact)
+                    actual_hash = hashlib.sha256(content).hexdigest() if content is not None else None
                 except OSError:
                     actual_hash = None
                 if actual_hash is not None and actual_hash != expected_hash:
@@ -2388,7 +2473,7 @@ else:
     for rel_name in ("CLAUDE.md", "PROJECT_BRIEF.md"):
         before_path = snapshot_dir / rel_name
         after_path = root / rel_name
-        if not before_path.is_file() or not after_path.is_file():
+        if not before_path.is_file() or before_path.is_symlink() or not after_path.is_file():
             continue
         if "[Project Name]" not in read(before_path) and "[Project Name]" in read(after_path):
             blanked.append(rel_name)
@@ -2422,6 +2507,11 @@ else:
           "none detected" if not replaced else
           "symlink silently replaced by a regular file (lesson #15): " + ", ".join(replaced),
           fix="; ".join(f"ls -l {shlex.quote(str(snapshot_dir / name))} {shlex.quote(name)}" for name in replaced))
+
+check("content_file_types", not unsafe_content_inputs,
+      "all opened content inputs are regular files" if not unsafe_content_inputs else
+      "refused non-regular content input(s): " + "; ".join(sorted(unsafe_content_inputs)),
+      fix="replace the listed paths with regular files before rerunning doctor")
 
 summary = {state: sum(1 for item in checks if item["state"] == state)
            for state in ("pass", "fail", SKIPPED, ADVISORY)}
