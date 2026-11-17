@@ -295,17 +295,21 @@ when the current session cannot be resolved unambiguously.
 ### Format
 
 ```
-type short-desc #N | type short-desc #N | ...
+type short-desc REF | type short-desc REF | ...
 ```
 
 - `type` matches the git commit type (`fix`, `feat`, `chore`, `refactor`, `devops`, `docs`, `test`)
 - `short-desc` — 3–6 words; enough to identify the work at a glance
+- `REF` — one ticket reference in the format of the `issue-tracking:` value in the
+  project `CLAUDE.md`, without brackets: `github` (or absent) `#91`, `linear`
+  `ENG-91`, `trello` `trello:a1B2c3`, `gus` `W-1234567`; omit it for `none`. A
+  merged pull request may be named `PR 12` under any tracker.
 - Keep the full string under ~100 characters
 
 ### Output
 
 > **Suggested session name:**
-> `feat user-auth magic-link flow #91`
+> `feat user-auth magic-link flow #91` (github; `ENG-91` for linear)
 
 Then invite the user to apply it:
 
