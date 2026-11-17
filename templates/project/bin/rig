@@ -6,7 +6,7 @@ readonly RIG_EXIT_UNAVAILABLE=69
 # Keep bootstrap and doctor's completeness check on the same source paths.
 # These fixed relative names contain no whitespace; Python splits on spaces.
 readonly RIG_WORKTREE_BOOTSTRAP_PATHS=".rigpath CLAUDE.md PROJECT_BRIEF.md .gitleaks.toml \
-  bin/rig bin/rig-session-resolve.py bin/rig-snapshot.py .claude .agents .codex \
+  bin/rig bin/rig-session-resolve.py bin/rig-session-index.py bin/rig-snapshot.py .claude .agents .codex \
   .mcp.json .playwright-mcp .github docs/INDEX.md docs/features/README.md"
 
 usage() { cat <<'EOF'
@@ -20,6 +20,7 @@ Commands:
   rig session resolve       Resolve the current session identity
   rig session current       Show the exact current session safely
   rig session list          List redacted public session summaries
+  rig session index         Search Rig records across known projects
   rig session doctor        Check session-record integrity and privacy
   rig session legacy        Quarantine or restore a historical flat record
   rig session repair        Preview or confirm explicit orphan repair
@@ -77,7 +78,7 @@ command_help() {
     worktree) printf 'Usage: rig worktree bootstrap\n';;
     upgrade) printf 'Usage: rig upgrade rollback (--last | --id ID) [--dry-run | --confirm ID] [--json]\n\nUndoes one completed upgrade using the report that run wrote.\nRestores only the paths that upgrade changed, and refuses anything\nedited since. For an interrupted upgrade, use install.sh --recover.\n\nExit codes: 0 fully undone, 3 some paths refused, 70 a restore failed.\n';;
     session) cat <<'EOF'
-Usage: rig session <resolve|current|list|doctor|legacy|repair|retrofit|obligation> [options]
+Usage: rig session <resolve|current|list|index|doctor|legacy|repair|retrofit|obligation> [options]
 
 Native IDs are redacted unless --verbose is explicitly supplied.
 Repair is preview-only unless --confirm TOKEN and --reason REASON are supplied.
@@ -2987,6 +2988,11 @@ print(line)'
   fi
 }
 
+session_index() {
+  RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" \
+    python3 "$(dirname "${BASH_SOURCE[0]}")/rig-session-index.py" "$@"
+}
+
 session_inspect() {
   local action="$1"; shift
   RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" RIG_RESOLVER="$(dirname "${BASH_SOURCE[0]}")/rig-session-resolve.py" python3 - "$action" "$@" <<'PY'
@@ -4279,6 +4285,16 @@ Lists redacted public summaries of this project's Rig session records.
 Native IDs are shown only with --verbose. Read-only.
 EOF
       ;;
+    session:index) cat <<'EOF'
+Usage: rig session index [--root PROJECT]... [--project current|PROJECT]
+                         [--provider claude|codex] [--state STATE]
+                         [--search TEXT] [--sort created|activity] [--json] [--verbose]
+
+Searches Rig records in the current project, immediate ~/code/* projects,
+~/.rig/projects/*, and explicit project roots. Never scans provider
+transcripts. Native IDs are shown only with --verbose. Read-only.
+EOF
+      ;;
     session:doctor) cat <<'EOF'
 Usage: rig session doctor [--json] [--verbose]
 
@@ -4440,7 +4456,7 @@ main() {
       subcommand="${1:-}"; shift || true
       # Help never runs the subcommand, so it cannot resolve, bind or write.
       if help_requested "$@" && subcommand_help "$command" "$subcommand"; then return; fi
-      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:doctor) session_inspect doctor "$@";; session:legacy) session_legacy "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; memory:restore-snapshot) memory_restore_snapshot "$@";; memory:workflow-lock) memory_workflow_lock "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
+      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:index) session_index "$@";; session:doctor) session_inspect doctor "$@";; session:legacy) session_legacy "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; memory:restore-snapshot) memory_restore_snapshot "$@";; memory:workflow-lock) memory_workflow_lock "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
     *) shift; usage_error "unknown command: $command" "$@";;
   esac
 }

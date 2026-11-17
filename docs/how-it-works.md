@@ -358,6 +358,37 @@ normal writer or a reviewed manual edit to change it.
 | Wrap completed | Record moves to `sessions/done/` with `lifecycle.state: complete` | Its final name stays with that work segment. |
 | Later work in the same native thread | A new active record with `lineage.kind: continuation` and `parent_anchor` | The parent name is not copied. New work can be named and wrapped independently. |
 
+### Cross-project Rig record index
+
+`bin/rig session index --json` searches Rig session records in the current
+project, immediate installed projects under `~/code/`, and immediate external
+Rig directories under `~/.rig/projects/`. Add a project elsewhere or nested
+under `~/code/` with `--root /path/to/project` (repeat for multiple
+projects). This is a bounded index of Rig records: it
+does not search Claude or Codex transcript databases, and an unbound native
+conversation will not appear. The JSON `coverage` field lists each Rig
+directory examined and its record count.
+
+Filter with `--project current` or `--project /path/to/project`,
+`--provider claude|codex`, `--state STATE`, and a case-insensitive
+`--search TEXT` over displayed names and branches. `--sort activity`
+(the default) and `--sort created` show newest first. Each row includes its
+recorded project, provider, name, branch, lifecycle state, file provenance,
+and a provider resume-picker hint. Older PID-only Rig records appear as
+`legacy_pid` with unknown provider and no resume hint; project attribution is
+marked unverified when inferred only from a storage directory.
+`provider_live_state` is always `unknown`: a Rig record does not prove its
+native conversation is still available. Native IDs are omitted unless
+`--verbose` is explicit.
+Malformed, future-schema, unsafe, or cross-project records appear as errors
+instead of silently becoming a selected session. Duplicate anchors are
+marked ambiguous; the index never chooses one for resumption. The command
+is read-only. A machine-wide query exits 2 when any scanned scope has errors.
+With `--project`, only errors attributable to the selected project affect the
+exit status; `coverage.omitted_unrelated_errors` counts diagnostics from other
+projects, and each scope retains its error count. Plain-text rows quote
+control characters so a recorded name cannot forge terminal output.
+
 SessionStart binds the native ID when the provider fires it. On a resumed thread
 that skips SessionStart, UserPromptSubmit can bind the exact ID in its event
 payload. If that hook cannot attach, `rig session current --json` reports a
