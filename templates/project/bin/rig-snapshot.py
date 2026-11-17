@@ -61,7 +61,8 @@ def split_legacy(content):
         if task is None or task in sections:
             fail("invalid_task_sections")
         end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
-        sections[task] = {"owner": None, "body": normalize(content[match.start() : end])}
+        raw_body = content[match.start() : end]
+        sections[task] = {"owner": None, "body": normalize(raw_body), "raw_body": raw_body}
     return shared, sections, True
 
 
@@ -113,7 +114,8 @@ def render_preserving_shared(shared, sections):
             output += "\n" if output.endswith("\n") else "\n\n"
         owner = entry["owner"] or "legacy"
         output += f"<!-- rig:handoff-start task={task} owner={owner} -->\n"
-        output += normalize(entry["body"]) + END_MARKER + "\n"
+        body = entry.get("raw_body", normalize(entry["body"]))
+        output += body + ("" if body.endswith("\n") else "\n") + END_MARKER + "\n"
     return output
 
 

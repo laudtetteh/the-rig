@@ -686,13 +686,14 @@ PY
   printf '# Latest header\n' > "$BATS_TEST_TMPDIR/latest.md"
   "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/latest.md" --shared-only \
     --retire-task legacy-task --done-task-file "$CASE_DIR/.rig/tasks/done/TASK_legacy-task.md" --json >/dev/null
-  printf 'Extra header detail  \n\n' >> "$snapshot"
+  printf 'Extra header detail  \n\n## Resuming from: current-task\n\nKeep B with Markdown break.  \n\n\n' >> "$snapshot"
   cp "$snapshot" "$BATS_TEST_TMPDIR/legacy-pre-restore.md"
   run "$rig" memory restore-snapshot --from "$backup" --confirm --json
   [ "$status" -eq 0 ]
-  CURRENT="$snapshot" PRIOR="$BATS_TEST_TMPDIR/legacy-pre-restore.md" python3 -c 'import os,pathlib; assert pathlib.Path(os.environ["CURRENT"]).read_bytes().startswith(pathlib.Path(os.environ["PRIOR"]).read_bytes())'
+  CURRENT="$snapshot" PRIOR="$BATS_TEST_TMPDIR/legacy-pre-restore.md" python3 -c 'import os,pathlib; current=pathlib.Path(os.environ["CURRENT"]).read_bytes(); prior=pathlib.Path(os.environ["PRIOR"]).read_bytes(); shared, existing=prior.split(b"## Resuming from: current-task",1); assert current.startswith(shared); assert b"## Resuming from: current-task"+existing in current'
   grep -Fq '# Latest header' "$snapshot"
   grep -Fq '## Resuming from: legacy-task (issue #5, blocked)' "$snapshot"
+  grep -Fq '## Resuming from: current-task' "$snapshot"
   grep -Fq 'Keep this handoff.' "$snapshot"
 }
 

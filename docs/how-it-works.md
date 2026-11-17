@@ -330,13 +330,15 @@ Step 8: Surface next priority — ask "What's next?"
 
 The snapshot writer saves a content-hashed backup when it retires or transfers
 a task handoff or migrates a legacy snapshot. To recover a missing handoff,
-list the backups, preview the section, then confirm the restore:
+list the backups:
 
 ```bash
 bin/rig memory restore-snapshot --list --json
-bin/rig memory restore-snapshot --from retired-<digest>.md --section TASK --json
-bin/rig memory restore-snapshot --from retired-<digest>.md --section TASK --confirm --json
 ```
+
+Pass a listed filename to `--from` to preview its missing sections. Add
+`--section` with the task ID to select one handoff. Add `--confirm` only after
+reviewing that preview.
 
 The restore verifies the backup hash and runs under the snapshot writer lock.
 It inserts only sections absent from the current snapshot; it keeps the current
