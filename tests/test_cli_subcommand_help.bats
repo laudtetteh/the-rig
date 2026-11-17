@@ -48,6 +48,7 @@ sprint audit
 sprint plan
 sprint status
 task inventory
+pr review-metadata
 upgrade rollback
 worktree bootstrap
 EOF

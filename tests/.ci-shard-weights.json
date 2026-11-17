@@ -46,6 +46,7 @@
   "tests/test_memory_freshness.bats": 5.0,
   "tests/test_memory_validation.bats": 5.0,
   "tests/test_notification_codex_strategy_guard.bats": 5.0,
+  "tests/test_pr_metadata_review.bats": 5.0,
   "tests/test_precommit_skip_list.bats": 5.0,
   "tests/test_progress_sid_format.bats": 5.0,
   "tests/test_project_conventions.bats": 5.0,

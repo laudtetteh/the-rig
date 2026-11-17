@@ -584,6 +584,14 @@ If user chooses **[u]**:
    ```bash
    gh pr edit [N] --title "[updated title]" --body-file /tmp/ship-pr-body.md
    ```
+   If `gh pr edit` exits non-zero (for example a GraphQL error about Projects
+   (classic) `projectCards`), write the same approved title and body through REST:
+   ```bash
+   python3 -c 'import json,sys; json.dump({"title": sys.argv[1], "body": open(sys.argv[2]).read()}, open(sys.argv[3], "w"))' \
+     "[updated title]" /tmp/ship-pr-body.md /tmp/ship-pr-payload.json
+   gh api repos/{owner}/{repo}/pulls/[N] --method PATCH --input /tmp/ship-pr-payload.json
+   ```
+   Then confirm with `gh pr view [N] --json title,body` that the edit landed.
 5. Check labels: `gh pr view [N] --json labels` — add any missing labels for new work areas
 6. Verify the `Closes #[issue]` line covers all linked issues for the full scope of work
 
@@ -656,6 +664,62 @@ gh pr create \
 ```
 
 Report the PR URL.
+
+## Step 9.5 — Final merge-boundary metadata review
+
+Run this read-only review once, immediately before any merge command: after the
+last commit is pushed and the user has asked to merge. Do not run it on every
+prompt, and do not edit the PR as part of it.
+
+Fetch the PR metadata and run the reviewer. Replace `[N]` with the PR number.
+Add `--issue NUMBER` for every issue in the task's scope, `--not-closing NUMBER`
+for every issue that is only partially delivered, and `--require-label "LABEL"`
+for every `area:` label chosen in Step 3:
+
+```bash
+REPO=$(git rev-parse --show-toplevel)
+PR_NUMBER=[N]
+TRACKING=$(grep "^issue-tracking:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+TRACKING="${TRACKING:-github}"
+REVIEW_DIR=$(mktemp -d)
+gh pr view "$PR_NUMBER" --json number,state,isDraft,headRefOid,title,body,labels,commits > "$REVIEW_DIR/pr.json"
+REVIEW_ARGS=(--pr "$REVIEW_DIR/pr.json" --issue-tracking "$TRACKING" --payload-out "$REVIEW_DIR/payload.json")
+if [[ "$TRACKING" == github ]] && gh api graphql \
+  -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){closingIssuesReferences(first:50){nodes{number}}}}}' \
+  -F o='{owner}' -F r='{repo}' -F n="$PR_NUMBER" > "$REVIEW_DIR/closing.json"; then
+  REVIEW_ARGS+=(--closing "$REVIEW_DIR/closing.json")
+fi
+"$REPO/bin/rig" pr review-metadata "${REVIEW_ARGS[@]}"
+echo "review exit: $?"
+```
+
+If the GraphQL call fails, the reviewer falls back to closing keywords in the PR
+body and says so in its `Closing links:` line. Report that fallback to the user.
+
+Act on the exit code:
+
+- **0 (CLEAN):** show the `Reviewed head:` SHA and the final-commit list. Confirm
+  the body still describes what landed; if it does not, draft a replacement body
+  and treat it like a proposed edit below. Then proceed to the merge.
+- **3 (findings):** show every finding and the proposed edits exactly as printed.
+  No edit has been made. Ask the user to approve or reject each proposed external
+  write. Run only the approved commands the reviewer printed — they use the REST
+  API (`gh api ... --method PATCH` / `--method POST`) because `gh pr edit` can fail
+  on repositories affected by the GitHub Projects (classic) deprecation. For a
+  finding without a proposed edit (for example an unexpected closing link or an
+  empty body), draft the exact change, get approval, write it with
+  `gh api repos/{owner}/{repo}/pulls/[N] --method PATCH --input FILE` where FILE
+  holds `{"body": "..."}`, and never assume a write succeeded because the
+  command was invoked. Re-run the fetch and review afterwards. Merge only when it
+  is clean or the user explicitly accepts each remaining finding.
+- **64 (bad input):** the metadata could not be read. Fix the fetch and re-run;
+  never merge on unreviewed metadata.
+
+Merge only the reviewed head, using the `Merge only the reviewed head:` command
+the reviewer printed (`gh pr merge [N] --match-head-commit SHA`, plus the merge
+method the project uses). If the head moved after the review, run Step 9.5 again.
+
+---
 
 ## Step 10 — Merge verification and branch cleanup
 

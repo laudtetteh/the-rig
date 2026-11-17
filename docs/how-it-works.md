@@ -717,7 +717,7 @@ skills covering the full development lifecycle:
 ### Ship and debug
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/ship` | `SHIP_WORKFLOW` | Sequential hard gate: task confirm → issue → labels → branch/stale-main check → pre-commit cleanup (removes debug statements, runs linter, runs tests if required) → checklist → task-specific live validation and evidence → optional manual validation card → commit approval → commit → housekeeping → open or update PR |
+| `/ship` | `SHIP_WORKFLOW` | Sequential hard gate: task confirm → issue → labels → branch/stale-main check → pre-commit cleanup (removes debug statements, runs linter, runs tests if required) → checklist → task-specific live validation and evidence → optional manual validation card → commit approval → commit → housekeeping → open or update PR → read-only final merge-boundary metadata review (`bin/rig pr review-metadata`; approved edits via REST) → merge of the reviewed head and verification |
 | `/debug` | `DEBUG_WORKFLOW` | Hypothesis before code, mandatory ERRORS.md entry |
 
 ### Release
