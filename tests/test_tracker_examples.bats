@@ -29,7 +29,7 @@ setup() {
   done
 }
 
-@test "a Linear project upgrades with no customized-command skips and gets Linear examples in both providers" {
+@test "switching a fresh install to Linear needs no command edits: upgrade skips nothing and both providers carry Linear examples" {
   local project="$BATS_TEST_TMPDIR/linear-project" file
   mkdir -p "$project"
   git -C "$project" init -q
@@ -54,4 +54,14 @@ PY
     .agents/skills/post-merge/references/command.md; do
     grep -Fq 'ENG-184' "$project/$file" || { echo "no Linear example in $file" >&3; return 1; }
   done
+  # The tracker lookup the commands tell the agent to run must report linear.
+  python3 - "$project/.claude/commands/session-name.md" > "$BATS_TEST_TMPDIR/lookup.sh" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+section = text.split("#### Ticket references", 1)[1]
+print(re.search(r"```bash\n(.*?)```", section, re.S).group(1))
+PY
+  run bash -c 'cd "$1/.claude" && bash "$2"' _ "$project" "$BATS_TEST_TMPDIR/lookup.sh"
+  [ "$status" -eq 0 ]
+  [ "$output" = linear ]
 }

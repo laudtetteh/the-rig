@@ -120,7 +120,8 @@ echo "${TRACKING:-github}"
 ```
 
 `REF` is one ticket reference in that tracker's format, without brackets, and
-`RANGE` is the lowest-to-highest span of references:
+`RANGE` is the lowest-to-highest span of references, or a short list for
+trackers whose IDs are not ordered:
 
 | `issue-tracking:` | `REF` example | `RANGE` example |
 |---|---|---|
@@ -176,7 +177,8 @@ Example: `sprint: 23 issues · feat/4 fix/15 chore/4 · #130–#152` (github;
 `ENG-130–ENG-152` for linear)
 
 If the session covered a named milestone or sprint, use the milestone name as a
-prefix: `milestone: Sprint 3 · 23 issues · feat/4 fix/15 · #130–#152`
+prefix: `milestone: Sprint 3 · 23 issues · feat/4 fix/15 · #130–#152` (github;
+`ENG-130–ENG-152` for linear)
 
 ### 4 — Present the suggestion
 

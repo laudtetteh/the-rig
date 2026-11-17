@@ -146,7 +146,7 @@ Print a single structured report before executing POST_MERGE_WORKFLOW:
 **Cross-project work:** [none | other projects mentioned: project-a, project-b — not updated here]
 
 **Merged:** PR #N — type(scope): description
-**Batch ledger:** [single PR | PR #N sha abc123 closes #X | PR #M sha def456 closes #Y,#Z]
+**Batch ledger:** [single PR | PR #N sha abc123 closes REF | PR #M sha def456 closes REF, REF] (REF in the `issue-tracking:` format; `none` → omit `closes`)
 
 **This session:**
 - PR #N merged: type(scope): description
@@ -418,7 +418,8 @@ echo "${TRACKING:-github}"
 ```
 
 `REF` is one ticket reference in that tracker's format, without brackets, and
-`RANGE` is the lowest-to-highest span of references:
+`RANGE` is the lowest-to-highest span of references, or a short list for
+trackers whose IDs are not ordered:
 
 | `issue-tracking:` | `REF` example | `RANGE` example |
 |---|---|---|

@@ -618,7 +618,8 @@ echo "${TRACKING:-github}"
 ```
 
 `REF` is one ticket reference in that tracker's format, without brackets, and
-`RANGE` is the lowest-to-highest span of references:
+`RANGE` is the lowest-to-highest span of references, or a short list for
+trackers whose IDs are not ordered:
 
 | `issue-tracking:` | `REF` example | `RANGE` example |
 |---|---|---|
