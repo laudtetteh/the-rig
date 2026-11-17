@@ -419,12 +419,13 @@ When made, this commit goes on the same PR branch before the PR is merged.
 
 After the last commit is pushed and the user asks to merge, fetch the PR's
 `number,state,isDraft,headRefOid,title,body,labels,commits` with
-`gh pr view --json` into a temporary JSON file. For GitHub issue tracking,
-also fetch the PR's closing issue references with `gh api graphql`; if that
-fetch fails, report
-that the reviewer will use closing keywords from the body. Run
-`bin/rig pr review-metadata --pr FILE --issue-tracking github --payload-out FILE`
-with `--closing FILE` when available, `--issue NUMBER` for every scoped issue,
+`gh pr view --json` into a temporary JSON file. Read `issue-tracking:` from
+`CLAUDE.md`, defaulting to `github` when absent. Only for GitHub tracking, fetch
+the PR's closing issue references with `gh api graphql`; if that fetch fails,
+report that the reviewer will use closing keywords from the body. Run
+`bin/rig pr review-metadata --pr FILE --issue-tracking TRACKING --payload-out FILE`
+with the configured tracker value, `--closing FILE` when available,
+`--issue NUMBER` for every scoped issue,
 `--not-closing NUMBER` for partial issues, and `--require-label LABEL` for each
 required `area:` label. This review is read-only.
 
