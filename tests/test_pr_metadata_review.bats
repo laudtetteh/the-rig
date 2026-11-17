@@ -71,9 +71,10 @@ review() {
   JSON_OUTPUT="$output" python3 -c '
 import json, os
 d = json.loads(os.environ["JSON_OUTPUT"])
-assert [f["code"] for f in d["findings"]] == ["stale_title", "missing_label"], d["findings"]
+assert [f["code"] for f in d["findings"]] == ["stale_title", "missing_label", "stale_label"], d["findings"]
 assert d["proposal"]["title"] == "fix(hooks): warn on branch change [#12]"
 assert d["proposal"]["add_labels"] == ["type: fix"]
+assert d["proposal"]["remove_labels"] == ["type: docs"]
 assert any(c.startswith("gh api repos/{owner}/{repo}/pulls/42 --method PATCH --input ") for c in d["commands"]), d["commands"]
 assert any("issues/42/labels --method POST" in c for c in d["commands"]), d["commands"]
 assert not any("gh pr edit" in c for c in d["commands"]), d["commands"]
@@ -191,4 +192,71 @@ assert "gh pr edit" not in section.split("Act on the exit code:")[1].replace("`g
 step9 = text[text.index("## Step 9"):review]
 assert "gh api repos/{owner}/{repo}/pulls/[N] --method PATCH" in step9
 PY
+}
+
+@test "pr review-metadata: a Refs list leaves every listed issue open" {
+  write_pr 'feat(x): add y [#12]' $'Closes #12\n\nRefs #13, #14 (partial)\nPartially addresses #15\n' 'type: feat' 'feat(x): add y [#12 #13 #14 #15]'
+  write_closing 12
+  review --pr "$PR_JSON" --closing "$CLOSING_JSON"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Result: CLEAN"* ]] || return 1
+}
+
+@test "pr review-metadata: a closing keyword in commit prose is reported without proposing a Closes line" {
+  write_pr 'fix(x): repair y [#12]' $'Closes #12\n' 'type: fix' 'fix(x): repair y [#12]|The approach that fixed #500 regressed this.'
+  write_closing 12
+  review --pr "$PR_JSON" --closing "$CLOSING_JSON" --payload-out "$PAYLOAD"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"[commit_message_closes]"*"#500"* && "$output" != *"missing_closing_link"* ]] || return 1
+  [ ! -e "$PAYLOAD" ]
+}
+
+@test "pr review-metadata: a body Closes line GitHub does not link is reported, not duplicated" {
+  write_pr 'fix(x): repair y [#12]' $'## Closes\n\nCloses #12\n' 'type: fix' 'fix(x): repair y [#12]'
+  write_closing
+  review --pr "$PR_JSON" --closing "$CLOSING_JSON" --payload-out "$PAYLOAD"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"[closing_link_not_linked]"*"#12"* && "$output" != *"missing_closing_link"* ]] || return 1
+  [ ! -e "$PAYLOAD" ]
+}
+
+@test "pr review-metadata: unreadable inputs and payload paths exit 64, as JSON when requested" {
+  review --pr "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 64 ]
+  [[ "$output" != *"Traceback"* ]] || return 1
+  write_pr 'docs: plan' 'Body' 'type: docs' 'fix(x): repair y [#12]'
+  review --pr "$PR_JSON" --payload-out "$BATS_TEST_TMPDIR/missing-dir/payload.json"
+  [ "$status" -eq 64 ]
+  [[ "$output" != *"Traceback"* ]] || return 1
+  review --bogus --json
+  [ "$status" -eq 64 ]
+  JSON_OUTPUT="$output" python3 -c 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); assert d["ok"] is False and d["error"] == "usage", d'
+}
+
+@test "pr review-metadata: non-conventional revert PRs are not given a mangled title or closing link" {
+  write_pr 'Revert "feat(x): add y [#12]"' $'Reverts #9\n' '' 'Revert "feat(x): add y [#12]"'
+  write_closing
+  review --pr "$PR_JSON" --closing "$CLOSING_JSON"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Result: CLEAN"* ]] || return 1
+}
+
+@test "pr review-metadata: a stale type label gets a DELETE proposal and drafts get a ready command" {
+  write_pr 'fix(x): repair y [#12]' $'Closes #12\n' 'type: fix,type: docs' 'fix(x): repair y [#12]'
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["isDraft"]=True; json.dump(d,open(sys.argv[1],"w"))' "$PR_JSON"
+  write_closing 12
+  review --pr "$PR_JSON" --closing "$CLOSING_JSON"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"[stale_label] label 'type: docs'"* ]] || return 1
+  [[ "$output" == *"issues/42/labels/type%3A%20docs --method DELETE"* ]] || return 1
+  [[ "$output" == *"gh pr ready 42"* ]] || return 1
+  [[ "$output" == *"--match-head-commit abc1234def5678 (add the project's --merge, --squash or --rebase flag)"* ]] || return 1
+}
+
+@test "pr review-metadata: a clean review writes no payload file" {
+  write_pr 'fix(x): repair y [#12]' $'Closes #12\n' 'type: fix' 'fix(x): repair y [#12]'
+  write_closing 12
+  review --pr "$PR_JSON" --closing "$CLOSING_JSON" --payload-out "$PAYLOAD"
+  [ "$status" -eq 0 ]
+  [ ! -e "$PAYLOAD" ]
 }
