@@ -109,6 +109,26 @@ PY
   fi
 }
 
+@test "doctor refuses symlinked copied skill directories before reading outside content" {
+  make_generated_skill task
+  make_generated_skill ship
+  mkdir -p "$BATS_TEST_TMPDIR/outside" "$CASE_DIR/.claude/skills" "$CASE_DIR/.agents/skills/copied"
+  printf 'outside content\n' > "$BATS_TEST_TMPDIR/outside/SKILL.md"
+  printf 'mirror content\n' > "$CASE_DIR/.agents/skills/copied/SKILL.md"
+  ln -s "$BATS_TEST_TMPDIR/outside" "$CASE_DIR/.claude/skills/copied"
+  run env RIG_DOCTOR_PARITY_PLAN=1 "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["content_file_types"]["state"]=="fail" and ".claude/skills/copied" in c["content_file_types"]["detail"] and "symlink" in c["content_file_types"]["detail"]; assert "b3V0c2lkZSBjb250ZW50Cg==" not in os.environ["JSON_OUTPUT"]'
+}
+
+@test "doctor names a copied skill FIFO even when file lists differ" {
+  mkdir -p "$CASE_DIR/.claude/skills/copied" "$CASE_DIR/.agents/skills/copied"
+  printf 'source\n' > "$CASE_DIR/.claude/skills/copied/SKILL.md"
+  printf 'extra\n' > "$CASE_DIR/.agents/skills/copied/notes.md"
+  mkfifo "$CASE_DIR/.agents/skills/copied/SKILL.md"
+  assert_bounded_doctor_rejects ".agents/skills/copied/SKILL.md"
+}
+
 @test "healthy doctor emits one JSON object and succeeds" {
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]

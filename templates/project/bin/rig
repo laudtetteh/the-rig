@@ -1452,6 +1452,7 @@ def check(name, ok, detail, fix=None, state=None):
     checks.append(item)
 
 unsafe_content_inputs = set()
+extra_content_anchors = []
 
 def note_nonregular(path, mode):
     try:
@@ -1462,8 +1463,36 @@ def note_nonregular(path, mode):
             else "directory" if stat.S_ISDIR(mode) else "non-regular file")
     unsafe_content_inputs.add(f"{display}: {kind}")
 
+def content_anchor(path):
+    for anchor in (root, rig, *extra_content_anchors):
+        try:
+            return anchor, path.relative_to(anchor)
+        except ValueError:
+            continue
+    return None, None
+
+def safe_content_directory(path):
+    """Reject symlinked ancestors before globbing or opening content."""
+    anchor, _ = content_anchor(path)
+    if anchor is None:
+        return False
+    current = path
+    while True:
+        try:
+            mode = current.lstat().st_mode
+        except OSError:
+            return False
+        if not stat.S_ISDIR(mode):
+            note_nonregular(current, mode)
+            return False
+        if current == anchor:
+            return True
+        current = current.parent
+
 def regular_content_file(path):
     """Refuse pipes, devices and symlinks before any doctor content open."""
+    if not safe_content_directory(path.parent):
+        return False
     try:
         mode = path.lstat().st_mode
     except FileNotFoundError:
@@ -1477,19 +1506,33 @@ def regular_content_file(path):
 
 def content_candidate(path):
     try:
-        return not stat.S_ISDIR(path.lstat().st_mode)
+        if stat.S_ISDIR(path.lstat().st_mode):
+            return False
+        regular_content_file(path)
+        return True
     except OSError:
         return False
 
 def open_regular_content(path, binary=False):
     if not regular_content_file(path):
         return None
-    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    anchor, relative = content_anchor(path)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
+    file_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    directory_fd = None
     try:
-        fd = os.open(path, flags)
+        directory_fd = os.open(anchor, directory_flags)
+        for part in relative.parts[:-1]:
+            next_fd = os.open(part, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        fd = os.open(relative.parts[-1], file_flags, dir_fd=directory_fd)
     except OSError:
         regular_content_file(path)
         return None
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
     try:
         mode = os.fstat(fd).st_mode
         if not stat.S_ISREG(mode):
@@ -1573,6 +1616,8 @@ if rigpath.exists():
     exclude_path = run(["git", "rev-parse", "--git-path", "info/exclude"])
     resolved_exclude = pathlib.Path(exclude_path.stdout.strip()) if exclude_path is not None and exclude_path.returncode == 0 else root / ".git" / "info" / "exclude"
     if not resolved_exclude.is_absolute(): resolved_exclude = root / resolved_exclude
+    # Linked worktrees keep the shared exclude file in the primary worktree.
+    extra_content_anchors.append(resolved_exclude.parent)
     exclude = read(resolved_exclude).splitlines()
     entries = {line.strip().rstrip("/") for line in exclude if line.strip() and not line.lstrip().startswith("#")}
     required = ["CLAUDE.md", "PROJECT_BRIEF.md", ".claude", ".rigpath"]
@@ -1670,14 +1715,17 @@ else:
           fix="/rig-upgrade --scope=project --mode=agent (restores Rig-owned command files)")
 
 skills = root / ".agents" / "skills"
-if skills.is_dir() and not command_dir.is_dir():
+skills_available = safe_content_directory(skills)
+command_available = safe_content_directory(command_dir)
+if skills_available and not command_available:
     check("codex_skill_parity", True, "Claude command source not installed; content comparison unavailable", state=SKIPPED)
-elif skills.is_dir():
+elif skills_available:
     command_names = {p.stem for p in command_dir.glob("*.md")}
-    skill_names = {p.parent.name for p in skills.glob("*/SKILL.md")}
-    skill_dirs = {p.name for p in skills.glob("*") if p.is_dir()}
+    skill_dirs = {p.name for p in skills.glob("*") if p.is_dir() and safe_content_directory(p)}
+    skill_names = {name for name in skill_dirs if content_candidate(skills / name / "SKILL.md")}
     source_skills = root / ".claude" / "skills"
-    copied_names = {p.name for p in source_skills.glob("*") if p.is_dir()}
+    copied_names = ({p.name for p in source_skills.glob("*") if p.is_dir() and safe_content_directory(p)}
+                    if safe_content_directory(source_skills) else set())
     def generated_names(paths):
         result = set()
         for path in paths:
