@@ -78,6 +78,136 @@ jobs:
       - name: Verify every tests/*.bats file was claimed by some shard
         run: python3 tests/plan-ci-shards.py --shards "$SHARD_COUNT" --check
 
+  macos-portability:
+    # Issue #669. A focused portability subset, not a second copy of the full
+    # suite: the Ubuntu matrix above stays the complete-suite gate. This job
+    # exists to run install, upgrade, recovery and hook paths under macOS
+    # system bash 3.2 with BSD sed/stat/mktemp/tail, which Ubuntu never does.
+    #
+    # Bash 3.2 enforcement: bats, every test file, install.sh and the hooks
+    # all start via `#!/usr/bin/env bash` or bare `bash`, so any Homebrew
+    # bash 5.x ahead of /bin/bash on PATH (common on developer Macs, and
+    # possible on future runner images) would silently replace 3.2. The
+    # tests/ci-use-system-bash.sh step prepends a shim dir holding only
+    # `bash -> /bin/bash`, and the "Prove bats runs under bash 3.2" step fails
+    # the job if a Bats test body sees anything other than BASH_VERSINFO 3.2.
+    #
+    # Subset (each file's Ubuntu weight is in tests/.ci-shard-weights.json):
+    #   install + upgrade smoke: test_install_idempotence (fresh install then
+    #     repeated upgrades), test_base_branch_manifest_freshness (sed_inplace
+    #     BSD branch), test_codex_config_merge
+    #   upgrade journal / recovery: test_upgrade_recovery (tac || tail -r,
+    #     mktemp journal temp files), test_security_recovery_gates
+    #   hooks smoke: test_hook_lifecycle (git hook install + manifest mode via
+    #     stat -f), test_commit_policy_runtime and test_commit_attribution
+    #     (commit-msg / pre-tool stat -f %m sentinel ages),
+    #     test_precommit_skip_list, test_provider_reminders,
+    #     test_contextual_tips (stat -f %m tip throttling)
+    #
+    # The installed git hooks are #!/bin/sh scripts; on macOS /bin/sh is
+    # bash 3.2 in POSIX mode, so the smoke commit exercises them there.
+    #
+    # Known macOS defects are fixed under their own issues, not here. A file
+    # is left out of the subset only when it fails because of one of them,
+    # and is listed here with that issue number:
+    #   (none currently excluded)
+    name: macOS bash 3.2 portability subset
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # Same reason as the Ubuntu matrix: upgrade tests resolve historical
+          # bases from release tags.
+          fetch-depth: 0
+
+      - name: Install bats-core
+        run: bash tests/ci-install-bats.sh
+
+      - name: Put system bash 3.2 first on PATH
+        run: /bin/bash tests/ci-use-system-bash.sh
+
+      - name: Prove bats runs under bash 3.2 with BSD userland
+        run: |
+          bash --version | head -n 1
+          probe="$RUNNER_TEMP/bash-version-probe.bats"
+          cat > "$probe" <<'EOF'
+          @test "bats test bodies run under bash 3.2" {
+            [ "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}" = "3.2" ]
+          }
+          @test "a child bash started from a test is bash 3.2" {
+            run bash -c 'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"'
+            [ "$output" = "3.2" ]
+          }
+          @test "sed is BSD sed" {
+            ! sed --version >/dev/null 2>&1
+          }
+          EOF
+          bats "$probe"
+
+      - name: Configure test Git identity
+        run: |
+          git config --global user.name "CI Test Runner"
+          git config --global user.email "ci-tests@example.invalid"
+
+      - name: Smoke install, upgrade and git hooks with /bin/bash
+        run: |
+          set -o pipefail
+          smoke="$RUNNER_TEMP/macos-smoke"
+          mkdir -p "$smoke/home" "$smoke/project" "$smoke/bin"
+          # install.sh preflight requires the agent CLI on PATH; stub it the
+          # same way tests/setup_suite.bash does for the Bats files.
+          printf '#!/usr/bin/env bash\nexit 0\n' > "$smoke/bin/claude"
+          chmod +x "$smoke/bin/claude"
+          export PATH="$smoke/bin:$PATH"
+          git -C "$smoke/project" init -q -b main
+          install_args=(--project-only --target "$smoke/project"
+            --project-name SmokeProject --tracking stealth)
+
+          HOME="$smoke/home" /bin/bash ./install.sh "${install_args[@]}" \
+            --strategy merge </dev/null
+          HOME="$smoke/home" /bin/bash ./install.sh "${install_args[@]}" \
+            --strategy upgrade </dev/null | tee "$smoke/upgrade.log"
+          grep -q '^RIG_UPGRADE_REVIEW_REQUIRED=0$' "$smoke/upgrade.log"
+
+          for hook in pre-commit commit-msg post-commit post-merge; do
+            test -x "$smoke/project/.git/hooks/$hook"
+          done
+          git -C "$smoke/project" checkout -q -b chore/macos-smoke
+          # Guarded policy makes the hooks do observable work: commit-msg ages
+          # the approval sentinel with `stat -f %m` and consumes it, and
+          # post-commit appends a PROGRESS.md stub naming the new SHA. Both
+          # hooks exit 0 on many failure paths, so assert on those artifacts
+          # rather than on the commit's exit status alone.
+          rig_dir="$(cat "$smoke/project/.rigpath")"
+          touch "$rig_dir/memory/.rig-commit-ok"
+          # HOME is sandboxed, so the global test identity is not visible.
+          HOME="$smoke/home" RIG_COMMIT_POLICY=guarded \
+            git -C "$smoke/project" \
+            -c user.name="CI Test Runner" -c user.email="ci-tests@example.invalid" \
+            commit --allow-empty -m "chore(ci): macOS hook smoke [#669]"
+          test ! -e "$rig_dir/memory/.rig-commit-ok"
+          head_sha="$(git -C "$smoke/project" rev-parse HEAD)"
+          grep -F "chore(ci): macOS hook smoke [#669] [$head_sha]" \
+            "$rig_dir/memory/PROGRESS.md"
+
+      - name: Run macOS portability subset
+        run: |
+          bats \
+            tests/test_install_idempotence.bats \
+            tests/test_base_branch_manifest_freshness.bats \
+            tests/test_codex_config_merge.bats \
+            tests/test_upgrade_recovery.bats \
+            tests/test_security_recovery_gates.bats \
+            tests/test_hook_lifecycle.bats \
+            tests/test_commit_policy_runtime.bats \
+            tests/test_commit_attribution.bats \
+            tests/test_precommit_skip_list.bats \
+            tests/test_provider_reminders.bats \
+            tests/test_contextual_tips.bats
+
   static:
     name: shell and static checks
     runs-on: ubuntu-24.04
