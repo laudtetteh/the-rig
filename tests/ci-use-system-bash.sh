@@ -2,10 +2,11 @@
 # Make macOS system bash 3.2 (/bin/bash) the first `bash` on PATH for every
 # later GitHub Actions step (issue #669).
 #
-# GitHub's macOS runner images ship Homebrew bash 5.x ahead of /bin/bash on
-# PATH. bats, every Bats test file, install.sh and the Rig hooks all start via
-# `#!/usr/bin/env bash` or a bare `bash ...` call, so without this shim the
-# macOS job would silently exercise bash 5 and never catch bash 3.2 breakage.
+# bats, every Bats test file, install.sh and the Rig hooks all start via
+# `#!/usr/bin/env bash` or a bare `bash ...` call, so any Homebrew bash 5.x
+# ahead of /bin/bash on PATH (common on developer Macs, possible on future
+# runner images) would make the macOS job silently exercise bash 5 and never
+# catch bash 3.2 breakage. The shim pins it regardless of the image.
 # A shim directory holding only `bash -> /bin/bash` is prepended through
 # GITHUB_PATH so the rest of the PATH (python3, jq, git) is left untouched.
 #

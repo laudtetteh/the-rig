@@ -84,9 +84,10 @@ jobs:
     # exists to run install, upgrade, recovery and hook paths under macOS
     # system bash 3.2 with BSD sed/stat/mktemp/tail, which Ubuntu never does.
     #
-    # Bash 3.2 enforcement: macOS runner images put Homebrew bash 5.x ahead of
-    # /bin/bash on PATH, and bats, every test file, install.sh and the hooks
-    # all start via `#!/usr/bin/env bash` or bare `bash`. The
+    # Bash 3.2 enforcement: bats, every test file, install.sh and the hooks
+    # all start via `#!/usr/bin/env bash` or bare `bash`, so any Homebrew
+    # bash 5.x ahead of /bin/bash on PATH (common on developer Macs, and
+    # possible on future runner images) would silently replace 3.2. The
     # tests/ci-use-system-bash.sh step prepends a shim dir holding only
     # `bash -> /bin/bash`, and the "Prove bats runs under bash 3.2" step fails
     # the job if a Bats test body sees anything other than BASH_VERSINFO 3.2.
@@ -155,7 +156,12 @@ jobs:
         run: |
           set -o pipefail
           smoke="$RUNNER_TEMP/macos-smoke"
-          mkdir -p "$smoke/home" "$smoke/project"
+          mkdir -p "$smoke/home" "$smoke/project" "$smoke/bin"
+          # install.sh preflight requires the agent CLI on PATH; stub it the
+          # same way tests/setup_suite.bash does for the Bats files.
+          printf '#!/usr/bin/env bash\nexit 0\n' > "$smoke/bin/claude"
+          chmod +x "$smoke/bin/claude"
+          export PATH="$smoke/bin:$PATH"
           git -C "$smoke/project" init -q -b main
           install_args=(--project-only --target "$smoke/project"
             --project-name SmokeProject --tracking stealth)
