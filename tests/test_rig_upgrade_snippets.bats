@@ -220,6 +220,36 @@ INSTALLER_SRC='$REPO_ROOT'")
   [ "$output" = "TRACKING=local HOOKS=.husky ARGS=--tracking local" ]
 }
 
+_detect_base_branch() {
+  local script
+  script=$(_snippet_script "$RIG_UPGRADE" 'TRACKING_ARGS=(--tracking "$TRACKING")' "REPO='$PROJECT'
+INSTALLER_SRC='$REPO_ROOT'")
+  printf 'echo "BASE=$BASE_BRANCH"\n' >> "$script"
+  /bin/bash "$script"
+}
+
+@test "rig-upgrade 1c: base branch comes from CLAUDE.md before origin/HEAD" {
+  git -C "$PROJECT" commit -q --allow-empty -m initial
+  git -C "$PROJECT" update-ref refs/remotes/origin/trunk HEAD
+  git -C "$PROJECT" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+  run _detect_base_branch
+  [ "$status" -eq 0 ]
+  [ "$output" = "BASE=trunk" ]
+
+  printf 'base-branch: release/v2  # integration\n' > "$PROJECT/CLAUDE.md"
+  run _detect_base_branch
+  [ "$status" -eq 0 ]
+  [ "$output" = "BASE=release/v2" ]
+
+  printf 'base-branch: [BASE_BRANCH]\n' > "$PROJECT/CLAUDE.md"
+  run _detect_base_branch
+  [ "$output" = "BASE=trunk" ]
+
+  printf 'base-branch: develop\nbase-branch: main\n' > "$PROJECT/CLAUDE.md"
+  run _detect_base_branch
+  [[ "$output" == *"sets base-branch: more than once"* ]] || false
+}
+
 _stage_fixture() {
   printf 'ignored-by-project.txt\n' > "$PROJECT/.gitignore"
   mkdir -p "$PROJECT/.rig/processes" "$PROJECT/.rig/memory" "$PROJECT/.claude/commands" \
@@ -473,6 +503,7 @@ cd '$PROJECT'")
   run /bin/bash "$script"
   [ "$status" -eq 0 ]
   [[ "$output" == *"ARG[--tracking]"*"ARG[stealth]"*"ARG[--rig-dir]"*"ARG[$rig_dir]"* ]] || false
+  [[ "$output" == *"ARG[--base-branch]"*"ARG[main]"* ]] || false
   [[ "$output" == *"install.sh exited 3"* ]] || false
   log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
   [ -f "$log" ]

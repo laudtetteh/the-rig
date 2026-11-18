@@ -189,7 +189,7 @@ fi
 # workflow files with a different one (issue #659). When CLAUDE.md sets
 # base-branch: more than once, omit the flag so install.sh stops with its
 # ambiguity error instead of this step guessing a value.
-BASE_BRANCH=$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$REPO/CLAUDE.md" 2>/dev/null | head -1)
+BASE_BRANCH=$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$REPO/CLAUDE.md" 2>/dev/null | head -1 || true)
 if [[ -z "$BASE_BRANCH" || "$BASE_BRANCH" == "[BASE_BRANCH]" ]]; then
   BASE_BRANCH=$(git -C "$REPO" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's|^refs/remotes/origin/||' || true)
 fi

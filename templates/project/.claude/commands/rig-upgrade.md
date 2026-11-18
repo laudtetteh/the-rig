@@ -535,7 +535,6 @@ if [[ -z "$BASE_BRANCH" || "$BASE_BRANCH" == "[BASE_BRANCH]" ]]; then
   BASE_BRANCH=$(git -C "$REPO" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's|^refs/remotes/origin/||' || true)
 fi
 BASE_BRANCH="${BASE_BRANCH:-main}"
-echo "Base branch: $BASE_BRANCH"
 ```
 
 If this printed `❌ … more than once`, stop here: show the user the listed
