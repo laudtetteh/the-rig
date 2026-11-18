@@ -42,16 +42,44 @@ fi
 If `$INSTALLER_SRC/install.sh` is missing, stop and tell the user the installer
 source is unavailable. Do not continue from the project-local command.
 
-4. Refresh the installer source before using any upgrade instructions from it:
+4. Check which branch the installer checkout is on before refreshing it. Never
+   switch branches silently — a `RIG_INSTALLER_SRC` checkout on a feature
+   branch may be deliberate:
 
 ```bash
-if [[ -d "$INSTALLER_SRC/.git" ]]; then
-  git -C "$INSTALLER_SRC" checkout main
-  git -C "$INSTALLER_SRC" pull --ff-only origin main
+INSTALLER_IS_GIT=false
+INSTALLER_BRANCH=""
+if git -C "$INSTALLER_SRC" rev-parse --git-dir >/dev/null 2>&1; then
+  INSTALLER_IS_GIT=true
+  INSTALLER_BRANCH=$(git -C "$INSTALLER_SRC" branch --show-current 2>/dev/null || echo "")
 fi
 ```
 
-If the checkout or pull fails, stop and report the failure. Do not run a project
+- If `$INSTALLER_IS_GIT` is `false`: there is nothing to refresh; continue
+  with the checkout as-is.
+- If `$INSTALLER_BRANCH` is empty (detached HEAD): warn that the installer
+  source is detached and ask whether to continue from it unchanged. Wait for
+  the user's response; stop if they decline.
+- If `$INSTALLER_BRANCH` is not `main`: say exactly —
+  > "⚠️ Installer source `$INSTALLER_SRC` is on branch '`$INSTALLER_BRANCH`',
+  > not `main`. Upgrading from a non-stable branch may install unreviewed
+  > changes. Switch to `main` and pull, or proceed on '`$INSTALLER_BRANCH`'
+  > as-is?"
+  Wait for the user's response. Only if they choose to switch, run:
+
+```bash
+git -C "$INSTALLER_SRC" checkout main && git -C "$INSTALLER_SRC" pull --ff-only origin main
+```
+
+  If they choose to proceed as-is, do not checkout or pull (pulling `main`
+  into another branch would merge unrelated history into it).
+- If `$INSTALLER_BRANCH` is `main`: refresh it:
+
+```bash
+git -C "$INSTALLER_SRC" pull --ff-only origin main
+```
+
+If a checkout or pull fails, stop and report the failure. Do not run a project
 upgrade from stale command text unless the user explicitly tells you to proceed.
 
 5. Export the resolved installer source so the delegated latest project command

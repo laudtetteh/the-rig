@@ -2,7 +2,7 @@
 
 Upgrades The Rig in this project to the latest version available in the installer source.
 
-Handles all known upgrade scenarios: repo, external, and stealth tracking; user-modified
+Handles all known upgrade scenarios: repo, local, external, and stealth tracking; user-modified
 files; global layer; VERSION staleness; and settings.json deduplication. Each phase is
 gated — survey before touching anything, confirm before committing.
 
@@ -317,10 +317,15 @@ INSTALLER_VERSION=$(cat "$INSTALLER_SRC/VERSION" 2>/dev/null || echo "unknown")
 - If `$INSTALLER_BRANCH` is not `main`: say exactly —
   > "⚠️ Installer source is on branch '`$INSTALLER_BRANCH`', not `main`.
   > Upgrading from a non-stable branch may install unreviewed changes.
-  > Switch with: `git -C $INSTALLER_SRC checkout main && git pull origin main`
+  > Switch with: `git -C "$INSTALLER_SRC" checkout main && git -C "$INSTALLER_SRC" pull --ff-only origin main`
   > Proceed anyway?" 
   Wait for the user's response.
 - If `$INSTALLER_BRANCH == main`: proceed.
+
+Record the outcome as `INSTALLER_ON_MAIN=true` when `$INSTALLER_BRANCH` is
+`main`, and `INSTALLER_ON_MAIN=false` when the user chose to proceed on another
+branch or a detached HEAD. Phase 1a reads it so it never pulls `main` into a
+non-`main` installer branch.
 
 Report what version will be installed:
 > "Upgrading: **$CURRENT_VERSION → $INSTALLER_VERSION**"
@@ -340,9 +345,23 @@ CLAUDE_MD="$REPO/CLAUDE.md"
 if [[ -f "$CLAUDE_MD" ]]; then
   # Local, self-contained tracking-mode detection (Phase 1c computes the
   # same value later for the rest of the command; duplicated here rather
-  # than referenced forward, since Phase 0e always runs first).
+  # than referenced forward, since Phase 0e always runs first). Mirrors
+  # install.sh's own upgrade auto-detection: a .rigpath under
+  # $HOME/.rig/projects/ is stealth, any other .rigpath is external; without
+  # a .rigpath, a git-tracked .rig/ is repo and a .rig/ excluded via
+  # .git/info/exclude or .gitignore is local.
   if [[ -f "$REPO/.rigpath" ]]; then
-    if [[ -d "$REPO/.husky" ]]; then TRACKING="external"; else TRACKING="stealth"; fi
+    _rigpath_dir=$(tr -d '[:space:]' < "$REPO/.rigpath")
+    if [[ "$_rigpath_dir" == "$HOME/.rig/projects/"* ]]; then
+      TRACKING="stealth"
+    else
+      TRACKING="external"
+    fi
+  elif [[ -n "$(git -C "$REPO" ls-files -- .rig/ 2>/dev/null)" ]]; then
+    TRACKING="repo"
+  elif grep -qF '.rig/' "$REPO/.git/info/exclude" 2>/dev/null \
+       || grep -qF '.rig/' "$REPO/.gitignore" 2>/dev/null; then
+    TRACKING="local"
   else
     TRACKING="repo"
   fi
@@ -350,9 +369,9 @@ if [[ -f "$CLAUDE_MD" ]]; then
   # Check for stealth-style absolute paths (e.g. /Users/name/.rig/projects/)
   STEALTH_PATHS=$(grep -E '/\.rig/projects/' "$CLAUDE_MD" 2>/dev/null || true)
 
-  if [[ -n "$STEALTH_PATHS" && "$TRACKING" == "repo" ]]; then
+  if [[ -n "$STEALTH_PATHS" && ( "$TRACKING" == "repo" || "$TRACKING" == "local" ) ]]; then
     echo "⚠️  Path mismatch in CLAUDE.md:"
-    echo "   CLAUDE.md contains absolute stealth paths but this is a repo-tracked install."
+    echo "   CLAUDE.md contains absolute stealth paths but this is a $TRACKING-tracked install (.rig/ lives in the repo)."
     echo "   These paths point to a directory that likely does not exist:"
     echo "$STEALTH_PATHS" | head -5
     echo ""
@@ -381,7 +400,7 @@ Then confirm: "CLAUDE.md paths corrected to relative `.rig/` references."
 
 If user chooses **[s]**: note the skip and continue.
 
-If CLAUDE.md does not exist, or tracking is not `repo`, or no stealth paths found: skip silently.
+If CLAUDE.md does not exist, or tracking is not `repo` or `local`, or no stealth paths found: skip silently.
 
 ---
 
@@ -392,13 +411,25 @@ If CLAUDE.md does not exist, or tracking is not `repo`, or no stealth paths foun
 
 ### 1a — Pull installer source to latest
 
-If `$INSTALLER_SRC` is NOT `$REPO`:
+If `$INSTALLER_SRC` is NOT `$REPO` and Phase 0d recorded `INSTALLER_ON_MAIN=true`:
 
 ```bash
-git -C "$INSTALLER_SRC" pull origin main 2>&1
+# Always -C the installer checkout: a bare `git pull` here would run in the
+# project and fast-forward the user's own branch instead.
+if ! git -C "$INSTALLER_SRC" pull --ff-only origin main 2>&1; then
+  echo "❌ Could not fast-forward $INSTALLER_SRC to origin/main."
+fi
 INSTALLER_VERSION=$(cat "$INSTALLER_SRC/VERSION" 2>/dev/null || echo "unknown")
 echo "Installer now at: $INSTALLER_VERSION"
 ```
+
+If the fast-forward fails, stop and report the output; do not upgrade from a
+checkout that diverged from `origin/main` unless the user explicitly says to
+proceed.
+
+If the user chose in Phase 0d to proceed on a non-`main` branch or detached
+HEAD (`INSTALLER_ON_MAIN=false`): skip the pull — pulling `main` into that
+branch would merge unrelated history into it. Upgrade from the checkout as-is.
 
 If `$INSTALLER_SRC` IS `$REPO`: skip — dev repo is already on the correct state.
 
@@ -434,19 +465,46 @@ were modified." and stop. Do not proceed to 1c.
 
 ### 1c — Detect tracking mode and key paths
 
+Mirror install.sh's own tracking-mode rules exactly (install.sh decides by
+the `.rigpath` target and by git state, never by whether `.husky/` exists):
+
+| Mode | install.sh rule | `.rig/` lives at | Git hooks |
+|---|---|---|---|
+| `stealth` | `.rigpath` points under `$HOME/.rig/projects/` | `.rigpath` target | `.git/hooks/` (manifest-managed by install.sh) |
+| `external` | `.rigpath` points anywhere else | `.rigpath` target | `.husky/` (tracked) |
+| `repo` | no `.rigpath`; `.rig/` is git-tracked | `$REPO/.rig` | `.husky/` (tracked) |
+| `local` | no `.rigpath`; `.rig/` is in `.git/info/exclude` or `.gitignore` | `$REPO/.rig` (excluded) | `.husky/` (tracked) |
+
 ```bash
 # Tracking mode
 if [[ -f "$REPO/.rigpath" ]]; then
-  if [[ -d "$REPO/.husky" ]]; then
-    TRACKING="external"
-    HOOKS_DIR="$REPO/.husky"
-  else
+  RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+  if [[ "$RIG_DIR" == "$HOME/.rig/projects/"* ]]; then
     TRACKING="stealth"
     HOOKS_DIR="$REPO/.git/hooks"
+  else
+    TRACKING="external"
+    HOOKS_DIR="$REPO/.husky"
   fi
 else
-  TRACKING="repo"
+  RIG_DIR="$REPO/.rig"
   HOOKS_DIR="$REPO/.husky"
+  if [[ -n "$(git -C "$REPO" ls-files -- .rig/ 2>/dev/null)" ]]; then
+    TRACKING="repo"
+  elif grep -qF '.rig/' "$REPO/.git/info/exclude" 2>/dev/null \
+       || grep -qF '.rig/' "$REPO/.gitignore" 2>/dev/null; then
+    TRACKING="local"
+  else
+    TRACKING="repo"
+  fi
+fi
+
+# install.sh requires --rig-dir for external tracking, and without it would
+# default a stealth install to $HOME/.rig/projects/<project-name> instead of
+# the directory .rigpath already points at -- always pass the resolved one.
+TRACKING_ARGS=(--tracking "$TRACKING")
+if [[ "$TRACKING" == "stealth" || "$TRACKING" == "external" ]]; then
+  TRACKING_ARGS+=(--rig-dir "$RIG_DIR")
 fi
 
 TEMPLATES="$INSTALLER_SRC/templates/project"
@@ -468,7 +526,7 @@ counted in the installer's `UPGRADE_*_COUNT` bookkeeping).
 
 ```bash
 AGENT_PLAN_JSON=$(bash "$INSTALLER_SRC/install.sh" --project-only \
-  --target "$REPO" --tracking "$TRACKING" --strategy agent-plan)
+  --target "$REPO" "${TRACKING_ARGS[@]}" --strategy agent-plan)
 AGENT_PLAN_STATUS=$?
 ```
 
@@ -745,7 +803,7 @@ Then continue to **2a-agent** if `UPGRADE_MODE=agent`, or **2a-classic** if
 
 ```bash
 AGENT_UPGRADE_JSON=$(bash "$INSTALLER_SRC/install.sh" --project-only \
-  --target "$REPO" --tracking "$TRACKING" --strategy agent-upgrade)
+  --target "$REPO" "${TRACKING_ARGS[@]}" --strategy agent-upgrade)
 AGENT_UPGRADE_STATUS=$?
 echo "$AGENT_UPGRADE_JSON" | python3 -m json.tool  # pretty-print for the user
 ```
@@ -844,6 +902,7 @@ meaningful.
 installer_output=$("$INSTALLER_SRC/install.sh" \
   --project-only \
   --strategy upgrade \
+  "${TRACKING_ARGS[@]}" \
   --target "$REPO" 2>&1)
 echo "$installer_output"  # show full output to user
 ```
@@ -901,14 +960,60 @@ For each file the installer reported as `"Customized file detected:"`:
 4. If user chooses **[a]**: copy the template (with substitutions) over the installed file
    at `$installed_path` (resolved in step 1 above — the external `$RIG_DIR` path for
    `.rig/`-prefixed files in stealth/external tracking, `$REPO/$rel` otherwise).
-   Then update the manifest entry and record the result:
-   ```bash
-   NEW_HASH=$(shasum -a 256 "$installed_path" 2>/dev/null | awk '{print $1}')
-   # Replace the old hash line in .rig-manifest
-   sed -i '' "/$rel$/s/^[a-f0-9]* /$NEW_HASH /" "$MANIFEST" 2>/dev/null || \
-   sed -i "/$rel$/s/^[a-f0-9]* /$NEW_HASH /" "$MANIFEST"
-   CUSTOMIZED_ACCEPTED+=("$rel")
-   ```
+   Then update the manifest entry and record the result. `$rel` contains `/`
+   and `.`, so never splice it into a `sed` address or regex (that errors on
+   BSD sed and, on GNU sed, silently rewrites every manifest line containing
+   `.claude`); this structured update matches the path field exactly and works
+   the same on macOS and Linux (the block is flush-left on purpose: the
+   embedded Python is indentation-sensitive):
+
+```bash
+MANIFEST="$RIG_DIR/memory/.rig-manifest"
+REL="$rel"
+python3 - "$MANIFEST" "$REL" "$installed_path" <<'PY'
+import hashlib, json, os, sys, tempfile
+
+manifest, rel, artifact = sys.argv[1:]
+with open(artifact, "rb") as fh:
+    digest = hashlib.sha256(fh.read()).hexdigest()
+
+def write_atomic(path, text):
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text)
+    os.chmod(tmp, os.stat(path).st_mode & 0o777)
+    os.replace(tmp, path)
+
+# Flat manifest: "<sha256>  <rel>" lines. Match the path field exactly --
+# never as a regex -- so "/" and "." in $REL cannot corrupt other entries.
+out, found = [], False
+with open(manifest) as fh:
+    for line in fh.read().splitlines():
+        fields = line.split(None, 1)
+        if not line.startswith("#") and len(fields) == 2 and fields[1] == rel:
+            if not found:
+                out.append(digest + "  " + rel)
+            found = True
+            continue
+        out.append(line)
+if not found:
+    out.append(digest + "  " + rel)
+write_atomic(manifest, "\n".join(out) + "\n")
+
+# Metadata sidecar (.rig-manifest.json), when present: keep its hash in sync
+# so bin/rig doctor's manifest_mode_hash gate agrees with the flat manifest.
+meta = manifest + ".json"
+if os.path.exists(meta):
+    with open(meta) as fh:
+        data = json.load(fh)
+    entry = data.get("entries", {}).get(rel)
+    if isinstance(entry, dict):
+        entry["sha256"] = digest
+        write_atomic(meta, json.dumps(data, indent=2, sort_keys=True) + "\n")
+print("manifest: " + rel + " -> " + digest)
+PY
+CUSTOMIZED_ACCEPTED+=("$rel")
+```
 
 5. If user chooses **[k]**: log a note and move on:
    ```bash
@@ -923,23 +1028,42 @@ substitution differs (expected)."
    SKIPPED_BASE_BRANCH+=("$rel")
    ```
 
-### 2c — Stealth: update `.git/hooks/`
+### 2c — Stealth: verify `.git/hooks/` (read-only)
 
-If `$TRACKING == stealth`, the installer does not update `.git/hooks/` directly (it writes
-to `.husky/` which doesn't exist in stealth projects). Apply hook updates manually:
+If `$TRACKING == stealth`, install.sh itself already wrote the stealth git hooks
+to `.git/hooks/` during Phase 2 (under every strategy). Those writes are
+manifest-tracked and customization-aware: an unmodified hook is updated, a
+customized or foreign hook is backed up first in classic mode and refused (and
+listed in `conflicts[]`) in agent mode, and `--skip-git-hooks` suppresses them
+entirely. Do **not** `cp` templates over `.git/hooks/` here — that bypasses the
+manifest, the backup, and the customization refusal, and silently destroys a
+hook the user customized.
+
+Only report the resulting state:
 
 ```bash
-for f in pre-commit commit-msg post-commit post-merge filter-commit-message-inplace.sh; do
-  tpl="$TEMPLATES/.husky/$f"
-  dest="$REPO/.git/hooks/$f"
-  [[ -f "$tpl" ]] || continue
-  if ! diff -q "$tpl" "$dest" >/dev/null 2>&1; then
-    cp "$tpl" "$dest"
-    chmod +x "$dest"
-    echo "Updated .git/hooks/$f"
-  fi
-done
+if [[ "$TRACKING" == "stealth" ]]; then
+  for f in pre-commit commit-msg post-commit post-merge filter-commit-message-inplace.sh; do
+    tpl="$TEMPLATES/.husky/$f"
+    dest="$REPO/.git/hooks/$f"
+    [[ -f "$tpl" ]] || continue
+    if [[ ! -f "$dest" ]]; then
+      echo "missing:    .git/hooks/$f"
+    elif cmp -s "$tpl" "$dest"; then
+      echo "up-to-date: .git/hooks/$f"
+    else
+      echo "differs:    .git/hooks/$f"
+    fi
+  done
+fi
 ```
+
+For any hook reported `differs` or `missing`, do not repair it by hand: it is
+either listed in the agent-mode `conflicts[]` (follow its `repair_guidance`)
+or was a customized hook kept in classic mode. To accept the template version
+deliberately, re-run `install.sh --project-only --strategy upgrade
+"${TRACKING_ARGS[@]}" --target "$REPO"`, which backs the customized hook up to
+`.rig-backup/` before replacing it and records the new manifest hash.
 
 ---
 
@@ -953,15 +1077,60 @@ EXPECTED_VERSION=$(cat "$INSTALLER_SRC/VERSION")
 ```
 
 - If `$INSTALLED_VERSION == $EXPECTED_VERSION`: ✓ say so.
-- If they differ: fix it:
-  ```bash
-  echo "$EXPECTED_VERSION" > "$RIG_DIR/VERSION"
-  NEW_HASH=$(shasum -a 256 "$RIG_DIR/VERSION" | awk '{print $1}')
-  sed -i '' "/\.rig\/VERSION$/s/^[a-f0-9]* /$NEW_HASH /" "$MANIFEST" 2>/dev/null || \
-  sed -i "/\.rig\/VERSION$/s/^[a-f0-9]* /$NEW_HASH /" "$MANIFEST"
-  echo "Fixed .rig/VERSION: $INSTALLED_VERSION → $EXPECTED_VERSION"
-  FIXED+=(".rig/VERSION: $INSTALLED_VERSION → $EXPECTED_VERSION")
-  ```
+- If they differ: fix it (block flush-left because the embedded Python is
+  indentation-sensitive; the manifest update matches the path field exactly
+  instead of splicing it into a `sed` regex):
+
+```bash
+echo "$EXPECTED_VERSION" > "$RIG_DIR/VERSION"
+MANIFEST="$RIG_DIR/memory/.rig-manifest"
+REL=".rig/VERSION"
+installed_path="$RIG_DIR/VERSION"
+python3 - "$MANIFEST" "$REL" "$installed_path" <<'PY'
+import hashlib, json, os, sys, tempfile
+
+manifest, rel, artifact = sys.argv[1:]
+with open(artifact, "rb") as fh:
+    digest = hashlib.sha256(fh.read()).hexdigest()
+
+def write_atomic(path, text):
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text)
+    os.chmod(tmp, os.stat(path).st_mode & 0o777)
+    os.replace(tmp, path)
+
+# Flat manifest: "<sha256>  <rel>" lines. Match the path field exactly --
+# never as a regex -- so "/" and "." in $REL cannot corrupt other entries.
+out, found = [], False
+with open(manifest) as fh:
+    for line in fh.read().splitlines():
+        fields = line.split(None, 1)
+        if not line.startswith("#") and len(fields) == 2 and fields[1] == rel:
+            if not found:
+                out.append(digest + "  " + rel)
+            found = True
+            continue
+        out.append(line)
+if not found:
+    out.append(digest + "  " + rel)
+write_atomic(manifest, "\n".join(out) + "\n")
+
+# Metadata sidecar (.rig-manifest.json), when present: keep its hash in sync
+# so bin/rig doctor's manifest_mode_hash gate agrees with the flat manifest.
+meta = manifest + ".json"
+if os.path.exists(meta):
+    with open(meta) as fh:
+        data = json.load(fh)
+    entry = data.get("entries", {}).get(rel)
+    if isinstance(entry, dict):
+        entry["sha256"] = digest
+        write_atomic(meta, json.dumps(data, indent=2, sort_keys=True) + "\n")
+print("manifest: " + rel + " -> " + digest)
+PY
+echo "Fixed .rig/VERSION: $INSTALLED_VERSION → $EXPECTED_VERSION"
+FIXED+=(".rig/VERSION: $INSTALLED_VERSION → $EXPECTED_VERSION")
+```
 
 ### 3b — settings.json deduplication check
 
@@ -1225,18 +1394,75 @@ test -f "$REPO/.agents/skills/post-merge/SKILL.md"
 test -f "$REPO/.agents/skills/post-merge/references/command.md"
 ```
 
-If any check fails, regenerate the mirrors from the canonical Claude command
-sources with the installer generator, then re-run the checks:
+If any check fails, first compute the mirror set this project should have,
+using the same opt-in selection as install.sh's `should_install_codex_command`
+(the feature-docs and contribute command families are mirrored only when that
+opt-in is already installed in this project). Generate into a temporary
+staging directory and compare — never generate straight into
+`$REPO/.agents/skills`: existing mirrors are manifest-tracked (a customized one
+must not be overwritten) and the generator refuses to write over existing
+skill files anyway. This block uses no `mapfile`, so it runs on macOS's stock
+bash 3.2:
 
 ```bash
-mapfile -d '' CODEX_COMMAND_SOURCES < <(find "$INSTALLER_SRC/templates/project/.claude/commands" \
-  -maxdepth 1 -type f -name '*.md' -print0)
+_rig_optin_installed() {
+  local name
+  for name in "$@"; do
+    if [[ -f "$REPO/.claude/commands/$name.md" || -f "$REPO/.agents/skills/$name/SKILL.md" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+FEATURE_DOCS=false
+CONTRIBUTE=false
+_rig_optin_installed doc-feature doc-list feature-context refresh-feature-doc && FEATURE_DOCS=true
+_rig_optin_installed rig-gaps rig-propose && CONTRIBUTE=true
+
+CODEX_COMMAND_SOURCES=()
+for src in "$INSTALLER_SRC/templates/project/.claude/commands/"*.md; do
+  [[ -f "$src" ]] || continue
+  case "$(basename "$src" .md)" in
+    doc-feature|doc-list|feature-context|refresh-feature-doc)
+      [[ "$FEATURE_DOCS" == true ]] || continue ;;
+    rig-gaps|rig-propose)
+      [[ "$CONTRIBUTE" == true ]] || continue ;;
+  esac
+  CODEX_COMMAND_SOURCES+=("$src")
+done
+
+CODEX_STAGE=$(mktemp -d)
 python3 "$INSTALLER_SRC/installer/generate-codex-skills.py" \
-  --output "$REPO/.agents/skills" \
+  --output "$CODEX_STAGE" \
   --base-branch "$BASE_BRANCH" \
   --skills-source "$INSTALLER_SRC/templates/project/.claude/skills" \
   "${CODEX_COMMAND_SOURCES[@]}"
+
+(cd "$CODEX_STAGE" && find . -type f | sed 's|^\./||' | sort) | while IFS= read -r rel; do
+  if [[ ! -f "$REPO/.agents/skills/$rel" ]]; then
+    echo "missing: .agents/skills/$rel"
+  elif ! cmp -s "$CODEX_STAGE/$rel" "$REPO/.agents/skills/$rel"; then
+    echo "differs: .agents/skills/$rel"
+  fi
+done
+rm -rf "$CODEX_STAGE"
 ```
+
+If any mirror is `missing`, restore it through install.sh — it regenerates
+exactly the selected skills, writes them through its manifest-aware copy, and
+records each one in the manifest — then re-run the checks:
+
+```bash
+REPAIR_ARGS=()
+[[ "$FEATURE_DOCS" == true ]] && REPAIR_ARGS+=(--feature-docs)
+[[ "$CONTRIBUTE" == true ]] && REPAIR_ARGS+=(--contribute)
+bash "$INSTALLER_SRC/install.sh" --project-only --target "$REPO" \
+  "${TRACKING_ARGS[@]}" ${REPAIR_ARGS[@]+"${REPAIR_ARGS[@]}"} --strategy agent-upgrade
+```
+
+A mirror reported as `differs` is a customized (manifest-protected) mirror
+that install.sh already reported in `conflicts[]` or as a customized file;
+leave it alone and follow that guidance instead of overwriting it.
 
 Do not patch generated `.agents/skills/*/references/command.md` files by hand
 without making the matching canonical `.claude/commands/*.md` change first.
@@ -1249,40 +1475,99 @@ Count the total modified files:
 TOTAL_CHANGED=$((${#UPGRADED[@]} + ${#CONVERGED[@]} + ${#CUSTOMIZED_ACCEPTED[@]} + ${#FIXED[@]}))
 ```
 
-If `$TRACKING == stealth` (or `external`), the branch/commit/PR recommendation
-below does not apply: `.claude/` and `.rig/` are wholesale excluded from git
-via `.git/info/exclude` in stealth/external tracking, so there is nothing to
-branch, stage, or commit for those paths, regardless of `$TOTAL_CHANGED`. Say
-instead:
-> "**Commit strategy:** N/A — this is a `$TRACKING`-tracked project.
-> `.claude/`/`.rig/` changes made by this upgrade are excluded from git
-> entirely; there is nothing to commit for them."
-and skip the rest of this phase.
+What is committable depends on the tracking mode, using the same rules as
+Phase 1c (which mirror install.sh):
 
-If `$TRACKING == repo` and `$TOTAL_CHANGED` > 3:
+- **`stealth`** — every Rig artifact (`.claude/`, `.agents/`, `.codex/`,
+  `bin/rig*`, `CLAUDE.md`, `.rigpath`, ...) is listed in `.git/info/exclude`,
+  `.rig/` lives outside the repo, and hooks live in `.git/hooks/`. There is
+  nothing to commit. Say:
+  > "**Commit strategy:** N/A — this is a stealth-tracked project. Every file
+  > this upgrade changed is excluded from git or lives outside the repo;
+  > there is nothing to commit."
+  and skip the rest of this phase.
+- **`external`** — `.rig/` lives outside the repo (only `.rigpath` is
+  excluded), but `.claude/`, `.husky/`, `.agents/skills/`, `.codex/`, and
+  `bin/rig*` are ordinary tracked project files. Commit those.
+- **`local`** — `.rig/` is excluded via `.git/info/exclude` (or
+  `.gitignore`); never stage it. `.claude/`, `.husky/`, `.agents/skills/`,
+  `.codex/`, and `bin/rig*` are tracked. Commit those.
+- **`repo`** — the Rig-owned `.rig/` paths (`processes/`, `rules/`,
+  `VERSION`, and the manifest) are tracked too. Commit them along with the
+  project-level paths.
 
-> "**Commit strategy:** `$TOTAL_CHANGED` files were modified — use a branch and PR,
-> even if `housekeeping: direct-push` is set:
->
-> ```bash
-> git checkout -b chore/rig-upgrade-$EXPECTED_VERSION
-> git add -f .claude/ .husky/ .rig/processes/ .rig/rules/ .rig/VERSION
-> ROOT=$(git rev-parse --show-toplevel)
-> RIG_DIR="$ROOT/.rig"
-> if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; fi
-> touch "$RIG_DIR/memory/.rig-commit-ok"  # after user approval
-> RIG_COMMIT_POLICY=guarded git commit -m "chore(rig): upgrade to The Rig $EXPECTED_VERSION [#N]"
-> gh pr create --title "chore(rig): upgrade to $EXPECTED_VERSION" ...
-> ```
->
-> `housekeeping: direct-push` applies to memory commits (PROGRESS.md, task file moves)
-> — not to upgrades that modify hooks, commands, and process files."
+For `repo`, `local`, and `external`, recommend the branch strategy first:
 
-If `$TRACKING == repo` and `$TOTAL_CHANGED` <= 3:
+- `$TOTAL_CHANGED` > 3: "**Commit strategy:** `$TOTAL_CHANGED` files were
+  modified — use a branch and PR, even if `housekeeping: direct-push` is set.
+  `housekeeping: direct-push` applies to memory commits (PROGRESS.md, task
+  file moves) — not to upgrades that modify hooks, commands, and process
+  files."
+- `$TOTAL_CHANGED` <= 3: "**Commit strategy:** Only `$TOTAL_CHANGED` file(s)
+  changed — a direct `chore(rig): upgrade to $EXPECTED_VERSION [#N]` commit to
+  `$BASE_BRANCH` is acceptable if `housekeeping: direct-push` is set;
+  otherwise use a branch and PR."
 
-> "**Commit strategy:** Only `$TOTAL_CHANGED` file(s) changed — a direct
-> `chore(rig): upgrade to $EXPECTED_VERSION [#N]` commit to `$BASE_BRANCH`
-> is acceptable if `housekeeping: direct-push` is set."
+When the user wants to commit, run these steps in order.
+
+1. **Branch** (skip only for an accepted direct commit to `$BASE_BRANCH`):
+
+```bash
+cd "$REPO"
+UPGRADE_BRANCH="chore/rig-upgrade-$EXPECTED_VERSION"
+git checkout -b "$UPGRADE_BRANCH"
+```
+
+2. **Stage only Rig-managed paths, never with `git add -f`.** Force-adding
+   stages ignored files such as `.claude/settings.local.json` and turns
+   `.claude/worktrees/*` checkouts into embedded repositories. Paths git
+   ignores are skipped; `.rig/` paths are staged only in `repo` mode:
+
+```bash
+cd "$REPO"
+RIG_STAGE_CANDIDATES=(.claude .husky .agents/skills .codex .gitleaks.toml bin/rig*)
+if [[ "$TRACKING" == "repo" ]]; then
+  RIG_STAGE_CANDIDATES+=(.rig/processes .rig/rules .rig/VERSION \
+    .rig/memory/.rig-manifest .rig/memory/.rig-manifest.json)
+fi
+RIG_STAGE_PATHS=()
+for p in "${RIG_STAGE_CANDIDATES[@]}"; do
+  # Keep a path that exists, or one git still tracks (a Rig-removed file).
+  [[ -e "$p" ]] || [[ -n "$(git ls-files -- "$p")" ]] || continue
+  git check-ignore -q -- "$p" && continue
+  RIG_STAGE_PATHS+=("$p")
+done
+if [[ ${#RIG_STAGE_PATHS[@]} -gt 0 ]]; then
+  git add -A -- "${RIG_STAGE_PATHS[@]}" \
+    ':(exclude).claude/settings.local.json' ':(exclude).claude/worktrees'
+fi
+git diff --cached --stat
+```
+
+   If `git add` failed or `git diff --cached --stat` prints nothing, stop and
+   report it — do not create a commit approval for an empty or failed stage.
+   Show the staged list to the user and wait for approval.
+
+3. **Commit** — only after staging succeeded and the user approved. The
+   one-use approval is created immediately before the commit, never earlier:
+
+```bash
+cd "$REPO"
+touch "$RIG_DIR/memory/.rig-commit-ok"
+RIG_COMMIT_POLICY=guarded git commit -m "chore(rig): upgrade to The Rig $EXPECTED_VERSION [#N]"
+```
+
+4. **Push, then open the PR** against the configured base branch (for an
+   accepted direct commit, `git push origin "$BASE_BRANCH"` instead and skip
+   the PR):
+
+```bash
+cd "$REPO"
+git push -u origin "$UPGRADE_BRANCH"
+gh pr create --base "$BASE_BRANCH" --head "$UPGRADE_BRANCH" \
+  --title "chore(rig): upgrade to $EXPECTED_VERSION" \
+  --body "Upgrades The Rig from $CURRENT_VERSION to $EXPECTED_VERSION. See CHANGELOG for details."
+```
 
 If `$UPGRADE_REPORT_PATH` is non-empty, always close the summary with the
 evidence trail and the exact undo command, so the user never has to ask where
@@ -1314,7 +1599,7 @@ Then say:
 | Symptom | Fix |
 |---|---|
 | Installer not found | Set `RIG_INSTALLER_SRC` or check `~/tools/the-rig/` |
-| Installer on wrong branch | `git -C ~/tools/the-rig checkout main && git pull origin main` |
+| Installer on wrong branch | `git -C "$INSTALLER_SRC" checkout main && git -C "$INSTALLER_SRC" pull --ff-only origin main` (`$INSTALLER_SRC` is `~/tools/the-rig` unless `RIG_INSTALLER_SRC` is set) |
 | `settings.json` still has duplicates after upgrade | Run Phase 3b manually; edit file directly |
 | `.rig/VERSION` shows old version | Run Phase 3a fix block manually |
 | A Rig-owned file wasn't updated (no prompt either) | Copy from template manually: `cp $TEMPLATES/$rel $REPO/$rel` — or, for a `.rig/`-prefixed `$rel` in stealth/external tracking, `cp $TEMPLATES/$rel $RIG_DIR/${rel#.rig/}` |
