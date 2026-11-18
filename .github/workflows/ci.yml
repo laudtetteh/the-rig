@@ -176,10 +176,22 @@ jobs:
             test -x "$smoke/project/.git/hooks/$hook"
           done
           git -C "$smoke/project" checkout -q -b chore/macos-smoke
+          # Guarded policy makes the hooks do observable work: commit-msg ages
+          # the approval sentinel with `stat -f %m` and consumes it, and
+          # post-commit appends a PROGRESS.md stub naming the new SHA. Both
+          # hooks exit 0 on many failure paths, so assert on those artifacts
+          # rather than on the commit's exit status alone.
+          rig_dir="$(cat "$smoke/project/.rigpath")"
+          touch "$rig_dir/memory/.rig-commit-ok"
           # HOME is sandboxed, so the global test identity is not visible.
-          HOME="$smoke/home" git -C "$smoke/project" \
+          HOME="$smoke/home" RIG_COMMIT_POLICY=guarded \
+            git -C "$smoke/project" \
             -c user.name="CI Test Runner" -c user.email="ci-tests@example.invalid" \
             commit --allow-empty -m "chore(ci): macOS hook smoke [#669]"
+          test ! -e "$rig_dir/memory/.rig-commit-ok"
+          head_sha="$(git -C "$smoke/project" rev-parse HEAD)"
+          grep -F "chore(ci): macOS hook smoke [#669] [$head_sha]" \
+            "$rig_dir/memory/PROGRESS.md"
 
       - name: Run macOS portability subset
         run: |

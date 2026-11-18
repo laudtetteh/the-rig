@@ -10,9 +10,10 @@
 # A shim directory holding only `bash -> /bin/bash` is prepended through
 # GITHUB_PATH so the rest of the PATH (python3, jq, git) is left untouched.
 #
-# The script also asserts the userland really is BSD (no GNU sed or stat
-# shadowing the system tools), because the BSD branches of sed_inplace and
-# manifest_artifact_mode are part of what this job exists to exercise.
+# The script also asserts the userland really is BSD (no GNU sed, stat or tac
+# shadowing the system tools), because the BSD branches of sed_inplace,
+# manifest_artifact_mode and the `tail -r` journal replay are part of what
+# this job exists to exercise.
 set -euo pipefail
 
 : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
@@ -35,11 +36,18 @@ if stat -c '%a' / >/dev/null 2>&1; then
   exit 1
 fi
 
+# install.sh replays upgrade journals with `tac || tail -r`; a GNU tac on PATH
+# would take the first branch and leave the BSD `tail -r` path unexercised.
+if command -v tac >/dev/null 2>&1; then
+  printf 'GNU tac is on PATH (%s); the BSD tail -r path would go untested\n' "$(command -v tac)" >&2
+  exit 1
+fi
+
 shim_dir="$RUNNER_TEMP/system-bash-shim"
 mkdir -p "$shim_dir"
 ln -sf "$system_bash" "$shim_dir/bash"
 printf '%s\n' "$shim_dir" >> "$GITHUB_PATH"
 
-printf 'Shadowed bash candidates on PATH:\n'
+printf 'bash candidates before shim (shim applies from the next step):\n'
 type -a bash || true
 printf 'Prepended %s (bash -> %s, version %s)\n' "$shim_dir" "$system_bash" "$system_version"
