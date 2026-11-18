@@ -305,7 +305,7 @@ open(p, 'w').write(new_text)
 
   # Point the recorded baseline at this file's content in an older release, so
   # the resolved base genuinely differs from the incoming template -- the real
-  # 4Culture shape. Then edit the same first lines the upstream change touched.
+  # downstream-pilot shape. Then edit the same first lines the upstream change touched.
   local old_tag old_hash
   old_tag="$(git -C "$REPO_ROOT" tag --list 'v1.2*' | sort -V | head -1)"
   # A hard failure, not a skip. These are the only tests proving a genuine

@@ -1,6 +1,6 @@
 # Lessons learned
 
-Twenty-three documented pitfalls — from the original LaudBot pilot (#1-#13) through
+Twenty-three documented pitfalls — from the original pilot project (#1-#13) through
 The Rig's own ongoing development (#14 onward) — the failures that shaped The Rig.
 
 Every component in this system exists because something went wrong without it. These are the incidents, in the order they were discovered.
@@ -179,7 +179,7 @@ The manifest was later extended (v1.10.0) to track **all** files — not just Ri
 
 **Fix**: Restored both files via `git checkout --` (git had the real content the entire time, since the corrupted state was never committed). No code change was needed — the underlying bug was already fixed in v1.10.1. Filed and fixed a related but separate issue found during the same audit: `bin/rig doctor`'s `manifest_mode_hash`/`stale_manifest_entries` gates resolved every manifest path against the project root unconditionally, false-failing on every stealth install (#468, PR #469).
 
-**Watch for**: A project that goes long stretches between `/rig-upgrade` runs can carry silent damage from a bug that was fixed upstream ages ago — the fix only stops new damage. For any git-tracked project, a routine `git diff`/`git status` after an upgrade is real protection. **For stealth/external installs, `CLAUDE.md` and `PROJECT_BRIEF.md` are git-excluded by design — there is no diff to catch this, and if no `.rig-backup/` snapshot predates the damage, content lost this way is unrecoverable.** Three stealth-mode files initially looked like further instances of this same bug (`scrap`'s `CLAUDE.md`+`PROJECT_BRIEF.md`, `beaconessentials-main`'s `PROJECT_BRIEF.md`) but turned out, on full-file inspection, to be pristine unfilled templates in every section — consistent with never having been filled in rather than destroyed. Don't conclude "bug damage" from one blank section alone; check whether the rest of the file is genuinely customized first.
+**Watch for**: A project that goes long stretches between `/rig-upgrade` runs can carry silent damage from a bug that was fixed upstream ages ago — the fix only stops new damage. For any git-tracked project, a routine `git diff`/`git status` after an upgrade is real protection. **For stealth/external installs, `CLAUDE.md` and `PROJECT_BRIEF.md` are git-excluded by design — there is no diff to catch this, and if no `.rig-backup/` snapshot predates the damage, content lost this way is unrecoverable.** Three stealth-mode files initially looked like further instances of this same bug (one project's `CLAUDE.md`+`PROJECT_BRIEF.md`, another project's `PROJECT_BRIEF.md`) but turned out, on full-file inspection, to be pristine unfilled templates in every section — consistent with never having been filled in rather than destroyed. Don't conclude "bug damage" from one blank section alone; check whether the rest of the file is genuinely customized first.
 
 ---
 

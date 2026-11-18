@@ -339,7 +339,7 @@ housekeeping commits.
 ## Case-only branch rename says the branch already exists
 
 **Symptom:** Renaming a branch only to change capitalization (for example,
-`bweb-241` to `BWEB-241`) reports that the target branch already exists.
+`feat-241` to `FEAT-241`) reports that the target branch already exists.
 
 **Cause:** On a case-insensitive filesystem, a direct `git branch -m` can resolve
 the old and new spellings to the same ref path.

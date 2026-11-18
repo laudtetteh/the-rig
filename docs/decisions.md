@@ -463,7 +463,7 @@ the proof that a three-way base is safe; version metadata is useful only for
 scan order and diagnostics.
 
 **Consequences:** Tag reachability is load-bearing. On the reference
-4Culture-shaped blocker, automatic convergence resolves 5 of 16 customized
+downstream-pilot blocker, automatic convergence resolves 5 of 16 customized
 Rig-owned files and reports the other 11 as genuine overlapping edits. That
 ceiling is intentional release evidence, not a claim that convergence unblocks
 the rollout by itself.

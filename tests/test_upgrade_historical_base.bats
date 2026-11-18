@@ -13,14 +13,14 @@
 #
 # The resolver is content-addressed, not version-keyed. That is not a stylistic
 # choice: on the real install that motivated this work
-# (/Users/beaconavenue/code/4Culture, Rig 1.27.1) all 16 refused Rig-owned
+# (a downstream pilot project, Rig 1.27.1) all 16 refused Rig-owned
 # files were tracked only in the legacy flat `.rig-manifest`, which records
 # `sha256  path` and nothing else. base_revision was absent for 16 of 16, so a
 # version-keyed lookup resolves zero of them. Matching the recorded SHA256
 # against rendered template content across historical tags recovered 16/16 --
 # at v1.14.0-v1.17.0, not the v1.27.1 base_revision would have claimed.
 #
-# The fixtures below are 4Culture-shaped: a synthetic installer-source git repo
+# The fixtures below are pilot-shaped: a synthetic installer-source git repo
 # carrying several release tags, and a target whose baseline is recorded in a
 # legacy flat manifest with no provenance metadata at all. Nothing here reads
 # the developer's real checkouts.
@@ -78,7 +78,7 @@ _release() {
 }
 
 # Build a three-release history where a command file changes at each release.
-# v1.14.0 content is the "old downstream baseline" a 4Culture-shaped install
+# v1.14.0 content is the "old downstream baseline" a pilot-shaped install
 # would still be sitting on.
 _build_history() {
   _write_template ".claude/commands/wrap.md" "# wrap v1.14.0
@@ -163,7 +163,7 @@ Added upstream line.
 Original body.
 ")"
 
-  # 1.29.0 is deliberately the wrong hint -- exactly the 4Culture-shaped case
+  # 1.29.0 is deliberately the wrong hint -- exactly the pilot-shaped case
   # where a version field would have pointed at the wrong template. The hint
   # only orders the scan; hash equality decides.
   _resolve --rel .claude/commands/wrap.md --recorded-hash "$baseline" \
@@ -339,13 +339,13 @@ base-branch: [BASE_BRANCH]
 "
   _release "v1.20.0"
   local baseline
-  baseline="$(_sha256_string "# 4Culture
+  baseline="$(_sha256_string "# PilotProject
 
 base-branch: develop
 ")"
 
   _resolve --rel CLAUDE.md --recorded-hash "$baseline" \
-    --project-name "4Culture" --base-branch "develop"
+    --project-name "PilotProject" --base-branch "develop"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"ok":true'* ]] || return 1
@@ -638,9 +638,9 @@ Original body.
   echo "$output" | python3 -c 'import json,sys; json.loads(sys.stdin.read())'
 }
 
-# ── 4Culture-shaped end-to-end fixture ───────────────────────────────────────
+# ── pilot-shaped end-to-end fixture ───────────────────────────────────────
 
-@test "4Culture-shaped fixture: every legacy flat-manifest baseline resolves" {
+@test "pilot-shaped fixture: every legacy flat-manifest baseline resolves" {
   _build_history
 
   # A legacy flat manifest: sha256 + path, no provenance whatsoever. This is
@@ -676,7 +676,7 @@ description = "v1.14.0"
   [ "$resolved" -eq 3 ]
 }
 
-@test "4Culture-shaped fixture: resolving a base mutates nothing in the source" {
+@test "pilot-shaped fixture: resolving a base mutates nothing in the source" {
   _build_history
   local before
   before="$(git -C "$SOURCE_REPO" status --porcelain)"
