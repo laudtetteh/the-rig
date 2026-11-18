@@ -57,7 +57,7 @@ Three locations work together. The installer repo produces the other two:
 │  Once per machine.       │  │  Once per project.                │
 │                          │  │                                   │
 │  ~/.claude/CLAUDE.md     │  │  CLAUDE.md       ← project brain  │
-│    └─ Hard rules (13),   │  │  .rig/           ← Rig system     │
+│    └─ Hard rules,        │  │  .rig/           ← Rig system     │
 │       working style,     │  │  .rig/processes/ ← workflows      │
 │       memory discipline, │  │  .rig/rules/     ← standards      │
 │       planning, git,     │  │  .rig/memory/    ← PROGRESS +     │
@@ -716,14 +716,14 @@ skills. Exact delivery differs by provider, but the shared `.rig` contract does 
 
 | Source | Typical size | Notes |
 |---|---|---|
-| `~/.claude/CLAUDE.md` (global) | ~10 KB | Hard rules, working style, conventions |
-| Project `CLAUDE.md` | ~6 KB | Stack, structure, off-limits |
-| `.rig/rules/` (4 files, via `@`) | ~11 KB | Coding standards, git, security, verification |
-| `docs/features/README.md` (via `@`) | ~1 KB | Feature index |
+| `~/.claude/CLAUDE.md` (global) | ~14 KB | Hard rules, working style, conventions |
+| Project `CLAUDE.md` | ~14 KB | Stack, structure, off-limits |
+| `.rig/rules/` (4 files, via `@`) | ~10 KB | Coding standards, git, security, verification |
+| `docs/features/README.md` (via `@`) | ~1.4 KB | Feature index |
 | `PROJECT_CONVENTIONS.md` | ~1.5 KB initially | Explicitly approved current rules/preferences |
 | `CONTEXT_SNAPSHOT.md` | ~2 KB | Session state — the most important gate |
 
-**Session-start baseline: ~30 KB (~7,000 tokens).** Well within supported agent context windows.
+**Session-start baseline: ~43 KB across these current template files.** Installed project content and provider load order can change the actual amount read.
 
 ### What loads on demand (not at startup)
 
@@ -866,7 +866,7 @@ These sit alongside the existing `base-branch:` and `housekeeping:` fields:
 | `base-branch:` | `main` | Any branch name | The integration branch all PRs target |
 | `housekeeping:` | `direct-push` | `direct-push` \| `pr-required` | How `/post-merge` handles memory-update commits |
 | `issue-tracking:` | `github` | `github` \| `linear` \| `trello` \| `gus` \| `none` | Which issue tracker is required; shapes ref format in commit messages and intake wizard |
-| `issue-creator:` | `user` | `user` \| `agent` | GitHub only: whether the agent creates issues itself (`agent`) or waits for the user to provide a number (`user`) |
+| `issue-creator:` | `user` | `user` \| `agent` | GitHub only: `agent` drafts the exact issue and files it after separate approval; `user` waits for the user to provide a number |
 | `secret-scanner:` | `gitleaks` | `gitleaks` \| `none` | Secret scanning on commit; disabling requires editing `.husky/pre-commit` |
 | `commit-cleanup:` | `yes` | `yes` \| `no` | Whether auto-injected tool footers are stripped from commit messages |
 | `rig-gaps-push-target:` | *(unset)* | Absolute file path | Path to `RIG_GAPS.md` in the local Rig repo on this machine; enables `/rig-gaps --push` to append entries directly. Leave blank if The Rig repo isn't on this machine. |
