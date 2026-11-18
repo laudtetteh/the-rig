@@ -166,6 +166,23 @@ EOF
   context | grep -Fq 'Run /code-review'
 }
 
+@test "new context: reviewable-branch tip falls back to origin/<base> and accepts a quoted base" {
+  printf 'base-branch: "develop"\n' > "$REPO/CLAUDE.md"
+  git -C "$REPO" -c user.name=Test -c user.email=test@example.com commit --allow-empty -m d1 -q
+  git -C "$REPO" -c user.name=Test -c user.email=test@example.com commit --allow-empty -m d2 -q
+  # Fresh-clone shape: the configured base exists only as origin/develop.
+  git -C "$REPO" update-ref refs/remotes/origin/develop HEAD
+  git -C "$REPO" checkout -q -b feature/from-clone
+  git -C "$REPO" -c user.name=Test -c user.email=test@example.com commit --allow-empty -m f1 -q
+  run_start
+  run context
+  [[ "$output" != *'Run /code-review'* ]] || return 1
+
+  git -C "$REPO" -c user.name=Test -c user.email=test@example.com commit --allow-empty -m f2 -q
+  run_start
+  context | grep -Fq 'Run /code-review'
+}
+
 @test "project category: docs without an index emits a project-specific tip" {
   mkdir -p "$REPO/docs" "$RIG_DIR/memory/tips"
   touch "$RIG_DIR/memory/tips/.tip-session-name-shown"

@@ -177,9 +177,15 @@ git branch --show-current
 git status --short
 ```
 
-**If you are on the configured base branch (`base-branch:` in `CLAUDE.md`, read
-in Step 3a), `main`, or `master`:** do not commit. You need a feature branch —
-see Step 3c below for how to create one safely.
+Read the configured base branch (`base-branch:` in `CLAUDE.md`, default `main`):
+
+```bash
+BASE=$(grep "^base-branch:" CLAUDE.md 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+BASE="${BASE:-main}"
+```
+
+**If you are on `$BASE`, `main`, or `master`:** do not commit. You need a feature
+branch — see Step 3c below for how to create one safely.
 
 **If there are untracked or modified files outside the task scope** (shown by `git status`):
 surface them and ask whether to stage, stash, or ignore before continuing.

@@ -41,11 +41,13 @@ evidence_gaps_logged() {
 }
 suppress_rig_gaps() { ! tip_command_available rig-gaps || tip_command_already_used rig-gaps; }
 
-# Prints the single base-branch: value CLAUDE.md configures, or nothing when
-# it is absent, still the template placeholder, or set more than once.
+# Prints the single base-branch: value CLAUDE.md configures (one pair of
+# surrounding quotes removed), or nothing when it is absent, still the
+# template placeholder, or set more than once.
 tip_configured_base_branch() {
   local values
-  values=$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$REPO/CLAUDE.md" 2>/dev/null || true)
+  values=$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$REPO/CLAUDE.md" 2>/dev/null |
+    sed -e 's/^"\(..*\)"$/\1/' -e "s/^'\(..*\)'\$/\1/" || true)
   [[ -n "$values" && "$values" != *$'\n'* && "$values" != "[BASE_BRANCH]" ]] || return 0
   printf '%s' "$values"
 }
@@ -56,7 +58,14 @@ evidence_reviewable_branch() {
   base=$(tip_configured_base_branch)
   [[ -n "$branch" && "$branch" != "main" && "$branch" != "master" && "$branch" != "$base" ]] || return 1
   if [[ -n "$base" ]]; then
-    git -C "$REPO" show-ref --verify --quiet "refs/heads/$base" || return 1
+    # A fresh clone may only have the remote-tracking ref for the base.
+    if git -C "$REPO" show-ref --verify --quiet "refs/heads/$base"; then
+      base="refs/heads/$base"
+    elif git -C "$REPO" show-ref --verify --quiet "refs/remotes/origin/$base"; then
+      base="refs/remotes/origin/$base"
+    else
+      return 1
+    fi
   elif git -C "$REPO" show-ref --verify --quiet refs/heads/main; then
     base=main
   elif git -C "$REPO" show-ref --verify --quiet refs/heads/master; then

@@ -1481,13 +1481,16 @@ is_supported_base_branch() {
 
 # Prints the base branch configured in a project CLAUDE.md, or nothing when
 # none is configured. Mirrors `rig doctor`: a `base-branch:` line at the start
-# of a line, value up to whitespace or `#`. The unsubstituted template
+# of a line, value up to whitespace or `#`, with one pair of surrounding
+# matching quotes removed (`"develop"` upgraded fine before #659 because the
+# old sanitizer stripped the quotes). The unsubstituted template
 # placeholder counts as unconfigured. More than one such line is ambiguous;
 # the function prints the conflicting lines on stderr and returns 2.
 read_configured_base_branch() {
   local claude_md="$1" values count
   [[ -f "$claude_md" ]] || return 0
-  values="$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$claude_md" 2>/dev/null || true)"
+  values="$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$claude_md" 2>/dev/null |
+    sed -e 's/^"\(..*\)"$/\1/' -e "s/^'\(..*\)'\$/\1/" || true)"
   [[ -n "$values" ]] || return 0
   count="$(printf '%s\n' "$values" | grep -c . || true)"
   if [[ "$count" -gt 1 ]]; then
@@ -1496,6 +1499,29 @@ read_configured_base_branch() {
   fi
   [[ "$values" == "[BASE_BRANCH]" ]] && return 0
   printf '%s' "$values"
+}
+
+# Exits with a clear error unless "$1" is a supported base branch name.
+require_supported_base_branch() {
+  is_supported_base_branch "$1" && return 0
+  error "Unsupported base branch name: '$1'"
+  error "Use a valid Git branch name made of letters, digits, '.', '_', '-' and '/'."
+  exit 1
+}
+
+# Prints the base branch configured in CLAUDE.md "$1", exiting with a clear
+# error when that file sets base-branch: more than once or to an unsupported
+# name. Prints nothing when none is configured.
+require_configured_base_branch() {
+  local claude_md="$1" configured status=0
+  configured="$(read_configured_base_branch "$claude_md")" || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    error "$claude_md sets base-branch: more than once (lines above)."
+    error "Keep exactly one base-branch: line (fenced examples count too), or pass --base-branch <name>."
+    exit 1
+  fi
+  [[ -z "$configured" ]] || require_supported_base_branch "$configured"
+  printf '%s' "$configured"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3581,6 +3607,18 @@ _stealth_install_git_hook() {
   record_upgrade_result updated "$rel"
 }
 
+# ── BASE BRANCH PRE-FLIGHT ───────────────────────────────────────────────────
+# Reject an unusable base branch before the global layer writes anything
+# (issue #659). The project layer re-resolves it once the target is final;
+# this only covers what is already known from the flags.
+if [[ "$DO_PROJECT" == true ]]; then
+  if [[ -n "$_FLAG_BASE_BRANCH" ]]; then
+    require_supported_base_branch "$_FLAG_BASE_BRANCH"
+  elif [[ -n "$_FLAG_TARGET" ]]; then
+    require_configured_base_branch "$_FLAG_TARGET/CLAUDE.md" >/dev/null
+  fi
+fi
+
 # ── GLOBAL LAYER ─────────────────────────────────────────────────────────────
 if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   bold "── Global layer ──"
@@ -3891,14 +3929,14 @@ if [[ "$DO_PROJECT" == true ]]; then
   # upgrade must never substitute anything else into workflow files -- issue
   # #659), then origin/HEAD, then main.
   _CONFIGURED_BASE=""
-  _CONFIGURED_BASE_STATUS=0
   if [[ -z "$_FLAG_BASE_BRANCH" ]]; then
-    _CONFIGURED_BASE="$(read_configured_base_branch "$TARGET/CLAUDE.md")" || _CONFIGURED_BASE_STATUS=$?
-    if [[ "$_CONFIGURED_BASE_STATUS" -ne 0 ]]; then
-      error "$TARGET/CLAUDE.md sets base-branch: more than once (lines above)."
-      error "Keep exactly one base-branch: line, or pass --base-branch <name>."
-      exit 1
-    fi
+    # Not in a $(...) subshell: require_configured_base_branch exits the
+    # installer on an ambiguous or unsupported value.
+    require_configured_base_branch "$TARGET/CLAUDE.md" >/dev/null
+    _CONFIGURED_BASE="$(read_configured_base_branch "$TARGET/CLAUDE.md")"
+  else
+    # The flag wins, but remember CLAUDE.md's value to warn about a split.
+    _CONFIGURED_BASE="$(read_configured_base_branch "$TARGET/CLAUDE.md" 2>/dev/null)" || _CONFIGURED_BASE=""
   fi
   if [[ -n "$_FLAG_BASE_BRANCH" ]]; then
     BASE_BRANCH="$_FLAG_BASE_BRANCH"
@@ -3931,15 +3969,20 @@ if [[ "$DO_PROJECT" == true ]]; then
   fi
   # Reject rather than rewrite: silently stripping characters once turned
   # `release/v2` into `releasev2` in every substituted workflow (issue #659).
-  if ! is_supported_base_branch "$BASE_BRANCH"; then
-    error "Unsupported base branch name: '$BASE_BRANCH'"
-    error "Use a valid Git branch name made of letters, digits, '.', '_', '-' and '/'."
-    exit 1
-  fi
+  require_supported_base_branch "$BASE_BRANCH"
   if [[ -n "$_CONFIGURED_BASE" && -z "$_FLAG_BASE_BRANCH" ]]; then
     info "Base branch: $BASE_BRANCH (from CLAUDE.md base-branch:)"
   else
     info "Base branch: $BASE_BRANCH"
+  fi
+  # CLAUDE.md is user-owned and is never rewritten here, so a differing
+  # --base-branch leaves the runtime workflows and commit guards (which read
+  # CLAUDE.md) on another branch until the user updates it. Written to stderr
+  # so agent-plan/agent-upgrade keep a JSON-only stdout and still surface it.
+  if [[ -n "$_FLAG_BASE_BRANCH" && -n "$_CONFIGURED_BASE" &&
+        "$_CONFIGURED_BASE" != "$BASE_BRANCH" ]]; then
+    echo -e "${YELLOW}!${RESET} CLAUDE.md still says base-branch: $_CONFIGURED_BASE, but workflow files were rendered with --base-branch $BASE_BRANCH." >&2
+    echo -e "${YELLOW}!${RESET} Update base-branch: in $TARGET/CLAUDE.md to $BASE_BRANCH (runtime workflows and commit guards read it), or re-run without --base-branch." >&2
   fi
   blank
 

@@ -210,6 +210,13 @@ HOOK
   run_claude_pretool_from_settings "$payload"
   [ "$status" -eq 0 ]
   [ ! -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+
+  printf 'base-branch: "develop"\n' > "$TEST_PROJECT/CLAUDE.md"
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload="$(bash_payload "$TEST_PROJECT" 'RIG_COMMIT_POLICY=guarded git commit -m "feat: blocked [#659]"')"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Commit to 'develop' blocked"* ]] || return 1
 }
 
 @test "hookless fallback rejects and clears stale approval" {

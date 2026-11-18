@@ -115,6 +115,7 @@ if [ "${RIG_COMMIT_POLICY:-}" = guarded ] && [ "$REPLAY" -eq 0 ]; then
   PROTECTED_BRANCH="$BRANCH"
   if [ -n "$BRANCH" ] &&
      sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$ROOT/CLAUDE.md" 2>/dev/null |
+       sed -e 's/^"\(..*\)"$/\1/' -e "s/^'\(..*\)'\$/\1/" |
        grep -Fxq -- "$BRANCH"; then
     PROTECTED_BRANCH=main
   fi

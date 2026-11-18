@@ -524,17 +524,22 @@ TEMPLATES="$INSTALLER_SRC/templates/project"
 # installer's own precedence (exactly one CLAUDE.md `base-branch:` line, then
 # origin/HEAD, then main) and pass it explicitly to every install.sh call
 # below, so an upgrade can never substitute a different branch (issue #659).
-BASE_BRANCH_VALUES=$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$REPO/CLAUDE.md" 2>/dev/null || true)
+# On duplicate lines BASE_BRANCH stays empty: `--base-branch ""` counts as no
+# flag, so install.sh itself stops with its ambiguity error.
+BASE_BRANCH_VALUES=$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$REPO/CLAUDE.md" 2>/dev/null |
+  sed -e 's/^"\(..*\)"$/\1/' -e "s/^'\(..*\)'\$/\1/" || true)
 BASE_BRANCH_COUNT=$(printf '%s\n' "$BASE_BRANCH_VALUES" | grep -c . || true)
+BASE_BRANCH=""
 if [[ "$BASE_BRANCH_COUNT" -gt 1 ]]; then
   echo "❌ $REPO/CLAUDE.md sets base-branch: more than once:"
   grep -n '^base-branch:' "$REPO/CLAUDE.md"
+else
+  BASE_BRANCH="$BASE_BRANCH_VALUES"
+  if [[ -z "$BASE_BRANCH" || "$BASE_BRANCH" == "[BASE_BRANCH]" ]]; then
+    BASE_BRANCH=$(git -C "$REPO" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's|^refs/remotes/origin/||' || true)
+  fi
+  BASE_BRANCH="${BASE_BRANCH:-main}"
 fi
-BASE_BRANCH="$BASE_BRANCH_VALUES"
-if [[ -z "$BASE_BRANCH" || "$BASE_BRANCH" == "[BASE_BRANCH]" ]]; then
-  BASE_BRANCH=$(git -C "$REPO" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's|^refs/remotes/origin/||' || true)
-fi
-BASE_BRANCH="${BASE_BRANCH:-main}"
 ```
 
 If this printed `❌ … more than once`, stop here: show the user the listed

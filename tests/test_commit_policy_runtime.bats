@@ -129,6 +129,21 @@ commit_count() { git -C "$TEST_PROJECT" rev-list --count HEAD; }
   [[ "$output" == *"Commit to 'release/v2' blocked"* ]] || return 1
 }
 
+@test "commit-msg protects a quoted configured base branch" {
+  git -C "$TEST_PROJECT" switch -qc develop
+  printf 'issue-tracking: none\nbase-branch: "develop"\n' > "$TEST_PROJECT/CLAUDE.md"
+  approval
+  run env RIG_COMMIT_POLICY=guarded git -C "$TEST_PROJECT" commit --allow-empty -m 'fix: blocked [#659]'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Commit to 'develop' blocked"* ]] || return 1
+
+  printf "issue-tracking: none\nbase-branch: 'develop'  # integration\n" > "$TEST_PROJECT/CLAUDE.md"
+  approval
+  run env RIG_COMMIT_POLICY=guarded git -C "$TEST_PROJECT" commit --allow-empty -m 'fix: blocked [#659]'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Commit to 'develop' blocked"* ]] || return 1
+}
+
 @test "prepared -F subject created in same shell call determines direct-push policy" {
   git -C "$TEST_PROJECT" switch -q main
   printf 'issue-tracking: none\nhousekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"

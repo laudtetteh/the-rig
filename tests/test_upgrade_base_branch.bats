@@ -99,8 +99,13 @@ assert not doc.get("conflicts"), doc.get("conflicts")
   assert_base_branch_kept develop
 }
 
-@test "classic upgrade keeps the CLAUDE.md base branch and reports no customized files next time" {
+@test "classic upgrade keeps a quoted CLAUDE.md base branch and reports no customized files next time" {
   install_project repo develop
+  # A quoted value upgraded fine before #659 (the old sanitizer dropped the
+  # quotes); it must still resolve to the bare branch name.
+  sed 's/^base-branch: develop$/base-branch: "develop"/' "$TEST_PROJECT/CLAUDE.md" > "$TEMP_DIR/claude.md"
+  cat "$TEMP_DIR/claude.md" > "$TEST_PROJECT/CLAUDE.md"
+  grep -q '^base-branch: "develop"$' "$TEST_PROJECT/CLAUDE.md"
 
   upgrade_project upgrade
   [ "$status" -eq 0 ]
@@ -120,6 +125,11 @@ assert not doc.get("conflicts"), doc.get("conflicts")
   [ "$status" -eq 0 ]
   [[ "$output" == *"Base branch: trunk"* ]] || return 1
   [[ "$output" != *"from CLAUDE.md"* ]] || return 1
+  [[ "$output" == *"CLAUDE.md still says base-branch: develop, but workflow files were rendered with --base-branch trunk"* ]] || return 1
+  [[ "$output" == *"Update base-branch: in $TEST_PROJECT/CLAUDE.md to trunk"* ]] || return 1
+  # CLAUDE.md is user-owned: warned about, never rewritten.
+  grep -q '^base-branch: develop$' "$TEST_PROJECT/CLAUDE.md"
+  grep -Fq -- '--base trunk' "$TEST_PROJECT/.claude/commands/ship.md"
 }
 
 @test "upgrade refuses a CLAUDE.md that sets base-branch more than once" {
@@ -155,4 +165,20 @@ assert not doc.get("conflicts"), doc.get("conflicts")
     [[ "$output" == *"Unsupported base branch name"* ]] || { echo "no error for: $bad"; return 1; }
     [ ! -f "$TEST_PROJECT/.claude/commands/ship.md" ] || { echo "installed for: $bad"; return 1; }
   done
+}
+
+@test "an unusable base branch stops a combined install before the global layer writes" {
+  run bash "$INSTALLER" --target "$TEST_PROJECT" --project-name Test \
+    --base-branch 'x$(id)' --tracking repo --strategy merge </dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Unsupported base branch name"* ]] || return 1
+  [ ! -e "$HOME/.claude" ]
+  [ ! -e "$HOME/.codex" ]
+
+  printf 'base-branch: develop\nbase-branch: main\n' > "$TEST_PROJECT/CLAUDE.md"
+  run bash "$INSTALLER" --target "$TEST_PROJECT" --project-name Test \
+    --tracking repo --strategy merge </dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sets base-branch: more than once"* ]] || return 1
+  [ ! -e "$HOME/.claude" ]
 }
