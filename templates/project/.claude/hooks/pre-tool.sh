@@ -534,6 +534,11 @@ print(match.group(1) + (match.group(2) or "/"), end="")
     load_protected_path_policy "$TARGET_RIG_DIR/rules/protected-paths.txt" "$TARGET_REPO" "$TARGET_RIG_DIR" "$TARGET_REPO" "$TARGET_RIG_DIR"
   fi
 
+  # Files that Rig hooks source are always protected. Upgrades skip a
+  # customized policy file, so an older policy may not list these entries.
+  RIG_PROTECTED+=("$RIG_DIR/contextual-tips.sh")
+  [[ "$TARGET_RIG_DIR" == "$RIG_DIR" ]] || RIG_PROTECTED+=("$TARGET_RIG_DIR/contextual-tips.sh")
+
   for protected in "${RIG_PROTECTED[@]}"; do
     protected_canonical=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$protected") || fail_closed "protected path could not be resolved."
     if [[ "$PATH_ARG" == *"$protected"* || "$PATH_CANONICAL" == "$protected_canonical" || "$PATH_CANONICAL" == "$protected_canonical/"* ]]; then

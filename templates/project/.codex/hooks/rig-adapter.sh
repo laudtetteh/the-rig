@@ -107,6 +107,9 @@ validate_protected_policy() {
     count=$((count + 1))
   done < "$policy"
   [[ "$count" -gt 0 ]] || fail_closed "The Rig protected-path policy contains no paths: $policy"
+  # Hook-sourced files stay protected even when an older or customized policy
+  # file does not list them.
+  PROTECTED_PATHS+=("$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$RIG_DIR/contextual-tips.sh")")
 }
 
 validate_apply_patch() {

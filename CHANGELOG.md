@@ -16,6 +16,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Session snapshots now preserve separate active task handoffs across concurrent wrap, post-merge, and ship workflows, with owner-aware writes and recoverable workflow locks (#598).
+- Permission auto-approval now has a narrower scope: test-runner commands always prompt, Rig-directory write approval covers only Markdown notes under memory, tasks, and docs, and the hook-sourced tips catalog is a protected path (#675).
 
 ### Fixed
 

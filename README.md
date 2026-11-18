@@ -381,7 +381,7 @@ bin/rig session index [--json] → read-only, bounded search of Rig session reco
 |---|---|---|
 | `session-start.sh` | `SessionStart` | Injects `CONTEXT_SNAPSHOT.md` and pending flag warnings before the first user turn |
 | `prompt-submit.sh` | `UserPromptSubmit` | Re-checks pending flags and warns once per branch change for the exact active session |
-| `permission-request.sh` | `PermissionRequest` | Auto-approves safe read-only tool patterns to reduce permission-prompt noise |
+| `permission-request.sh` | `PermissionRequest` | Auto-approves read-only tool patterns and Markdown notes in the Rig's memory, tasks, and docs to reduce permission-prompt noise |
 | `pre-tool.sh` | `PreToolUse` (every tool call) | Blocks structured writes and visible unmarked Bash commits; checks approval for marked visible commits, consuming it before execution when no Rig `commit-msg` hook is active; redirects worktree writes |
 | `commit-msg` | Guarded Git commit | Consumes one-use approval and checks the prepared subject and target branch |
 | `post-commit` | Guarded Git commit | Auto-stubs the target worktree's `PROGRESS.md` using the final commit SHA |

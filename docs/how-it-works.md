@@ -135,7 +135,8 @@ Agent is oriented. Hooks are live. Ready to work.
      │
      │  On every permission request:
      │  └─ permission-request.sh (PermissionRequest)
-     │       Auto-approves safe read-only patterns
+     │       Auto-approves read-only patterns and Markdown notes in
+     │       Rig memory/, tasks/, docs/
      │
      │  Before every tool call:
      │  └─ pre-tool.sh (PreToolUse)
@@ -490,10 +491,16 @@ User submits a prompt
 Agent requests a permission
      │
      └─► permission-request.sh (PermissionRequest)
-           Auto-approves safe read-only patterns:
-             Read, Bash (ls/cat/grep/find/git log/git diff/etc.), WebFetch, WebSearch
+           Auto-approves a narrow set of patterns:
+             Read; Bash read-only inspection (cat/head/tail/wc/grep/find,
+               read-only git queries, bash -n syntax checks)
+             Edit/Write of Markdown (.md) notes under RIG_DIR/memory/,
+               RIG_DIR/tasks/, RIG_DIR/docs/ (resolved path; opt out with
+               RIG_DIR/memory/.rig-strict-permissions)
+           Never auto-approves commands that execute project code (test
+             runners, build tools) or writes to scripts and data files
            Returns {"behavior": "allow"} for matched patterns — no prompt shown
-           Falls through (no response) for write/destructive operations
+           Falls through (no response) for everything else
 
 Every tool call
      │
@@ -503,7 +510,9 @@ Every tool call
      │     Worktree redirect: Write/Edit/NotebookEdit targeting .claude/worktrees/
      │       → rewrites path to main-repo equivalent via hookSpecificOutput.updatedInput
      │     Checks RIG_PROTECTED: blocks writes to governance files
-     │       (RIG_DIR/processes/, RIG_DIR/rules/, .husky/, CLAUDE.md, .claude/hooks/)
+     │       (RIG_DIR/processes/, RIG_DIR/rules/, RIG_DIR/contextual-tips.sh,
+     │        .husky/, CLAUDE.md, .claude/hooks/); hook-sourced Rig files stay
+     │        protected even if an older policy file omits them
      │     Checks BLOCKED_PATHS: blocks project-specific protected paths
      │     Rejects visible unmarked Bash commits; marked visible commits
      │       require approval. With no active Rig commit-msg hook, checks
