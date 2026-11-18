@@ -164,8 +164,9 @@ rename_branch_case_safe "[desired-branch-name]"
 If it fails, stop and surface the error. Do not remove a reported temporary ref;
 it is retained only when rollback failed and protects the user's branch contents.
 
-**If on `main` or `master`:** stop — you cannot commit directly here. Ask:
-> "You're on `main`. Which branch should this go on? I can create `[type/slug]` off `[BASE]`."
+**If on the configured base branch (`$BASE`, read below), `main`, or `master`:**
+stop — you cannot commit directly here. Ask:
+> "You're on `[current-branch]`. Which branch should this go on? I can create `[type/slug]` off `[BASE]`."
 Wait for the user's answer. Before creating the branch, run the stale-main check below.
 
 **Read the configured base branch:**

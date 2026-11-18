@@ -96,6 +96,54 @@ commit_count() { git -C "$TEST_PROJECT" rev-list --count HEAD; }
   [ ! -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
 }
 
+@test "commit-msg protects the configured base branch like main" {
+  git -C "$TEST_PROJECT" switch -qc develop
+  printf 'issue-tracking: none\nbase-branch: develop\n' > "$TEST_PROJECT/CLAUDE.md"
+  approval
+  run env RIG_COMMIT_POLICY=guarded git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: blocked [#659]'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Commit to 'develop' blocked"* ]] || return 1
+
+  printf 'issue-tracking: none\nbase-branch: develop\nhousekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
+  approval
+  run env RIG_COMMIT_POLICY=guarded git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: blocked [#659]'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'Direct-to-develop commit blocked'* ]] || return 1
+  approval
+  run env RIG_COMMIT_POLICY=guarded git -C "$TEST_PROJECT" commit --allow-empty -m 'docs: allowed [#659]'
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$TEST_PROJECT" log -1 --format=%s)" = 'docs: allowed [#659]' ]
+
+  git -C "$TEST_PROJECT" switch -qc feat/on-top
+  approval
+  run env RIG_COMMIT_POLICY=guarded git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: feature branch [#659]'
+  [ "$status" -eq 0 ]
+}
+
+@test "commit-msg protects a configured base branch containing a slash" {
+  git -C "$TEST_PROJECT" switch -qc release/v2
+  printf 'issue-tracking: none\nbase-branch: release/v2\n' > "$TEST_PROJECT/CLAUDE.md"
+  approval
+  run env RIG_COMMIT_POLICY=guarded git -C "$TEST_PROJECT" commit --allow-empty -m 'fix: blocked [#659]'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Commit to 'release/v2' blocked"* ]] || return 1
+}
+
+@test "commit-msg protects a quoted configured base branch" {
+  git -C "$TEST_PROJECT" switch -qc develop
+  printf 'issue-tracking: none\nbase-branch: "develop"\n' > "$TEST_PROJECT/CLAUDE.md"
+  approval
+  run env RIG_COMMIT_POLICY=guarded git -C "$TEST_PROJECT" commit --allow-empty -m 'fix: blocked [#659]'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Commit to 'develop' blocked"* ]] || return 1
+
+  printf "issue-tracking: none\nbase-branch: 'develop'  # integration\n" > "$TEST_PROJECT/CLAUDE.md"
+  approval
+  run env RIG_COMMIT_POLICY=guarded git -C "$TEST_PROJECT" commit --allow-empty -m 'fix: blocked [#659]'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Commit to 'develop' blocked"* ]] || return 1
+}
+
 @test "prepared -F subject created in same shell call determines direct-push policy" {
   git -C "$TEST_PROJECT" switch -q main
   printf 'issue-tracking: none\nhousekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"

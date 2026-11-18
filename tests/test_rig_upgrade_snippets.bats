@@ -220,6 +220,55 @@ INSTALLER_SRC='$REPO_ROOT'")
   [ "$output" = "TRACKING=local HOOKS=.husky ARGS=--tracking local" ]
 }
 
+_detect_base_branch() {
+  local script
+  script=$(_snippet_script "$RIG_UPGRADE" 'TRACKING_ARGS=(--tracking "$TRACKING")' "REPO='$PROJECT'
+INSTALLER_SRC='$REPO_ROOT'")
+  printf 'echo "BASE=$BASE_BRANCH"\n' >> "$script"
+  /bin/bash "$script"
+}
+
+@test "rig-upgrade 1c: base branch comes from CLAUDE.md before origin/HEAD" {
+  git -C "$PROJECT" commit -q --allow-empty -m initial
+  git -C "$PROJECT" update-ref refs/remotes/origin/trunk HEAD
+  git -C "$PROJECT" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+  run _detect_base_branch
+  [ "$status" -eq 0 ]
+  [ "$output" = "BASE=trunk" ]
+
+  printf 'base-branch: release/v2  # integration\n' > "$PROJECT/CLAUDE.md"
+  run _detect_base_branch
+  [ "$status" -eq 0 ]
+  [ "$output" = "BASE=release/v2" ]
+
+  printf 'base-branch: [BASE_BRANCH]\n' > "$PROJECT/CLAUDE.md"
+  run _detect_base_branch
+  [ "$output" = "BASE=trunk" ]
+
+  printf "base-branch: 'release/v2'\n" > "$PROJECT/CLAUDE.md"
+  run _detect_base_branch
+  [ "$status" -eq 0 ]
+  [ "$output" = "BASE=release/v2" ]
+
+  # Duplicates: no multi-line value and no origin/HEAD guess. BASE stays
+  # empty so install.sh receives no usable flag and raises its own error.
+  printf 'base-branch: develop\nbase-branch: main\n' > "$PROJECT/CLAUDE.md"
+  run _detect_base_branch
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sets base-branch: more than once"* ]] || false
+  [ "${lines[${#lines[@]}-1]}" = "BASE=" ]
+
+  local duplicate
+  for duplicate in $'base-branch: develop\nbase-branch:\n' \
+                   $'base-branch:\nbase-branch: develop\n'; do
+    printf '%s' "$duplicate" > "$PROJECT/CLAUDE.md"
+    run _detect_base_branch
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"sets base-branch: more than once"* ]] || false
+    [ "${lines[${#lines[@]}-1]}" = "BASE=" ]
+  done
+}
+
 _stage_fixture() {
   printf 'ignored-by-project.txt\n' > "$PROJECT/.gitignore"
   mkdir -p "$PROJECT/.rig/processes" "$PROJECT/.rig/memory" "$PROJECT/.claude/commands" \
@@ -473,10 +522,31 @@ cd '$PROJECT'")
   run /bin/bash "$script"
   [ "$status" -eq 0 ]
   [[ "$output" == *"ARG[--tracking]"*"ARG[stealth]"*"ARG[--rig-dir]"*"ARG[$rig_dir]"* ]] || false
+  [[ "$output" == *"ARG[--base-branch]"*"ARG[main]"* ]] || false
   [[ "$output" == *"install.sh exited 3"* ]] || false
   log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
   [ -f "$log" ]
   [ -f "$log.failed" ]
+}
+
+@test "UPGRADE_WORKFLOW step 4: passes the configured base and omits it on duplicates" {
+  local fake="$TEST_TMP/fake installer" script
+  mkdir -p "$fake"
+  printf '#!/bin/bash\nfor a in "$@"; do printf "ARG[%%s]\\n" "$a"; done\n' > "$fake/install.sh"
+  chmod +x "$fake/install.sh"
+  script=$(_snippet_script "$UPGRADE_WORKFLOW" 'INSTALL_STATUS=$(cat "$INSTALL_STATUS_FILE")' "export RIG_INSTALLER_SRC='$fake'
+cd '$PROJECT'")
+
+  printf 'base-branch: "release/v2"\n' > "$PROJECT/CLAUDE.md"
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ARG[--base-branch]"*"ARG[release/v2]"* ]] || false
+
+  printf 'base-branch: develop\nbase-branch: main\n' > "$PROJECT/CLAUDE.md"
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ARG[--base-branch]"* ]] || false
+  [[ "$output" == *"ARG[--target]"* ]] || false
 }
 
 @test "UPGRADE_WORKFLOW step 4: re-runs append to the log and clear the failure marker" {

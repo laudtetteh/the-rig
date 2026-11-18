@@ -778,8 +778,9 @@ for arg in "$@"; do
       echo "                                        any file was left for manual review"
       echo "  --target <path>       Set target project directory."
       echo "  --project-name <name> Set project name (used in CLAUDE.md substitution)."
-      echo "  --base-branch <name>  Set base branch name (default: main). Substituted into"
-      echo "                        workflow examples and CLAUDE.md base-branch field."
+      echo "  --base-branch <name>  Set base branch name. Default: the single base-branch:"
+      echo "                        line in the target CLAUDE.md, then origin/HEAD, then main."
+      echo "                        Substituted into workflow examples and CLAUDE.md."
       echo "  --tracking <mode>     Set .rig/ tracking mode without a prompt."
       echo "                        Values: repo | local | external | stealth"
       echo "                        repo     — .rig/ committed with the project (default)"
@@ -1450,6 +1451,79 @@ sed_inplace() {
   else
     sed -i '' "$pattern" "$file"
   fi
+}
+
+# Escape a single-line literal for the replacement side of a sed `s/…/…/`
+# expression that uses `/` as its delimiter: `\`, `/` and `&` are special
+# there. Done with sed rather than ${var//…/…} because bash 5.2's
+# patsub_replacement changes how `&` behaves in parameter substitution.
+sed_escape_replacement() {
+  printf '%s' "$1" | sed 's/[\/&\\]/\\&/g'
+}
+
+# ── Base-branch helpers (issue #659) ─────────────────────────────────────────
+# Succeeds when "$1" is a branch name the installer can substitute safely.
+# Git ref validity alone is not enough: Git accepts `$`, `(`, `;`, quotes and
+# similar characters, and the substituted value lands inside shell snippets
+# that agents run verbatim, so the accepted alphabet is also restricted.
+is_supported_base_branch() {
+  local name="$1"
+  [[ -n "$name" ]] || return 1
+  [[ "$name" =~ ^[A-Za-z0-9._/-]+$ ]] || return 1
+  [[ "$name" != -* && "$name" != HEAD ]] || return 1
+  if command -v git >/dev/null 2>&1; then
+    git check-ref-format "refs/heads/$name" >/dev/null 2>&1
+    return
+  fi
+  [[ "$name" != /* && "$name" != */ && "$name" != *//* && "$name" != *..* &&
+     "$name" != .* && "$name" != */.* && "$name" != *.lock && "$name" != *. ]]
+}
+
+# Prints the base branch configured in a project CLAUDE.md, or nothing when
+# none is configured. Mirrors `rig doctor`: a `base-branch:` line at the start
+# of a line, value up to whitespace or `#`, with one pair of surrounding
+# matching quotes removed (`"develop"` upgraded fine before #659 because the
+# old sanitizer stripped the quotes). The unsubstituted template
+# placeholder counts as unconfigured. More than one such line is ambiguous;
+# the function prints the conflicting lines on stderr and returns 2.
+read_configured_base_branch() {
+  local claude_md="$1" values count
+  [[ -f "$claude_md" ]] || return 0
+  # Count declarations, not only parsed nonempty values. A blank second line
+  # still makes the project configuration ambiguous.
+  count="$(grep -c '^base-branch:' "$claude_md" 2>/dev/null || true)"
+  if [[ "$count" -gt 1 ]]; then
+    grep -n '^base-branch:' "$claude_md" >&2 || true
+    return 2
+  fi
+  values="$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$claude_md" 2>/dev/null |
+    sed -e 's/^"\(..*\)"$/\1/' -e "s/^'\(..*\)'\$/\1/" || true)"
+  [[ -n "$values" ]] || return 0
+  [[ "$values" == "[BASE_BRANCH]" ]] && return 0
+  printf '%s' "$values"
+}
+
+# Exits with a clear error unless "$1" is a supported base branch name.
+require_supported_base_branch() {
+  is_supported_base_branch "$1" && return 0
+  error "Unsupported base branch name: '$1'"
+  error "Use a valid Git branch name made of letters, digits, '.', '_', '-' and '/'."
+  exit 1
+}
+
+# Prints the base branch configured in CLAUDE.md "$1", exiting with a clear
+# error when that file sets base-branch: more than once or to an unsupported
+# name. Prints nothing when none is configured.
+require_configured_base_branch() {
+  local claude_md="$1" configured status=0
+  configured="$(read_configured_base_branch "$claude_md")" || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    error "$claude_md sets base-branch: more than once (lines above)."
+    error "Keep exactly one base-branch: line (fenced examples count too), or pass --base-branch <name>."
+    exit 1
+  fi
+  [[ -z "$configured" ]] || require_supported_base_branch "$configured"
+  printf '%s' "$configured"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3131,7 +3205,7 @@ _copy_upgrade_existing() {
      grep -q '\[BASE_BRANCH\]' "$src" 2>/dev/null; then
     local rendered_src rendered_hash raw_dest raw_dest_hash
     rendered_src="$(mktemp /tmp/rig-base-branch-rendered-XXXXXX)"
-    sed "s/\\[BASE_BRANCH\\]/${BASE_BRANCH//\//\\/}/g" "$src" > "$rendered_src"
+    sed "s/\\[BASE_BRANCH\\]/$(sed_escape_replacement "$BASE_BRANCH")/g" "$src" > "$rendered_src"
     rendered_hash="$(sha256_file "$rendered_src")"
     rm -f "$rendered_src"
     if [[ -n "$rendered_hash" && "$dest_hash" == "$rendered_hash" ]]; then
@@ -3535,6 +3609,18 @@ _stealth_install_git_hook() {
   record_upgrade_result updated "$rel"
 }
 
+# ── BASE BRANCH PRE-FLIGHT ───────────────────────────────────────────────────
+# Reject an unusable base branch before the global layer writes anything
+# (issue #659). The project layer re-resolves it once the target is final;
+# this only covers what is already known from the flags.
+if [[ "$DO_PROJECT" == true ]]; then
+  if [[ -n "$_FLAG_BASE_BRANCH" ]]; then
+    require_supported_base_branch "$_FLAG_BASE_BRANCH"
+  elif [[ -n "$_FLAG_TARGET" ]]; then
+    require_configured_base_branch "$_FLAG_TARGET/CLAUDE.md" >/dev/null
+  fi
+fi
+
 # ── GLOBAL LAYER ─────────────────────────────────────────────────────────────
 if [[ "$DO_GLOBAL" == true && "$GLOBAL_AGENT" != none ]]; then
   bold "── Global layer ──"
@@ -3840,8 +3926,24 @@ if [[ "$DO_PROJECT" == true ]]; then
   # ── BASE BRANCH ──────────────────────────────────────────────────────────────
   # The main integration branch for this repo (main, master, integration, etc.).
   # Substituted into workflow examples in CLAUDE.md, processes, and commands.
+  # Precedence: --base-branch, then the `base-branch:` already configured in
+  # the target's CLAUDE.md (the file every runtime workflow reads, so an
+  # upgrade must never substitute anything else into workflow files -- issue
+  # #659), then origin/HEAD, then main.
+  _CONFIGURED_BASE=""
+  if [[ -z "$_FLAG_BASE_BRANCH" ]]; then
+    # Not in a $(...) subshell: require_configured_base_branch exits the
+    # installer on an ambiguous or unsupported value.
+    require_configured_base_branch "$TARGET/CLAUDE.md" >/dev/null
+    _CONFIGURED_BASE="$(read_configured_base_branch "$TARGET/CLAUDE.md")"
+  else
+    # The flag wins, but remember CLAUDE.md's value to warn about a split.
+    _CONFIGURED_BASE="$(read_configured_base_branch "$TARGET/CLAUDE.md" 2>/dev/null)" || _CONFIGURED_BASE=""
+  fi
   if [[ -n "$_FLAG_BASE_BRANCH" ]]; then
     BASE_BRANCH="$_FLAG_BASE_BRANCH"
+  elif [[ -n "$_CONFIGURED_BASE" ]]; then
+    BASE_BRANCH="$_CONFIGURED_BASE"
   else
     # Try to auto-detect from git
     _DETECTED_BASE=""
@@ -3867,13 +3969,25 @@ if [[ "$DO_PROJECT" == true ]]; then
       BASE_BRANCH="$_DEFAULT_BASE"
     fi
   fi
-  # Sanitize: letters, digits, hyphens, underscores, dots only
-  BASE_BRANCH="$(echo "$BASE_BRANCH" | tr -dc 'A-Za-z0-9._-')"
-  if [[ -z "$BASE_BRANCH" ]]; then
-    BASE_BRANCH="main"
-    warn "Invalid base branch name — defaulting to 'main'"
+  # Reject rather than rewrite: silently stripping characters once turned
+  # `release/v2` into `releasev2` in every substituted workflow (issue #659).
+  require_supported_base_branch "$BASE_BRANCH"
+  if [[ -n "$_CONFIGURED_BASE" && -z "$_FLAG_BASE_BRANCH" ]]; then
+    info "Base branch: $BASE_BRANCH (from CLAUDE.md base-branch:)"
+  else
+    info "Base branch: $BASE_BRANCH"
   fi
-  info "Base branch: $BASE_BRANCH"
+  # CLAUDE.md is user-owned and is never rewritten here, so a differing
+  # --base-branch leaves the runtime workflows and commit guards (which read
+  # CLAUDE.md) on another branch until the user updates it. Agent modes add
+  # the same split to their structured JSON warning list below; raw warn()
+  # output would break callers that parse the combined output as JSON.
+  # /rig-upgrade passes CLAUDE.md's own value, so it cannot create this split.
+  if [[ -n "$_FLAG_BASE_BRANCH" && -n "$_CONFIGURED_BASE" &&
+        "$_CONFIGURED_BASE" != "$BASE_BRANCH" ]]; then
+    warn "CLAUDE.md still says base-branch: $_CONFIGURED_BASE, but workflow files were rendered with --base-branch $BASE_BRANCH."
+    warn "Update base-branch: in $TARGET/CLAUDE.md to $BASE_BRANCH (runtime workflows and commit guards read it), or re-run without --base-branch."
+  fi
   blank
 
   # ── GIT TRACKING FOR .rig/ ────────────────────────────────────────────────
@@ -4480,7 +4594,7 @@ PYEOF
 
   # Substitute [BASE_BRANCH] in CLAUDE.md, commands, and process files.
   # Covers both inline (.claude/commands/) and external (.rig/processes/) paths.
-  _BASE_ESC="${BASE_BRANCH//\//\\/}"
+  _BASE_ESC="$(sed_escape_replacement "$BASE_BRANCH")"
   _subst_base_branch() {
     local f="$1" base="$TARGET" rel target_rig_dir="${_TARGET_RIG_DIR:-}"
     [[ -f "$f" ]] || return 0
@@ -5071,13 +5185,15 @@ if [[ -n "$AGENT_MODE" ]]; then
     "$UPGRADE_UPDATED_COUNT" "$UPGRADE_MERGED_COUNT" "$UPGRADE_REMOVED_COUNT" \
     "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" "$UPGRADE_SKIPPED_CONFLICT_COUNT" \
     "$UPGRADE_SKIPPED_UNTRACKED_COUNT" "$UPGRADE_STALE_COUNT" "$UPGRADE_CONVERGED_COUNT" \
-    "$UPGRADE_REPORT_PATH" "$UPGRADE_ROLLBACK_ID" <<'PYEOF'
+    "$UPGRADE_REPORT_PATH" "$UPGRADE_ROLLBACK_ID" \
+    "$_FLAG_BASE_BRANCH" "${_CONFIGURED_BASE:-}" "${BASE_BRANCH:-}" <<'PYEOF'
 import json, sys
 
 mode, status, records_path = sys.argv[1], sys.argv[2], sys.argv[3]
 (updated, merged, removed, skipped_customized, skipped_conflict,
  skipped_untracked, stale, converged) = (int(x) for x in sys.argv[4:12])
 report_path, rollback_id = sys.argv[12], sys.argv[13]
+override_base, configured_base, rendered_base = sys.argv[14:17]
 
 # result-code (as passed to record_upgrade_result in install.sh) -> fields.
 CLASSIFICATION = {
@@ -5174,6 +5290,18 @@ for line in records_text.split("\n"):
             "details": details,
         })
 
+warnings = []
+if override_base and configured_base and configured_base != rendered_base:
+    warnings.append({
+        "code": "base_branch_config_split",
+        "configured_base_branch": configured_base,
+        "rendered_base_branch": rendered_base,
+        "message": (
+            "CLAUDE.md still names a different base branch; update its "
+            "base-branch value or rerun without --base-branch."
+        ),
+    })
+
 doc = {
     "schema_version": 1,
     "mode": mode,
@@ -5190,6 +5318,7 @@ doc = {
     },
     "artifacts": artifacts,
     "conflicts": conflicts,
+    "warnings": warnings,
 }
 # Present only when a durable report was actually written, so a consumer can
 # tell "no rollback candidate" from "rollback available" without guessing.

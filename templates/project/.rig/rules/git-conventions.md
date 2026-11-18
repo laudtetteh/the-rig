@@ -56,7 +56,7 @@ devops(ci): add Docker build step to GitHub Actions [#7]
 
 - **Issue before commit.** Create the GitHub issue before writing code. The issue number must be in the commit message — not added retroactively.
 - **Commit after each meaningful unit of work.** Not at end of day. Not after five unrelated changes.
-- **Never commit directly to `main` or `master`.** Always branch.
+- **Never commit directly to the configured base branch (`base-branch:` in `CLAUDE.md`), `main`, or `master`.** Always branch.
 - **Never force-push to shared branches.**
 - **Reference issue numbers in commits** when a GitHub issue exists: `feat(scope): description [#N]`
 - Each commit must leave the repo in a working state (linting and tests pass).

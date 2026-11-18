@@ -185,6 +185,21 @@ elif grep -qF '.rig/' "$GIT_EXCLUDE" 2>/dev/null || grep -qF '.rig/' "$REPO/.git
 else
   TRACKING_ARGS=(--tracking repo)
 fi
+# Pass the configured base branch explicitly so the upgrade can never render
+# workflow files with a different one (issue #659). When CLAUDE.md sets
+# base-branch: more than once, omit the flag so install.sh stops with its
+# ambiguity error instead of this step guessing a value.
+BASE_BRANCH=$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$REPO/CLAUDE.md" 2>/dev/null |
+  sed -e 's/^"\(..*\)"$/\1/' -e "s/^'\(..*\)'\$/\1/" | head -1 || true)
+if [[ -z "$BASE_BRANCH" || "$BASE_BRANCH" == "[BASE_BRANCH]" ]]; then
+  BASE_BRANCH=$(git -C "$REPO" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's|^refs/remotes/origin/||' || true)
+fi
+BASE_BRANCH="${BASE_BRANCH:-main}"
+if [[ "$(grep -c '^base-branch:' "$REPO/CLAUDE.md" 2>/dev/null || true)" -gt 1 ]]; then
+  BASE_BRANCH_ARGS=()
+else
+  BASE_BRANCH_ARGS=(--base-branch "$BASE_BRANCH")
+fi
 UPGRADE_LOG=$(git -C "$REPO" rev-parse --git-path rig-upgrade.log)
 [[ "$UPGRADE_LOG" == /* ]] || UPGRADE_LOG="$REPO/$UPGRADE_LOG"
 # Record install.sh's own exit status: a plain `| tee` would report tee's
@@ -192,7 +207,7 @@ UPGRADE_LOG=$(git -C "$REPO" rev-parse --git-path rig-upgrade.log)
 # `set -euo pipefail`).
 INSTALL_STATUS_FILE=$(mktemp)
 { "$INSTALLER_SRC/install.sh" --project-only --strategy upgrade "${TRACKING_ARGS[@]}" \
-    --target "$REPO" 2>&1 && echo 0 > "$INSTALL_STATUS_FILE" || echo $? > "$INSTALL_STATUS_FILE"; } \
+    ${BASE_BRANCH_ARGS[@]+"${BASE_BRANCH_ARGS[@]}"} --target "$REPO" 2>&1 && echo 0 > "$INSTALL_STATUS_FILE" || echo $? > "$INSTALL_STATUS_FILE"; } \
   | tee -a "$UPGRADE_LOG"
 INSTALL_STATUS=$(cat "$INSTALL_STATUS_FILE")
 rm -f "$INSTALL_STATUS_FILE"

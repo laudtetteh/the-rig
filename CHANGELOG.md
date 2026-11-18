@@ -24,6 +24,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Native Git commit hooks now remove recognized AI attribution while preserving human trailers (#594).
 - Session current and resolve now work with macOS Bash 3.2 and read-only process sandboxes (#595).
 - Session continuations now keep exact provider identity and lineage for naming and explicit app-server retrofit (#597).
+- Upgrades now keep the base branch configured in `CLAUDE.md` instead of rewriting workflows and Codex skills to `origin/HEAD`; `/rig-upgrade` passes it explicitly, branch names such as `release/v2` are preserved, and commit guards protect the configured base branch as well as `main`/`master`. Install and upgrade now stop with a clear error when `CLAUDE.md` has more than one `base-branch:` line (a line inside a fenced example counts) or names an invalid branch; keep exactly one line or pass `--base-branch <name>`. When `--base-branch` differs from `CLAUDE.md`, the installer warns that `CLAUDE.md` must be updated; agent modes include the split in JSON `warnings[]`. Interactive installs no longer prompt for the base branch when `CLAUDE.md` already sets it (#659).
 
 ---
 

@@ -110,7 +110,16 @@ fi
 SUBJECT=$(head -1 "$COMMIT_MSG_FILE" | sed 's/\r//')
 if [ "${RIG_COMMIT_POLICY:-}" = guarded ] && [ "$REPLAY" -eq 0 ]; then
   BRANCH=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
-  case "$BRANCH" in
+  # Protect main, master, and every base-branch: value CLAUDE.md configures
+  # (issue #659); a configured `develop` base is a base branch too.
+  PROTECTED_BRANCH="$BRANCH"
+  if [ -n "$BRANCH" ] &&
+     sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$ROOT/CLAUDE.md" 2>/dev/null |
+       sed -e 's/^"\(..*\)"$/\1/' -e "s/^'\(..*\)'\$/\1/" |
+       grep -Fxq -- "$BRANCH"; then
+    PROTECTED_BRANCH=main
+  fi
+  case "$PROTECTED_BRANCH" in
     main|master)
       HOUSEKEEPING=$(sed -n 's/^housekeeping:[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$ROOT/CLAUDE.md" 2>/dev/null | head -1)
       if [ "$HOUSEKEEPING" != direct-push ]; then
