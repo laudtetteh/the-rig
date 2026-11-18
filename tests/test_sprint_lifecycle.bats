@@ -40,15 +40,32 @@ open(os.environ["TASK_F"],"w").write("\n".join(lines)+"\n")'
   task real-github '#10' P1 src/f.py
   task real-custom 'NONE-123' P1 src/g.py
   task fallback 'TBD' P1 src/h.py
+  task annotated-tbd 'TBD: will file' P1 src/i.py
+  task real-pending 'pending review' P1 src/j.py
+  task real-unknown 'unknown project' P1 src/k.py
+  task real-tbd-prefix 'TBD-123' P1 src/l.py
   TASK_F="$CASE_DIR/.rig/tasks/backlog/fallback.md" python3 -c 'import os,pathlib; p=pathlib.Path(os.environ["TASK_F"]); p.write_text(p.read_text().replace("**GitHub issue**: TBD", "**GitHub issue**: TBD\n**Issue**: #12"))'
 
   run "$CASE_DIR/bin/rig" sprint audit --all --json
   [ "$status" -eq 0 ]
-  printf '%s' "$output" | python3 -c 'import json,sys; r=json.load(sys.stdin)["result"]; refs={t["slug"]:t["canonical_ref"] for t in r["tasks"]}; assert not r["duplicates"]; assert all(refs[s] is None for s in ("no-tracker-a","no-tracker-b","pending-a","pending-b","local-explanation")); assert refs["real-github"]=="#10" and refs["real-custom"]=="NONE-123" and refs["fallback"]=="#12"; assert {p["canonical_ref"] for p in r["parity"]}=={"#10","NONE-123","#12"}'
+  printf '%s' "$output" | python3 -c '
+import json, sys
+r = json.load(sys.stdin)["result"]
+refs = {task["slug"]: task["canonical_ref"] for task in r["tasks"]}
+assert not r["duplicates"]
+assert all(refs[slug] is None for slug in (
+    "no-tracker-a", "no-tracker-b", "pending-a", "pending-b",
+    "local-explanation", "annotated-tbd"))
+assert {refs[slug] for slug in ("real-github", "real-custom", "fallback",
+                                "real-pending", "real-unknown", "real-tbd-prefix")} == {
+    "#10", "NONE-123", "#12", "pending review", "unknown project", "TBD-123"}
+assert {item["canonical_ref"] for item in r["parity"]} == {
+    "#10", "NONE-123", "#12", "pending review", "unknown project", "TBD-123"}
+'
 
   run "$CASE_DIR/bin/rig" sprint plan --all --mode plan-only --json
   [ "$status" -eq 0 ]
-  printf '%s' "$output" | python3 -c 'import json,sys; p=json.load(sys.stdin)["result"]["plan"]; assert {s for wave in p["waves"] for s in wave}=={"no-tracker-a","no-tracker-b","pending-a","pending-b","local-explanation","real-github","real-custom","fallback"}'
+  printf '%s' "$output" | python3 -c 'import json,sys; p=json.load(sys.stdin)["result"]["plan"]; assert {s for wave in p["waves"] for s in wave}=={"no-tracker-a","no-tracker-b","pending-a","pending-b","local-explanation","real-github","real-custom","fallback","annotated-tbd","real-pending","real-unknown","real-tbd-prefix"}'
 }
 
 @test "plan deterministically separates prefix conflicts and non-execution lanes" {

@@ -30,11 +30,15 @@ ISSUE_FIELDS=("GitHub issue","Issue","GitHub")
 TERMINAL_STATUSES={"done","complete","completed","closed","cancelled","canceled"}
 # Declared statuses that clearly mean open work; only these contradict done/.
 OPEN_STATUSES={"backlog","active","open","proposed","planned","blocked","todo","wip"}
+PLACEHOLDER_REF=re.compile(
+    r"(?:n/?a|none|tbd|not applicable|no issue)"
+    r"(?:\s*\([^)]*\)|:\s+\S.*|\s+[—–-]\s+\S.*)?"
+)
 def placeholder_ref(value):
-    # A card may explain why it has no tracker item after a placeholder word.
-    # Require whitespace or the end so arbitrary refs such as NONE-123 survive.
+    # Accept standard placeholders and explicitly delimited explanations only;
+    # arbitrary tracker refs such as NONE-123 and "pending review" stay valid.
     value=value.replace("`", "").strip().casefold()
-    return bool(re.match(r"^(?:n/?a|none|tbd|pending|unknown|not applicable|not yet filed|no issue|[-–—])(?:\s|$)", value))
+    return value in {"-", "–", "—"} or bool(PLACEHOLDER_REF.fullmatch(value))
 def issue_ref(text):
     for key in ISSUE_FIELDS:
         value=metadata(text,key)
