@@ -161,8 +161,8 @@ install_fake_gh() {
   cat > "$bin/gh" <<'GH'
 #!/usr/bin/env bash
 if [[ "$1" == "auth" ]]; then
-  [[ "${FAKE_GH_AUTH:-ok}" == "ok" ]]
-  exit $?
+  [[ "${FAKE_GH_AUTH:-ok}" == "ok" ]] || exit 1
+  exit 0
 fi
 if [[ "$1" == "repo" ]]; then
   [[ "${FAKE_GH_REPO:-ok}" == "ok" ]] || exit 1
