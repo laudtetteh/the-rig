@@ -54,10 +54,12 @@ sys.exit("marker not found: " + marker)
 PY
 }
 
-# Write a runnable script: a preamble of variable assignments plus the block.
+# Write a runnable script: strict mode, a preamble of variable assignments,
+# then the block. Every snippet must survive `set -euo pipefail` on the
+# stock macOS bash 3.2 the tests run it with.
 _snippet_script() {
   local file="$1" marker="$2" preamble="$3" out="$TEST_TMP/snippet-$RANDOM.sh"
-  { printf '%s\n' "$preamble"; _extract_block "$file" "$marker"; } > "$out"
+  { printf 'set -euo pipefail\n%s\n' "$preamble"; _extract_block "$file" "$marker"; } > "$out"
   echo "$out"
 }
 
@@ -87,9 +89,12 @@ EOF
   script=$(_snippet_script "$RIG_UPGRADE" 'REL="$rel"' "RIG_DIR='$PROJECT/.rig'
 rel='.claude/commands/ship.md'
 installed_path='$PROJECT/.claude/commands/ship.md'
-CUSTOMIZED_ACCEPTED=()")
+CUSTOMIZED_ACCEPTED=()
+RIG_WRITTEN_PATHS=()")
+  printf 'echo "accepted=${CUSTOMIZED_ACCEPTED[*]-}"\n' >> "$script"
   run /bin/bash "$script"
   [ "$status" -eq 0 ]
+  [[ "$output" == *"accepted=.claude/commands/ship.md"* ]] || false
   local expected
   expected=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$PROJECT/.claude/commands/ship.md")
   grep -qx "$expected  .claude/commands/ship.md" "$PROJECT/.rig/memory/.rig-manifest"
@@ -104,6 +109,32 @@ assert data["entries"][".claude/hooks/pre-tool.sh"]["sha256"] == "2" * 64
 PY
 }
 
+@test "rig-upgrade 2b-classic: manifest helper refuses an absent entry and a missing manifest" {
+  _write_manifest_fixture "$PROJECT/.rig"
+  mkdir -p "$PROJECT/.claude/commands"
+  printf 'new\n' > "$PROJECT/.claude/commands/unlisted.md"
+  cp "$PROJECT/.rig/memory/.rig-manifest" "$TEST_TMP/manifest-before"
+  local script
+  script=$(_snippet_script "$RIG_UPGRADE" 'REL="$rel"' "RIG_DIR='$PROJECT/.rig'
+rel='.claude/commands/unlisted.md'
+installed_path='$PROJECT/.claude/commands/unlisted.md'
+CUSTOMIZED_ACCEPTED=()
+RIG_WRITTEN_PATHS=()")
+  printf 'echo "accepted=${#CUSTOMIZED_ACCEPTED[@]}"\n' >> "$script"
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"has no manifest entry"* ]] || false
+  [[ "$output" == *"accepted=0"* ]] || false
+  cmp -s "$TEST_TMP/manifest-before" "$PROJECT/.rig/memory/.rig-manifest"
+
+  rm "$PROJECT/.rig/memory/.rig-manifest"
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"error: manifest not found"* ]] || false
+  [[ "$output" != *"Traceback"* ]] || false
+  [[ "$output" == *"accepted=0"* ]] || false
+}
+
 @test "rig-upgrade 3a: VERSION repair updates the external manifest entry" {
   local rig_dir="$HOME/.rig/projects/demo"
   _write_manifest_fixture "$rig_dir"
@@ -111,7 +142,8 @@ PY
   script=$(_snippet_script "$RIG_UPGRADE" 'REL=".rig/VERSION"' "RIG_DIR='$rig_dir'
 EXPECTED_VERSION='9.9.9'
 INSTALLED_VERSION='1.0.0'
-FIXED=()")
+FIXED=()
+RIG_WRITTEN_PATHS=()")
   run /bin/bash "$script"
   [ "$status" -eq 0 ]
   [ "$(cat "$rig_dir/VERSION")" = "9.9.9" ]
@@ -145,6 +177,36 @@ INSTALLER_SRC='$REPO_ROOT'")
   [ "$output" = "TRACKING=external HOOKS=.husky ARGS=--tracking external --rig-dir $TEST_TMP/shared-rig" ]
 }
 
+@test "rig-upgrade 1c: a .rigpath containing spaces is read verbatim" {
+  local rig_dir="$HOME/.rig/projects/live st"
+  mkdir -p "$rig_dir"
+  printf '%s\r\n' "$rig_dir" > "$PROJECT/.rigpath"
+  run _detect_tracking
+  [ "$status" -eq 0 ]
+  [ "$output" = "TRACKING=stealth HOOKS=.git/hooks ARGS=--tracking stealth --rig-dir $rig_dir" ]
+  local script
+  script=$(_snippet_script "$UPGRADE_WORKFLOW" 'installed="$RIG_DIR/${src#.rig/}"' "cd '$PROJECT'")
+  printf 'echo "RIG_DIR=$RIG_DIR"\n' >> "$script"
+  run /bin/bash "$script"
+  [[ "$output" == *"RIG_DIR=$rig_dir"* ]] || false
+}
+
+@test "rig-upgrade 1c: local mode is detected inside a linked worktree" {
+  echo base > "$PROJECT/README.md"
+  git -C "$PROJECT" add README.md
+  git -C "$PROJECT" commit -qm init
+  printf '.rig/\n' >> "$PROJECT/.git/info/exclude"
+  git -C "$PROJECT" worktree add -q "$TEST_TMP/linked" -b linked
+  mkdir -p "$TEST_TMP/linked/.rig"
+  [ -f "$TEST_TMP/linked/.git" ]
+  local saved="$PROJECT"
+  PROJECT="$TEST_TMP/linked"
+  run _detect_tracking
+  PROJECT="$saved"
+  [ "$status" -eq 0 ]
+  [ "$output" = "TRACKING=local HOOKS=.husky ARGS=--tracking local" ]
+}
+
 @test "rig-upgrade 1c: tracked .rig/ is repo and excluded .rig/ is local" {
   mkdir -p "$PROJECT/.rig"
   echo "1.0.0" > "$PROJECT/.rig/VERSION"
@@ -158,34 +220,101 @@ INSTALLER_SRC='$REPO_ROOT'")
   [ "$output" = "TRACKING=local HOOKS=.husky ARGS=--tracking local" ]
 }
 
-@test "rig-upgrade 5a: staging skips ignored files, worktrees, and excluded .rig/" {
-  printf '.rig/\n' >> "$PROJECT/.git/info/exclude"
+_stage_fixture() {
   printf 'ignored-by-project.txt\n' > "$PROJECT/.gitignore"
-  mkdir -p "$PROJECT/.rig/processes" "$PROJECT/.claude/commands" "$PROJECT/.claude/worktrees/wt" "$PROJECT/bin"
+  mkdir -p "$PROJECT/.rig/processes" "$PROJECT/.rig/memory" "$PROJECT/.claude/commands" \
+    "$PROJECT/.claude/worktrees/wt" "$PROJECT/bin" "$PROJECT/.github"
   echo base > "$PROJECT/README.md"
-  git -C "$PROJECT" add README.md .gitignore
+  echo '{"hooks": {}}' > "$PROJECT/.claude/settings.json"
+  echo 'user command' > "$PROJECT/.claude/commands/my-own.md"
+  echo old > "$PROJECT/.claude/commands/ship.md"
+  echo old > "$PROJECT/.rig/processes/SHIP_WORKFLOW.md"
+  echo old > "$PROJECT/.rig/memory/.rig-manifest"
+  git -C "$PROJECT" add -A
   git -C "$PROJECT" commit -qm init
-  echo cmd > "$PROJECT/.claude/commands/ship.md"
-  echo '{}' > "$PROJECT/.claude/settings.local.json"
-  echo proc > "$PROJECT/.rig/processes/SHIP_WORKFLOW.md"
+  # Rig writes ...
+  echo new > "$PROJECT/.claude/commands/ship.md"
+  echo new > "$PROJECT/.rig/processes/SHIP_WORKFLOW.md"
+  echo new > "$PROJECT/.rig/memory/.rig-manifest"
+  echo template > "$PROJECT/.github/PULL_REQUEST_TEMPLATE.md"
   echo launcher > "$PROJECT/bin/rig"
+  # ... and unrelated user state that must never be swept in.
+  echo 'user edit' > "$PROJECT/.claude/commands/my-own.md"
+  echo '{"hooks": {}, "mine": true}' > "$PROJECT/.claude/settings.json"
+  echo '{}' > "$PROJECT/.claude/settings.local.json"
   echo mine > "$PROJECT/bin/user-tool"
   git -C "$PROJECT/.claude/worktrees/wt" init -q
   echo user > "$PROJECT/notes.txt"
+}
+
+_run_stage() {
   local script
-  script=$(_snippet_script "$RIG_UPGRADE" 'RIG_STAGE_CANDIDATES=(' "REPO='$PROJECT'
-TRACKING=local")
-  run /bin/bash "$script"
+  script=$(_snippet_script "$RIG_UPGRADE" '_rig_stage_candidate() {' "REPO='$PROJECT'
+TRACKING=$1
+RIG_WRITTEN_PATHS=(.claude/commands/ship.md .rig/processes/SHIP_WORKFLOW.md .github/PULL_REQUEST_TEMPLATE.md bin/rig .git/hooks/pre-commit)")
+  /bin/bash "$script"
+}
+
+@test "rig-upgrade 5a: local mode stages only installer-written project files" {
+  _stage_fixture
+  printf '.rig/\n' >> "$PROJECT/.git/info/exclude"
+  git -C "$PROJECT" rm -rq --cached .rig
+  git -C "$PROJECT" commit -qm "untrack rig"
+  run _run_stage local
+  [ "$status" -eq 0 ]
+  local staged
+  staged=$(git -C "$PROJECT" diff --cached --name-only)
+  [ "$staged" = "$(printf '.claude/commands/ship.md\n.github/PULL_REQUEST_TEMPLATE.md\nbin/rig')" ]
+}
+
+@test "rig-upgrade 5a: repo mode adds .rig/ writes and bookkeeping, never user edits" {
+  _stage_fixture
+  run _run_stage repo
   [ "$status" -eq 0 ]
   local staged
   staged=$(git -C "$PROJECT" diff --cached --name-only)
   echo "$staged" | grep -qx '.claude/commands/ship.md'
-  echo "$staged" | grep -qx 'bin/rig'
+  echo "$staged" | grep -qx '.rig/processes/SHIP_WORKFLOW.md'
+  echo "$staged" | grep -qx '.rig/memory/.rig-manifest'
+  echo "$staged" | grep -qx '.github/PULL_REQUEST_TEMPLATE.md'
+  [[ "$staged" != *my-own.md* ]] || false
+  [[ "$staged" != *settings.json* ]] || false
   [[ "$staged" != *settings.local.json* ]] || false
   [[ "$staged" != *worktrees* ]] || false
-  [[ "$staged" != *.rig/* ]] || false
   [[ "$staged" != *user-tool* ]] || false
   [[ "$staged" != *notes.txt* ]] || false
+}
+
+@test "UPGRADE_WORKFLOW step 7: stealth is detected before branching" {
+  local rig_dir="$HOME/.rig/projects/demo"
+  mkdir -p "$rig_dir"
+  echo "$rig_dir" > "$PROJECT/.rigpath"
+  local script
+  script=$(_snippet_script "$UPGRADE_WORKFLOW" 'echo "Tracking mode: $TRACKING"' "cd '$PROJECT'")
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  [ "$output" = "Tracking mode: stealth" ]
+  local branch_line detect_line
+  detect_line=$(grep -n 'echo "Tracking mode: $TRACKING"' "$UPGRADE_WORKFLOW" | cut -d: -f1)
+  branch_line=$(grep -n 'git checkout -b chore/rig-upgrade-vX.Y.Z' "$UPGRADE_WORKFLOW" | cut -d: -f1)
+  [ "$detect_line" -lt "$branch_line" ]
+}
+
+@test "UPGRADE_WORKFLOW step 7: stages exactly the files the installer log reports" {
+  _stage_fixture
+  local log
+  log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
+  printf '\033[0;32m✓\033[0m Updated: .claude/commands/ship.md\n' > "$log"
+  printf '\033[0;32m✓\033[0m Created: .github/PULL_REQUEST_TEMPLATE.md\n' >> "$log"
+  printf '\033[0;32m✓\033[0m Updated: .rig/processes/SHIP_WORKFLOW.md\n' >> "$log"
+  printf 'Updated: 3\n' >> "$log"
+  local script
+  script=$(_snippet_script "$UPGRADE_WORKFLOW" 'done < "$UPGRADE_LOG"' "cd '$PROJECT'")
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  local staged
+  staged=$(git -C "$PROJECT" diff --cached --name-only)
+  [ "$staged" = "$(printf '.claude/commands/ship.md\n.github/PULL_REQUEST_TEMPLATE.md\n.rig/memory/.rig-manifest\n.rig/processes/SHIP_WORKFLOW.md')" ]
 }
 
 @test "rig-upgrade 2c: stealth hook check reports without overwriting a customized hook" {

@@ -317,6 +317,15 @@ PY
   done
 }
 
+@test "rig-upgrade commands: .rigpath is read verbatim, never whitespace-stripped (#663)" {
+  local f
+  for f in "$COMMAND_DIR/rig-upgrade.md" \
+           "$REPO_ROOT/templates/project/.rig/processes/UPGRADE_WORKFLOW.md"; do
+    run grep -nE "tr -d '\[:space:\]' < [^|]*rigpath" "$f"
+    [ "$status" -ne 0 ] || { echo "whitespace-stripping .rigpath read in $f: $output"; return 1; }
+  done
+}
+
 @test "rig-upgrade.md: tracking detection mirrors install.sh rules (#663)" {
   grep -Fq '"$HOME/.rig/projects/"*' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 'TRACKING="local"' "$COMMAND_DIR/rig-upgrade.md"

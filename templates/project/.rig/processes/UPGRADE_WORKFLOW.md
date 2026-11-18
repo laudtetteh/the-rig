@@ -78,12 +78,14 @@ REPO=$(git rev-parse --show-toplevel)
 RIG_DIR="$REPO/.rig"
 HOOKS_DIR="$REPO/.husky"
 if [[ -f "$REPO/.rigpath" ]]; then
-  RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+  # First line verbatim, CR/LF stripped only: interior spaces belong to the path.
+  IFS= read -r RIG_DIR < "$REPO/.rigpath" || true
+  RIG_DIR="${RIG_DIR%$'\r'}"
   # install.sh: a .rigpath under $HOME/.rig/projects/ is stealth (hooks in
   # .git/hooks/); any other .rigpath is external (hooks stay in .husky/).
   [[ "$RIG_DIR" == "$HOME/.rig/projects/"* ]] && HOOKS_DIR="$REPO/.git/hooks"
 fi
-BASE_BRANCH=$(grep "^base-branch:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+BASE_BRANCH=$(grep "^base-branch:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]' || true)
 BASE_BRANCH="${BASE_BRANCH:-main}"
 
 for src in \
@@ -157,7 +159,13 @@ Codex do not acquire independently maintained workflow text.
 ## Step 4 — Run the installer for the project layer
 
 ```bash
-~/tools/the-rig/install.sh --project-only --strategy upgrade --target "$(pwd)"
+INSTALLER_SRC="${RIG_INSTALLER_SRC:-$HOME/tools/the-rig}"
+REPO=$(git rev-parse --show-toplevel)
+# Keep the installer's output inside .git/ (never staged): Step 7 stages
+# exactly the files it reports as written.
+UPGRADE_LOG=$(git -C "$REPO" rev-parse --git-path rig-upgrade.log)
+[[ "$UPGRADE_LOG" == /* ]] || UPGRADE_LOG="$REPO/$UPGRADE_LOG"
+"$INSTALLER_SRC/install.sh" --project-only --strategy upgrade --target "$REPO" 2>&1 | tee "$UPGRADE_LOG"
 ```
 
 The installer will:
@@ -221,73 +229,118 @@ What can be committed depends on the tracking mode (install.sh's rules):
 | Mode | How install.sh identifies it | What to stage |
 |---|---|---|
 | stealth | `.rigpath` points under `$HOME/.rig/projects/` | Nothing — every Rig artifact is in `.git/info/exclude` or outside the repo; skip this step |
-| external | `.rigpath` points anywhere else | `.claude/`, `.husky/`, `.agents/skills/`, `.codex/`, `bin/rig*` (`.rig/` is outside the repo) |
-| local | no `.rigpath`; `.rig/` in `.git/info/exclude` or `.gitignore` | Same as external — never stage `.rig/` |
-| repo | no `.rigpath`; `.rig/` is git-tracked | The above plus `.rig/processes/`, `.rig/rules/`, `.rig/VERSION`, and the manifest |
+| external | `.rigpath` points anywhere else | Only the project files the installer wrote (`.rig/` is outside the repo) |
+| local | no `.rigpath`; `.rig/` in the git exclude file or `.gitignore` | Same as external — never stage `.rig/` |
+| repo | no `.rigpath`; `.rig/` is git-tracked | The files the installer wrote, plus its `.rig/` bookkeeping (`VERSION`, manifest, `install-targets.json`, `contextual-tips.sh`) |
 
 For any upgrade that modifies 4 or more files (hooks, commands, process files, VERSION),
 run these steps in order from the project root. Replace `X.Y.Z` with the new version.
 
-1. Create the branch:
+1. Detect the tracking mode **before** creating a branch. Stealth installs have
+   nothing to commit — stop here for them:
+
+```bash
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+GIT_EXCLUDE=$(git rev-parse --git-path info/exclude)
+[[ "$GIT_EXCLUDE" == /* ]] || GIT_EXCLUDE="$ROOT/$GIT_EXCLUDE"
+TRACKING="repo"
+if [[ -f .rigpath ]]; then
+  IFS= read -r RIGPATH_DIR < .rigpath || true
+  RIGPATH_DIR="${RIGPATH_DIR%$'\r'}"
+  TRACKING="external"
+  [[ "$RIGPATH_DIR" == "$HOME/.rig/projects/"* ]] && TRACKING="stealth"
+elif [[ -z "$(git ls-files -- .rig/)" ]] && \
+     { grep -qF '.rig/' "$GIT_EXCLUDE" 2>/dev/null || grep -qF '.rig/' .gitignore 2>/dev/null; }; then
+  TRACKING="local"
+fi
+echo "Tracking mode: $TRACKING"
+```
+
+   If it prints `stealth`, skip the rest of this step.
+
+2. Create the branch:
 
 ```bash
 git checkout -b chore/rig-upgrade-vX.Y.Z
 ```
 
-2. Stage only Rig-managed paths. Never use `git add -f`: it stages ignored
-   files such as `.claude/settings.local.json` and turns `.claude/worktrees/*`
-   checkouts into embedded repositories. Ignored paths are skipped:
+3. Stage exactly the files the Step 4 installer run reported as written —
+   never whole directories (that sweeps in unrelated user edits to commands or
+   `settings.json`) and never `git add -f` (that stages ignored files such as
+   `.claude/settings.local.json` and turns `.claude/worktrees/*` checkouts into
+   embedded repositories). Ignored or unchanged paths are skipped. `TRACKING`
+   is re-derived so this block also runs on its own:
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel)
 cd "$ROOT"
+GIT_EXCLUDE=$(git rev-parse --git-path info/exclude)
+[[ "$GIT_EXCLUDE" == /* ]] || GIT_EXCLUDE="$ROOT/$GIT_EXCLUDE"
 TRACKING="repo"
 if [[ -f .rigpath ]]; then
   TRACKING="external"
-  [[ "$(tr -d '[:space:]' < .rigpath)" == "$HOME/.rig/projects/"* ]] && TRACKING="stealth"
 elif [[ -z "$(git ls-files -- .rig/)" ]] && \
-     { grep -qF '.rig/' .git/info/exclude 2>/dev/null || grep -qF '.rig/' .gitignore 2>/dev/null; }; then
+     { grep -qF '.rig/' "$GIT_EXCLUDE" 2>/dev/null || grep -qF '.rig/' .gitignore 2>/dev/null; }; then
   TRACKING="local"
 fi
-if [[ "$TRACKING" == "stealth" ]]; then
-  echo "Stealth install: nothing to commit."
-else
-  CANDIDATES=(.claude .husky .agents/skills .codex .gitleaks.toml bin/rig*)
-  if [[ "$TRACKING" == "repo" ]]; then
-    CANDIDATES+=(.rig/processes .rig/rules .rig/VERSION .rig/memory/.rig-manifest .rig/memory/.rig-manifest.json)
-  fi
-  STAGE=()
-  for p in "${CANDIDATES[@]}"; do
-    [[ -e "$p" ]] || [[ -n "$(git ls-files -- "$p")" ]] || continue
-    git check-ignore -q -- "$p" && continue
-    STAGE+=("$p")
-  done
-  if [[ ${#STAGE[@]} -gt 0 ]]; then
-    git add -A -- "${STAGE[@]}" ':(exclude).claude/settings.local.json' ':(exclude).claude/worktrees'
-  fi
-  git diff --cached --stat
+UPGRADE_LOG=$(git rev-parse --git-path rig-upgrade.log)
+[[ "$UPGRADE_LOG" == /* ]] || UPGRADE_LOG="$ROOT/$UPGRADE_LOG"
+WRITTEN=()
+while IFS= read -r line; do
+  path=""
+  case "$line" in
+    *"Updated (overwritten): "*) path="${line#*Updated (overwritten): }" ;;
+    *"Updated: "*)               path="${line#*Updated: }" ;;
+    *"Converged: "*)             path="${line#*Converged: }" ;;
+    *"Created: "*)               path="${line#*Created: }" ;;
+    *"Removed obsolete legacy hook: "*) path="${line#*Removed obsolete legacy hook: }" ;;
+    *"Merged .claude/settings.json"*|*"Updated moved-project paths in .claude/settings.json"*)
+      path=".claude/settings.json" ;;
+  esac
+  [[ -z "$path" || "$path" =~ ^[0-9]+$ ]] && continue
+  WRITTEN+=("$path")
+done < "$UPGRADE_LOG"
+if [[ "$TRACKING" == "repo" ]]; then
+  WRITTEN+=(.rig/VERSION .rig/memory/.rig-manifest .rig/memory/.rig-manifest.json \
+    .rig/install-targets.json .rig/contextual-tips.sh)
 fi
+STAGE=()
+for p in ${WRITTEN[@]+"${WRITTEN[@]}"}; do
+  case "$p" in
+    .git/*) continue ;;
+    .rig/*) [[ "$TRACKING" == "repo" ]] || continue ;;
+  esac
+  if [[ ! -e "$p" && -z "$(git ls-files -- "$p")" ]]; then continue; fi
+  if git check-ignore -q -- "$p"; then continue; fi
+  if [[ -z "$(git status --porcelain -- "$p")" ]]; then continue; fi
+  STAGE+=("$p")
+done
+if [[ ${#STAGE[@]} -gt 0 ]]; then
+  git add -A -- "${STAGE[@]}"
+fi
+git diff --cached --stat
 ```
 
    If staging failed or nothing is staged, stop — do not create a commit
    approval. Otherwise review the staged list and get the user's approval.
 
-3. Only after staging succeeded and the user approved, create the current
+4. Only after staging succeeded and the user approved, create the current
    worktree's one-use approval and commit:
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel)
 RIG_DIR="$ROOT/.rig"
-if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; fi
+if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; RIG_DIR="${RIG_DIR%$'\r'}"; fi
 touch "$RIG_DIR/memory/.rig-commit-ok"
 RIG_COMMIT_POLICY=guarded git commit -m "chore(rig): upgrade to The Rig vX.Y.Z [#N]"
 ```
 
-4. Push the branch, then open the PR against the configured base branch:
+5. Push the branch, then open the PR against the configured base branch:
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel)
-BASE_BRANCH=$(grep "^base-branch:" "$ROOT/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+BASE_BRANCH=$(grep "^base-branch:" "$ROOT/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]' || true)
 BASE_BRANCH="${BASE_BRANCH:-main}"
 git push -u origin chore/rig-upgrade-vX.Y.Z
 gh pr create --base "$BASE_BRANCH" --head chore/rig-upgrade-vX.Y.Z \
