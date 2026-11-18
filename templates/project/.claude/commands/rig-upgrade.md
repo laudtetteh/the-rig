@@ -528,7 +528,7 @@ TEMPLATES="$INSTALLER_SRC/templates/project"
 # flag, so install.sh itself stops with its ambiguity error.
 BASE_BRANCH_VALUES=$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$REPO/CLAUDE.md" 2>/dev/null |
   sed -e 's/^"\(..*\)"$/\1/' -e "s/^'\(..*\)'\$/\1/" || true)
-BASE_BRANCH_COUNT=$(printf '%s\n' "$BASE_BRANCH_VALUES" | grep -c . || true)
+BASE_BRANCH_COUNT=$(grep -c '^base-branch:' "$REPO/CLAUDE.md" 2>/dev/null || true)
 BASE_BRANCH=""
 if [[ "$BASE_BRANCH_COUNT" -gt 1 ]]; then
   echo "❌ $REPO/CLAUDE.md sets base-branch: more than once:"

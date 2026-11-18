@@ -1489,14 +1489,16 @@ is_supported_base_branch() {
 read_configured_base_branch() {
   local claude_md="$1" values count
   [[ -f "$claude_md" ]] || return 0
-  values="$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$claude_md" 2>/dev/null |
-    sed -e 's/^"\(..*\)"$/\1/' -e "s/^'\(..*\)'\$/\1/" || true)"
-  [[ -n "$values" ]] || return 0
-  count="$(printf '%s\n' "$values" | grep -c . || true)"
+  # Count declarations, not only parsed nonempty values. A blank second line
+  # still makes the project configuration ambiguous.
+  count="$(grep -c '^base-branch:' "$claude_md" 2>/dev/null || true)"
   if [[ "$count" -gt 1 ]]; then
     grep -n '^base-branch:' "$claude_md" >&2 || true
     return 2
   fi
+  values="$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$claude_md" 2>/dev/null |
+    sed -e 's/^"\(..*\)"$/\1/' -e "s/^'\(..*\)'\$/\1/" || true)"
+  [[ -n "$values" ]] || return 0
   [[ "$values" == "[BASE_BRANCH]" ]] && return 0
   printf '%s' "$values"
 }

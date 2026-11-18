@@ -257,6 +257,16 @@ INSTALLER_SRC='$REPO_ROOT'")
   [ "$status" -eq 0 ]
   [[ "$output" == *"sets base-branch: more than once"* ]] || false
   [ "${lines[${#lines[@]}-1]}" = "BASE=" ]
+
+  local duplicate
+  for duplicate in $'base-branch: develop\nbase-branch:\n' \
+                   $'base-branch:\nbase-branch: develop\n'; do
+    printf '%s' "$duplicate" > "$PROJECT/CLAUDE.md"
+    run _detect_base_branch
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"sets base-branch: more than once"* ]] || false
+    [ "${lines[${#lines[@]}-1]}" = "BASE=" ]
+  done
 }
 
 _stage_fixture() {

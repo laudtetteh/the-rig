@@ -161,13 +161,17 @@ assert doc["warnings"] == [{
 
 @test "upgrade refuses a CLAUDE.md that sets base-branch more than once" {
   install_project repo develop
-  printf '\nbase-branch: main\n' >> "$TEST_PROJECT/CLAUDE.md"
   cp "$TEST_PROJECT/.claude/commands/ship.md" "$TEMP_DIR/ship.before"
-
-  upgrade_project upgrade
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"sets base-branch: more than once"* ]] || return 1
-  cmp -s "$TEMP_DIR/ship.before" "$TEST_PROJECT/.claude/commands/ship.md"
+  local lines
+  for lines in $'base-branch: develop\nbase-branch: main\n' \
+               $'base-branch: develop\nbase-branch:\n' \
+               $'base-branch:\nbase-branch: develop\n'; do
+    printf '%s' "$lines" > "$TEST_PROJECT/CLAUDE.md"
+    upgrade_project upgrade
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"sets base-branch: more than once"* ]] || return 1
+    cmp -s "$TEMP_DIR/ship.before" "$TEST_PROJECT/.claude/commands/ship.md"
+  done
 }
 
 @test "branch names containing a slash are preserved through install and upgrade" {
