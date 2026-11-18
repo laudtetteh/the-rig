@@ -271,6 +271,8 @@ RIG_WRITTEN_PATHS=(.claude/commands/ship.md .rig/processes/SHIP_WORKFLOW.md .git
   _stage_fixture
   run _run_stage repo
   [ "$status" -eq 0 ]
+  [[ "$output" == *"Not staged"* ]] || false
+  [[ "$output" == *".claude/commands/my-own.md"* ]] || false
   local staged
   staged=$(git -C "$PROJECT" diff --cached --name-only)
   echo "$staged" | grep -qx '.claude/commands/ship.md'
@@ -304,17 +306,96 @@ RIG_WRITTEN_PATHS=(.claude/commands/ship.md .rig/processes/SHIP_WORKFLOW.md .git
   _stage_fixture
   local log
   log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
+  # Real install.sh styles: colourised, with and without a colon after the verb.
   printf '\033[0;32m✓\033[0m Updated: .claude/commands/ship.md\n' > "$log"
-  printf '\033[0;32m✓\033[0m Created: .github/PULL_REQUEST_TEMPLATE.md\n' >> "$log"
+  printf '\033[0;32m✓\033[0m Created .github/PULL_REQUEST_TEMPLATE.md\n' >> "$log"
+  printf '\033[0;32m✓\033[0m Created bin/rig\n' >> "$log"
   printf '\033[0;32m✓\033[0m Updated: .rig/processes/SHIP_WORKFLOW.md\n' >> "$log"
+  printf '\033[0;32m✓\033[0m Created .rigpath → /somewhere/else\n' >> "$log"
   printf 'Updated: 3\n' >> "$log"
   local script
-  script=$(_snippet_script "$UPGRADE_WORKFLOW" 'done < "$UPGRADE_LOG"' "cd '$PROJECT'")
+  script=$(_snippet_script "$UPGRADE_WORKFLOW" 'done < <(sed "s/${ESC}' "cd '$PROJECT'")
   run /bin/bash "$script"
   [ "$status" -eq 0 ]
   local staged
   staged=$(git -C "$PROJECT" diff --cached --name-only)
-  [ "$staged" = "$(printf '.claude/commands/ship.md\n.github/PULL_REQUEST_TEMPLATE.md\n.rig/memory/.rig-manifest\n.rig/processes/SHIP_WORKFLOW.md')" ]
+  [ "$staged" = "$(printf '.claude/commands/ship.md\n.github/PULL_REQUEST_TEMPLATE.md\n.rig/memory/.rig-manifest\n.rig/processes/SHIP_WORKFLOW.md\nbin/rig')" ]
+  # Unrelated user edits under Rig-managed paths are listed, not staged.
+  [[ "$output" == *"Not staged"* ]] || false
+  [[ "$output" == *".claude/commands/my-own.md"* ]] || false
+  [[ "$output" == *".claude/settings.json"* ]] || false
+}
+
+@test "UPGRADE_WORKFLOW step 7: refuses a missing or stale installer log" {
+  _stage_fixture
+  local script log
+  script=$(_snippet_script "$UPGRADE_WORKFLOW" 'done < <(sed "s/${ESC}' "cd '$PROJECT'")
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No installer log"* ]] || false
+  [ -z "$(git -C "$PROJECT" diff --cached --name-only)" ]
+
+  log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
+  printf '\033[0;32m✓\033[0m Updated: .claude/commands/ship.md\n' > "$log"
+  touch -t 202001010000 "$log"
+  echo 9.9.9 > "$PROJECT/.rig/VERSION"
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"stale log"* ]] || false
+  [ -z "$(git -C "$PROJECT" diff --cached --name-only)" ]
+}
+
+@test "rig-upgrade 2a-classic: a real classic upgrade log stages created files" {
+  local fixture="$REPO_ROOT/tests/fixtures/rig_upgrade_classic_v1.28.1.txt"
+  # Recreate the project state behind the captured v1.28.1 -> current log:
+  # every "Updated: <path>" file exists before the upgrade and is modified by
+  # it; every "Created <path>" file is new.
+  local plain updated created p
+  plain=$(LC_ALL=C sed "s/$(printf '\033')\[[0-9;]*m//g" "$fixture")
+  updated=$(printf '%s\n' "$plain" | LC_ALL=C sed -n 's/^.* Updated: \([^ ]*\)$/\1/p')
+  created=$(printf '%s\n' "$plain" | LC_ALL=C sed -n 's/^.* Created \([^ ]*\)$/\1/p')
+  [ -n "$updated" ]
+  [ -n "$created" ]
+  while IFS= read -r p; do
+    mkdir -p "$PROJECT/$(dirname "$p")"; echo old > "$PROJECT/$p"
+  done <<< "$updated"
+  mkdir -p "$PROJECT/.claude/commands"
+  echo '{"hooks": {}}' > "$PROJECT/.claude/settings.json"
+  echo 'user command' > "$PROJECT/.claude/commands/my-own.md"
+  git -C "$PROJECT" add -A
+  git -C "$PROJECT" commit -qm "v1.28.1 install"
+  while IFS= read -r p; do echo new > "$PROJECT/$p"; done <<< "$updated"
+  while IFS= read -r p; do
+    mkdir -p "$PROJECT/$(dirname "$p")"; echo new > "$PROJECT/$p"
+  done <<< "$created"
+  echo '{"hooks": {"x": 1}}' > "$PROJECT/.claude/settings.json"
+  echo 'user edit' >> "$PROJECT/.claude/commands/my-own.md"
+
+  local script="$TEST_TMP/classic.sh"
+  {
+    printf 'set -euo pipefail\n'
+    printf "REPO='%s'\nRIG_DIR='%s/.rig'\nTRACKING=repo\n" "$PROJECT" "$PROJECT"
+    printf 'UPGRADED=()\nRIG_WRITTEN_PATHS=()\n'
+    printf 'installer_output=$(cat %q)\n' "$fixture"
+    _extract_block "$RIG_UPGRADE" 'plain_output=$(printf'
+    _extract_block "$RIG_UPGRADE" '_rig_stage_candidate() {'
+  } > "$script"
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  local staged
+  staged=$(git -C "$PROJECT" diff --cached --name-only)
+  while IFS= read -r p; do
+    echo "$staged" | grep -qxF "$p" || { echo "created file not staged: $p"; return 1; }
+  done <<< "$created"
+  while IFS= read -r p; do
+    echo "$staged" | grep -qxF "$p" || { echo "updated file not staged: $p"; return 1; }
+  done <<< "$updated"
+  echo "$created" | grep -qx 'bin/rig-session-index.py'
+  [[ "$staged" != *my-own.md* ]] || false
+  [[ "$staged" != *settings.json* ]] || false
+  [[ "$output" == *"Not staged"* ]] || false
+  [[ "$output" == *".claude/settings.json"* ]] || false
+  [[ "$output" == *".claude/commands/my-own.md"* ]] || false
 }
 
 @test "rig-upgrade 2c: stealth hook check reports without overwriting a customized hook" {
@@ -374,4 +455,26 @@ cd '$PROJECT'")
   [[ "$output" == *"same:    .claude/hooks/stop.sh"* ]] || false
   [[ "$output" == *"CHANGED: .claude/hooks/pre-tool.sh"* ]] || false
   [[ "$output" == *"MISSING: .rig/processes/POST_MERGE_WORKFLOW.md"* ]] || false
+}
+
+@test "UPGRADE_WORKFLOW step 4: passes tracking args and surfaces installer failure" {
+  local rig_dir="$HOME/.rig/projects/live st" fake="$TEST_TMP/fake installer"
+  mkdir -p "$rig_dir" "$fake"
+  echo "$rig_dir" > "$PROJECT/.rigpath"
+  cat > "$fake/install.sh" <<'SH'
+#!/bin/bash
+for a in "$@"; do printf 'ARG[%s]\n' "$a"; done
+exit 3
+SH
+  chmod +x "$fake/install.sh"
+  local script log
+  script=$(_snippet_script "$UPGRADE_WORKFLOW" 'INSTALL_STATUS=$(cat "$INSTALL_STATUS_FILE")' "export RIG_INSTALLER_SRC='$fake'
+cd '$PROJECT'")
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ARG[--tracking]"*"ARG[stealth]"*"ARG[--rig-dir]"*"ARG[$rig_dir]"* ]] || false
+  [[ "$output" == *"install.sh exited 3"* ]] || false
+  log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
+  [ ! -e "$log" ]
+  [ -f "$log.failed" ]
 }

@@ -917,39 +917,59 @@ meaningful.
 ### 2a-classic — Run the installer
 
 ```bash
+INSTALLER_STATUS=0
 installer_output=$("$INSTALLER_SRC/install.sh" \
   --project-only \
   --strategy upgrade \
   "${TRACKING_ARGS[@]}" \
-  --target "$REPO" 2>&1)
+  --target "$REPO" 2>&1) || INSTALLER_STATUS=$?
 echo "$installer_output"  # show full output to user
+echo "install.sh exit status: $INSTALLER_STATUS"
 ```
 
+If `$INSTALLER_STATUS` is not `0`, stop and report the output — do not parse
+it or continue to 2b-classic.
+
 Parse the captured output to populate result accumulators. The installer's
-`success()` function prefixes every line with ANSI color codes and a status
-symbol (`✓ `), so match on substring rather than prefix:
+`success()` lines look like `ESC[0;32m✓ESC[0m Created bin/rig` (ANSI colour
+codes, then `✓ `, then the message), so strip the colour codes first and match
+on the message. Both message styles occur: the upgrade path prints
+`Updated: <path>` / `Created: <path>` with a colon, while the project-layer
+copy helpers print `Created <path>` / `Updated <path>` / `Overwrote <path>`
+without one. A candidate is kept only if it names a real file (or a tracked
+file the run removed), which drops count lines such as `Updated: 3` and
+non-path messages such as `Created .rigpath → ...`:
 
 ```bash
+ESC=$(printf '\033')
+plain_output=$(printf '%s\n' "$installer_output" | sed "s/${ESC}\[[0-9;]*m//g")
 while IFS= read -r line; do
+  msg="${line#*✓ }"
   written=""
-  case "$line" in
-    *"Updated (overwritten): "*) written="${line#*Updated (overwritten): }" ;;
-    *"Updated: "*)               written="${line#*Updated: }" ;;
-    *"Converged: "*)             written="${line#*Converged: }" ;;
-    *"Created: "*)               written="${line#*Created: }" ;;
-    *"Removed obsolete legacy hook: "*) written="${line#*Removed obsolete legacy hook: }" ;;
-    *"Merged .claude/settings.json"*|*"Updated moved-project paths in .claude/settings.json"*)
+  case "$msg" in
+    "Merged .claude/settings.json"*|"Updated moved-project paths in .claude/settings.json"*)
       written=".claude/settings.json" ;;
+    "Updated (overwritten): "*) written="${msg#Updated (overwritten): }" ;;
+    "Updated: "*)               written="${msg#Updated: }" ;;
+    "Converged: "*)             written="${msg#Converged: }" ;;
+    "Created: "*)               written="${msg#Created: }" ;;
+    "Removed obsolete legacy hook: "*) written="${msg#Removed obsolete legacy hook: }" ;;
+    "Created "*)                written="${msg#Created }" ;;
+    "Updated "*)                written="${msg#Updated }" ;;
+    "Overwrote "*)              written="${msg#Overwrote }" ;;
   esac
-  # Skip the end-of-run count lines ("Updated: 3") -- they are not paths.
-  [[ -z "$written" || "$written" =~ ^[0-9]+$ ]] && continue
+  [[ -n "$written" ]] || continue
+  case "$written" in
+    .rig/*) [[ -e "$RIG_DIR/${written#.rig/}" ]] || continue ;;
+    *) [[ -e "$REPO/$written" || -n "$(git -C "$REPO" ls-files -- "$written")" ]] || continue ;;
+  esac
   UPGRADED+=("$written")
   RIG_WRITTEN_PATHS+=("$written")
-done <<< "$installer_output"
+done <<< "$plain_output"
 ```
 
 Watch for:
-- `"Updated: ..."`, `"Created: ..."`, `"Converged: ..."` — file was written ✓ → added to `UPGRADED[]` and `RIG_WRITTEN_PATHS[]`
+- `"Updated: ..."`, `"Created ..."`, `"Created: ..."`, `"Converged: ..."` — file was written ✓ → added to `UPGRADED[]` and `RIG_WRITTEN_PATHS[]`
 - `"Up to date: ..."` — file already current ✓
 - `"Merged .claude/settings.json"` — settings merged ✓
 - `"Customized file detected: ..."` — user-modified file was skipped; handle in 2b-classic
@@ -1621,7 +1641,27 @@ if [[ ${#RIG_STAGE_PATHS[@]} -gt 0 ]]; then
   git add -A -- "${RIG_STAGE_PATHS[@]}"
 fi
 git diff --cached --stat
+
+# Anything else changed under Rig-managed paths is listed, never auto-staged:
+# installer edits that print no path (settings.json hook wiring, [REPO_ROOT]
+# substitution, CLAUDE.md rewrites, the .codex/config.toml fallback merge,
+# executable-bit fixes) as well as unrelated user edits. The user decides.
+RIG_MANAGED_PATHSPECS=(.claude .husky .agents .codex .github .gitleaks.toml .mcp.json \
+  CLAUDE.md PROJECT_BRIEF.md docs/INDEX.md docs/features 'bin/rig*')
+if [[ "$TRACKING" == "repo" ]]; then
+  RIG_MANAGED_PATHSPECS+=(.rig)
+fi
+RIG_LEFTOVER=$(git status --porcelain --untracked-files=all -- "${RIG_MANAGED_PATHSPECS[@]}" \
+  ':(exclude).claude/settings.local.json' ':(exclude).claude/worktrees' \
+  | awk 'substr($0, 2, 1) != " "' || true)
+if [[ -n "$RIG_LEFTOVER" ]]; then
+  echo "Not staged — other changes under Rig-managed paths (review each; stage only what you intend):"
+  printf '%s\n' "$RIG_LEFTOVER"
+fi
 ```
+
+   If the block lists unstaged changes, show them to the user and ask which,
+   if any, belong in the upgrade commit; stage only the ones they name.
 
    If `git add` failed or `git diff --cached --stat` prints nothing, stop and
    report it — do not create a commit approval for an empty or failed stage.

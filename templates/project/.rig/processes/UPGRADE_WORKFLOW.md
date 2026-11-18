@@ -158,15 +158,48 @@ Codex do not acquire independently maintained workflow text.
 
 ## Step 4 — Run the installer for the project layer
 
+Pass the tracking mode explicitly (same rules as install.sh, with `.rigpath`
+read verbatim so a path containing spaces survives) instead of relying on the
+installer's own auto-detection, and keep the installer's output inside `.git/`
+(never staged) so Step 7 can stage exactly the files it reports as written:
+
 ```bash
 INSTALLER_SRC="${RIG_INSTALLER_SRC:-$HOME/tools/the-rig}"
 REPO=$(git rev-parse --show-toplevel)
-# Keep the installer's output inside .git/ (never staged): Step 7 stages
-# exactly the files it reports as written.
+GIT_EXCLUDE=$(git -C "$REPO" rev-parse --git-path info/exclude)
+[[ "$GIT_EXCLUDE" == /* ]] || GIT_EXCLUDE="$REPO/$GIT_EXCLUDE"
+if [[ -f "$REPO/.rigpath" ]]; then
+  IFS= read -r RIG_DIR < "$REPO/.rigpath" || true
+  RIG_DIR="${RIG_DIR%$'\r'}"
+  if [[ "$RIG_DIR" == "$HOME/.rig/projects/"* ]]; then TRACKING="stealth"; else TRACKING="external"; fi
+  TRACKING_ARGS=(--tracking "$TRACKING" --rig-dir "$RIG_DIR")
+elif [[ -n "$(git -C "$REPO" ls-files -- .rig/)" ]]; then
+  TRACKING_ARGS=(--tracking repo)
+elif grep -qF '.rig/' "$GIT_EXCLUDE" 2>/dev/null || grep -qF '.rig/' "$REPO/.gitignore" 2>/dev/null; then
+  TRACKING_ARGS=(--tracking local)
+else
+  TRACKING_ARGS=(--tracking repo)
+fi
 UPGRADE_LOG=$(git -C "$REPO" rev-parse --git-path rig-upgrade.log)
 [[ "$UPGRADE_LOG" == /* ]] || UPGRADE_LOG="$REPO/$UPGRADE_LOG"
-"$INSTALLER_SRC/install.sh" --project-only --strategy upgrade --target "$REPO" 2>&1 | tee "$UPGRADE_LOG"
+# Record install.sh's own exit status: a plain `| tee` would report tee's
+# status and hide an installer failure (this form also works under
+# `set -euo pipefail`).
+INSTALL_STATUS_FILE=$(mktemp)
+{ "$INSTALLER_SRC/install.sh" --project-only --strategy upgrade "${TRACKING_ARGS[@]}" \
+    --target "$REPO" 2>&1 && echo 0 > "$INSTALL_STATUS_FILE" || echo $? > "$INSTALL_STATUS_FILE"; } \
+  | tee "$UPGRADE_LOG"
+INSTALL_STATUS=$(cat "$INSTALL_STATUS_FILE")
+rm -f "$INSTALL_STATUS_FILE"
+if [[ "$INSTALL_STATUS" -ne 0 ]]; then
+  mv -f "$UPGRADE_LOG" "$UPGRADE_LOG.failed"
+  echo "❌ install.sh exited $INSTALL_STATUS — stop here. Output kept in $UPGRADE_LOG.failed."
+fi
 ```
+
+If the block printed `❌ install.sh exited ...`, stop: fix the reported
+problem and re-run this step. Do not continue to Step 5; Step 7 refuses to
+stage without a successful run's log.
 
 The installer will:
 - Auto-update Rig-owned files that haven't been locally modified (manifest hash matches)
@@ -269,8 +302,15 @@ git checkout -b chore/rig-upgrade-vX.Y.Z
    never whole directories (that sweeps in unrelated user edits to commands or
    `settings.json`) and never `git add -f` (that stages ignored files such as
    `.claude/settings.local.json` and turns `.claude/worktrees/*` checkouts into
-   embedded repositories). Ignored or unchanged paths are skipped. `TRACKING`
-   is re-derived so this block also runs on its own:
+   embedded repositories). Ignored or unchanged paths are skipped. The block
+   refuses to stage if the Step 4 log is missing or older than the installed
+   `.rig/VERSION` (a stale log from an earlier run). Installer lines are
+   colourised (`ESC[0;32m✓ESC[0m Created bin/rig`) and come in two styles —
+   `Updated: <path>` / `Created: <path>`, and `Created <path>` /
+   `Updated <path>` / `Overwrote <path>` without a colon — so colours are
+   stripped first and a candidate is kept only if it names a real file (or a
+   tracked file the run removed). Anything else changed under Rig-managed
+   paths is listed for review, never staged automatically:
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel)
@@ -278,62 +318,91 @@ cd "$ROOT"
 GIT_EXCLUDE=$(git rev-parse --git-path info/exclude)
 [[ "$GIT_EXCLUDE" == /* ]] || GIT_EXCLUDE="$ROOT/$GIT_EXCLUDE"
 TRACKING="repo"
+RIG_DIR="$ROOT/.rig"
 if [[ -f .rigpath ]]; then
   TRACKING="external"
+  IFS= read -r RIG_DIR < .rigpath || true
+  RIG_DIR="${RIG_DIR%$'\r'}"
 elif [[ -z "$(git ls-files -- .rig/)" ]] && \
      { grep -qF '.rig/' "$GIT_EXCLUDE" 2>/dev/null || grep -qF '.rig/' .gitignore 2>/dev/null; }; then
   TRACKING="local"
 fi
 UPGRADE_LOG=$(git rev-parse --git-path rig-upgrade.log)
 [[ "$UPGRADE_LOG" == /* ]] || UPGRADE_LOG="$ROOT/$UPGRADE_LOG"
-WRITTEN=()
-while IFS= read -r line; do
-  path=""
-  case "$line" in
-    *"Updated (overwritten): "*) path="${line#*Updated (overwritten): }" ;;
-    *"Updated: "*)               path="${line#*Updated: }" ;;
-    *"Converged: "*)             path="${line#*Converged: }" ;;
-    *"Created: "*)               path="${line#*Created: }" ;;
-    *"Removed obsolete legacy hook: "*) path="${line#*Removed obsolete legacy hook: }" ;;
-    *"Merged .claude/settings.json"*|*"Updated moved-project paths in .claude/settings.json"*)
-      path=".claude/settings.json" ;;
-  esac
-  [[ -z "$path" || "$path" =~ ^[0-9]+$ ]] && continue
-  WRITTEN+=("$path")
-done < "$UPGRADE_LOG"
-if [[ "$TRACKING" == "repo" ]]; then
-  WRITTEN+=(.rig/VERSION .rig/memory/.rig-manifest .rig/memory/.rig-manifest.json \
-    .rig/install-targets.json .rig/contextual-tips.sh)
+if [[ ! -f "$UPGRADE_LOG" ]]; then
+  echo "❌ No installer log at $UPGRADE_LOG — re-run Step 4 before staging."
+elif [[ -f "$RIG_DIR/VERSION" && "$UPGRADE_LOG" -ot "$RIG_DIR/VERSION" ]]; then
+  echo "❌ $UPGRADE_LOG is older than $RIG_DIR/VERSION (stale log) — re-run Step 4 before staging."
+else
+  ESC=$(printf '\033')
+  WRITTEN=()
+  while IFS= read -r line; do
+    msg="${line#*✓ }"
+    path=""
+    case "$msg" in
+      "Merged .claude/settings.json"*|"Updated moved-project paths in .claude/settings.json"*)
+        path=".claude/settings.json" ;;
+      "Updated (overwritten): "*) path="${msg#Updated (overwritten): }" ;;
+      "Updated: "*)               path="${msg#Updated: }" ;;
+      "Converged: "*)             path="${msg#Converged: }" ;;
+      "Created: "*)               path="${msg#Created: }" ;;
+      "Removed obsolete legacy hook: "*) path="${msg#Removed obsolete legacy hook: }" ;;
+      "Created "*)                path="${msg#Created }" ;;
+      "Updated "*)                path="${msg#Updated }" ;;
+      "Overwrote "*)              path="${msg#Overwrote }" ;;
+    esac
+    [[ -n "$path" ]] && WRITTEN+=("$path")
+  done < <(sed "s/${ESC}\[[0-9;]*m//g" "$UPGRADE_LOG")
+  if [[ "$TRACKING" == "repo" ]]; then
+    WRITTEN+=(.rig/VERSION .rig/memory/.rig-manifest .rig/memory/.rig-manifest.json \
+      .rig/install-targets.json .rig/contextual-tips.sh)
+  fi
+  STAGE=()
+  for p in ${WRITTEN[@]+"${WRITTEN[@]}"}; do
+    case "$p" in
+      .git/*) continue ;;
+      .rig/*) [[ "$TRACKING" == "repo" ]] || continue ;;
+    esac
+    if [[ ! -e "$p" && -z "$(git ls-files -- "$p")" ]]; then continue; fi
+    if git check-ignore -q -- "$p"; then continue; fi
+    if [[ -z "$(git status --porcelain -- "$p")" ]]; then continue; fi
+    STAGE+=("$p")
+  done
+  if [[ ${#STAGE[@]} -gt 0 ]]; then
+    git add -A -- "${STAGE[@]}"
+  fi
+  git diff --cached --stat
+  MANAGED=(.claude .husky .agents .codex .github .gitleaks.toml .mcp.json \
+    CLAUDE.md PROJECT_BRIEF.md docs/INDEX.md docs/features 'bin/rig*')
+  if [[ "$TRACKING" == "repo" ]]; then MANAGED+=(.rig); fi
+  LEFTOVER=$(git status --porcelain --untracked-files=all -- "${MANAGED[@]}" \
+    ':(exclude).claude/settings.local.json' ':(exclude).claude/worktrees' \
+    | awk 'substr($0, 2, 1) != " "' || true)
+  if [[ -n "$LEFTOVER" ]]; then
+    echo "Not staged — other changes under Rig-managed paths (review each; stage only what you intend):"
+    printf '%s\n' "$LEFTOVER"
+  fi
 fi
-STAGE=()
-for p in ${WRITTEN[@]+"${WRITTEN[@]}"}; do
-  case "$p" in
-    .git/*) continue ;;
-    .rig/*) [[ "$TRACKING" == "repo" ]] || continue ;;
-  esac
-  if [[ ! -e "$p" && -z "$(git ls-files -- "$p")" ]]; then continue; fi
-  if git check-ignore -q -- "$p"; then continue; fi
-  if [[ -z "$(git status --porcelain -- "$p")" ]]; then continue; fi
-  STAGE+=("$p")
-done
-if [[ ${#STAGE[@]} -gt 0 ]]; then
-  git add -A -- "${STAGE[@]}"
-fi
-git diff --cached --stat
 ```
 
-   If staging failed or nothing is staged, stop — do not create a commit
-   approval. Otherwise review the staged list and get the user's approval.
+   If the block printed `❌`, staging failed, or nothing is staged, stop — do
+   not create a commit approval. If it listed unstaged changes, decide which
+   (if any) belong in the upgrade commit and stage only those. Then review the
+   staged list and get the user's approval.
 
 4. Only after staging succeeded and the user approved, create the current
-   worktree's one-use approval and commit:
+   worktree's one-use approval and commit. The Step 4 log is removed once the
+   commit lands so it can never be reused for a later upgrade:
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel)
 RIG_DIR="$ROOT/.rig"
 if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; RIG_DIR="${RIG_DIR%$'\r'}"; fi
+UPGRADE_LOG=$(git rev-parse --git-path rig-upgrade.log)
+[[ "$UPGRADE_LOG" == /* ]] || UPGRADE_LOG="$ROOT/$UPGRADE_LOG"
 touch "$RIG_DIR/memory/.rig-commit-ok"
-RIG_COMMIT_POLICY=guarded git commit -m "chore(rig): upgrade to The Rig vX.Y.Z [#N]"
+RIG_COMMIT_POLICY=guarded git commit -m "chore(rig): upgrade to The Rig vX.Y.Z [#N]" \
+  && rm -f "$UPGRADE_LOG"
 ```
 
 5. Push the branch, then open the PR against the configured base branch:
