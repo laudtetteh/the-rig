@@ -33,9 +33,9 @@ setup() {
 teardown() { rm -rf "$TEMP_DIR"; }
 
 install_project() {
-  local tracking="$1" base="$2"
+  local tracking="$1" base="$2" agent="${3:-both}"
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
-    --project-name Test --project-agent both --base-branch "$base" \
+    --project-name Test --project-agent "$agent" --base-branch "$base" \
     --tracking "$tracking" --strategy merge </dev/null
   [ "$status" -eq 0 ] || { printf '%s\n' "$output" | tail -20; return 1; }
 }
@@ -128,6 +128,33 @@ assert not doc.get("conflicts"), doc.get("conflicts")
   [[ "$output" == *"CLAUDE.md still says base-branch: develop, but workflow files were rendered with --base-branch trunk"* ]] || return 1
   [[ "$output" == *"Update base-branch: in $TEST_PROJECT/CLAUDE.md to trunk"* ]] || return 1
   # CLAUDE.md is user-owned: warned about, never rewritten.
+  grep -q '^base-branch: develop$' "$TEST_PROJECT/CLAUDE.md"
+  grep -Fq -- '--base trunk' "$TEST_PROJECT/.claude/commands/ship.md"
+}
+
+@test "agent plan and upgrade report a configured base branch split as JSON" {
+  install_project repo develop claude
+  local strategy expected_mode
+  for strategy in agent-plan agent-upgrade; do
+    expected_mode=plan
+    [ "$strategy" = agent-plan ] || expected_mode=apply
+    run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+      --strategy "$strategy" --base-branch trunk </dev/null
+    [ "$status" -eq 0 ] || { printf '%s\n' "$output" | tail -20; return 1; }
+    run python3 -c '
+import json, sys
+doc = json.loads(sys.argv[1])
+assert doc["mode"] == sys.argv[2], doc["mode"]
+assert doc["status"] == "success", doc["status"]
+assert doc["warnings"] == [{
+    "code": "base_branch_config_split",
+    "configured_base_branch": "develop",
+    "rendered_base_branch": "trunk",
+    "message": "CLAUDE.md still names a different base branch; update its base-branch value or rerun without --base-branch.",
+}], doc["warnings"]
+' "$output" "$expected_mode"
+    [ "$status" -eq 0 ] || { printf '%s\n' "$output"; return 1; }
+  done
   grep -q '^base-branch: develop$' "$TEST_PROJECT/CLAUDE.md"
   grep -Fq -- '--base trunk' "$TEST_PROJECT/.claude/commands/ship.md"
 }

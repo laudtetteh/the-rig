@@ -3977,10 +3977,10 @@ if [[ "$DO_PROJECT" == true ]]; then
   fi
   # CLAUDE.md is user-owned and is never rewritten here, so a differing
   # --base-branch leaves the runtime workflows and commit guards (which read
-  # CLAUDE.md) on another branch until the user updates it. warn() is silent
-  # in agent-plan/agent-upgrade, whose stdout and stderr callers parse as one
-  # JSON document; /rig-upgrade passes CLAUDE.md's own value, so it cannot
-  # create this split.
+  # CLAUDE.md) on another branch until the user updates it. Agent modes add
+  # the same split to their structured JSON warning list below; raw warn()
+  # output would break callers that parse the combined output as JSON.
+  # /rig-upgrade passes CLAUDE.md's own value, so it cannot create this split.
   if [[ -n "$_FLAG_BASE_BRANCH" && -n "$_CONFIGURED_BASE" &&
         "$_CONFIGURED_BASE" != "$BASE_BRANCH" ]]; then
     warn "CLAUDE.md still says base-branch: $_CONFIGURED_BASE, but workflow files were rendered with --base-branch $BASE_BRANCH."
@@ -5183,13 +5183,15 @@ if [[ -n "$AGENT_MODE" ]]; then
     "$UPGRADE_UPDATED_COUNT" "$UPGRADE_MERGED_COUNT" "$UPGRADE_REMOVED_COUNT" \
     "$UPGRADE_SKIPPED_CUSTOMIZED_COUNT" "$UPGRADE_SKIPPED_CONFLICT_COUNT" \
     "$UPGRADE_SKIPPED_UNTRACKED_COUNT" "$UPGRADE_STALE_COUNT" "$UPGRADE_CONVERGED_COUNT" \
-    "$UPGRADE_REPORT_PATH" "$UPGRADE_ROLLBACK_ID" <<'PYEOF'
+    "$UPGRADE_REPORT_PATH" "$UPGRADE_ROLLBACK_ID" \
+    "$_FLAG_BASE_BRANCH" "${_CONFIGURED_BASE:-}" "${BASE_BRANCH:-}" <<'PYEOF'
 import json, sys
 
 mode, status, records_path = sys.argv[1], sys.argv[2], sys.argv[3]
 (updated, merged, removed, skipped_customized, skipped_conflict,
  skipped_untracked, stale, converged) = (int(x) for x in sys.argv[4:12])
 report_path, rollback_id = sys.argv[12], sys.argv[13]
+override_base, configured_base, rendered_base = sys.argv[14:17]
 
 # result-code (as passed to record_upgrade_result in install.sh) -> fields.
 CLASSIFICATION = {
@@ -5286,6 +5288,18 @@ for line in records_text.split("\n"):
             "details": details,
         })
 
+warnings = []
+if override_base and configured_base and configured_base != rendered_base:
+    warnings.append({
+        "code": "base_branch_config_split",
+        "configured_base_branch": configured_base,
+        "rendered_base_branch": rendered_base,
+        "message": (
+            "CLAUDE.md still names a different base branch; update its "
+            "base-branch value or rerun without --base-branch."
+        ),
+    })
+
 doc = {
     "schema_version": 1,
     "mode": mode,
@@ -5302,6 +5316,7 @@ doc = {
     },
     "artifacts": artifacts,
     "conflicts": conflicts,
+    "warnings": warnings,
 }
 # Present only when a durable report was actually written, so a consumer can
 # tell "no rollback candidate" from "rollback available" without guessing.
