@@ -496,7 +496,7 @@ Agent requests a permission
                read-only git queries, bash -n syntax checks)
              Edit/Write of Markdown (.md) notes under RIG_DIR/memory/,
                RIG_DIR/tasks/, RIG_DIR/docs/ (resolved path; excludes
-               PROJECT_CONVENTIONS.md and hard-linked files; opt out with
+               PROJECT_CONVENTIONS.md; opt out with
                RIG_DIR/memory/.rig-strict-permissions)
            Never auto-approves commands that execute project code (test
              runners, build tools) or writes to scripts and data files

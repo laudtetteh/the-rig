@@ -216,11 +216,12 @@ require_case_insensitive_fs() {
   assert_not_allowed
 }
 
-@test "permission scope: hard-linked Markdown notes are not auto-approved" {
-  printf 'note\n' > "$RIG_DIR/docs/source.md"
-  ln "$RIG_DIR/docs/source.md" "$RIG_DIR/memory/linked.md"
-  perm_request Write file_path "$RIG_DIR/memory/linked.md"
-  assert_not_allowed
+@test "permission scope: a note with an extra sync-tool hard link is still auto-approved" {
+  printf 'note\n' > "$RIG_DIR/memory/PROGRESS.md"
+  mkdir -p "$RIG_DIR/memory/.tmp.driveupload"
+  ln "$RIG_DIR/memory/PROGRESS.md" "$RIG_DIR/memory/.tmp.driveupload/12345"
+  perm_request Write file_path "$RIG_DIR/memory/PROGRESS.md"
+  assert_allowed
 }
 
 @test "protected paths: MultiEdit to a protected path is blocked" {
@@ -237,6 +238,12 @@ require_case_insensitive_fs() {
 @test "protected paths: hard-link alias of a protected file is blocked" {
   ln "$RIG_DIR/contextual-tips.sh" "$RIG_DIR/memory/tips-alias.sh"
   pretool_write Write "$RIG_DIR/memory/tips-alias.sh"
+  assert_governance_block
+}
+
+@test "protected paths: Markdown-named hard link to a protected file is blocked" {
+  ln "$RIG_DIR/contextual-tips.sh" "$RIG_DIR/memory/hl.md"
+  pretool_write Write "$RIG_DIR/memory/hl.md"
   assert_governance_block
 }
 
