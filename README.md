@@ -119,7 +119,7 @@ git init
 
 # Then open Claude Code and run /kickoff, or open Codex and run $kickoff
 # The kickoff adapter reads PROJECT_BRIEF.md, confirms the project shape,
-# and scaffolds CLAUDE.md + task backlog + GitHub issues in one pass.
+# and scaffolds CLAUDE.md + task backlog + configured-tracker items in one pass.
 ```
 
 The Rig stays in `~/tools/the-rig/`. Your project is clean. By default, Rig memory
@@ -331,7 +331,7 @@ for a full snapshot — hooks are a safety net, not a replacement.
 
 **Start a project**
 ```
-/kickoff      →  reads PROJECT_BRIEF.md, scaffolds CLAUDE.md + task backlog + GitHub issues (run once at project creation)
+/kickoff      →  reads PROJECT_BRIEF.md, scaffolds CLAUDE.md + task backlog + tracker items per issue-tracking: (run once at project creation)
 ```
 
 **Daily work**

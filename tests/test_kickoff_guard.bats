@@ -140,3 +140,74 @@ run_probe() {
   run /usr/bin/grep -q 'Do not report kickoff or the scaffold item as' "$KICKOFF"
   [ "$status" -eq 0 ]
 }
+
+run_tracker_probe() {
+  local probe
+  probe="$(sed -n '/# kickoff-tracker-probe-start/,/# kickoff-tracker-probe-end/p' "$KICKOFF")"
+  run bash -o pipefail -c "cd \"\$1\" && $probe" _ "$TEST_REPO"
+}
+
+@test "kickoff tracker probe: absent issue-tracking field defaults to github" {
+  printf '# Project\n' > "$TEST_REPO/CLAUDE.md"
+  run_tracker_probe
+  [ "$status" -eq 0 ]
+  [ "$output" = "github" ]
+}
+
+@test "kickoff tracker probe: reads every supported configured tracker" {
+  local mode
+  for mode in github linear trello gus none; do
+    printf '# Project\n\n```\nissue-tracking: %s\n```\n' "$mode" > "$TEST_REPO/CLAUDE.md"
+    run_tracker_probe
+    [ "$status" -eq 0 ] || return 1
+    [ "$output" = "$mode" ] || return 1
+  done
+}
+
+@test "kickoff: every supported tracker mode has plan, record, and handoff guidance" {
+  local mode
+  for mode in github linear trello gus none; do
+    /usr/bin/grep -q "^| \`$mode\` | \*\*3\. " "$KICKOFF" || return 1
+    /usr/bin/grep -q "\`$mode\`" <(sed -n '/^#### 5c\./,/^#### 5d\./p' "$KICKOFF") || return 1
+    /usr/bin/grep -q "\`$mode\`" <(sed -n '/^### Step 6/,/^## Notes/p' "$KICKOFF") || return 1
+  done
+  run /usr/bin/grep -q 'is not a supported tracker' "$KICKOFF"
+  [ "$status" -eq 0 ]
+}
+
+@test "kickoff: GitHub issue creation is confined to the github tracker mode" {
+  run /usr/bin/grep -n 'GitHub issue' "$KICKOFF"
+  [ "$status" -eq 0 ]
+  local line
+  while IFS= read -r line; do
+    [[ "$line" == *'`github`'* || "$line" == *'**GitHub issue**'* ]] || {
+      printf 'unconditional GitHub wording: %s\n' "$line"
+      return 1
+    }
+  done <<< "$output"
+  local total github_only
+  total=$(/usr/bin/grep -c 'gh issue create' "$KICKOFF")
+  github_only=$(sed -n '/^\*\*`github`:\*\*/,/^\*\*`linear`, `trello`, or `gus`:\*\*/p' "$KICKOFF" \
+    | /usr/bin/grep -c 'gh issue create')
+  [ "$total" -ge 1 ]
+  [ "$total" -eq "$github_only" ]
+  run /usr/bin/grep -q 'agent never creates Linear tickets, Trello cards, or GUS work items' "$KICKOFF"
+  [ "$status" -eq 0 ]
+  run /usr/bin/grep -q 'N/A (issue-tracking: none)' "$KICKOFF"
+  [ "$status" -eq 0 ]
+}
+
+@test "kickoff: generated Codex skill carries the tracker-aware guidance" {
+  local out="$BATS_TEST_TMPDIR/codex-skills"
+  run python3 "$REPO_ROOT/installer/generate-codex-skills.py" \
+    --output "$out" --base-branch main "$KICKOFF"
+  [ "$status" -eq 0 ]
+  local skill="$out/kickoff/references/command.md"
+  [ -f "$skill" ]
+  run /usr/bin/grep -q 'kickoff-tracker-probe-start' "$skill"
+  [ "$status" -eq 0 ]
+  run /usr/bin/grep -q 'N/A (issue-tracking: none)' "$skill"
+  [ "$status" -eq 0 ]
+  run /usr/bin/grep -q 'Open GitHub issues #' "$skill"
+  [ "$status" -ne 0 ]
+}

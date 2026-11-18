@@ -10,8 +10,10 @@ Trigger this command to bootstrap a brand new project from scratch.
 
 `/kickoff` is the greenfield entry point. It reads your `PROJECT_BRIEF.md`, confirms
 it understands what's being built, resolves open questions, then scaffolds everything
-needed to start shipping: a filled-in `CLAUDE.md`, an initial task backlog, and GitHub
-issues for the first milestone.
+needed to start shipping: a filled-in `CLAUDE.md`, an initial task backlog, and
+tracker items for the first milestone in the tracker named by `issue-tracking:` in
+`CLAUDE.md` (GitHub issues for `github` or an absent field; no tracker items for
+`none`).
 
 Use `/task` for day-to-day work on an established project. Use `/kickoff` once, at
 the start, before there's anything to `/task` on.
@@ -197,6 +199,34 @@ Record all decisions in `PROJECT_BRIEF.md` under the relevant section (or under
 
 ### Step 4 — Confirm the build plan
 
+First, read the configured issue tracker from `CLAUDE.md`. An absent field means
+`github` (the marker comments are used by the focused tracker tests; keep the
+commands between them executable):
+
+```bash
+# kickoff-tracker-probe-start
+REPO=$(git rev-parse --show-toplevel)
+TRACKING=$(grep "^issue-tracking:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+echo "${TRACKING:-github}"
+# kickoff-tracker-probe-end
+```
+
+Use the printed value as the tracker mode for item 3 of the plan below and for
+Steps 5c, 5d, and 6. Choose item 3's wording from this table:
+
+| Tracker mode | Item 3 of the plan |
+|---|---|
+| `github` | **3. Open GitHub issues** — one issue per task, labelled and ready to work from |
+| `linear` | **3. Link Linear tickets** — you create one Linear ticket per task and give me each ticket ID (e.g. `ENG-123`); I record them in the task files |
+| `trello` | **3. Link Trello cards** — you create one Trello card per task and give me each card ID or short URL; I record them in the task files |
+| `gus` | **3. Link GUS work items** — you create one GUS work item per task and give me each item ID (e.g. `W-1234567`); I record them in the task files |
+| `none` | **3. No tracker items** — `issue-tracking: none` is set, so the local task files are the backlog |
+
+If the printed value is anything else, stop and tell the user:
+"`issue-tracking: [value]` in `CLAUDE.md` is not a supported tracker. Set it to
+`github`, `linear`, `trello`, `gus`, or `none`, then run `/kickoff` again." Do not
+scaffold until the value is supported.
+
 Present the full scaffolding plan before touching any files:
 
 > "Here's what I'm about to scaffold:
@@ -205,7 +235,7 @@ Present the full scaffolding plan before touching any files:
 > **2. Create initial task backlog** — [N] tasks in `.rig/tasks/backlog/` covering the MVP features:
 >    - `[task-slug]` — [one-line description]
 >    - [...]
-> **3. Open GitHub issues** — one issue per task, labelled and ready to work from
+> **3. [item 3 wording for the tracker mode, from the tracker-mode table in this step]**
 > **4. Update `.rig/memory/PROGRESS.md`** — log the kickoff as the starting entry
 >
 > Say **go** to scaffold, or adjust the plan."
@@ -251,7 +281,9 @@ Replace every placeholder in `CLAUDE.md` with real content from the brief:
 - `## How to run locally` (real commands, not `[command]`)
 - `## Off-limits` (at minimum: `.husky/`, `.claude/worktrees/`, `.github/`)
 
-Do not leave any `[PLACEHOLDER]` lines in the final file.
+Do not leave any `[PLACEHOLDER]` lines in the final file. Keep the existing
+`issue-tracking:` value unchanged unless the user explicitly asks to change it; Steps
+5c, 5d, and 6 use the tracker mode read in Step 4.
 
 #### 5b. Generate task backlog
 
@@ -267,13 +299,42 @@ task template. Each task file must have:
 Order tasks by dependency: foundational work (auth, data layer, core models) before
 features that build on them.
 
-#### 5c. Open GitHub issues
+#### 5c. Record tracker items
 
-For each task file, open a GitHub issue:
+Use the tracker mode read in Step 4. Only `github` is created by the agent; the
+agent never creates Linear tickets, Trello cards, or GUS work items.
+
+**`github`:** For each task file, open a GitHub issue (the user's **go** in Step 4
+authorizes these):
 - Title: matches the task goal
 - Body: copy the `## Goal`, `## Context`, and `## Acceptance criteria` from the task file
 - Labels: `type: feat` + the most relevant area label
-- Update the task file's `## GitHub issue` field with the issue number
+- Run `gh issue create --title "[task goal]" --body-file [file holding the body] --label "type: feat" --label "[area label]"`
+- Set the task file's `**GitHub issue**:` field to the issue number, e.g. `#42`
+
+If `gh issue create` fails (for example `gh` is missing, unauthenticated, or a label
+does not exist), show the exact error and stop. Do not report issues as opened
+until each one has a real number.
+
+**`linear`, `trello`, or `gus`:** List every task file with its title, goal, and
+acceptance criteria so the user can create one item per task in their tracker. Then
+say exactly:
+
+> "Create one [Linear ticket / Trello card / GUS work item] per task listed above
+> and share each reference next to its task slug — I'll wait. The references go in
+> the task files and every commit."
+
+Wait for the references. For each task file, replace the `**GitHub issue**: #[N]`
+line with `**Issue**: [reference]`, using the tracker's format:
+- `linear`: `**Issue**: ENG-123`
+- `trello`: `**Issue**: trello:CARD-ID`
+- `gus`: `**Issue**: W-1234567`
+
+If the user cannot provide a reference for a task yet, leave that task's line as
+`**Issue**: TBD` and list it in Step 6 as needing a ticket before work starts.
+
+**`none`:** Do not create or request tracker items. For each task file, replace the
+`**GitHub issue**: #[N]` line with `**Issue**: N/A (issue-tracking: none)`.
 
 #### 5d. Update .rig/memory/PROGRESS.md
 
@@ -285,7 +346,7 @@ Append a dated entry:
 - Ran /kickoff from PROJECT_BRIEF.md
 - Filled in CLAUDE.md with real project content
 - Generated [N] tasks in .rig/tasks/backlog/
-- Opened GitHub issues #[X]–#[Y]
+- [Tracker line for the tracker mode read in Step 4: `github` → "Opened GitHub issues #[X]–#[Y]"; `linear` / `trello` / `gus` → "Linked [tracker] items [references]"; `none` → "No tracker items (issue-tracking: none)"]
 - Stack confirmed: [one-line summary]
 - Open decisions deferred: [list, or 'none']
 ```
@@ -300,7 +361,7 @@ After scaffolding is complete:
 >
 > - `CLAUDE.md` is filled in — The Rig is oriented on your project
 > - [N] tasks are in `.rig/tasks/backlog/` — ordered by dependency
-> - GitHub issues #[X]–#[Y] are open and labelled
+> - [Tracker line for the tracker mode read in Step 4: `github` → "GitHub issues #[X]–#[Y] are open and labelled"; `linear` / `trello` / `gus` → "[Tracker] items [references] are recorded in the task files" plus any tasks still marked `TBD`; `none` → "No tracker items — `issue-tracking: none` keeps the backlog in local task files"]
 >
 > Suggested first move: run `/run [first-task-slug]` — that's the foundation
 > everything else builds on.
