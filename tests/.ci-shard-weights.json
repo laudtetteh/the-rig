@@ -55,6 +55,7 @@
   "tests/test_provider_reminders.bats": 5.0,
   "tests/test_rig_doctor.bats": 5.0,
   "tests/test_rig_gaps_aggregation.bats": 5.0,
+  "tests/test_rig_upgrade_snippets.bats": 6.0,
   "tests/test_same_run_creation_tracking.bats": 5.0,
   "tests/test_security_recovery_gates.bats": 5.0,
   "tests/test_session_diagnostics.bats": 5.0,
