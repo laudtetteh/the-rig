@@ -103,7 +103,7 @@ For Claude Code, the project wiring and bundled Claude Code commands provide fou
 
 | Mechanism | What it does | How to configure |
 |---|---|---|
-| `permission-request.sh` | Runtime hook — intercepts unapproved tool requests; auto-approves writes to `$RIG_DIR` | Installed automatically; edit to add custom auto-approvals |
+| `permission-request.sh` | Runtime hook — intercepts unapproved tool requests; auto-approves read-only patterns and Markdown notes under `$RIG_DIR/memory`, `tasks`, and `docs` | Installed automatically; edit to add custom auto-approvals |
 | `/permissions` | Claude Code built-in — pre-approves or pre-denies specific tool patterns before a session starts | Run `/permissions` in Claude Code |
 | `settings.json` `allow`/`deny` | Persistent per-project rules loaded at every session; no prompt for matched patterns | Edit `.claude/settings.json` directly |
 | `/fewer-permission-prompts` | Claude Code bundled skill (Claude only) — scans transcripts for frequent patterns and bulk-adds them to `settings.json` `allow` | Run in Claude Code; this slash skill is unavailable in Codex |

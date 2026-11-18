@@ -16,6 +16,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Session snapshots now preserve separate active task handoffs across concurrent wrap, post-merge, and ship workflows, with owner-aware writes and recoverable workflow locks (#598).
+- Permission auto-approval now covers only read-only inspection and Markdown notes under the Rig's memory, tasks, and docs (excluding owner-approved conventions); hook-loaded Rig files are protected, and protected paths are matched by filesystem identity, including `MultiEdit` writes (#675).
 
 ### Fixed
 

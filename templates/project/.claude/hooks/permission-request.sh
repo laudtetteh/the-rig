@@ -8,13 +8,18 @@
 # Approved patterns:
 #   Read       — any file (read-only, no side effects)
 #   Bash       — git log/status/diff/branch (read-only git queries)
-#   Bash       — bats (test runner, local only)
 #   Bash       — bash -n (syntax check, no execution)
 #   Bash       — grep, find (read-only searches)
 #   Bash       — cat, head, tail, wc (read-only inspection), optionally after
 #                a narrow variable-assignment preamble
-#   Edit/Write — any path under $RIG_DIR (Rig's own memory, tasks, docs)
+#   Edit/Write — Markdown (.md) files under $RIG_DIR/memory/, tasks/, or docs/
+#                (Rig's own notes), except PROJECT_CONVENTIONS.md; every
+#                other path, including scripts and data files that hooks
+#                read or source, prompts as usual
 #                opt-out: touch $RIG_DIR/memory/.rig-strict-permissions
+#
+# Commands that execute project code (test runners, build tools) are never
+# auto-approved here; allow them explicitly in .claude/settings.json if wanted.
 #
 # For approved patterns: outputs JSON decision with behavior: allow.
 # For all other patterns: exits 0 with no output (normal permission handling).
@@ -122,8 +127,6 @@ if tool_name == 'Bash':
             return False
         if tokens[0] == 'git':
             return safe_git(tokens)
-        if tokens[0] == 'bats':
-            return True
         if tokens[0] == 'bash':
             return len(tokens) >= 2 and tokens[1] == '-n'
         if tokens[0] in ('grep', 'cat', 'head', 'tail', 'wc'):
@@ -149,15 +152,33 @@ if tool_name == 'Bash':
     if valid and seen_command:
         allow()
 
-# Edit/Write — auto-approve writes to Rig's own directory.
-# Principle: Rig is allowed to manage its own memory, tasks, and docs.
+# Edit/Write — auto-approve Markdown notes in Rig's own memory, tasks, and docs.
+# Paths are resolved first so '..' segments and symlinks cannot reach other
+# files. Only .md files qualify: nothing a hook sources or executes is ever
+# covered by this rule.
 # Opt-out: touch \$RIG_DIR/memory/.rig-strict-permissions to disable.
-if tool_name in ('Edit', 'Write', 'NotebookEdit') and rig_dir:
+owner_approved_notes = ('project_conventions.md',)
+
+def rig_note_path(file_path):
+    if not isinstance(file_path, str) or not os.path.isabs(file_path):
+        return False
+    resolved = os.path.realpath(file_path)
+    rig_real = os.path.realpath(rig_dir)
+    name = os.path.basename(resolved)
+    if not name.lower().endswith('.md') or name.startswith('.'):
+        return False
+    # Owner-approved conventions load into every session; changes must prompt.
+    if name.lower() in owner_approved_notes:
+        return False
+    return any(
+        resolved.startswith(os.path.join(rig_real, area) + os.sep)
+        for area in ('memory', 'tasks', 'docs')
+    )
+
+if tool_name in ('Edit', 'Write') and rig_dir:
     strict_sentinel = os.path.join(rig_dir, 'memory', '.rig-strict-permissions')
-    if not os.path.exists(strict_sentinel):
-        file_path = tool_input.get('file_path', '').rstrip('/')
-        if file_path and file_path.startswith(rig_dir + '/'):
-            allow()
+    if not os.path.exists(strict_sentinel) and rig_note_path(tool_input.get('file_path')):
+        allow()
 
 # Not an approved pattern — fall through to normal permission handling
 sys.exit(0)

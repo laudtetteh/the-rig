@@ -5,6 +5,7 @@
 # placeholders after resolving the current project's locations.
 [RIG_DIR]/processes/
 [RIG_DIR]/rules/
+[RIG_DIR]/contextual-tips.sh
 [REPO]/.husky/
 [REPO]/CLAUDE.md
 [REPO]/.claude/hooks/

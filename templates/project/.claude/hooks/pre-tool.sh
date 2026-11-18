@@ -21,6 +21,47 @@ fail_closed() {
 }
 
 command -v python3 >/dev/null 2>&1 || fail_closed "python3 is required to inspect PreToolUse payloads."
+
+# Print the first protected entry that names a path or one of its ancestors.
+# Existing components are compared by filesystem identity, so case variants on
+# case-insensitive volumes, symlinks, and hard links all match. Components that
+# do not exist yet are compared case-insensitively.
+# Usage: protected_identity_match <path> <protected-entry>...
+protected_identity_match() {
+  python3 -c '
+import os, sys
+
+def identity_key(path):
+    path = os.path.realpath(path)
+    missing = []
+    while not os.path.exists(path):
+        parent, name = os.path.split(path)
+        if parent == path:
+            break
+        missing.insert(0, name.casefold())
+        path = parent
+    info = os.stat(path)
+    return (info.st_dev, info.st_ino, tuple(missing))
+
+def self_and_ancestors(path):
+    path = os.path.realpath(path)
+    while True:
+        yield path
+        parent = os.path.dirname(path)
+        if parent == path:
+            return
+        path = parent
+
+protected = {}
+for entry in sys.argv[2:]:
+    protected.setdefault(identity_key(entry), entry)
+for candidate in self_and_ancestors(sys.argv[1]):
+    match = protected.get(identity_key(candidate))
+    if match is not None:
+        print(match, end="")
+        break
+' "$@"
+}
 TOOL=$(printf '%s' "$INPUT" | python3 -c '
 import json, sys
 try:
@@ -436,7 +477,7 @@ print(os.path.abspath(cwd or sys.argv[1]) + "\t")
 fi
 
 # ── Block writes to protected paths ──────────────────────────────────────────
-if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" || "$TOOL" == "NotebookEdit" ]]; then
+if [[ "$TOOL" == "Write" || "$TOOL" == "Edit" || "$TOOL" == "MultiEdit" || "$TOOL" == "NotebookEdit" ]]; then
 
   PATH_ARG=$(printf '%s' "$INPUT" | python3 -c '
 import json, os, sys
@@ -534,20 +575,32 @@ print(match.group(1) + (match.group(2) or "/"), end="")
     load_protected_path_policy "$TARGET_RIG_DIR/rules/protected-paths.txt" "$TARGET_REPO" "$TARGET_RIG_DIR" "$TARGET_REPO" "$TARGET_RIG_DIR"
   fi
 
+  # Files that Rig hooks source are always protected. Upgrades skip a
+  # customized policy file, so an older policy may not list these entries.
+  RIG_PROTECTED+=("$RIG_DIR/contextual-tips.sh")
+  [[ "$TARGET_RIG_DIR" == "$RIG_DIR" ]] || RIG_PROTECTED+=("$TARGET_RIG_DIR/contextual-tips.sh")
+
+  protected_match=""
   for protected in "${RIG_PROTECTED[@]}"; do
-    protected_canonical=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$protected") || fail_closed "protected path could not be resolved."
-    if [[ "$PATH_ARG" == *"$protected"* || "$PATH_CANONICAL" == "$protected_canonical" || "$PATH_CANONICAL" == "$protected_canonical/"* ]]; then
-      echo "Blocked: '$PATH_ARG' is a The Rig governance file." >&2
-      echo "The agent must not modify its own rules directly." >&2
-      case "${RIG_AGENT:-claude}" in
-        codex) propose_invocation='$rig-propose' ;;
-        claude) propose_invocation='/rig-propose' ;;
-        *) propose_invocation='the rig-propose workflow' ;;
-      esac
-      echo "Use $propose_invocation to stage a change for human review, or edit manually." >&2
-      exit 2
+    if [[ "$PATH_ARG" == *"$protected"* ]]; then
+      protected_match="$protected"
+      break
     fi
   done
+  if [[ -z "$protected_match" ]]; then
+    protected_match=$(protected_identity_match "$PATH_ARG" "${RIG_PROTECTED[@]}") || fail_closed "protected path could not be resolved."
+  fi
+  if [[ -n "$protected_match" ]]; then
+    echo "Blocked: '$PATH_ARG' is a The Rig governance file." >&2
+    echo "The agent must not modify its own rules directly." >&2
+    case "${RIG_AGENT:-claude}" in
+      codex) propose_invocation='$rig-propose' ;;
+      claude) propose_invocation='/rig-propose' ;;
+      *) propose_invocation='the rig-propose workflow' ;;
+    esac
+    echo "Use $propose_invocation to stage a change for human review, or edit manually." >&2
+    exit 2
+  fi
 
   # ── PROJECT-SPECIFIC PROTECTED PATHS ─────────────────────────────────────
   # Add paths that should never be written by the agent in this project.
