@@ -95,3 +95,136 @@ PY
   grep -Fq 'project config cannot override' "$doc"
   grep -Fq 'For stealth/external installs, docs should say `$RIG_DIR`' "$doc"
 }
+
+@test "troubleshooting quotes the real commit-msg branch guard messages" {
+  python3 - "$REPO_ROOT/templates/project/.husky/commit-msg" "$REPO_ROOT/docs/troubleshooting.md" <<'PY'
+import pathlib
+import re
+import sys
+
+hook = pathlib.Path(sys.argv[1]).read_text()
+docs = pathlib.Path(sys.argv[2]).read_text()
+
+messages = re.findall(r'echo "(ERROR: [^"]*\$BRANCH[^"]*)"', hook)
+if len(messages) != 2:
+    raise SystemExit(f"expected two branch guard messages in commit-msg, found {messages!r}")
+for message in messages:
+    rendered = message.replace("$BRANCH", "main")
+    if rendered not in docs:
+        raise SystemExit(f"troubleshooting does not quote guard message: {rendered!r}")
+if "Committing directly to 'main' is not allowed." in docs:
+    raise SystemExit("troubleshooting still quotes a guard message the hook never prints")
+if "direct commits are intentional for this project" in docs:
+    raise SystemExit("troubleshooting still claims direct-push allows every direct commit")
+if "only for `chore` and `docs`" not in docs:
+    raise SystemExit("troubleshooting does not state the chore/docs direct-push limit")
+PY
+}
+
+@test "troubleshooting numbered sections are unique and sequential" {
+  python3 - "$REPO_ROOT/docs/troubleshooting.md" <<'PY'
+import pathlib
+import re
+import sys
+
+numbers = [int(n) for n in re.findall(r"(?m)^## (\d+)\. ", pathlib.Path(sys.argv[1]).read_text())]
+if numbers != list(range(len(numbers))):
+    raise SystemExit(f"section numbers are not 0..N in order: {numbers}")
+PY
+}
+
+@test "troubleshooting executable-bit fix covers every shipped Claude hook script" {
+  python3 - "$REPO_ROOT/templates/project/.claude/hooks" "$REPO_ROOT/docs/troubleshooting.md" <<'PY'
+import pathlib
+import sys
+
+hooks = sorted(p.name for p in pathlib.Path(sys.argv[1]).glob("*.sh"))
+docs = pathlib.Path(sys.argv[2]).read_text()
+try:
+    section = docs.split("### Hooks not executable", 1)[1].split("\n### ", 1)[0]
+except IndexError:
+    raise SystemExit("Hooks not executable section not found")
+if "chmod +x .claude/hooks/*.sh" not in section:
+    raise SystemExit("executable-bit fix does not cover all .claude/hooks/*.sh scripts")
+missing = [name for name in hooks if f"`{name}`" not in section]
+if missing:
+    raise SystemExit(f"executable-bit section does not name shipped hooks: {missing}")
+for git_hook in ("pre-commit", "commit-msg", "post-commit", "post-merge"):
+    if f".git/hooks/{git_hook}" not in section or f".husky/{git_hook}" not in section:
+        raise SystemExit(f"executable-bit fix misses {git_hook} for husky or stealth installs")
+PY
+}
+
+@test "public doc shell examples resolve Rig state paths instead of bare .rig/memory" {
+  python3 - "$REPO_ROOT" <<'PY'
+import pathlib
+import re
+import sys
+
+root = pathlib.Path(sys.argv[1])
+bad = []
+for rel in ("README.md", "docs/troubleshooting.md", "docs/customizing.md", "docs/agent-install.md"):
+    text = (root / rel).read_text()
+    for block in re.findall(r"```(?:bash|sh)\n(.*?)```", text, re.S):
+        for line in block.splitlines():
+            if re.search(r"(?<![\w$/{.-])\.rig/(memory|install-targets)", line):
+                bad.append(f"{rel}: {line.strip()}")
+readme = (root / "README.md").read_text()
+for stale in ("`.rig/memory/tips/`", "`.rig/memory/.rig-tips-disabled`"):
+    if stale in readme:
+        bad.append(f"README.md: {stale}")
+if bad:
+    raise SystemExit("bare .rig state paths fail in stealth installs:\n" + "\n".join(bad))
+PY
+}
+
+@test "install docs do not reference the never-created PROFILE.md" {
+  run grep -n "your-ai-contexts" "$REPO_ROOT/README.md" "$REPO_ROOT/docs/agent-install.md" \
+    "$REPO_ROOT/docs/troubleshooting.md" "$REPO_ROOT/docs/customizing.md"
+  [ "$status" -eq 1 ]
+  run grep -rn "PROFILE_PATH" "$REPO_ROOT/install.sh" "$REPO_ROOT/templates/global"
+  [ "$status" -eq 1 ]
+  grep -q "^\*\*Correction (2026-11-18):\*\* This decision no longer describes shipped behaviour" \
+    "$REPO_ROOT/docs/decisions.md"
+}
+
+@test "agent-install new-machine setup does not hardcode repo tracking or rely on a cloned .rigpath" {
+  python3 - "$REPO_ROOT/docs/agent-install.md" <<'PY'
+import pathlib
+import sys
+
+docs = pathlib.Path(sys.argv[1]).read_text()
+try:
+    section = docs.split("### 7 — New machine setup", 1)[1].split("\n### ", 1)[0]
+except IndexError:
+    raise SystemExit("new machine setup section not found")
+if "--tracking repo" in section:
+    raise SystemExit("new machine example hardcodes --tracking repo")
+if "read it to know where" in section:
+    raise SystemExit("new machine setup tells users to read .rigpath from a fresh clone")
+if ".git/info/exclude" not in section:
+    raise SystemExit("new machine setup does not explain why .rigpath is absent")
+PY
+}
+
+@test "agent-install post-install checklist checks stealth git hooks and avoids repo-only Bats" {
+  python3 - "$REPO_ROOT/docs/agent-install.md" <<'PY'
+import pathlib
+import sys
+
+docs = pathlib.Path(sys.argv[1]).read_text()
+section = docs.split("## Post-install checklist", 1)[1]
+if "bats tests/" in section:
+    raise SystemExit("post-install checklist tells end users to run repo-only Bats")
+if ".git/hooks/commit-msg" not in section:
+    raise SystemExit("post-install checklist does not check stealth .git/hooks/")
+PY
+}
+
+@test "README documents RIG_INSTALLER_SRC used by the upgrade commands" {
+  grep -q 'RIG_INSTALLER_SRC' "$REPO_ROOT/templates/global/commands/rig-upgrade.md"
+  grep -q 'export RIG_INSTALLER_SRC=/path/to/the-rig' "$REPO_ROOT/README.md"
+  grep -q 'not by `install.sh` itself' "$REPO_ROOT/README.md"
+  run grep -n 'RIG_INSTALLER_SRC' "$REPO_ROOT/install.sh"
+  [ "$status" -eq 1 ]
+}

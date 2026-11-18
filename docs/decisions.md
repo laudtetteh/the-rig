@@ -118,6 +118,8 @@ Why The Rig is built the way it is. Each entry covers what was decided, what was
 
 **Tradeoff accepted:** Requires the install script to run (can't just `cp` the template). Acceptable — `install.sh` is the intended installation method.
 
+**Correction (2026-11-18):** This decision no longer describes shipped behaviour. The global template has no `[PROFILE_PATH]` placeholder, `install.sh` performs no such substitution, and no `~/.your-ai-contexts/PROFILE.md` file is created. Personal context now lives in the `## Personal context` section of the installed `~/.claude/CLAUDE.md`, which the global upgrade treats as user-owned. The original entry above is kept as the historical record.
+
 ---
 
 ## 10. Commit hooks and PostToolUse auto-stub PROGRESS.md for guarded agent commits
