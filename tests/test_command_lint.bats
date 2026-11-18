@@ -296,10 +296,75 @@ PY
   grep -Fq 'Do not run `/post-merge`, `/wrap`, or any checklist step' "$COMMAND_DIR/handoff-checklist.md"
 }
 
+@test "rig-upgrade commands: every installer pull targets the installer checkout (#663)" {
+  local f
+  for f in "$COMMAND_DIR/rig-upgrade.md" \
+           "$REPO_ROOT/templates/project/.rig/processes/UPGRADE_WORKFLOW.md" \
+           "$REPO_ROOT/templates/global/commands/rig-upgrade.md"; do
+    run grep -nE '&& git pull|^ *git pull' "$f"
+    [ "$status" -ne 0 ] || { echo "bare git pull in $f: $output"; return 1; }
+  done
+  grep -Fq 'git -C "$INSTALLER_SRC" pull --ff-only origin main' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'git -C "$INSTALLER_SRC" pull --ff-only origin main' "$REPO_ROOT/templates/project/.rig/processes/UPGRADE_WORKFLOW.md"
+}
+
+@test "rig-upgrade commands: no force-add, sed manifest splice, mapfile, or hook clobber (#663)" {
+  local f
+  for f in "$COMMAND_DIR/rig-upgrade.md" \
+           "$REPO_ROOT/templates/project/.rig/processes/UPGRADE_WORKFLOW.md"; do
+    run grep -nE 'git add -f \.|sed -i .*\$rel|mapfile -d|cp "\$tpl" "\$dest"' "$f"
+    [ "$status" -ne 0 ] || { echo "forbidden pattern in $f: $output"; return 1; }
+  done
+}
+
+@test "rig-upgrade commands: .rigpath is read verbatim, never whitespace-stripped (#663)" {
+  local f
+  for f in "$COMMAND_DIR/rig-upgrade.md" \
+           "$REPO_ROOT/templates/project/.rig/processes/UPGRADE_WORKFLOW.md"; do
+    run grep -nE "tr -d '\[:space:\]' < [^|]*rigpath" "$f"
+    [ "$status" -ne 0 ] || { echo "whitespace-stripping .rigpath read in $f: $output"; return 1; }
+  done
+}
+
+@test "rig-upgrade.md: tracking detection mirrors install.sh rules (#663)" {
+  grep -Fq '"$HOME/.rig/projects/"*' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'TRACKING="local"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq 'TRACKING_ARGS+=(--rig-dir "$RIG_DIR")' "$COMMAND_DIR/rig-upgrade.md"
+  run grep -F 'if [[ -d "$REPO/.husky" ]]; then TRACKING="external"' "$COMMAND_DIR/rig-upgrade.md"
+  [ "$status" -ne 0 ]
+}
+
+@test "UPGRADE_WORKFLOW.md: commit approval follows staging and PR follows push (#663)" {
+  local wf="$REPO_ROOT/templates/project/.rig/processes/UPGRADE_WORKFLOW.md"
+  local stage_line touch_line push_line pr_line
+  stage_line=$(grep -n 'git add -A --' "$wf" | head -1 | cut -d: -f1)
+  touch_line=$(grep -n 'touch "$RIG_DIR/memory/.rig-commit-ok"' "$wf" | head -1 | cut -d: -f1)
+  push_line=$(grep -n 'git push -u origin chore/rig-upgrade' "$wf" | head -1 | cut -d: -f1)
+  pr_line=$(grep -n 'gh pr create --base "$BASE_BRANCH"' "$wf" | head -1 | cut -d: -f1)
+  [ -n "$stage_line" ]
+  [ -n "$touch_line" ]
+  [ -n "$push_line" ]
+  [ -n "$pr_line" ]
+  [ "$stage_line" -lt "$touch_line" ]
+  [ "$touch_line" -lt "$push_line" ]
+  [ "$push_line" -lt "$pr_line" ]
+  grep -Fq 'python3 "$INSTALLER_SRC/installer/repair-stealth.py"' "$wf"
+}
+
+@test "global rig-upgrade.md: asks before switching a non-main installer checkout (#663)" {
+  local g="$REPO_ROOT/templates/global/commands/rig-upgrade.md"
+  grep -Fq 'INSTALLER_BRANCH=$(git -C "$INSTALLER_SRC" branch --show-current' "$g"
+  grep -Fq 'Wait for the user'"'"'s response. Only if they choose to switch' "$g"
+  run grep -nE '^  git -C "\$INSTALLER_SRC" checkout main$' "$g"
+  [ "$status" -ne 0 ]
+}
+
 @test "rig-upgrade.md: verifies Codex mirrors after command updates" {
   grep -Fq '.agents/skills/wrap/SKILL.md' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq 'installer/generate-codex-skills.py' "$COMMAND_DIR/rig-upgrade.md"
-  grep -Fq -- '--output "$REPO/.agents/skills"' "$COMMAND_DIR/rig-upgrade.md"
+  grep -Fq -- '--output "$CODEX_STAGE"' "$COMMAND_DIR/rig-upgrade.md"
+  run grep -F -- '--output "$REPO/.agents/skills"' "$COMMAND_DIR/rig-upgrade.md"
+  [ "$status" -ne 0 ]
   grep -Fq -- '--base-branch "$BASE_BRANCH"' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq -- '--skills-source "$INSTALLER_SRC/templates/project/.claude/skills"' "$COMMAND_DIR/rig-upgrade.md"
   grep -Fq '"${CODEX_COMMAND_SOURCES[@]}"' "$COMMAND_DIR/rig-upgrade.md"

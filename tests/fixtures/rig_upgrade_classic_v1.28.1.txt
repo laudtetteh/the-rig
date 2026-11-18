@@ -1,0 +1,212 @@
+
+[1m╔══════════════════════════════════════╗[0m
+[1m║         The Rig — Installer          ║[0m
+[1m╚══════════════════════════════════════╝[0m
+
+
+[0;34m→[0m Strategy: upgrade
+
+[0;34m→[0m Agent targets: global=claude project=claude
+Target matrix: global=claude project=both
+Missing prerequisites: none
+Degraded features: none
+Next steps: Launch claude, Launch codex
+[1m── Project layer ──[0m
+
+
+[0;34m→[0m Base branch: main
+
+[0;34m→[0m Pre-flight snapshot: /tmp/rig-fixture/proj/.rig-backup/preflight-snapshots/20261118_041626_28349
+
+
+[0;34m→[0m Scaffolding into: /tmp/rig-fixture/proj
+[0;34m→[0m Project name:     proj
+
+[1;33m![0m CLAUDE.md references feature-docs files that Upgrade will skip; rerun with --feature-docs.
+[1;33m![0m CLAUDE.md references contribute files that Upgrade will skip; rerun with --contribute.
+[0;32m✓[0m Updated: .husky/filter-commit-message-inplace.sh
+[0;32m✓[0m Updated: .husky/post-commit
+[0;32m✓[0m Updated: .husky/commit-msg
+[0;32m✓[0m Updated: .husky/post-merge
+[0;32m✓[0m Updated: .husky/pre-commit
+[0;34m→[0m Skipped (user-owned): PROJECT_BRIEF.md
+[0;32m✓[0m Created bin/rig-session-index.py
+[0;34m→[0m Skipped (user-owned): bin/rig-sprint
+[0;34m→[0m Skipped (user-owned): bin/rig-connector-preflight
+[0;34m→[0m Skipped (user-owned): bin/rig-tab-title-watch
+[0;32m✓[0m Updated: bin/rig
+[0;32m✓[0m Created bin/rig-session-resolve.py
+[0;32m✓[0m Created bin/rig-snapshot.py
+[0;34m→[0m Up to date: .claude/settings.json
+[0;34m→[0m Up to date: .claude/agents/code-reviewer.md
+[0;34m→[0m Up to date: .claude/hooks/pre-compact.sh
+[0;34m→[0m Up to date: .claude/hooks/subagent-start.sh
+[0;32m✓[0m Updated: .claude/hooks/pre-tool.sh
+[0;34m→[0m Up to date: .claude/hooks/permission-request.sh
+[0;32m✓[0m Updated: .claude/hooks/session-start.sh
+[0;34m→[0m Up to date: .claude/hooks/post-compact.sh
+[0;32m✓[0m Updated: .claude/hooks/post-tool.sh
+[0;32m✓[0m Updated: .claude/hooks/stop.sh
+[0;32m✓[0m Updated: .claude/hooks/prompt-submit.sh
+[0;34m→[0m Up to date: .claude/commands/debug.md
+[0;32m✓[0m Updated: .claude/commands/rig-upgrade.md
+[0;34m→[0m Component not selected — skipped: .claude/commands/rig-propose.md
+[0;34m→[0m Up to date: .claude/commands/connector-preflight.md
+[0;32m✓[0m Updated: .claude/commands/rig-help.md
+[0;32m✓[0m Updated: .claude/commands/post-merge.md
+[0;32m✓[0m Updated: .claude/commands/kickoff.md
+[0;34m→[0m Component not selected — skipped: .claude/commands/refresh-feature-doc.md
+[0;34m→[0m Up to date: .claude/commands/recon.md
+[0;34m→[0m Up to date: .claude/commands/status.md
+[0;34m→[0m Component not selected — skipped: .claude/commands/rig-gaps.md
+[0;34m→[0m Component not selected — skipped: .claude/commands/doc-feature.md
+[0;32m✓[0m Updated: .claude/commands/ship.md
+[0;32m✓[0m Updated: .claude/commands/rig-status.md
+[0;32m✓[0m Updated: .claude/commands/wrap.md
+[0;32m✓[0m Updated: .claude/commands/sprint.md
+[0;34m→[0m Up to date: .claude/commands/handoff-checklist.md
+[0;34m→[0m Up to date: .claude/commands/pre-release-review.md
+[0;32m✓[0m Updated: .claude/commands/session-name.md
+[0;34m→[0m Up to date: .claude/commands/code-review.md
+[0;32m✓[0m Updated: .claude/commands/run.md
+[0;32m✓[0m Updated: .claude/commands/task.md
+[0;34m→[0m Component not selected — skipped: .claude/commands/feature-context.md
+[0;34m→[0m Component not selected — skipped: .claude/commands/doc-list.md
+[0;34m→[0m Component not selected — skipped: docs/features/README.md
+[0;34m→[0m Component not selected — skipped: docs/INDEX.md
+[0;32m✓[0m Updated: .codex/hooks/rig-adapter.sh
+[0;34m→[0m Up to date: .codex/hooks.json
+[0;34m→[0m Skipped (user-owned): .codex/skills/sprint/SKILL.md
+[0;34m→[0m Skipped (user-owned): .github/PULL_REQUEST_TEMPLATE.md
+[0;34m→[0m Skipped (user-owned): .github/ISSUE_TEMPLATE/bug.md
+[0;34m→[0m Skipped (user-owned): .github/ISSUE_TEMPLATE/chore.md
+[0;34m→[0m Skipped (user-owned): .github/ISSUE_TEMPLATE/feature.md
+[0;34m→[0m Up to date: .gitleaks.toml
+[0;34m→[0m Skipped (user-owned): .rig/connectors/skill-dependencies.v1.json
+[0;34m→[0m Skipped (user-owned): .rig/tasks/backlog/TASK_example.md
+[0;34m→[0m Skipped (user-owned): .rig/tasks/done/.gitkeep
+[0;34m→[0m Skipped (user-owned): .rig/tasks/active/.gitkeep
+[0;34m→[0m Skipped (user-owned): .rig/memory/PROJECT_CONVENTIONS.md
+[0;34m→[0m Skipped (user-owned): .rig/memory/CONTEXT_SNAPSHOT.md
+[0;34m→[0m Skipped (user-owned): .rig/memory/RIG_GAPS.md
+[0;34m→[0m Skipped (user-owned): .rig/memory/PROGRESS.md
+[0;34m→[0m Skipped (user-owned): .rig/memory/ERRORS.md
+[0;34m→[0m Skipped (user-owned): .rig/memory/.gitignore
+[0;34m→[0m Skipped (user-owned): .rig/memory/DECISIONS.md
+[0;34m→[0m Skipped (user-owned): .rig/contextual-tips.sh
+[0;32m✓[0m Updated: .rig/processes/SHIP_WORKFLOW.md
+[0;34m→[0m Up to date: .rig/processes/WORK_MODES.md
+[0;34m→[0m Up to date: .rig/processes/DEBUG_WORKFLOW.md
+[0;34m→[0m Up to date: .rig/processes/CONNECTOR_PREFLIGHT.md
+[0;32m✓[0m Updated: .rig/processes/UPGRADE_WORKFLOW.md
+[0;32m✓[0m Updated: .rig/processes/POST_MERGE_WORKFLOW.md
+[0;32m✓[0m Updated: .rig/processes/NEW_TASK_WORKFLOW.md
+[0;32m✓[0m Created .rig/processes/RIG_GAPS_TRIAGE.md
+[0;32m✓[0m Updated: .rig/processes/SPRINT_WORKFLOW.md
+[0;34m→[0m Skipped (user-owned): .rig/rules/session-identity.md
+[0;34m→[0m Skipped (user-owned): .rig/rules/git-conventions.md
+[0;34m→[0m Skipped (user-owned): .rig/rules/coding-standards.md
+[0;34m→[0m Skipped (user-owned): .rig/rules/verification.md
+[0;34m→[0m Up to date: .rig/rules/protected-paths.txt
+[0;34m→[0m Skipped (user-owned): .rig/rules/session-naming.md
+[0;34m→[0m Skipped (user-owned): .rig/rules/security.md
+[0;34m→[0m Skipped (user-owned): CLAUDE.md
+[0;32m✓[0m Updated: .agents/skills/kickoff/references/command.md
+[0;34m→[0m Up to date: .agents/skills/kickoff/SKILL.md
+[0;32m✓[0m Updated: .agents/skills/rig-upgrade/references/command.md
+[0;34m→[0m Up to date: .agents/skills/rig-upgrade/SKILL.md
+[0;34m→[0m Up to date: .agents/skills/connector-preflight/references/command.md
+[0;34m→[0m Up to date: .agents/skills/connector-preflight/SKILL.md
+[0;32m✓[0m Updated: .agents/skills/rig-help/references/command.md
+[0;34m→[0m Up to date: .agents/skills/rig-help/SKILL.md
+[0;34m→[0m Up to date: .agents/skills/code-review/references/command.md
+[0;34m→[0m Up to date: .agents/skills/code-review/SKILL.md
+[0;34m→[0m Up to date: .agents/skills/status/references/command.md
+[0;34m→[0m Up to date: .agents/skills/status/SKILL.md
+[0;32m✓[0m Updated: .agents/skills/session-name/references/command.md
+[0;34m→[0m Up to date: .agents/skills/session-name/SKILL.md
+[0;32m✓[0m Updated: .agents/skills/wrap/references/command.md
+[0;34m→[0m Up to date: .agents/skills/wrap/SKILL.md
+[0;32m✓[0m Updated: .agents/skills/rig-status/references/command.md
+[0;34m→[0m Up to date: .agents/skills/rig-status/SKILL.md
+[0;32m✓[0m Updated: .agents/skills/task/references/command.md
+[0;34m→[0m Up to date: .agents/skills/task/SKILL.md
+[0;34m→[0m Up to date: .agents/skills/handoff-checklist/references/command.md
+[0;34m→[0m Up to date: .agents/skills/handoff-checklist/SKILL.md
+[0;32m✓[0m Updated: .agents/skills/ship/references/command.md
+[0;34m→[0m Up to date: .agents/skills/ship/SKILL.md
+[0;32m✓[0m Updated: .agents/skills/run/references/command.md
+[0;34m→[0m Up to date: .agents/skills/run/SKILL.md
+[0;32m✓[0m Updated: .agents/skills/post-merge/references/command.md
+[0;34m→[0m Up to date: .agents/skills/post-merge/SKILL.md
+[0;32m✓[0m Updated: .agents/skills/sprint/references/command.md
+[0;34m→[0m Up to date: .agents/skills/sprint/SKILL.md
+[0;34m→[0m Up to date: .agents/skills/recon/references/command.md
+[0;34m→[0m Up to date: .agents/skills/recon/SKILL.md
+[0;34m→[0m Up to date: .agents/skills/pre-release-review/references/command.md
+[0;34m→[0m Up to date: .agents/skills/pre-release-review/SKILL.md
+[0;34m→[0m Up to date: .agents/skills/debug/references/command.md
+[0;34m→[0m Up to date: .agents/skills/debug/SKILL.md
+[0;32m✓[0m Codex project instructions: CLAUDE.md fallback unchanged
+[0;32m✓[0m Wired SubagentStart hook in .claude/settings.json
+[0;32m✓[0m Substituted [REPO_ROOT] in .claude/settings.json → /tmp/rig-fixture/proj
+[0;32m✓[0m Substituted [BASE_BRANCH] → main in workflow files
+[0;32m✓[0m Set executable bits on .husky/ hooks
+[0;32m✓[0m Set executable bits on .claude/hooks/ scripts
+[0;32m✓[0m Set executable bits on Codex hook adapters
+[0;32m✓[0m Set executable bit on bin/rig
+[1;33m![0m No package.json found in /tmp/rig-fixture/proj.
+  Husky requires a package.json. To set it up later:
+    cd /tmp/rig-fixture/proj && npm init -y && npm install --save-dev husky && npx husky install
+
+[0;34m→[0m Originals backed up to: /tmp/rig-fixture/proj/.rig-backup/.in-progress
+
+[0;34m→[0m Hook files modified — stage and commit to apply them:
+[0;34m→[0m    M .husky/commit-msg
+[0;34m→[0m    M .husky/filter-commit-message-inplace.sh
+[0;34m→[0m    M .husky/post-commit
+[0;34m→[0m    M .husky/post-merge
+[0;34m→[0m    M .husky/pre-commit
+[0;34m→[0m   git add .husky/ && git commit -m 'chore(hooks): update Rig git hooks'
+[0;32m✓[0m Postflight targets: project=both; smoke={"ok":true,"results":[{"id":"rig-dispatcher","type":"executable","target":"bin/rig","required":true,"status":"pass"},{"id":"rig-session-resolver","type":"exists","target":"bin/rig-session-resolve.py","required":true,"status":"pass"},{"id":"rig-session-index","type":"exists","target":"bin/rig-session-index.py","required":true,"status":"pass"},{"id":"rig-snapshot-writer","type":"exists","target":"bin/rig-snapshot.py","required":true,"status":"pass"},{"id":"claude-settings","type":"exists","target":".claude/settings.json","required":true,"status":"pass"},{"id":"codex-claude-fallback","type":"exists","target":".codex/config.toml","required":true,"status":"pass"},{"id":"codex-project-brain","type":"exists","target":"CLAUDE.md","required":true,"status":"pass"},{"id":"codex-hooks","type":"exists","target":".codex/hooks.json","required":true,"status":"pass"},{"id":"codex-adapter","type":"executable","target":".codex/hooks/rig-adapter.sh","required":true,"status":"pass"},{"id":"codex-skills","type":"exists","target":".agents/skills","required":true,"status":"pass"}]}
+
+
+[1m── Checking dependencies ──[0m
+
+[0;32m✓[0m gitleaks is installed — secret scanning is active
+
+[1m── Upgrade summary ──[0m
+Updated: 43
+Merged: 0
+Removed obsolete: 0
+Skipped customized: 0
+Skipped conflicts: 0
+Skipped untracked user-owned: 0
+Stale/missing tracked artifacts: 0
+Future/bogus manifest base_revision: 0
+Backups: /tmp/rig-fixture/proj/.rig-backup/20261118_041626_28349
+Preflight snapshot: /tmp/rig-fixture/proj/.rig-backup/preflight-snapshots/20261118_041626_28349
+Upgrade report: /tmp/rig-fixture/proj/.rig/upgrade-reports/20261118_041626_28349.json
+Roll back this upgrade: bin/rig upgrade rollback --id 20261118_041626_28349 --dry-run
+Selected agents: global=claude project=both
+Missing prerequisites: none
+Degraded/skipped capabilities: none
+Exact next steps: Launch claude; Launch codex
+Project smoke tests (expected signal: passed): {"ok":true,"results":[{"id":"rig-dispatcher","type":"executable","target":"bin/rig","required":true,"status":"pass"},{"id":"rig-session-resolver","type":"exists","target":"bin/rig-session-resolve.py","required":true,"status":"pass"},{"id":"rig-session-index","type":"exists","target":"bin/rig-session-index.py","required":true,"status":"pass"},{"id":"rig-snapshot-writer","type":"exists","target":"bin/rig-snapshot.py","required":true,"status":"pass"},{"id":"claude-settings","type":"exists","target":".claude/settings.json","required":true,"status":"pass"},{"id":"codex-claude-fallback","type":"exists","target":".codex/config.toml","required":true,"status":"pass"},{"id":"codex-project-brain","type":"exists","target":"CLAUDE.md","required":true,"status":"pass"},{"id":"codex-hooks","type":"exists","target":".codex/hooks.json","required":true,"status":"pass"},{"id":"codex-adapter","type":"executable","target":".codex/hooks/rig-adapter.sh","required":true,"status":"pass"},{"id":"codex-skills","type":"exists","target":".agents/skills","required":true,"status":"pass"}]}
+
+[1m── Done ──[0m
+
+The Rig upgrade is complete. Next steps:
+
+  3. Fill in /tmp/rig-fixture/proj/CLAUDE.md
+     (stack, conventions, off-limits paths)
+
+  4. Open a Claude Code session in your project and run /kickoff or /task
+
+  4. Open a Codex session in your project and run $kickoff or $task
+
+  Codex: launch 'codex' and verify native project guidance.
+  Codex hooks: open /hooks, review The Rig project hooks, and trust their current definitions.
+Documentation: https://github.com/laudtetteh/the-rig
+
+RIG_UPGRADE_REVIEW_REQUIRED=0

@@ -35,10 +35,13 @@ Before starting:
 ## Step 1 — Pull the installer source to latest
 
 ```bash
-cd ~/tools/the-rig
-git checkout main
-git pull origin main
-cat VERSION   # confirm expected version
+INSTALLER_SRC="${RIG_INSTALLER_SRC:-$HOME/tools/the-rig}"
+if [[ "$(git -C "$INSTALLER_SRC" branch --show-current)" == "main" ]]; then
+  git -C "$INSTALLER_SRC" pull --ff-only origin main
+else
+  echo "Installer checkout is not on main; see the gotcha below before pulling."
+fi
+cat "$INSTALLER_SRC/VERSION"   # confirm expected version
 ```
 
 **Critical gotcha:** `~/tools/the-rig` can accidentally end up on a feature branch.
@@ -49,9 +52,12 @@ Always verify you're on `main` before proceeding. The dev repo for The Rig itsel
 git -C ~/tools/the-rig branch --show-current   # must print "main"
 ```
 
-If not on `main`:
+If not on `main`, switch the installer checkout itself (every command needs
+`-C`; a bare `git pull` would run in your project and fast-forward your own
+branch instead). `RIG_INSTALLER_SRC` overrides the default location:
 ```bash
-git -C ~/tools/the-rig checkout main && git pull origin main
+INSTALLER_SRC="${RIG_INSTALLER_SRC:-$HOME/tools/the-rig}"
+git -C "$INSTALLER_SRC" checkout main && git -C "$INSTALLER_SRC" pull --ff-only origin main
 ```
 
 ---
@@ -60,8 +66,27 @@ git -C ~/tools/the-rig checkout main && git pull origin main
 
 Before touching anything, know exactly what the upgrade will affect:
 
+Installed paths are resolved per tracking mode, using the same rules as
+install.sh: `.rig/` files live at the `.rigpath` target in stealth/external
+installs, and stealth installs keep their git hooks in `.git/hooks/` instead
+of `.husky/`. `[BASE_BRANCH]` is substituted before comparing.
+
 ```bash
-TEMPLATES=~/tools/the-rig/templates/project
+INSTALLER_SRC="${RIG_INSTALLER_SRC:-$HOME/tools/the-rig}"
+TEMPLATES="$INSTALLER_SRC/templates/project"
+REPO=$(git rev-parse --show-toplevel)
+RIG_DIR="$REPO/.rig"
+HOOKS_DIR="$REPO/.husky"
+if [[ -f "$REPO/.rigpath" ]]; then
+  # First line verbatim, CR/LF stripped only: interior spaces belong to the path.
+  IFS= read -r RIG_DIR < "$REPO/.rigpath" || true
+  RIG_DIR="${RIG_DIR%$'\r'}"
+  # install.sh: a .rigpath under $HOME/.rig/projects/ is stealth (hooks in
+  # .git/hooks/); any other .rigpath is external (hooks stay in .husky/).
+  [[ "$RIG_DIR" == "$HOME/.rig/projects/"* ]] && HOOKS_DIR="$REPO/.git/hooks"
+fi
+BASE_BRANCH=$(grep "^base-branch:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]' || true)
+BASE_BRANCH="${BASE_BRANCH:-main}"
 
 for src in \
   ".claude/hooks/pre-tool.sh" \
@@ -82,9 +107,20 @@ for src in \
   ".rig/processes/NEW_TASK_WORKFLOW.md" \
   ".rig/processes/POST_MERGE_WORKFLOW.md"; do
   tpl="$TEMPLATES/$src"
-  [[ -f "$tpl" ]] && result=$(diff "$src" "$tpl" 2>/dev/null) \
-    && { [[ -n "$result" ]] && echo "CHANGED: $src" || echo "same:    $src"; } \
-    || echo "NO_TPL:  $src"
+  case "$src" in
+    .rig/*)   installed="$RIG_DIR/${src#.rig/}" ;;
+    .husky/*) installed="$HOOKS_DIR/${src#.husky/}" ;;
+    *)        installed="$REPO/$src" ;;
+  esac
+  if [[ ! -f "$tpl" ]]; then
+    echo "NO_TPL:  $src"
+  elif [[ ! -f "$installed" ]]; then
+    echo "MISSING: $src"
+  elif sed "s/\[BASE_BRANCH\]/${BASE_BRANCH}/g" "$tpl" | cmp -s - "$installed"; then
+    echo "same:    $src"
+  else
+    echo "CHANGED: $src"
+  fi
 done
 ```
 
@@ -122,9 +158,55 @@ Codex do not acquire independently maintained workflow text.
 
 ## Step 4 — Run the installer for the project layer
 
+The log is appended to, never overwritten: a re-run of this step (after a
+failed run, a stale-log refusal in Step 7, or the Step 5 VERSION fix) reports
+already-written files only as "Up to date", so each run's "Created"/"Updated"
+lines must accumulate until the upgrade commit removes the log.
+
+Pass the tracking mode explicitly (same rules as install.sh, with `.rigpath`
+read verbatim so a path containing spaces survives) instead of relying on the
+installer's own auto-detection, and keep the installer's output inside `.git/`
+(never staged) so Step 7 can stage exactly the files it reports as written:
+
 ```bash
-~/tools/the-rig/install.sh --project-only --strategy upgrade --target "$(pwd)"
+INSTALLER_SRC="${RIG_INSTALLER_SRC:-$HOME/tools/the-rig}"
+REPO=$(git rev-parse --show-toplevel)
+GIT_EXCLUDE=$(git -C "$REPO" rev-parse --git-path info/exclude)
+[[ "$GIT_EXCLUDE" == /* ]] || GIT_EXCLUDE="$REPO/$GIT_EXCLUDE"
+if [[ -f "$REPO/.rigpath" ]]; then
+  IFS= read -r RIG_DIR < "$REPO/.rigpath" || true
+  RIG_DIR="${RIG_DIR%$'\r'}"
+  if [[ "$RIG_DIR" == "$HOME/.rig/projects/"* ]]; then TRACKING="stealth"; else TRACKING="external"; fi
+  TRACKING_ARGS=(--tracking "$TRACKING" --rig-dir "$RIG_DIR")
+elif [[ -n "$(git -C "$REPO" ls-files -- .rig/)" ]]; then
+  TRACKING_ARGS=(--tracking repo)
+elif grep -qF '.rig/' "$GIT_EXCLUDE" 2>/dev/null || grep -qF '.rig/' "$REPO/.gitignore" 2>/dev/null; then
+  TRACKING_ARGS=(--tracking local)
+else
+  TRACKING_ARGS=(--tracking repo)
+fi
+UPGRADE_LOG=$(git -C "$REPO" rev-parse --git-path rig-upgrade.log)
+[[ "$UPGRADE_LOG" == /* ]] || UPGRADE_LOG="$REPO/$UPGRADE_LOG"
+# Record install.sh's own exit status: a plain `| tee` would report tee's
+# status and hide an installer failure (this form also works under
+# `set -euo pipefail`).
+INSTALL_STATUS_FILE=$(mktemp)
+{ "$INSTALLER_SRC/install.sh" --project-only --strategy upgrade "${TRACKING_ARGS[@]}" \
+    --target "$REPO" 2>&1 && echo 0 > "$INSTALL_STATUS_FILE" || echo $? > "$INSTALL_STATUS_FILE"; } \
+  | tee -a "$UPGRADE_LOG"
+INSTALL_STATUS=$(cat "$INSTALL_STATUS_FILE")
+rm -f "$INSTALL_STATUS_FILE"
+if [[ "$INSTALL_STATUS" -ne 0 ]]; then
+  touch "$UPGRADE_LOG.failed"
+  echo "❌ install.sh exited $INSTALL_STATUS — stop here. Output is in $UPGRADE_LOG."
+else
+  rm -f "$UPGRADE_LOG.failed"
+fi
 ```
+
+If the block printed `❌ install.sh exited ...`, stop: fix the reported
+problem and re-run this step. Do not continue to Step 5; Step 7 refuses to
+stage without a successful run's log.
 
 The installer will:
 - Auto-update Rig-owned files that haven't been locally modified (manifest hash matches)
@@ -182,23 +264,182 @@ git diff --stat   # count the modified files
 | 1–3 files | Direct `chore(rig):` commit to the configured base branch acceptable if `housekeeping: direct-push` |
 | 4+ files | **Branch + PR** — regardless of `housekeeping:` setting |
 
-For any upgrade that modifies 4 or more files (hooks, commands, process files, VERSION):
+What can be committed depends on the tracking mode (install.sh's rules):
 
-After user approval, prepare the current worktree's one-use approval:
+| Mode | How install.sh identifies it | What to stage |
+|---|---|---|
+| stealth | `.rigpath` points under `$HOME/.rig/projects/` | Nothing — every Rig artifact is in `.git/info/exclude` or outside the repo; skip this step |
+| external | `.rigpath` points anywhere else | Only the project files the installer wrote (`.rig/` is outside the repo) |
+| local | no `.rigpath`; `.rig/` in the git exclude file or `.gitignore` | Same as external — never stage `.rig/` |
+| repo | no `.rigpath`; `.rig/` is git-tracked | The files the installer wrote, plus its `.rig/` bookkeeping (`VERSION`, manifest, `install-targets.json`, `contextual-tips.sh`) |
+
+For any upgrade that modifies 4 or more files (hooks, commands, process files, VERSION),
+run these steps in order from the project root. Replace `X.Y.Z` with the new version.
+
+1. Detect the tracking mode **before** creating a branch. Stealth installs have
+   nothing to commit — stop here for them:
+
+```bash
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+GIT_EXCLUDE=$(git rev-parse --git-path info/exclude)
+[[ "$GIT_EXCLUDE" == /* ]] || GIT_EXCLUDE="$ROOT/$GIT_EXCLUDE"
+TRACKING="repo"
+if [[ -f .rigpath ]]; then
+  IFS= read -r RIGPATH_DIR < .rigpath || true
+  RIGPATH_DIR="${RIGPATH_DIR%$'\r'}"
+  TRACKING="external"
+  [[ "$RIGPATH_DIR" == "$HOME/.rig/projects/"* ]] && TRACKING="stealth"
+elif [[ -z "$(git ls-files -- .rig/)" ]] && \
+     { grep -qF '.rig/' "$GIT_EXCLUDE" 2>/dev/null || grep -qF '.rig/' .gitignore 2>/dev/null; }; then
+  TRACKING="local"
+fi
+echo "Tracking mode: $TRACKING"
+```
+
+   If it prints `stealth`, skip the rest of this step.
+
+2. Create the branch:
+
+```bash
+git checkout -b chore/rig-upgrade-vX.Y.Z
+```
+
+3. Stage exactly the files the Step 4 installer run reported as written —
+   never whole directories (that sweeps in unrelated user edits to commands or
+   `settings.json`) and never `git add -f` (that stages ignored files such as
+   `.claude/settings.local.json` and turns `.claude/worktrees/*` checkouts into
+   embedded repositories). Ignored or unchanged paths are skipped. The block
+   refuses to stage if the Step 4 log is missing or older than the installed
+   `.rig/VERSION` (a stale log from an earlier run). Installer lines are
+   colourised (`ESC[0;32m✓ESC[0m Created bin/rig`) and come in two styles —
+   `Updated: <path>` / `Created: <path>`, and `Created <path>` /
+   `Updated <path>` / `Overwrote <path>` without a colon — so colours are
+   stripped first and a candidate is kept only if it names a real file (or a
+   tracked file the run removed). Anything else changed under Rig-managed
+   paths is listed for review, never staged automatically:
+
+```bash
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+GIT_EXCLUDE=$(git rev-parse --git-path info/exclude)
+[[ "$GIT_EXCLUDE" == /* ]] || GIT_EXCLUDE="$ROOT/$GIT_EXCLUDE"
+TRACKING="repo"
+RIG_DIR="$ROOT/.rig"
+if [[ -f .rigpath ]]; then
+  TRACKING="external"
+  IFS= read -r RIG_DIR < .rigpath || true
+  RIG_DIR="${RIG_DIR%$'\r'}"
+elif [[ -z "$(git ls-files -- .rig/)" ]] && \
+     { grep -qF '.rig/' "$GIT_EXCLUDE" 2>/dev/null || grep -qF '.rig/' .gitignore 2>/dev/null; }; then
+  TRACKING="local"
+fi
+UPGRADE_LOG=$(git rev-parse --git-path rig-upgrade.log)
+[[ "$UPGRADE_LOG" == /* ]] || UPGRADE_LOG="$ROOT/$UPGRADE_LOG"
+if [[ ! -f "$UPGRADE_LOG" ]]; then
+  echo "❌ No installer log at $UPGRADE_LOG — re-run Step 4 before staging."
+elif [[ -f "$UPGRADE_LOG.failed" ]]; then
+  echo "❌ The last Step 4 installer run failed — fix it and re-run Step 4 before staging."
+elif [[ -f "$RIG_DIR/VERSION" && "$UPGRADE_LOG" -ot "$RIG_DIR/VERSION" ]]; then
+  echo "❌ $UPGRADE_LOG is older than $RIG_DIR/VERSION (stale log) — re-run Step 4 before staging."
+else
+  ESC=$(printf '\033')
+  WRITTEN=()
+  while IFS= read -r line; do
+    msg="${line#*✓ }"
+    path=""
+    case "$msg" in
+      "Merged .claude/settings.json"*|"Updated moved-project paths in .claude/settings.json"*)
+        path=".claude/settings.json" ;;
+      "Updated (overwritten): "*) path="${msg#Updated (overwritten): }" ;;
+      "Updated: "*)               path="${msg#Updated: }" ;;
+      "Converged: "*)             path="${msg#Converged: }" ;;
+      "Created: "*)               path="${msg#Created: }" ;;
+      "Removed obsolete legacy hook: "*) path="${msg#Removed obsolete legacy hook: }" ;;
+      "Created "*)                path="${msg#Created }" ;;
+      "Updated "*)                path="${msg#Updated }" ;;
+      "Overwrote "*)              path="${msg#Overwrote }" ;;
+    esac
+    # Project-layer copy helpers print paths relative to the external Rig
+    # dir in stealth/external mode ("Created processes/X.md"); never let such a
+    # line stage a same-named project file.
+    if [[ -n "$path" && "$RIG_DIR" != "$ROOT/.rig" && "$path" != .rig/* && -e "$RIG_DIR/$path" ]]; then
+      path=""
+    fi
+    [[ -n "$path" ]] && WRITTEN+=("$path")
+  done < <(sed "s/${ESC}\[[0-9;]*m//g" "$UPGRADE_LOG")
+  if [[ "$TRACKING" == "repo" ]]; then
+    WRITTEN+=(.rig/VERSION .rig/memory/.rig-manifest .rig/memory/.rig-manifest.json \
+      .rig/install-targets.json .rig/contextual-tips.sh)
+  fi
+  BOOKKEEPING=" .rig/VERSION .rig/memory/.rig-manifest .rig/memory/.rig-manifest.json .rig/install-targets.json .rig/contextual-tips.sh "
+  STAGE=()
+  REAL_CHANGES=0
+  for p in ${WRITTEN[@]+"${WRITTEN[@]}"}; do
+    case "$p" in
+      .git/*) continue ;;
+      .rig/*) [[ "$TRACKING" == "repo" ]] || continue ;;
+    esac
+    if [[ ! -e "$p" && -z "$(git ls-files -- "$p")" ]]; then continue; fi
+    if git check-ignore -q -- "$p"; then continue; fi
+    if [[ -z "$(git status --porcelain -- "$p")" ]]; then continue; fi
+    STAGE+=("$p")
+    [[ "$BOOKKEEPING" == *" $p "* ]] || REAL_CHANGES=$((REAL_CHANGES + 1))
+  done
+  if [[ ${#STAGE[@]} -gt 0 && "$REAL_CHANGES" -eq 0 ]]; then
+    # Only installer bookkeeping would be committed: the log no longer names
+    # the files this upgrade changed (e.g. it was rotated), so staging now
+    # would commit VERSION/manifest without the content they describe.
+    echo "❌ Only .rig bookkeeping files would be staged; the installer log names none of the upgraded files."
+    echo "   Nothing staged. Review 'git status', then stage the upgrade's files explicitly."
+    STAGE=()
+  fi
+  if [[ ${#STAGE[@]} -gt 0 ]]; then
+    git add -A -- "${STAGE[@]}"
+  fi
+  git diff --cached --stat
+  MANAGED=(.claude .husky .agents .codex .github .gitleaks.toml .mcp.json \
+    CLAUDE.md PROJECT_BRIEF.md docs/INDEX.md docs/features 'bin/rig*')
+  if [[ "$TRACKING" == "repo" ]]; then MANAGED+=(.rig); fi
+  LEFTOVER=$(git status --porcelain --untracked-files=all -- "${MANAGED[@]}" \
+    ':(exclude).claude/settings.local.json' ':(exclude).claude/worktrees' \
+    | awk 'substr($0, 2, 1) != " "' || true)
+  if [[ -n "$LEFTOVER" ]]; then
+    echo "Not staged — other changes under Rig-managed paths (review each; stage only what you intend):"
+    printf '%s\n' "$LEFTOVER"
+  fi
+fi
+```
+
+   If the block printed `❌`, staging failed, or nothing is staged, stop — do
+   not create a commit approval. If it listed unstaged changes, decide which
+   (if any) belong in the upgrade commit and stage only those. Then review the
+   staged list and get the user's approval.
+
+4. Only after staging succeeded and the user approved, create the current
+   worktree's one-use approval and commit. The Step 4 log is removed once the
+   commit lands so it can never be reused for a later upgrade:
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel)
 RIG_DIR="$ROOT/.rig"
-if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; fi
+if [ -f "$ROOT/.rigpath" ]; then IFS= read -r RIG_DIR < "$ROOT/.rigpath"; RIG_DIR="${RIG_DIR%$'\r'}"; fi
+UPGRADE_LOG=$(git rev-parse --git-path rig-upgrade.log)
+[[ "$UPGRADE_LOG" == /* ]] || UPGRADE_LOG="$ROOT/$UPGRADE_LOG"
 touch "$RIG_DIR/memory/.rig-commit-ok"
+RIG_COMMIT_POLICY=guarded git commit -m "chore(rig): upgrade to The Rig vX.Y.Z [#N]" \
+  && rm -f "$UPGRADE_LOG" "$UPGRADE_LOG.failed"
 ```
 
+5. Push the branch, then open the PR against the configured base branch:
+
 ```bash
-# Replace X.Y.Z with the new version
-git checkout -b chore/rig-upgrade-vX.Y.Z
-git add -f .claude/ .agents/skills/ .codex/ .husky/ .rig/processes/ .rig/rules/ .rig/VERSION
-RIG_COMMIT_POLICY=guarded git commit -m "chore(rig): upgrade to The Rig vX.Y.Z [#N]"
-gh pr create --title "chore(rig): upgrade to vX.Y.Z" \
+ROOT=$(git rev-parse --show-toplevel)
+BASE_BRANCH=$(grep "^base-branch:" "$ROOT/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]' || true)
+BASE_BRANCH="${BASE_BRANCH:-main}"
+git push -u origin chore/rig-upgrade-vX.Y.Z
+gh pr create --base "$BASE_BRANCH" --head chore/rig-upgrade-vX.Y.Z \
+  --title "chore(rig): upgrade to vX.Y.Z" \
   --body "Upgrades The Rig from vOLD to vNEW. See CHANGELOG for details."
 ```
 
@@ -230,7 +471,7 @@ acquiring the index lock and works correctly inside hooks on all Git versions.
 
 | Symptom | Fix |
 |---|---|
-| `~/tools/the-rig` is on a feature branch | `cd ~/tools/the-rig && git checkout main && git pull` |
+| `~/tools/the-rig` is on a feature branch | `git -C ~/tools/the-rig checkout main && git -C ~/tools/the-rig pull --ff-only origin main` |
 | `settings.json` has duplicate hook entries | Remove duplicates manually; each event should have exactly one entry |
 | `.rig/VERSION` still shows old version after installer | Update manually: `echo "X.Y.Z" > .rig/VERSION` then fix manifest hash |
 | A Rig-owned file wasn't updated (installer said "Customized") | Copy the template manually: `cp ~/tools/the-rig/templates/project/<path> <dest>` |
@@ -665,8 +906,10 @@ string on an ordinary install — that is expected steady state, not a defect.
 ### Repair guidance by finding
 
 **Stealth `tracked_leak` / `untracked_leak` (from `stealth_status` or a
-direct `installer/audit-stealth.py` run):** run
-`python3 installer/repair-stealth.py <target>`. It appends any missing
+direct `installer/audit-stealth.py` run):** run the repair tool from the
+installer checkout (it never ships into the project itself):
+`python3 "$INSTALLER_SRC/installer/repair-stealth.py" <target>`, where
+`INSTALLER_SRC="${RIG_INSTALLER_SRC:-$HOME/tools/the-rig}"`. It appends any missing
 pattern to `.git/info/exclude` for artifacts classified as a leak — additive
 only, never rewrites or removes an existing exclude line, never touches the
 git index. A `tracked_leak` (a Rig-generated file that was actually
