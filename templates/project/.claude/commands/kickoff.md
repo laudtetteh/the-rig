@@ -248,8 +248,10 @@ elif ! (cd "$REPO" && gh repo view --json nameWithOwner -q .nameWithOwner >/dev/
 fi
 type_feat_label=unknown
 if (( github_ready == 1 )); then
-  if (cd "$REPO" && gh label list --limit 200 --json name -q '.[].name' 2>/dev/null) \
-    | /usr/bin/grep -qx 'type: feat'; then
+  # Capture the list first: piping gh into an early-exiting grep can SIGPIPE gh
+  # and make a present label look missing under pipefail.
+  label_names=$(cd "$REPO" && gh label list --limit 1000 --json name -q '.[].name' 2>/dev/null || true)
+  if grep -qx 'type: feat' <<< "$label_names"; then
     type_feat_label=present
   else
     type_feat_label=missing
@@ -362,10 +364,23 @@ agent never creates Linear tickets, Trello cards, or GUS work items.
 **`github-agent`:** The user's **go** in Step 4 authorizes these issues and any
 missing `type: feat` label. If the Step 4 preflight printed
 `type_feat_label=missing`, create the label first, with the same name, color, and
-description that `.rig/processes/SHIP_WORKFLOW.md` uses:
+description that `.rig/processes/SHIP_WORKFLOW.md` uses. A label that already
+exists counts as success (the preflight list can miss it in very large label
+sets):
 
 ```bash
-gh label create "type: feat" --color "#0075ca" --description "New feature"
+# kickoff-type-label-start
+type_feat_ready=1
+if ! label_out=$(gh label create "type: feat" --color "#0075ca" --description "New feature" 2>&1); then
+  if grep -qi 'already exists' <<< "$label_out"; then
+    printf 'type: feat label already exists\n'
+  else
+    printf '%s\n' "$label_out"
+    type_feat_ready=0
+  fi
+fi
+printf 'type_feat_ready=%s\n' "$type_feat_ready"
+# kickoff-type-label-end
 ```
 
 Then, for each task file in dependency order, open a GitHub issue:
@@ -377,8 +392,8 @@ Then, for each task file in dependency order, open a GitHub issue:
   adding `--label "[existing area label]"` only when one fits
 - Set the task file's `**GitHub issue**:` field to the issue number, e.g. `#42`
 
-If `gh label create` or any `gh issue create` fails, show the exact error and stop
-creating issues. Set `**GitHub issue**: TBD` in every task file that does not yet
+If the label step prints `type_feat_ready=0` or any `gh issue create` fails, show
+the exact error and stop creating issues. Set `**GitHub issue**: TBD` in every task file that does not yet
 have a number. Tell the user which issue numbers were already created (with their
 task slugs) and which task files still need an issue. Then continue to Step 5d and
 Step 6 and report the same split there. Do not report issues as opened until each
@@ -435,8 +450,14 @@ After scaffolding is complete:
 > - [N] tasks are in `.rig/tasks/backlog/` — ordered by dependency
 > - [Tracker line for the tracker mode chosen in Step 4: `github-agent` → "GitHub issues #[X]–#[Y] are open and labelled", plus the task files still at `TBD` if creation failed partway; `github-user` → "GitHub issues #[X]–#[Y] are recorded in the task files", plus any still at `TBD`; `github-deferred` → "GitHub issues were not opened ([preflight reason]); every task file is at `TBD` and needs an issue before work starts"; `linear` / `trello` / `gus` → "[Tracker] items [references] are recorded in the task files", plus any still at `TBD`; `none` → "No tracker items — `issue-tracking: none` keeps the backlog in local task files"]
 >
-> Suggested first move: run `/run [first-task-slug]` — that's the foundation
-> everything else builds on.
+> [Next-move line. If no task file is at `TBD`: "Suggested first move: run
+> `/run [first-task-slug]` — that's the foundation everything else builds on."
+> If any task file is at `TBD`: "Before `/run`, every task file at `TBD` needs a
+> tracker reference, because `.rig/processes/NEW_TASK_WORKFLOW.md` stops on `TBD`.
+> First fix the cause ([preflight reason or `gh` error], when there is one). Then,
+> for each `TBD` task file, create the issue or ticket (or run `/task` for it) and
+> record its reference in place of `TBD`, e.g. `**GitHub issue**: #42`. After
+> that, run `/run [first-task-slug]`."]
 >
 > This command has no further use. You can delete `.claude/commands/kickoff.md` — it won't be needed again.
 >

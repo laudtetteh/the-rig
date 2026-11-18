@@ -154,7 +154,9 @@ run_github_preflight() {
 }
 
 # A stand-in gh CLI: FAKE_GH_AUTH=fail fails auth, FAKE_GH_REPO=fail fails repo
-# view, FAKE_GH_LABELS lists existing label names (newline-separated).
+# view, FAKE_GH_LABELS lists existing label names (newline-separated),
+# FAKE_GH_EXTRA_LABELS appends that many filler labels after them, and
+# FAKE_GH_LABEL_CREATE=exists|fail makes label creation fail that way.
 install_fake_gh() {
   local bin="$BATS_TEST_TMPDIR/fake-bin"
   mkdir -p "$bin"
@@ -169,8 +171,24 @@ if [[ "$1" == "repo" ]]; then
   printf 'owner/project\n'
   exit 0
 fi
+if [[ "$1" == "label" && "$2" == "create" ]]; then
+  if [[ "${FAKE_GH_LABEL_CREATE:-ok}" == "exists" ]]; then
+    printf 'label with name "type: feat" already exists; use `--force` to update\n' >&2
+    exit 1
+  fi
+  if [[ "${FAKE_GH_LABEL_CREATE:-ok}" == "fail" ]]; then
+    printf 'HTTP 403: Resource not accessible by integration\n' >&2
+    exit 1
+  fi
+  exit 0
+fi
 if [[ "$1" == "label" ]]; then
   printf '%s\n' "${FAKE_GH_LABELS:-}"
+  i=0
+  while (( i < ${FAKE_GH_EXTRA_LABELS:-0} )); do
+    printf 'filler-label-%s\n' "$i"
+    i=$((i + 1))
+  done
   exit 0
 fi
 exit 1
@@ -178,6 +196,12 @@ GH
   chmod +x "$bin/gh"
   PATH="$bin:$PATH"
   export PATH
+}
+
+run_type_label_step() {
+  local step
+  step="$(sed -n '/# kickoff-type-label-start/,/# kickoff-type-label-end/p' "$KICKOFF")"
+  run bash -o pipefail -c "cd \"\$1\" && $step" _ "$TEST_REPO"
 }
 
 kickoff_section() {
@@ -291,4 +315,47 @@ kickoff_section() {
   [ "$status" -eq 0 ]
   run /usr/bin/grep -q 'N/A (issue-tracking: none)' "$skill"
   [ "$status" -eq 0 ]
+}
+
+@test "kickoff github preflight: a present label listed first survives pipefail in a large label set" {
+  git -C "$TEST_REPO" remote add origin https://github.com/owner/project.git
+  install_fake_gh
+  FAKE_GH_LABELS='type: feat' FAKE_GH_EXTRA_LABELS=5000 run_github_preflight
+  [ "$status" -eq 0 ]
+  [ "$output" = "github_ready=1 type_feat_label=present" ]
+}
+
+@test "kickoff type label step: an already-existing label counts as success" {
+  install_fake_gh
+  FAKE_GH_LABEL_CREATE=exists run_type_label_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"type_feat_ready=1"* ]] || return 1
+  FAKE_GH_LABEL_CREATE=ok run_type_label_step
+  [ "$status" -eq 0 ]
+  [ "$output" = "type_feat_ready=1" ]
+}
+
+@test "kickoff type label step: other label creation failures are surfaced" {
+  install_fake_gh
+  FAKE_GH_LABEL_CREATE=fail run_type_label_step
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"HTTP 403"* ]] || return 1
+  [[ "$output" == *"type_feat_ready=0" ]] || return 1
+}
+
+@test "kickoff hand-off requires tracker references before /run when any task is TBD" {
+  local handoff
+  handoff="$(kickoff_section '^### Step 6' '^## Notes')"
+  [[ "$handoff" == *'If any task file is at `TBD`'* ]] || return 1
+  [[ "$handoff" == *'Before `/run`, every task file at `TBD` needs a'* ]] || return 1
+  [[ "$handoff" == *'NEW_TASK_WORKFLOW.md` stops on `TBD`'* ]] || return 1
+  [[ "$handoff" == *'run `/task` for it'* ]] || return 1
+  [[ "$handoff" == *'If no task file is at `TBD`'* ]] || return 1
+}
+
+@test "kickoff tracker blocks use portable grep" {
+  local blocks
+  blocks="$(sed -n '/# kickoff-tracker-probe-start/,/# kickoff-tracker-probe-end/p;/# kickoff-github-preflight-start/,/# kickoff-github-preflight-end/p;/# kickoff-type-label-start/,/# kickoff-type-label-end/p' "$KICKOFF")"
+  [[ "$blocks" == *grep* ]] || return 1
+  [[ "$blocks" != */usr/bin/grep* ]] || return 1
 }
