@@ -31,6 +31,26 @@ open(os.environ["TASK_F"],"w").write("\n".join(lines)+"\n")'
   printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["schema_version"]==1 and d["result"]["tasks"][0]["canonical_ref"]=="#10"; assert d["result"]["parity"][0]["class"]=="evidence_unavailable"; assert "tracker_evidence_unavailable" in d["warnings"]'
 }
 
+@test "placeholder issue values keep cards distinct and out of tracker parity" {
+  task no-tracker-a 'N/A (issue-tracking: none)' P1 src/a.py
+  task no-tracker-b 'N/A (issue-tracking: none)' P1 src/b.py
+  task pending-a 'TBD' P1 src/c.py
+  task pending-b 'TBD' P1 src/d.py
+  task local-explanation 'none — local card' P1 src/e.py
+  task real-github '#10' P1 src/f.py
+  task real-custom 'NONE-123' P1 src/g.py
+  task fallback 'TBD' P1 src/h.py
+  TASK_F="$CASE_DIR/.rig/tasks/backlog/fallback.md" python3 -c 'import os,pathlib; p=pathlib.Path(os.environ["TASK_F"]); p.write_text(p.read_text().replace("**GitHub issue**: TBD", "**GitHub issue**: TBD\n**Issue**: #12"))'
+
+  run "$CASE_DIR/bin/rig" sprint audit --all --json
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; r=json.load(sys.stdin)["result"]; refs={t["slug"]:t["canonical_ref"] for t in r["tasks"]}; assert not r["duplicates"]; assert all(refs[s] is None for s in ("no-tracker-a","no-tracker-b","pending-a","pending-b","local-explanation")); assert refs["real-github"]=="#10" and refs["real-custom"]=="NONE-123" and refs["fallback"]=="#12"; assert {p["canonical_ref"] for p in r["parity"]}=={"#10","NONE-123","#12"}'
+
+  run "$CASE_DIR/bin/rig" sprint plan --all --mode plan-only --json
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; p=json.load(sys.stdin)["result"]["plan"]; assert {s for wave in p["waves"] for s in wave}=={"no-tracker-a","no-tracker-b","pending-a","pending-b","local-explanation","real-github","real-custom","fallback"}'
+}
+
 @test "plan deterministically separates prefix conflicts and non-execution lanes" {
   task feat-a '#10' P1 src
   task feat-b '#11' P2 src/b.py
