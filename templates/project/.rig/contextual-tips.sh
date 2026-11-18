@@ -41,11 +41,23 @@ evidence_gaps_logged() {
 }
 suppress_rig_gaps() { ! tip_command_available rig-gaps || tip_command_already_used rig-gaps; }
 
+# Prints the single base-branch: value CLAUDE.md configures, or nothing when
+# it is absent, still the template placeholder, or set more than once.
+tip_configured_base_branch() {
+  local values
+  values=$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$REPO/CLAUDE.md" 2>/dev/null || true)
+  [[ -n "$values" && "$values" != *$'\n'* && "$values" != "[BASE_BRANCH]" ]] || return 0
+  printf '%s' "$values"
+}
+
 evidence_reviewable_branch() {
   local branch base ahead
   branch=$(git -C "$REPO" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
-  [[ -n "$branch" && "$branch" != "main" && "$branch" != "master" ]] || return 1
-  if git -C "$REPO" show-ref --verify --quiet refs/heads/main; then
+  base=$(tip_configured_base_branch)
+  [[ -n "$branch" && "$branch" != "main" && "$branch" != "master" && "$branch" != "$base" ]] || return 1
+  if [[ -n "$base" ]]; then
+    git -C "$REPO" show-ref --verify --quiet "refs/heads/$base" || return 1
+  elif git -C "$REPO" show-ref --verify --quiet refs/heads/main; then
     base=main
   elif git -C "$REPO" show-ref --verify --quiet refs/heads/master; then
     base=master

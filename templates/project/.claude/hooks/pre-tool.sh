@@ -458,7 +458,11 @@ print(os.path.abspath(cwd or sys.argv[1]) + "\t")
 
       CURRENT_BRANCH=$(git -C "$COMMIT_REPO" branch --show-current 2>/dev/null) || \
         fail_closed "commit branch could not be verified."
-      if [[ "$CURRENT_BRANCH" == main || "$CURRENT_BRANCH" == master ]]; then
+      # Protect main, master, and every base-branch: value CLAUDE.md
+      # configures (issue #659); a configured `develop` base is a base branch.
+      CONFIGURED_BASES=$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$COMMIT_REPO/CLAUDE.md" 2>/dev/null || true)
+      if [[ "$CURRENT_BRANCH" == main || "$CURRENT_BRANCH" == master ]] ||
+         { [[ -n "$CURRENT_BRANCH" ]] && printf '%s\n' "$CONFIGURED_BASES" | grep -Fxq -- "$CURRENT_BRANCH"; }; then
         HOUSEKEEPING=$(sed -n 's/^housekeeping:[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$COMMIT_REPO/CLAUDE.md" 2>/dev/null | head -1)
         [[ "$HOUSEKEEPING" == direct-push ]] || \
           fail_closed "Commit to '$CURRENT_BRANCH' blocked by The Rig; create a feature branch."

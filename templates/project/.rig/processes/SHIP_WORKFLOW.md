@@ -177,7 +177,8 @@ git branch --show-current
 git status --short
 ```
 
-**If you are on `main` or `master`:** do not commit. You need a feature branch —
+**If you are on the configured base branch (`base-branch:` in `CLAUDE.md`, read
+in Step 3a), `main`, or `master`:** do not commit. You need a feature branch —
 see Step 3c below for how to create one safely.
 
 **If there are untracked or modified files outside the task scope** (shown by `git status`):

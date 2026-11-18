@@ -97,7 +97,8 @@ Do not summarise these back to me unless asked.
 1. **Never delete files without explicit permission.** Move to `_archive/` instead.
 2. **Never run destructive DB commands** (`DROP`, `TRUNCATE`, `DELETE` without `WHERE`)
    without showing the exact statement and waiting for confirmation.
-3. **Never commit to `main` or `master` directly.** Always use a branch.
+3. **Never commit to the project's base branch directly** (`base-branch:` in the
+   project `CLAUDE.md`, plus `main` and `master`). Always use a branch.
 4. **Never expose secrets.** If a key, token, or password appears in context,
    redact it immediately, flag it, and prompt the user to rotate it.
 5. **Write complete code.** No placeholders, no stubs, no `// TODO: implement`,
@@ -214,7 +215,8 @@ Types: `feat` | `fix` | `refactor` | `test` | `docs` | `chore` | `style` | `perf
 
 Max subject line: 72 characters.
 Reference the GitHub issue number (`[#N]`) when one exists and `issue-tracking: github` is set.
-Never commit directly to `main` or `master`.
+Never commit directly to the project's base branch (`base-branch:` in the project
+`CLAUDE.md`), `main`, or `master`.
 
 ---
 

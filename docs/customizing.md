@@ -196,7 +196,7 @@ Example — `/review-pr`:
 Runs the code-review skill against the current diff.
 
 ## What this does
-1. Gets the diff for the current branch vs main
+1. Gets the diff for the current branch vs the configured base branch (`base-branch:` in `CLAUDE.md`)
 2. Invokes the code-review skill
 3. Reports blockers first, then warnings, then suggestions
 

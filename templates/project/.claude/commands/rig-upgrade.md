@@ -520,9 +520,27 @@ if [[ "$TRACKING" == "stealth" || "$TRACKING" == "external" ]]; then
 fi
 
 TEMPLATES="$INSTALLER_SRC/templates/project"
-BASE_BRANCH=$(grep "^base-branch:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]' || true)
+# The base branch every workflow file is rendered with. Resolve it with the
+# installer's own precedence (exactly one CLAUDE.md `base-branch:` line, then
+# origin/HEAD, then main) and pass it explicitly to every install.sh call
+# below, so an upgrade can never substitute a different branch (issue #659).
+BASE_BRANCH_VALUES=$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$REPO/CLAUDE.md" 2>/dev/null || true)
+BASE_BRANCH_COUNT=$(printf '%s\n' "$BASE_BRANCH_VALUES" | grep -c . || true)
+if [[ "$BASE_BRANCH_COUNT" -gt 1 ]]; then
+  echo "❌ $REPO/CLAUDE.md sets base-branch: more than once:"
+  grep -n '^base-branch:' "$REPO/CLAUDE.md"
+fi
+BASE_BRANCH="$BASE_BRANCH_VALUES"
+if [[ -z "$BASE_BRANCH" || "$BASE_BRANCH" == "[BASE_BRANCH]" ]]; then
+  BASE_BRANCH=$(git -C "$REPO" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's|^refs/remotes/origin/||' || true)
+fi
 BASE_BRANCH="${BASE_BRANCH:-main}"
+echo "Base branch: $BASE_BRANCH"
 ```
+
+If this printed `❌ … more than once`, stop here: show the user the listed
+lines and ask them to keep exactly one `base-branch:` line in `CLAUDE.md`
+before re-running `/rig-upgrade`. Never pick one of the values yourself.
 
 ### 1c-bis — Structured plan via `install.sh --strategy agent-plan`
 
@@ -538,7 +556,8 @@ counted in the installer's `UPGRADE_*_COUNT` bookkeeping).
 
 ```bash
 AGENT_PLAN_JSON=$(bash "$INSTALLER_SRC/install.sh" --project-only \
-  --target "$REPO" "${TRACKING_ARGS[@]}" --strategy agent-plan)
+  --target "$REPO" "${TRACKING_ARGS[@]}" --base-branch "$BASE_BRANCH" \
+  --strategy agent-plan)
 AGENT_PLAN_STATUS=$?
 ```
 
@@ -817,7 +836,8 @@ Then continue to **2a-agent** if `UPGRADE_MODE=agent`, or **2a-classic** if
 
 ```bash
 AGENT_UPGRADE_JSON=$(bash "$INSTALLER_SRC/install.sh" --project-only \
-  --target "$REPO" "${TRACKING_ARGS[@]}" --strategy agent-upgrade)
+  --target "$REPO" "${TRACKING_ARGS[@]}" --base-branch "$BASE_BRANCH" \
+  --strategy agent-upgrade)
 AGENT_UPGRADE_STATUS=$?
 echo "$AGENT_UPGRADE_JSON" | python3 -m json.tool  # pretty-print for the user
 ```
@@ -922,6 +942,7 @@ installer_output=$("$INSTALLER_SRC/install.sh" \
   --project-only \
   --strategy upgrade \
   "${TRACKING_ARGS[@]}" \
+  --base-branch "$BASE_BRANCH" \
   --target "$REPO" 2>&1) || INSTALLER_STATUS=$?
 echo "$installer_output"  # show full output to user
 echo "install.sh exit status: $INSTALLER_STATUS"
@@ -1137,7 +1158,7 @@ it up to `.rig-backup/` and installs the template — so the remaining causes ar
   installed").
 
 After fixing the cause, re-run `install.sh --project-only --strategy upgrade
-"${TRACKING_ARGS[@]}" --target "$REPO"` so the installer writes the hook and
+"${TRACKING_ARGS[@]}" --base-branch "$BASE_BRANCH" --target "$REPO"` so the installer writes the hook and
 records its manifest hash.
 
 ---
@@ -1546,7 +1567,8 @@ REPAIR_ARGS=()
 [[ "$FEATURE_DOCS" == true ]] && REPAIR_ARGS+=(--feature-docs)
 [[ "$CONTRIBUTE" == true ]] && REPAIR_ARGS+=(--contribute)
 bash "$INSTALLER_SRC/install.sh" --project-only --target "$REPO" \
-  "${TRACKING_ARGS[@]}" ${REPAIR_ARGS[@]+"${REPAIR_ARGS[@]}"} --strategy agent-upgrade
+  "${TRACKING_ARGS[@]}" --base-branch "$BASE_BRANCH" \
+  ${REPAIR_ARGS[@]+"${REPAIR_ARGS[@]}"} --strategy agent-upgrade
 ```
 
 A mirror reported as `differs` is a customized (manifest-protected) mirror

@@ -190,6 +190,28 @@ HOOK
   [ "$status" -eq 2 ]
 }
 
+@test "hookless fallback protects the configured base branch like main" {
+  git -C "$TEST_PROJECT" checkout -q -B develop
+  printf 'base-branch: develop\n' > "$TEST_PROJECT/CLAUDE.md"
+  touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"
+  payload="$(bash_payload "$TEST_PROJECT" 'RIG_COMMIT_POLICY=guarded git commit -m "feat: blocked [#659]"')"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Commit to 'develop' blocked"* ]] || return 1
+  [ -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+
+  printf 'base-branch: develop\nhousekeeping: direct-push\n' > "$TEST_PROJECT/CLAUDE.md"
+  payload="$(bash_payload "$TEST_PROJECT" 'RIG_COMMIT_POLICY=guarded git commit -m "feat: blocked [#659]"')"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'Direct-to-develop commit blocked'* ]] || return 1
+
+  payload="$(bash_payload "$TEST_PROJECT" 'RIG_COMMIT_POLICY=guarded git commit -m "chore: allowed [#659]"')"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+  [ ! -f "$TEST_PROJECT/.rig/memory/.rig-commit-ok" ]
+}
+
 @test "hookless fallback rejects and clears stale approval" {
   git -C "$TEST_PROJECT" checkout -qb fix/hookless-ttl
   touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"

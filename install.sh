@@ -778,8 +778,9 @@ for arg in "$@"; do
       echo "                                        any file was left for manual review"
       echo "  --target <path>       Set target project directory."
       echo "  --project-name <name> Set project name (used in CLAUDE.md substitution)."
-      echo "  --base-branch <name>  Set base branch name (default: main). Substituted into"
-      echo "                        workflow examples and CLAUDE.md base-branch field."
+      echo "  --base-branch <name>  Set base branch name. Default: the single base-branch:"
+      echo "                        line in the target CLAUDE.md, then origin/HEAD, then main."
+      echo "                        Substituted into workflow examples and CLAUDE.md."
       echo "  --tracking <mode>     Set .rig/ tracking mode without a prompt."
       echo "                        Values: repo | local | external | stealth"
       echo "                        repo     — .rig/ committed with the project (default)"
@@ -1450,6 +1451,51 @@ sed_inplace() {
   else
     sed -i '' "$pattern" "$file"
   fi
+}
+
+# Escape a single-line literal for the replacement side of a sed `s/…/…/`
+# expression that uses `/` as its delimiter: `\`, `/` and `&` are special
+# there. Done with sed rather than ${var//…/…} because bash 5.2's
+# patsub_replacement changes how `&` behaves in parameter substitution.
+sed_escape_replacement() {
+  printf '%s' "$1" | sed 's/[\/&\\]/\\&/g'
+}
+
+# ── Base-branch helpers (issue #659) ─────────────────────────────────────────
+# Succeeds when "$1" is a branch name the installer can substitute safely.
+# Git ref validity alone is not enough: Git accepts `$`, `(`, `;`, quotes and
+# similar characters, and the substituted value lands inside shell snippets
+# that agents run verbatim, so the accepted alphabet is also restricted.
+is_supported_base_branch() {
+  local name="$1"
+  [[ -n "$name" ]] || return 1
+  [[ "$name" =~ ^[A-Za-z0-9._/-]+$ ]] || return 1
+  [[ "$name" != -* && "$name" != HEAD ]] || return 1
+  if command -v git >/dev/null 2>&1; then
+    git check-ref-format "refs/heads/$name" >/dev/null 2>&1
+    return
+  fi
+  [[ "$name" != /* && "$name" != */ && "$name" != *//* && "$name" != *..* &&
+     "$name" != .* && "$name" != */.* && "$name" != *.lock && "$name" != *. ]]
+}
+
+# Prints the base branch configured in a project CLAUDE.md, or nothing when
+# none is configured. Mirrors `rig doctor`: a `base-branch:` line at the start
+# of a line, value up to whitespace or `#`. The unsubstituted template
+# placeholder counts as unconfigured. More than one such line is ambiguous;
+# the function prints the conflicting lines on stderr and returns 2.
+read_configured_base_branch() {
+  local claude_md="$1" values count
+  [[ -f "$claude_md" ]] || return 0
+  values="$(sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$claude_md" 2>/dev/null || true)"
+  [[ -n "$values" ]] || return 0
+  count="$(printf '%s\n' "$values" | grep -c . || true)"
+  if [[ "$count" -gt 1 ]]; then
+    grep -n '^base-branch:' "$claude_md" >&2 || true
+    return 2
+  fi
+  [[ "$values" == "[BASE_BRANCH]" ]] && return 0
+  printf '%s' "$values"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3131,7 +3177,7 @@ _copy_upgrade_existing() {
      grep -q '\[BASE_BRANCH\]' "$src" 2>/dev/null; then
     local rendered_src rendered_hash raw_dest raw_dest_hash
     rendered_src="$(mktemp /tmp/rig-base-branch-rendered-XXXXXX)"
-    sed "s/\\[BASE_BRANCH\\]/${BASE_BRANCH//\//\\/}/g" "$src" > "$rendered_src"
+    sed "s/\\[BASE_BRANCH\\]/$(sed_escape_replacement "$BASE_BRANCH")/g" "$src" > "$rendered_src"
     rendered_hash="$(sha256_file "$rendered_src")"
     rm -f "$rendered_src"
     if [[ -n "$rendered_hash" && "$dest_hash" == "$rendered_hash" ]]; then
@@ -3840,8 +3886,24 @@ if [[ "$DO_PROJECT" == true ]]; then
   # ── BASE BRANCH ──────────────────────────────────────────────────────────────
   # The main integration branch for this repo (main, master, integration, etc.).
   # Substituted into workflow examples in CLAUDE.md, processes, and commands.
+  # Precedence: --base-branch, then the `base-branch:` already configured in
+  # the target's CLAUDE.md (the file every runtime workflow reads, so an
+  # upgrade must never substitute anything else into workflow files -- issue
+  # #659), then origin/HEAD, then main.
+  _CONFIGURED_BASE=""
+  _CONFIGURED_BASE_STATUS=0
+  if [[ -z "$_FLAG_BASE_BRANCH" ]]; then
+    _CONFIGURED_BASE="$(read_configured_base_branch "$TARGET/CLAUDE.md")" || _CONFIGURED_BASE_STATUS=$?
+    if [[ "$_CONFIGURED_BASE_STATUS" -ne 0 ]]; then
+      error "$TARGET/CLAUDE.md sets base-branch: more than once (lines above)."
+      error "Keep exactly one base-branch: line, or pass --base-branch <name>."
+      exit 1
+    fi
+  fi
   if [[ -n "$_FLAG_BASE_BRANCH" ]]; then
     BASE_BRANCH="$_FLAG_BASE_BRANCH"
+  elif [[ -n "$_CONFIGURED_BASE" ]]; then
+    BASE_BRANCH="$_CONFIGURED_BASE"
   else
     # Try to auto-detect from git
     _DETECTED_BASE=""
@@ -3867,13 +3929,18 @@ if [[ "$DO_PROJECT" == true ]]; then
       BASE_BRANCH="$_DEFAULT_BASE"
     fi
   fi
-  # Sanitize: letters, digits, hyphens, underscores, dots only
-  BASE_BRANCH="$(echo "$BASE_BRANCH" | tr -dc 'A-Za-z0-9._-')"
-  if [[ -z "$BASE_BRANCH" ]]; then
-    BASE_BRANCH="main"
-    warn "Invalid base branch name — defaulting to 'main'"
+  # Reject rather than rewrite: silently stripping characters once turned
+  # `release/v2` into `releasev2` in every substituted workflow (issue #659).
+  if ! is_supported_base_branch "$BASE_BRANCH"; then
+    error "Unsupported base branch name: '$BASE_BRANCH'"
+    error "Use a valid Git branch name made of letters, digits, '.', '_', '-' and '/'."
+    exit 1
   fi
-  info "Base branch: $BASE_BRANCH"
+  if [[ -n "$_CONFIGURED_BASE" && -z "$_FLAG_BASE_BRANCH" ]]; then
+    info "Base branch: $BASE_BRANCH (from CLAUDE.md base-branch:)"
+  else
+    info "Base branch: $BASE_BRANCH"
+  fi
   blank
 
   # ── GIT TRACKING FOR .rig/ ────────────────────────────────────────────────
@@ -4480,7 +4547,7 @@ PYEOF
 
   # Substitute [BASE_BRANCH] in CLAUDE.md, commands, and process files.
   # Covers both inline (.claude/commands/) and external (.rig/processes/) paths.
-  _BASE_ESC="${BASE_BRANCH//\//\\/}"
+  _BASE_ESC="$(sed_escape_replacement "$BASE_BRANCH")"
   _subst_base_branch() {
     local f="$1" base="$TARGET" rel target_rig_dir="${_TARGET_RIG_DIR:-}"
     [[ -f "$f" ]] || return 0
