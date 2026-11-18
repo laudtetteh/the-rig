@@ -87,7 +87,7 @@ Two properties of the historical-base fixture class are load-bearing:
   degrades to refuse-always, and these tests pass locally while failing in CI
   for an unrelated reason. The Bats job sets `fetch-depth: 0` for this.
 - **A live/adversarial pilot is still required** for releases in this area.
-  Automatic convergence has a real ceiling: on the 4Culture-shaped blocker it
+  Automatic convergence has a real ceiling: on the downstream-pilot blocker it
   resolves 5 of 16 files, with the other 11 genuine overlapping edits reported
   per hunk. "Some files still refuse" is the designed outcome, not a failure —
   but it means a pilot, not a green suite, is what tells you a rollout will

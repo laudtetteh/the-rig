@@ -886,9 +886,9 @@ both are pre-existing, narrower in reach, and tracked for a fast follow:
 
 ### Fixed
 
-- **pre-commit hook — grep pattern escaping** (`templates/project/.husky/pre-commit`): debug patterns like `console\.log(` used unescaped `(` in grep -E syntax, causing `empty (sub)expression` errors that blocked all commits. All parentheses in BUILTIN_PATTERNS are now escaped (`\(`). Closes gap found during 4Culture upgrade.
-- **pre-commit hook — hook file self-scan** (`templates/project/.husky/pre-commit`): the script scanned its own source file (`.husky/pre-commit`) and flagged `debugger;` and `byebug` in the BUILTIN_PATTERNS definition as debug artifacts. Hooks directory (`.husky/*`, `.claude/hooks/*`) is now excluded from the staged file scan. Closes gap found during 4Culture upgrade. # rig-debug-ok
-- **pre-commit hook — Husky `sh -e` compatibility** (`templates/project/.husky/pre-commit`): Husky runs hooks with `sh -e`. When `grep` finds no debug matches (exit 1), `sh -e` aborted the hook, falsely failing every commit. Added `|| true` after the grep call to prevent the false failure. Closes gap found during 4Culture upgrade.
+- **pre-commit hook — grep pattern escaping** (`templates/project/.husky/pre-commit`): debug patterns like `console\.log(` used unescaped `(` in grep -E syntax, causing `empty (sub)expression` errors that blocked all commits. All parentheses in BUILTIN_PATTERNS are now escaped (`\(`). Closes gap found during a downstream pilot project upgrade.
+- **pre-commit hook — hook file self-scan** (`templates/project/.husky/pre-commit`): the script scanned its own source file (`.husky/pre-commit`) and flagged `debugger;` and `byebug` in the BUILTIN_PATTERNS definition as debug artifacts. Hooks directory (`.husky/*`, `.claude/hooks/*`) is now excluded from the staged file scan. Closes gap found during a downstream pilot project upgrade. # rig-debug-ok
+- **pre-commit hook — Husky `sh -e` compatibility** (`templates/project/.husky/pre-commit`): Husky runs hooks with `sh -e`. When `grep` finds no debug matches (exit 1), `sh -e` aborted the hook, falsely failing every commit. Added `|| true` after the grep call to prevent the false failure. Closes gap found during a downstream pilot project upgrade.
 
 ---
 
@@ -925,7 +925,7 @@ both are pre-existing, narrower in reach, and tracked for a fast follow:
 - **`/doc-feature` slash command** (`templates/project/.claude/commands/doc-feature.md`): research a named feature end-to-end and produce a structured doc in `docs/features/`. Traces entry points, render logic, data model, business rules, and gotchas. Guards against duplicates — redirects to `/refresh-feature-doc` if the slug already exists. Updates `docs/features/README.md` index automatically.
 - **`/refresh-feature-doc` slash command** (`templates/project/.claude/commands/refresh-feature-doc.md`): re-verify every claim in an existing feature doc against current code. Corrects stale paths and line numbers, flags removed fields, and logs any actual bugs found (not just doc inaccuracies) to `ERRORS.md`. Intended to run after any PR that touches a documented feature.
 - **`docs/features/README.md` template** (`templates/project/docs/features/README.md`): scaffolded index for all feature docs. Imported by the project `CLAUDE.md` via `@docs/features/README.md` so every session knows the feature doc system exists and is loaded. Starts with a placeholder row that `/doc-feature` replaces on first use.
-- **Feature documentation section in project `CLAUDE.md`**: adds `@docs/features/README.md` import and a 3-point guide (when to read, when to refresh, when to create) so every session knows the system exists and when to engage it. Originated as a project-level pattern in the 4Culture pilot.
+- **Feature documentation section in project `CLAUDE.md`**: adds `@docs/features/README.md` import and a 3-point guide (when to read, when to refresh, when to create) so every session knows the system exists and when to engage it. Originated as a project-level pattern in a downstream pilot project.
 
 ### Changed
 
@@ -964,7 +964,7 @@ both are pre-existing, narrower in reach, and tracked for a fast follow:
 ### Added
 
 - **Stop hook** (`templates/project/.claude/hooks/stop.sh`, wired as `"Stop"` event in `settings.json`): fires automatically when Claude Code's agent finishes its response (after each turn). Updates the `Last updated:` date in `CONTEXT_SNAPSHOT.md` (preserves the description — only the date changes) so the freshness signal stays accurate even when `/wrap` isn't run. Appends a `<!-- session-end YYYY-MM-DD HH:MM -->` boundary comment to `PROGRESS.md` — the heuristic in `/wrap` and `/post-merge` uses this to determine which entries belong to the current session. Idempotent: skips if a marker is already the last non-blank line. Documented in `docs/how-it-works.md` session lifecycle diagram and hook system section.
-- **Session naming step** (`/wrap` step 8, `/post-merge` step 7): at wrap/post-merge time, agent reads this session's PROGRESS.md entries, derives a pipe-separated `/rename` command in `type short-desc #N | ...` format, and presents it as a ready-to-run command. User runs or tweaks it; agent never fires `/rename` automatically. Heuristic now uses `<!-- session-end -->` markers (from stop.sh) as the primary session boundary signal, with `Last updated:` timestamp as fallback — robust across multi-day and resumed sessions. If session is already named (tracked in CONTEXT_SNAPSHOT `Session name:` field), suggests appending new work rather than replacing. Agent updates `Session name:` in CONTEXT_SNAPSHOT after user confirms. Originated as a RIG_GAPS report from the 4Culture project.
+- **Session naming step** (`/wrap` step 8, `/post-merge` step 7): at wrap/post-merge time, agent reads this session's PROGRESS.md entries, derives a pipe-separated `/rename` command in `type short-desc #N | ...` format, and presents it as a ready-to-run command. User runs or tweaks it; agent never fires `/rename` automatically. Heuristic now uses `<!-- session-end -->` markers (from stop.sh) as the primary session boundary signal, with `Last updated:` timestamp as fallback — robust across multi-day and resumed sessions. If session is already named (tracked in CONTEXT_SNAPSHOT `Session name:` field), suggests appending new work rather than replacing. Agent updates `Session name:` in CONTEXT_SNAPSHOT after user confirms. Originated as a RIG_GAPS report from a downstream pilot project.
 - **`**Session name:**` field in CONTEXT_SNAPSHOT template**: allows /wrap and /post-merge to detect an existing session name and suggest appends on resume, avoiding accidental name replacement.
 
 ### Changed
@@ -1112,7 +1112,7 @@ both are pre-existing, narrower in reach, and tracked for a fast follow:
 
 ## [1.0.0] — 2026-04-10
 
-First stable release. Built and refined across 100+ PRs on the LaudBot project.
+First stable release. Built and refined across 100+ PRs on the original pilot project.
 
 ### Added
 
@@ -1167,5 +1167,5 @@ First stable release. Built and refined across 100+ PRs on the LaudBot project.
 **Documentation**
 - `docs/how-it-works.md` — architecture deep-dive with diagrams
 - `docs/decisions.md` — 10 key design decisions with rationale and tradeoffs
-- `docs/lessons-learned.md` — 10 documented pitfalls from the LaudBot pilot
+- `docs/lessons-learned.md` — 10 documented pitfalls from the original pilot project
 - `docs/customizing.md` — adapting The Rig for any stack

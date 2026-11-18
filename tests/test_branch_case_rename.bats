@@ -25,14 +25,14 @@ load_rename_helper() {
 
 @test "documented helper performs a case-only rename" {
   cd "$TEST_REPO"
-  git branch -M bweb-241
+  git branch -M feat-241
   load_rename_helper "$COMMAND_DIR/task.md"
-  rename_branch_case_safe BWEB-241
-  [ "$(git branch --show-current)" = "BWEB-241" ]
+  rename_branch_case_safe FEAT-241
+  [ "$(git branch --show-current)" = "FEAT-241" ]
 
   load_rename_helper "$COMMAND_DIR/ship.md"
-  rename_branch_case_safe bweb-241
-  [ "$(git branch --show-current)" = "bweb-241" ]
+  rename_branch_case_safe feat-241
+  [ "$(git branch --show-current)" = "feat-241" ]
   [ -z "$(git for-each-ref --format='%(refname:short)' 'refs/heads/tmp/*')" ]
 }
 

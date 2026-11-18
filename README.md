@@ -430,11 +430,11 @@ See [docs/INDEX.md](docs/INDEX.md) for the canonical documentation index, includ
 
 ## Origin
 
-The Rig grew organically out of real project work, starting with [LaudBot](https://github.com/laudtetteh/laudbot) — an AI-powered interactive resume where each session revealed a new failure mode and prompted a new layer of scaffolding. Every component exists because something went wrong without it.
+The Rig grew organically out of real project work, starting with an AI-powered interactive resume project where each session revealed a new failure mode and prompted a new layer of scaffolding. Every component exists because something went wrong without it.
 
 It was subsequently piloted on [4Culture.org](https://4culture.org), a shared-repo WordPress platform with multiple contributors. That engagement surface stealth mode, the housekeeping commit convention, and several robustness improvements to the hook system.
 
-The LaudBot repo history — 100+ PRs, clean conventional commits, linked issues, documented architecture — is the original proof of concept.
+That first project's history — 100+ PRs, clean conventional commits, linked issues, documented architecture — is the original proof of concept.
 
 ---
 

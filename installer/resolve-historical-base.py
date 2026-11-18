@@ -9,7 +9,7 @@ Why content-addressed rather than version-keyed
 -----------------------------------------------
 The obvious design is "look the template up at the manifest's recorded
 base_revision". Live analysis of a real blocked downstream install
-(/Users/beaconavenue/code/4Culture, Rig 1.27.1) disproved that premise: all 16
+(a downstream pilot project, Rig 1.27.1) disproved that premise: all 16
 customized Rig-owned files that the v1.29.0 agent-plan refused are tracked only
 in the legacy flat `.rig-manifest`, which records `sha256  path` and nothing
 else. base_revision was absent for 16 of 16, so a version-keyed resolver would
