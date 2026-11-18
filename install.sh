@@ -3977,12 +3977,14 @@ if [[ "$DO_PROJECT" == true ]]; then
   fi
   # CLAUDE.md is user-owned and is never rewritten here, so a differing
   # --base-branch leaves the runtime workflows and commit guards (which read
-  # CLAUDE.md) on another branch until the user updates it. Written to stderr
-  # so agent-plan/agent-upgrade keep a JSON-only stdout and still surface it.
+  # CLAUDE.md) on another branch until the user updates it. warn() is silent
+  # in agent-plan/agent-upgrade, whose stdout and stderr callers parse as one
+  # JSON document; /rig-upgrade passes CLAUDE.md's own value, so it cannot
+  # create this split.
   if [[ -n "$_FLAG_BASE_BRANCH" && -n "$_CONFIGURED_BASE" &&
         "$_CONFIGURED_BASE" != "$BASE_BRANCH" ]]; then
-    echo -e "${YELLOW}!${RESET} CLAUDE.md still says base-branch: $_CONFIGURED_BASE, but workflow files were rendered with --base-branch $BASE_BRANCH." >&2
-    echo -e "${YELLOW}!${RESET} Update base-branch: in $TARGET/CLAUDE.md to $BASE_BRANCH (runtime workflows and commit guards read it), or re-run without --base-branch." >&2
+    warn "CLAUDE.md still says base-branch: $_CONFIGURED_BASE, but workflow files were rendered with --base-branch $BASE_BRANCH."
+    warn "Update base-branch: in $TARGET/CLAUDE.md to $BASE_BRANCH (runtime workflows and commit guards read it), or re-run without --base-branch."
   fi
   blank
 
