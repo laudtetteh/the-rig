@@ -54,11 +54,27 @@ require approval and never auto-stub PROGRESS.md.
 **Causes and fixes:**
 
 ### Hooks not executable
-After a re-clone, hook scripts lose their executable bit.
+After a re-clone or a manual copy, hook scripts can lose their executable bit.
+The Claude Code adapter ships up to nine hook scripts in `.claude/hooks/`:
+`pre-tool.sh`, `post-tool.sh`, `permission-request.sh`, `prompt-submit.sh`,
+`session-start.sh`, `stop.sh`, `pre-compact.sh`, `post-compact.sh`, and
+`subagent-start.sh` (the last only with `--subagents` or a Codex project target).
+Restore the bit on every installed hook rather than a subset:
 
 ```bash
-chmod +x .claude/hooks/pre-tool.sh .claude/hooks/post-tool.sh .claude/hooks/stop.sh
+chmod +x .claude/hooks/*.sh
+# Codex project target:
+chmod +x .codex/hooks/rig-adapter.sh
+# Git hooks — repo, local, or external tracking:
+chmod +x .husky/pre-commit .husky/commit-msg .husky/post-commit .husky/post-merge
+# Git hooks — stealth tracking (installed into .git/hooks/ instead of .husky/):
+chmod +x .git/hooks/pre-commit .git/hooks/commit-msg .git/hooks/post-commit .git/hooks/post-merge
 ```
+
+Re-running the project installer also sets the executable bit on
+`.claude/hooks/`, `.codex/hooks/`, and `.husky/` scripts (an upgrade leaves a
+skipped customized file's mode alone). In stealth tracking, `.git/hooks/` files
+get the bit when the installer writes them.
 
 ### Wrong tool names in hook matchers
 Claude Code tool names are **PascalCase** (`Write`, `Edit`, `Bash`). If
@@ -101,12 +117,19 @@ After resolving merge conflicts, a guarded `git commit` is a new approved
 attempt even while `MERGE_HEAD` exists. A guarded `git merge --no-ff` that
 creates a commit also needs approval before it starts.
 
+The sentinel lives in the effective Rig directory: `.rig/` for repo or local
+tracking, or the directory named in `.rigpath` for stealth or external tracking.
+
 ```bash
+# Resolve the effective Rig directory
+RIG_DIR=.rig
+[ -f .rigpath ] && RIG_DIR=$(head -1 .rigpath)
+
 # Check if it exists
-ls .rig/memory/.rig-commit-ok
+ls "$RIG_DIR/memory/.rig-commit-ok"
 
 # Delete it and start the commit flow again
-rm .rig/memory/.rig-commit-ok
+rm "$RIG_DIR/memory/.rig-commit-ok"
 ```
 
 ### Git hooks are not installed or enabled
@@ -140,8 +163,10 @@ workflow skills generated under `.agents/skills/`. Check the persisted project
 target and run the provider-neutral doctor before inspecting individual files:
 
 ```bash
+RIG_DIR=.rig
+[ -f .rigpath ] && RIG_DIR=$(head -1 .rigpath)
 bin/rig doctor --json
-cat .rig/install-targets.json 2>/dev/null || true
+cat "$RIG_DIR/install-targets.json" 2>/dev/null || true
 test -x .codex/hooks/rig-adapter.sh
 test -d .agents/skills
 ```
@@ -160,7 +185,7 @@ generated `.agents/skills/` file independently.
 
 ---
 
-## 3. PROGRESS.md is too large / session start is slow
+## 4. PROGRESS.md is too large / session start is slow
 
 **Symptom:** Session startup takes a long time. The agent reads PROGRESS.md in full
 instead of stopping at CONTEXT_SNAPSHOT.md.
@@ -177,19 +202,24 @@ agent loads PROGRESS.md as a fallback. Fix: run `/wrap` to refresh the snapshot.
 
 ### PROGRESS.md has too many entries
 `/wrap` caps PROGRESS.md at 20 entries and archives older ones to
-`.rig/memory/PROGRESS_archive.md`. If the cap hasn't been hit yet (under 20 entries)
-but startup is still slow, the issue is likely a missing or stale snapshot — see above.
+`$RIG_DIR/memory/PROGRESS_archive.md`, where `$RIG_DIR` is `.rig/` for repo or
+local tracking and the `.rigpath` target for stealth or external tracking. If the
+cap hasn't been hit yet (under 20 entries) but startup is still slow, the issue
+is likely a missing or stale snapshot — see "CONTEXT_SNAPSHOT.md is missing" and
+"CONTEXT_SNAPSHOT.md is stale" in this section.
 
 To manually trim if `/wrap` hasn't been run recently:
 ```bash
+RIG_DIR=.rig
+[ -f .rigpath ] && RIG_DIR=$(head -1 .rigpath)
 # Count entries
-grep -c "^## " .rig/memory/PROGRESS.md
+grep -c "^## " "$RIG_DIR/memory/PROGRESS.md"
 # Then run /wrap and confirm the trim when prompted
 ```
 
 ---
 
-## 4. /wrap suggests the wrong session name
+## 5. /wrap suggests the wrong session name
 
 **Symptom:** `/wrap` suggests a name containing work from another session or
 omitting work from the current one.
@@ -217,7 +247,7 @@ naming boundaries.
 
 ---
 
-## 5. Finding and reading the session log
+## 6. Finding and reading the session log
 
 The hooks write a project-qualified session log to
 `/tmp/the-rig-session-<project>.log` by default. Set `RIG_SESSION_LOG` to override
@@ -244,11 +274,11 @@ timestamped: `[HH:MM:SS] TOOL: what happened`.
 
 ---
 
-## 6. CONTEXT_SNAPSHOT.md is missing after a re-clone
+## 7. CONTEXT_SNAPSHOT.md is missing after a re-clone
 
 **Symptom:** After cloning the project on a new machine (or for a new teammate),
-`.rig/memory/CONTEXT_SNAPSHOT.md` doesn't exist and the first session loads all
-of PROGRESS.md.
+`CONTEXT_SNAPSHOT.md` doesn't exist in the effective Rig directory's `memory/`
+folder and the first session loads all of PROGRESS.md.
 
 **Why this happens:** `CONTEXT_SNAPSHOT.md` is gitignored — it's machine-local
 session state. It never travels with the repo. This is intentional.
@@ -260,15 +290,15 @@ orient from the snapshot instead of loading all of PROGRESS.md.
 **For the first session only:** the agent loads PROGRESS.md (last 20 entries) as a
 fallback. This is slower but correct. No data is lost.
 
-> **Note:** if you use an external `.rig/` directory (`.rigpath` file in the project
-> root), the entire `.rig/` directory is outside the repo and won't clone with it.
-> You'll need to re-run the installer on the new machine with `--rig-dir` pointing
-> to the same external path, then restore your memory files from a backup or
-> another machine.
+> **Note:** with stealth or external tracking, the Rig directory lives outside the
+> repo and `.rigpath` is excluded through `.git/info/exclude`, so neither clones
+> with the project. Restore the Rig directory from a backup, sync, or another
+> machine, then re-run the installer with the same `--tracking` mode and a
+> `--rig-dir` pointing at the restored directory.
 
 ---
 
-## 7. Hook crashes with "fatal: cannot lock ref" or "index.lock" on Git 2.39+
+## 8. Hook crashes with "fatal: cannot lock ref" or "index.lock" on Git 2.39+
 
 **Symptom:** A commit fails with a message like:
 
@@ -303,18 +333,39 @@ use `git update-index --add` instead of `git add`.
 
 ---
 
-## 8. "Commit to 'main' blocked by The Rig"
+## 9. "Commit to 'main' blocked by The Rig"
 
-**Symptom:** The agent tries to commit and receives:
+**Symptom:** A guarded agent commit (`RIG_COMMIT_POLICY=guarded git commit ...`)
+on `main` or `master` fails with one of these messages from the Rig `commit-msg`
+hook:
 
 ```
-Commit to 'main' blocked by The Rig.
-Committing directly to 'main' is not allowed.
-Create a feature branch first: git checkout -b feat/your-description
+ERROR: Commit to 'main' blocked by The Rig; create a feature branch.
 ```
 
-**Cause:** The main-branch commit guard in `commit-msg` blocks guarded direct commits
-to `main` or `master` unless the project explicitly allows them.
+```
+ERROR: Direct-to-main commit blocked; only chore/docs subjects are allowed.
+```
+
+When no Rig `commit-msg` hook is active, the PreToolUse commit gate prints the
+same text prefixed with `Blocked:` instead of `ERROR:`.
+
+**Cause:** Both guards check guarded commits whose current branch is literally
+`main` or `master`. The `commit-msg` guard skips commits Git creates while
+replaying history (rebase, cherry-pick, revert, or another sequencer run).
+For other guarded commits on those branches:
+
+- Without `housekeeping: direct-push` in the project `CLAUDE.md`, every guarded
+  direct commit is blocked with the first message.
+- With `housekeeping: direct-push`, a guarded direct commit is allowed only when
+  its subject is a `chore` or `docs` Conventional Commit (for example
+  `chore(rig): log session progress`). Any other type, such as `feat` or `fix`,
+  is blocked with the second message.
+
+Ordinary terminal commits without `RIG_COMMIT_POLICY=guarded` are not checked by
+this guard. The `commit-msg` hook consumes the one-use approval before its branch
+check, so an attempt it blocks needs fresh approval before retrying; the
+PreToolUse gate checks the branch before consuming approval.
 
 **Fix for feature branch projects:** this is the correct behavior. Create a branch
 before committing:
@@ -323,16 +374,18 @@ before committing:
 git checkout -b feat/your-change
 ```
 
-**Fix for solo or housekeeping projects** that legitimately commit directly to `main`
-(e.g. post-merge housekeeping commits): add this line to your project's `CLAUDE.md`:
+**Fix for solo or housekeeping projects** that legitimately commit housekeeping
+changes directly to `main` (e.g. post-merge memory updates): make sure your
+project's `CLAUDE.md` contains this line. The scaffolded `CLAUDE.md` ships with
+it, so it is only missing if it was removed or changed:
 
 ```
 housekeeping: direct-push
 ```
 
-This setting tells the guard that direct commits are intentional for this project.
-It is already set in The Rig's own `CLAUDE.md` as it uses direct-push for
-housekeeping commits.
+This setting permits direct guarded commits only for `chore` and `docs`
+subjects. Feature and fix work still needs a branch. To block every guarded
+direct commit, set `housekeeping: pr-required` instead.
 
 ---
 
@@ -417,9 +470,10 @@ only this variable preserves other proxy variables that unrelated tools may need
 
 ## Still stuck?
 
-Check the session log first (see the project-qualified path in section 5). If the log shows the hook
+Check the session log first (see the project-qualified path in section 6). If the log shows the hook
 firing but the wrong behaviour happening, read the relevant hook script directly —
 they're in `.claude/hooks/` and are plain bash.
 
 If something looks like a Rig bug or a missing feature, log it in
-`.rig/memory/RIG_GAPS.md` and submit it via `/rig-gaps`.
+`$RIG_DIR/memory/RIG_GAPS.md` (`.rig/` for repo or local tracking, the `.rigpath`
+target for stealth or external tracking) and submit it via `/rig-gaps`.

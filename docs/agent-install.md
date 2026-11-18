@@ -95,8 +95,8 @@ aborts before the first destination write when a required prerequisite is missin
 ```bash
 cd ~/tools/the-rig
 ./install.sh --global-only --strategy merge
-# Then fill in the personal profile:
-$EDITOR ~/.your-ai-contexts/PROFILE.md
+# Then fill in the "## Personal context" section of the global brain:
+$EDITOR ~/.claude/CLAUDE.md
 ```
 
 The Claude global layer installs `~/.claude/CLAUDE.md`,
@@ -218,23 +218,34 @@ git clone https://github.com/laudtetteh/the-rig.git ~/tools/the-rig
 cd ~/tools/the-rig
 ./install.sh --global-only --strategy merge
 
-# 3. Fill in your personal profile
-$EDITOR ~/.your-ai-contexts/PROFILE.md
+# 3. Fill in the "## Personal context" section of the global brain
+$EDITOR ~/.claude/CLAUDE.md
 
 # 4. Clone your project
 git clone <project-url> ~/code/my-project
 
-# 5. Re-run the project installer (wires hooks, restores local files)
+# 5. Re-run the project installer (wires hooks, restores local files).
+#    Use the tracking mode the project was originally installed with.
 ./install.sh \
   --project-only \
   --target ~/code/my-project \
-  --tracking repo \
+  --tracking <repo|local|external|stealth> \
   --strategy merge
 ```
 
-If the project uses stealth or external tracking, use the same `--tracking` and
-`--rig-dir` values as the original install. The `.rigpath` file in the project root
-records the external `.rig/` path — read it to know where `.rig/` should be.
+Pick `--tracking` to match the original install — a fresh clone cannot tell you:
+
+- **repo** — `.rig/` is committed, so it arrives with the clone.
+- **local** — `.rig/` was excluded from git and does not arrive with the clone;
+  restore it from a backup or re-create it with this command.
+- **stealth** or **external** — the Rig directory lives outside the repo, and
+  `.rigpath` is excluded through `.git/info/exclude`, so neither the directory
+  nor `.rigpath` exists in a fresh clone. Restore the Rig directory from a
+  backup, sync, or the old machine (stealth defaults to
+  `~/.rig/projects/<project-name>/`), then pass `--rig-dir <that path>` (and the
+  original `--project-name` for stealth) so the installer writes a new
+  `.rigpath` pointing at it. External tracking always needs `--rig-dir`. On the
+  old machine, `cat <project>/.rigpath` shows the path that was in use.
 
 ---
 
@@ -306,17 +317,27 @@ exact `install.sh` command for review before running it.
 After any install, verify:
 
 ```bash
-# Hooks are executable
+# Claude hooks are executable
 ls -la /path/to/project/.claude/hooks/
+
+# Git hooks are executable — repo, local, or external tracking
 ls -la /path/to/project/.husky/
+# Git hooks are executable — stealth tracking (no .husky/ is written)
+ls -la /path/to/project/.git/hooks/pre-commit /path/to/project/.git/hooks/commit-msg \
+  /path/to/project/.git/hooks/post-commit /path/to/project/.git/hooks/post-merge \
+  /path/to/project/.git/hooks/filter-commit-message-inplace.sh
+# commit-msg refuses every commit if filter-commit-message-inplace.sh is missing
 
 # settings.json wired
 cat /path/to/project/.claude/settings.json | grep pre-tool
 
-# Focused installer smoke test from the Rig repo
-bash -n install.sh
-bats tests/test_install_a.bats
+# Provider-neutral health check from inside the project
+cd /path/to/project && bin/rig doctor --json
 ```
+
+Skip the Git hook checks when the install used `--skip-git-hooks` or declined
+Git hooks. Claude `/rig-status` or Codex `$rig-status` gives the same check as a
+readable report.
 
 For stealth/external installs, also confirm:
 ```bash

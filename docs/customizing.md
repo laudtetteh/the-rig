@@ -36,10 +36,13 @@ Leave blank (or omit the line) if The Rig repo isn't on this machine.
 `/rig-gaps --submit` creates public GitHub issues in `laudtetteh/the-rig` directly via the `gh` CLI. It requires explicit opt-in:
 
 ```bash
-touch .rig/memory/.rig-contribute-enabled
+RIG_DIR=.rig
+[ -f .rigpath ] && RIG_DIR=$(head -1 .rigpath)
+touch "$RIG_DIR/memory/.rig-contribute-enabled"
 ```
 
-This file is gitignored — opt-in is per-machine, not per-repo. When the sentinel exists, each gap entry is reviewed and confirmed individually before submission. Requires `gh auth login` with public repo access. Strip any project-specific details (client names, internal paths) before submitting — entries become publicly visible.
+`$RIG_DIR` is `.rig/` for repo or local tracking and the directory named in
+`.rigpath` for stealth or external tracking. This file is gitignored — opt-in is per-machine, not per-repo. When the sentinel exists, each gap entry is reviewed and confirmed individually before submission. Requires `gh auth login` with public repo access. Strip any project-specific details (client names, internal paths) before submitting — entries become publicly visible.
 
 For deeper customization of individual components, see the sections below.
 

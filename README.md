@@ -159,6 +159,24 @@ The global `/rig-upgrade` and `$rig-upgrade` bootstrap commands refresh
 `~/tools/the-rig` first, then follow the latest upgrade workflow from that
 checkout. This avoids starting an upgrade from stale project-local command text.
 
+To keep the installer checkout somewhere other than `~/tools/the-rig`, set
+`RIG_INSTALLER_SRC` to that checkout's absolute path before running the upgrade
+command:
+
+```bash
+export RIG_INSTALLER_SRC=/path/to/the-rig
+```
+
+`RIG_INSTALLER_SRC` is read by the `/rig-upgrade` and `$rig-upgrade` commands
+and by `.rig/processes/UPGRADE_WORKFLOW.md`, not by `install.sh` itself. The
+commands use it only when `$RIG_INSTALLER_SRC/install.sh` exists; otherwise they
+fall back to `~/tools/the-rig` (the project-level command also accepts the
+current repo when it is itself a Rig source checkout). `UPGRADE_WORKFLOW.md`
+uses the value as given whenever it is set, without that existence check. The global bootstrap re-exports the resolved
+path so the delegated project workflow uses the same checkout, and it never
+switches that checkout's branch without asking. When you run `install.sh`
+directly, the checkout you invoke is the installer source.
+
 ```bash
 # 1. Pull the latest Rig source
 git -C ~/tools/the-rig checkout main
@@ -296,9 +314,9 @@ Feature tips use only local project signals (such as recorded errors, workflow
 gaps, branch history, sessions, and issue references). A shared deterministic
 catalog selects the highest-priority applicable tip, suppresses commands that
 are unavailable or already used, and records a one-time sentinel under
-`.rig/memory/tips/`. To opt out, create `.rig/memory/.rig-tips-disabled`. To
-reset one tip, remove its `.rig/memory/tips/.tip-<id>-shown` file; remove the
-`tips/` directory to reset all tips.
+`$RIG_DIR/memory/tips/`. To opt out, create `$RIG_DIR/memory/.rig-tips-disabled`.
+To reset one tip, remove its `$RIG_DIR/memory/tips/.tip-<id>-shown` file; remove
+the `tips/` directory to reset all tips.
 
 **At session end**, provider hook adapters bind lifecycle work to the exact native
 session record. `stop.sh` maintains the checkpoint and wrap obligation for the
