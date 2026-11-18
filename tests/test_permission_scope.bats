@@ -16,6 +16,8 @@ setup() {
     "$RIG_DIR/memory" "$RIG_DIR/tasks/active" "$RIG_DIR/docs" "$RIG_DIR/rules" \
     "$RIG_DIR/processes"
   git -C "$TEST_PROJECT" init -q
+  git -C "$TEST_PROJECT" config user.email test@example.com
+  git -C "$TEST_PROJECT" config user.name "Test User"
   git -C "$TEST_PROJECT" commit --allow-empty -m initial -q
 
   local hook
