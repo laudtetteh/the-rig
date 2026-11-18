@@ -13,7 +13,8 @@
 #   Bash       — cat, head, tail, wc (read-only inspection), optionally after
 #                a narrow variable-assignment preamble
 #   Edit/Write — Markdown (.md) files under $RIG_DIR/memory/, tasks/, or docs/
-#                (Rig's own notes); every other path, including scripts and
+#                (Rig's own notes), except PROJECT_CONVENTIONS.md and
+#                hard-linked files; every other path, including scripts and
 #                data files that hooks read or source, prompts as usual
 #                opt-out: touch $RIG_DIR/memory/.rig-strict-permissions
 #
@@ -156,12 +157,21 @@ if tool_name == 'Bash':
 # files. Only .md files qualify: nothing a hook sources or executes is ever
 # covered by this rule.
 # Opt-out: touch \$RIG_DIR/memory/.rig-strict-permissions to disable.
+owner_approved_notes = ('project_conventions.md',)
+
 def rig_note_path(file_path):
     if not isinstance(file_path, str) or not os.path.isabs(file_path):
         return False
     resolved = os.path.realpath(file_path)
     rig_real = os.path.realpath(rig_dir)
-    if not resolved.endswith('.md') or os.path.basename(resolved).startswith('.'):
+    name = os.path.basename(resolved)
+    if not name.lower().endswith('.md') or name.startswith('.'):
+        return False
+    # Owner-approved conventions load into every session; changes must prompt.
+    if name.lower() in owner_approved_notes:
+        return False
+    # A hard link shares content with another path that may not be a note.
+    if os.path.exists(resolved) and os.stat(resolved).st_nlink > 1:
         return False
     return any(
         resolved.startswith(os.path.join(rig_real, area) + os.sep)

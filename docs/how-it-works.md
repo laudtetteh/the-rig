@@ -495,7 +495,8 @@ Agent requests a permission
              Read; Bash read-only inspection (cat/head/tail/wc/grep/find,
                read-only git queries, bash -n syntax checks)
              Edit/Write of Markdown (.md) notes under RIG_DIR/memory/,
-               RIG_DIR/tasks/, RIG_DIR/docs/ (resolved path; opt out with
+               RIG_DIR/tasks/, RIG_DIR/docs/ (resolved path; excludes
+               PROJECT_CONVENTIONS.md and hard-linked files; opt out with
                RIG_DIR/memory/.rig-strict-permissions)
            Never auto-approves commands that execute project code (test
              runners, build tools) or writes to scripts and data files
@@ -507,12 +508,14 @@ Every tool call
      ├─► pre-tool.sh (PreToolUse)
      │     Resolves RIG_DIR (.rigpath if present, else $REPO/.rig)
      │     Logs call to RIG_SESSION_LOG or /tmp/the-rig-session-<project>.log
-     │     Worktree redirect: Write/Edit/NotebookEdit targeting .claude/worktrees/
+     │     Worktree redirect: Write/Edit/MultiEdit/NotebookEdit targeting .claude/worktrees/
      │       → rewrites path to main-repo equivalent via hookSpecificOutput.updatedInput
      │     Checks RIG_PROTECTED: blocks writes to governance files
      │       (RIG_DIR/processes/, RIG_DIR/rules/, RIG_DIR/contextual-tips.sh,
-     │        .husky/, CLAUDE.md, .claude/hooks/); hook-sourced Rig files stay
-     │        protected even if an older policy file omits them
+     │        .husky/, CLAUDE.md, .claude/hooks/); hook-loaded Rig files stay
+     │        protected even if an older policy file omits them. Paths are
+     │        matched by filesystem identity (case variants, symlinks, hard
+     │        links); not-yet-existing parts compare case-insensitively
      │     Checks BLOCKED_PATHS: blocks project-specific protected paths
      │     Rejects visible unmarked Bash commits; marked visible commits
      │       require approval. With no active Rig commit-msg hook, checks

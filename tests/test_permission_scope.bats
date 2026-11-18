@@ -181,3 +181,91 @@ assert_not_allowed() {
   [ "$status" -eq 2 ]
   [[ "$output" == *"governance file"* ]] || return 1
 }
+
+# Send a PreToolUse write payload for one tool and path to the Claude hook.
+pretool_write() {
+  local tool="$1" path="$2" payload
+  payload=$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":sys.argv[1],"tool_input":{"file_path":sys.argv[2],"content":"x"}}))' "$tool" "$path")
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/pre-tool.sh' \
+    _ "$TEST_PROJECT" "$payload"
+}
+
+# Send a Codex apply_patch payload that updates one project-relative path.
+codex_patch() {
+  local target="$1" payload patch
+  patch=$'*** Begin Patch\n*** Update File: '"$target"$'\n@@\n-x\n+y\n*** End Patch'
+  payload=$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"apply_patch","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$TEST_PROJECT" "$patch")
+  run bash -c 'cd "$1" && printf "%s" "$2" | bash .codex/hooks/rig-adapter.sh' \
+    _ "$TEST_PROJECT" "$payload"
+}
+
+assert_governance_block() {
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"governance file"* ]] || return 1
+}
+
+# Case-variant aliases only exist on case-insensitive volumes (macOS default).
+require_case_insensitive_fs() {
+  [ -e "$RIG_DIR/RULES" ] || skip "requires a case-insensitive filesystem (#675)"
+}
+
+@test "permission scope: owner-approved conventions are not auto-approved" {
+  perm_request Write file_path "$RIG_DIR/memory/PROJECT_CONVENTIONS.md"
+  assert_not_allowed
+  perm_request Edit file_path "$RIG_DIR/memory/project_conventions.md"
+  assert_not_allowed
+}
+
+@test "permission scope: hard-linked Markdown notes are not auto-approved" {
+  printf 'note\n' > "$RIG_DIR/docs/source.md"
+  ln "$RIG_DIR/docs/source.md" "$RIG_DIR/memory/linked.md"
+  perm_request Write file_path "$RIG_DIR/memory/linked.md"
+  assert_not_allowed
+}
+
+@test "protected paths: MultiEdit to a protected path is blocked" {
+  pretool_write MultiEdit "$RIG_DIR/rules/security.md"
+  assert_governance_block
+}
+
+@test "protected paths: missing protected file is matched case-insensitively" {
+  [ ! -e "$TEST_PROJECT/CLAUDE.md" ]
+  pretool_write Write "$TEST_PROJECT/claude.md"
+  assert_governance_block
+}
+
+@test "protected paths: hard-link alias of a protected file is blocked" {
+  ln "$RIG_DIR/contextual-tips.sh" "$RIG_DIR/memory/tips-alias.sh"
+  pretool_write Write "$RIG_DIR/memory/tips-alias.sh"
+  assert_governance_block
+}
+
+@test "protected paths: case variant of a protected file is blocked" {
+  require_case_insensitive_fs
+  pretool_write Write "$RIG_DIR/CONTEXTUAL-TIPS.SH"
+  assert_governance_block
+}
+
+@test "protected paths: case variant of a protected directory is blocked" {
+  require_case_insensitive_fs
+  pretool_write Write "$RIG_DIR/RULES/security.md"
+  assert_governance_block
+}
+
+@test "protected paths: Codex apply_patch to a missing protected file is matched case-insensitively" {
+  codex_patch claude.md
+  assert_governance_block
+}
+
+@test "protected paths: Codex apply_patch to case variants of protected paths is blocked" {
+  require_case_insensitive_fs
+  codex_patch .rig/CONTEXTUAL-TIPS.SH
+  assert_governance_block
+  codex_patch .rig/RULES/security.md
+  assert_governance_block
+}
+
+@test "protected paths: Codex apply_patch to an unprotected Markdown note is allowed" {
+  codex_patch .rig/memory/PROGRESS.md
+  [ "$status" -eq 0 ]
+}

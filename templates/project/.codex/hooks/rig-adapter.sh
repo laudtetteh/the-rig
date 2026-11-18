@@ -112,6 +112,47 @@ validate_protected_policy() {
   PROTECTED_PATHS+=("$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$RIG_DIR/contextual-tips.sh")")
 }
 
+# Print the first protected entry that names a path or one of its ancestors.
+# Existing components are compared by filesystem identity, so case variants on
+# case-insensitive volumes, symlinks, and hard links all match. Components that
+# do not exist yet are compared case-insensitively.
+# Usage: protected_identity_match <path> <protected-entry>...
+protected_identity_match() {
+  python3 -c '
+import os, sys
+
+def identity_key(path):
+    path = os.path.realpath(path)
+    missing = []
+    while not os.path.exists(path):
+        parent, name = os.path.split(path)
+        if parent == path:
+            break
+        missing.insert(0, name.casefold())
+        path = parent
+    info = os.stat(path)
+    return (info.st_dev, info.st_ino, tuple(missing))
+
+def self_and_ancestors(path):
+    path = os.path.realpath(path)
+    while True:
+        yield path
+        parent = os.path.dirname(path)
+        if parent == path:
+            return
+        path = parent
+
+protected = {}
+for entry in sys.argv[2:]:
+    protected.setdefault(identity_key(entry), entry)
+for candidate in self_and_ancestors(sys.argv[1]):
+    match = protected.get(identity_key(candidate))
+    if match is not None:
+        print(match, end="")
+        break
+' "$@"
+}
+
 validate_apply_patch() {
   validate_protected_policy
   local paths path protected found=0
@@ -130,11 +171,11 @@ for value in re.findall(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$"
   [[ -n "$paths" ]] || fail_closed "apply_patch payload contains no file targets."
   while IFS= read -r path; do
     found=1
-    for protected in "${PROTECTED_PATHS[@]}"; do
-      if [[ "$path" == "$protected" || "$path" == "$protected/"* ]]; then
-        fail_closed "'$path' is a The Rig governance file. Use \$rig-propose to stage a change for human review, or edit manually."
-      fi
-    done
+    protected=$(protected_identity_match "$path" "${PROTECTED_PATHS[@]}") || \
+      fail_closed "protected path could not be resolved."
+    if [[ -n "$protected" ]]; then
+      fail_closed "'$path' is a The Rig governance file. Use \$rig-propose to stage a change for human review, or edit manually."
+    fi
   done <<< "$paths"
   [[ "$found" -eq 1 ]] || fail_closed "apply_patch payload contains no file targets."
   PATCH_TARGETS="$paths"
