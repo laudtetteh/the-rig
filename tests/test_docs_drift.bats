@@ -97,7 +97,8 @@ PY
 }
 
 @test "troubleshooting quotes the real commit-msg branch guard messages" {
-  python3 - "$REPO_ROOT/templates/project/.husky/commit-msg" "$REPO_ROOT/docs/troubleshooting.md" <<'PY'
+  python3 - "$REPO_ROOT/templates/project/.husky/commit-msg" "$REPO_ROOT/docs/troubleshooting.md" \
+    "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh" <<'PY'
 import pathlib
 import re
 import sys
@@ -112,6 +113,19 @@ for message in messages:
     rendered = message.replace("$BRANCH", "main")
     if rendered not in docs:
         raise SystemExit(f"troubleshooting does not quote guard message: {rendered!r}")
+pretool = pathlib.Path(sys.argv[3]).read_text()
+prefix = re.search(r'fail_closed\(\) \{\n  echo "([^"$]*)\$1"', pretool)
+if not prefix:
+    raise SystemExit("fail_closed prefix not found in pre-tool.sh")
+if f"prefixed with `{prefix.group(1).strip()}`" not in docs:
+    raise SystemExit(f"troubleshooting does not name the PreToolUse prefix {prefix.group(1)!r}")
+pretool_messages = re.findall(r'fail_closed "([^"]*\$CURRENT_BRANCH[^"]*)"', pretool)
+if len(pretool_messages) != 2:
+    raise SystemExit(f"expected two PreToolUse branch guard messages, found {pretool_messages!r}")
+hook_rendered = sorted(m.replace("ERROR: ", "", 1).replace("$BRANCH", "main") for m in messages)
+pretool_rendered = sorted(m.replace("$CURRENT_BRANCH", "main") for m in pretool_messages)
+if hook_rendered != pretool_rendered:
+    raise SystemExit(f"PreToolUse wording differs from commit-msg: {pretool_rendered!r} vs {hook_rendered!r}")
 if "Committing directly to 'main' is not allowed." in docs:
     raise SystemExit("troubleshooting still quotes a guard message the hook never prints")
 if "direct commits are intentional for this project" in docs:
@@ -216,8 +230,9 @@ docs = pathlib.Path(sys.argv[1]).read_text()
 section = docs.split("## Post-install checklist", 1)[1]
 if "bats tests/" in section:
     raise SystemExit("post-install checklist tells end users to run repo-only Bats")
-if ".git/hooks/commit-msg" not in section:
-    raise SystemExit("post-install checklist does not check stealth .git/hooks/")
+for hook in ("commit-msg", "filter-commit-message-inplace.sh"):
+    if f".git/hooks/{hook}" not in section:
+        raise SystemExit(f"post-install checklist does not check stealth .git/hooks/{hook}")
 PY
 }
 

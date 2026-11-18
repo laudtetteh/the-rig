@@ -351,7 +351,9 @@ When no Rig `commit-msg` hook is active, the PreToolUse commit gate prints the
 same text prefixed with `Blocked:` instead of `ERROR:`.
 
 **Cause:** Both guards check guarded commits whose current branch is literally
-`main` or `master`:
+`main` or `master`. The `commit-msg` guard skips commits Git creates while
+replaying history (rebase, cherry-pick, revert, or another sequencer run).
+For other guarded commits on those branches:
 
 - Without `housekeeping: direct-push` in the project `CLAUDE.md`, every guarded
   direct commit is blocked with the first message.

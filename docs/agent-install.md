@@ -324,7 +324,9 @@ ls -la /path/to/project/.claude/hooks/
 ls -la /path/to/project/.husky/
 # Git hooks are executable — stealth tracking (no .husky/ is written)
 ls -la /path/to/project/.git/hooks/pre-commit /path/to/project/.git/hooks/commit-msg \
-  /path/to/project/.git/hooks/post-commit /path/to/project/.git/hooks/post-merge
+  /path/to/project/.git/hooks/post-commit /path/to/project/.git/hooks/post-merge \
+  /path/to/project/.git/hooks/filter-commit-message-inplace.sh
+# commit-msg refuses every commit if filter-commit-message-inplace.sh is missing
 
 # settings.json wired
 cat /path/to/project/.claude/settings.json | grep pre-tool

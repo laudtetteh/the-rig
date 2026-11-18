@@ -171,7 +171,8 @@ export RIG_INSTALLER_SRC=/path/to/the-rig
 and by `.rig/processes/UPGRADE_WORKFLOW.md`, not by `install.sh` itself. The
 commands use it only when `$RIG_INSTALLER_SRC/install.sh` exists; otherwise they
 fall back to `~/tools/the-rig` (the project-level command also accepts the
-current repo when it is itself a Rig source checkout). The global bootstrap re-exports the resolved
+current repo when it is itself a Rig source checkout). `UPGRADE_WORKFLOW.md`
+uses the value as given whenever it is set, without that existence check. The global bootstrap re-exports the resolved
 path so the delegated project workflow uses the same checkout, and it never
 switches that checkout's branch without asking. When you run `install.sh`
 directly, the checkout you invoke is the installer source.
