@@ -959,6 +959,12 @@ while IFS= read -r line; do
     "Overwrote "*)              written="${msg#Overwrote }" ;;
   esac
   [[ -n "$written" ]] || continue
+  # In stealth/external mode the project-layer copy helpers print paths
+  # relative to the external Rig dir ("Created processes/X.md"); never let
+  # such a line stand for a same-named project file.
+  if [[ "$RIG_DIR" != "$REPO/.rig" && "$written" != .rig/* && -e "$RIG_DIR/$written" ]]; then
+    continue
+  fi
   case "$written" in
     .rig/*) [[ -e "$RIG_DIR/${written#.rig/}" ]] || continue ;;
     *) [[ -e "$REPO/$written" || -n "$(git -C "$REPO" ls-files -- "$written")" ]] || continue ;;
@@ -1631,11 +1637,20 @@ _rig_stage_candidate() {
 for p in ${RIG_WRITTEN_PATHS[@]+"${RIG_WRITTEN_PATHS[@]}"}; do
   _rig_stage_candidate "$p"
 done
+RIG_REAL_STAGED=${#RIG_STAGE_PATHS[@]}
 if [[ "$TRACKING" == "repo" ]]; then
   for p in .rig/VERSION .rig/memory/.rig-manifest .rig/memory/.rig-manifest.json \
            .rig/install-targets.json .rig/contextual-tips.sh; do
     _rig_stage_candidate "$p"
   done
+fi
+if [[ ${#RIG_STAGE_PATHS[@]} -gt 0 && "$RIG_REAL_STAGED" -eq 0 ]]; then
+  # RIG_WRITTEN_PATHS named nothing that changed (e.g. the accumulators were
+  # lost between shell sessions), so only VERSION/manifest bookkeeping would
+  # be committed without the content it describes.
+  echo "❌ Only .rig bookkeeping files would be staged; RIG_WRITTEN_PATHS names none of the upgraded files."
+  echo "   Nothing staged. Re-derive RIG_WRITTEN_PATHS from Phase 2, or stage the upgrade's files explicitly."
+  RIG_STAGE_PATHS=()
 fi
 if [[ ${#RIG_STAGE_PATHS[@]} -gt 0 ]]; then
   git add -A -- "${RIG_STAGE_PATHS[@]}"

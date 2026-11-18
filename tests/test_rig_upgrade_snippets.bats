@@ -475,6 +475,103 @@ cd '$PROJECT'")
   [[ "$output" == *"ARG[--tracking]"*"ARG[stealth]"*"ARG[--rig-dir]"*"ARG[$rig_dir]"* ]] || false
   [[ "$output" == *"install.sh exited 3"* ]] || false
   log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
-  [ ! -e "$log" ]
+  [ -f "$log" ]
   [ -f "$log.failed" ]
+}
+
+@test "UPGRADE_WORKFLOW step 4: re-runs append to the log and clear the failure marker" {
+  local fake="$TEST_TMP/fake installer" log
+  mkdir -p "$fake"
+  printf '#!/bin/bash\nprintf "\\033[0;32m✓\\033[0m Created bin/rig\\n"\n' > "$fake/install.sh"
+  chmod +x "$fake/install.sh"
+  local script
+  script=$(_snippet_script "$UPGRADE_WORKFLOW" 'INSTALL_STATUS=$(cat "$INSTALL_STATUS_FILE")' "export RIG_INSTALLER_SRC='$fake'
+cd '$PROJECT'")
+  log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
+  touch "$log.failed"
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  printf '#!/bin/bash\nprintf "\\033[0;32m✓\\033[0m Up to date: bin/rig\\n"\n' > "$fake/install.sh"
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  grep -q 'Created bin/rig' "$log"
+  grep -q 'Up to date: bin/rig' "$log"
+  [ ! -e "$log.failed" ]
+}
+
+@test "UPGRADE_WORKFLOW step 7: refuses when the last installer run failed" {
+  _stage_fixture
+  local log script
+  log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
+  printf '\033[0;32m✓\033[0m Updated: .claude/commands/ship.md\n' > "$log"
+  touch "$log.failed"
+  script=$(_snippet_script "$UPGRADE_WORKFLOW" 'done < <(sed "s/${ESC}' "cd '$PROJECT'")
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"last Step 4 installer run failed"* ]] || false
+  [ -z "$(git -C "$PROJECT" diff --cached --name-only)" ]
+}
+
+@test "UPGRADE_WORKFLOW step 7: stops when only bookkeeping files would be staged" {
+  _stage_fixture
+  local log script
+  log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
+  # A second run that only re-reports up-to-date files names nothing written.
+  printf '\033[0;34m→\033[0m Up to date: .claude/commands/ship.md\n' > "$log"
+  script=$(_snippet_script "$UPGRADE_WORKFLOW" 'done < <(sed "s/${ESC}' "cd '$PROJECT'")
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Only .rig bookkeeping files would be staged"* ]] || false
+  [ -z "$(git -C "$PROJECT" diff --cached --name-only)" ]
+}
+
+@test "rig-upgrade 5a: stops when only bookkeeping files would be staged" {
+  _stage_fixture
+  local script
+  script=$(_snippet_script "$RIG_UPGRADE" '_rig_stage_candidate() {' "REPO='$PROJECT'
+TRACKING=repo
+RIG_WRITTEN_PATHS=()")
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Only .rig bookkeeping files would be staged"* ]] || false
+  [ -z "$(git -C "$PROJECT" diff --cached --name-only)" ]
+}
+
+@test "external mode: Rig-dir-relative 'Created' lines never stage a same-named project file" {
+  local ext="$TEST_TMP/ext rig"
+  mkdir -p "$ext/processes" "$PROJECT/processes" "$PROJECT/.claude/commands"
+  echo "$ext" > "$PROJECT/.rigpath"
+  echo rig > "$ext/processes/SHIP_WORKFLOW.md"
+  echo old > "$PROJECT/processes/SHIP_WORKFLOW.md"
+  echo old > "$PROJECT/.claude/commands/ship.md"
+  git -C "$PROJECT" add -A
+  git -C "$PROJECT" commit -qm init
+  echo 'user edit' > "$PROJECT/processes/SHIP_WORKFLOW.md"
+  echo new > "$PROJECT/.claude/commands/ship.md"
+  local log
+  log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
+  printf '\033[0;32m✓\033[0m Created processes/SHIP_WORKFLOW.md\n' > "$log"
+  printf '\033[0;32m✓\033[0m Updated: .claude/commands/ship.md\n' >> "$log"
+
+  local script staged
+  script=$(_snippet_script "$UPGRADE_WORKFLOW" 'done < <(sed "s/${ESC}' "cd '$PROJECT'")
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  staged=$(git -C "$PROJECT" diff --cached --name-only)
+  [ "$staged" = ".claude/commands/ship.md" ]
+
+  git -C "$PROJECT" reset -q
+  script="$TEST_TMP/classic-ext.sh"
+  {
+    printf 'set -euo pipefail\n'
+    printf "REPO='%s'\nRIG_DIR='%s'\nTRACKING=external\n" "$PROJECT" "$ext"
+    printf 'UPGRADED=()\nRIG_WRITTEN_PATHS=()\n'
+    printf 'installer_output=$(cat %q)\n' "$log"
+    _extract_block "$RIG_UPGRADE" 'plain_output=$(printf'
+    _extract_block "$RIG_UPGRADE" '_rig_stage_candidate() {'
+  } > "$script"
+  run /bin/bash "$script"
+  [ "$status" -eq 0 ]
+  staged=$(git -C "$PROJECT" diff --cached --name-only)
+  [ "$staged" = ".claude/commands/ship.md" ]
 }

@@ -158,6 +158,11 @@ Codex do not acquire independently maintained workflow text.
 
 ## Step 4 — Run the installer for the project layer
 
+The log is appended to, never overwritten: a re-run of this step (after a
+failed run, a stale-log refusal in Step 7, or the Step 5 VERSION fix) reports
+already-written files only as "Up to date", so each run's "Created"/"Updated"
+lines must accumulate until the upgrade commit removes the log.
+
 Pass the tracking mode explicitly (same rules as install.sh, with `.rigpath`
 read verbatim so a path containing spaces survives) instead of relying on the
 installer's own auto-detection, and keep the installer's output inside `.git/`
@@ -188,12 +193,14 @@ UPGRADE_LOG=$(git -C "$REPO" rev-parse --git-path rig-upgrade.log)
 INSTALL_STATUS_FILE=$(mktemp)
 { "$INSTALLER_SRC/install.sh" --project-only --strategy upgrade "${TRACKING_ARGS[@]}" \
     --target "$REPO" 2>&1 && echo 0 > "$INSTALL_STATUS_FILE" || echo $? > "$INSTALL_STATUS_FILE"; } \
-  | tee "$UPGRADE_LOG"
+  | tee -a "$UPGRADE_LOG"
 INSTALL_STATUS=$(cat "$INSTALL_STATUS_FILE")
 rm -f "$INSTALL_STATUS_FILE"
 if [[ "$INSTALL_STATUS" -ne 0 ]]; then
-  mv -f "$UPGRADE_LOG" "$UPGRADE_LOG.failed"
-  echo "❌ install.sh exited $INSTALL_STATUS — stop here. Output kept in $UPGRADE_LOG.failed."
+  touch "$UPGRADE_LOG.failed"
+  echo "❌ install.sh exited $INSTALL_STATUS — stop here. Output is in $UPGRADE_LOG."
+else
+  rm -f "$UPGRADE_LOG.failed"
 fi
 ```
 
@@ -331,6 +338,8 @@ UPGRADE_LOG=$(git rev-parse --git-path rig-upgrade.log)
 [[ "$UPGRADE_LOG" == /* ]] || UPGRADE_LOG="$ROOT/$UPGRADE_LOG"
 if [[ ! -f "$UPGRADE_LOG" ]]; then
   echo "❌ No installer log at $UPGRADE_LOG — re-run Step 4 before staging."
+elif [[ -f "$UPGRADE_LOG.failed" ]]; then
+  echo "❌ The last Step 4 installer run failed — fix it and re-run Step 4 before staging."
 elif [[ -f "$RIG_DIR/VERSION" && "$UPGRADE_LOG" -ot "$RIG_DIR/VERSION" ]]; then
   echo "❌ $UPGRADE_LOG is older than $RIG_DIR/VERSION (stale log) — re-run Step 4 before staging."
 else
@@ -351,13 +360,21 @@ else
       "Updated "*)                path="${msg#Updated }" ;;
       "Overwrote "*)              path="${msg#Overwrote }" ;;
     esac
+    # Project-layer copy helpers print paths relative to the external Rig
+    # dir in stealth/external mode ("Created processes/X.md"); never let such a
+    # line stage a same-named project file.
+    if [[ -n "$path" && "$RIG_DIR" != "$ROOT/.rig" && "$path" != .rig/* && -e "$RIG_DIR/$path" ]]; then
+      path=""
+    fi
     [[ -n "$path" ]] && WRITTEN+=("$path")
   done < <(sed "s/${ESC}\[[0-9;]*m//g" "$UPGRADE_LOG")
   if [[ "$TRACKING" == "repo" ]]; then
     WRITTEN+=(.rig/VERSION .rig/memory/.rig-manifest .rig/memory/.rig-manifest.json \
       .rig/install-targets.json .rig/contextual-tips.sh)
   fi
+  BOOKKEEPING=" .rig/VERSION .rig/memory/.rig-manifest .rig/memory/.rig-manifest.json .rig/install-targets.json .rig/contextual-tips.sh "
   STAGE=()
+  REAL_CHANGES=0
   for p in ${WRITTEN[@]+"${WRITTEN[@]}"}; do
     case "$p" in
       .git/*) continue ;;
@@ -367,7 +384,16 @@ else
     if git check-ignore -q -- "$p"; then continue; fi
     if [[ -z "$(git status --porcelain -- "$p")" ]]; then continue; fi
     STAGE+=("$p")
+    [[ "$BOOKKEEPING" == *" $p "* ]] || REAL_CHANGES=$((REAL_CHANGES + 1))
   done
+  if [[ ${#STAGE[@]} -gt 0 && "$REAL_CHANGES" -eq 0 ]]; then
+    # Only installer bookkeeping would be committed: the log no longer names
+    # the files this upgrade changed (e.g. it was rotated), so staging now
+    # would commit VERSION/manifest without the content they describe.
+    echo "❌ Only .rig bookkeeping files would be staged; the installer log names none of the upgraded files."
+    echo "   Nothing staged. Review 'git status', then stage the upgrade's files explicitly."
+    STAGE=()
+  fi
   if [[ ${#STAGE[@]} -gt 0 ]]; then
     git add -A -- "${STAGE[@]}"
   fi
@@ -402,7 +428,7 @@ UPGRADE_LOG=$(git rev-parse --git-path rig-upgrade.log)
 [[ "$UPGRADE_LOG" == /* ]] || UPGRADE_LOG="$ROOT/$UPGRADE_LOG"
 touch "$RIG_DIR/memory/.rig-commit-ok"
 RIG_COMMIT_POLICY=guarded git commit -m "chore(rig): upgrade to The Rig vX.Y.Z [#N]" \
-  && rm -f "$UPGRADE_LOG"
+  && rm -f "$UPGRADE_LOG" "$UPGRADE_LOG.failed"
 ```
 
 5. Push the branch, then open the PR against the configured base branch:
