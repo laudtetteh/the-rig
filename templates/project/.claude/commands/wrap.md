@@ -107,9 +107,10 @@ later to perform all finalization gates.
    provenance and preserve other sessions' content.
 6. Build the Active tasks snapshot draft below with a current shared project
    header, the exact session's task handoffs and dirty-path list. Use
-   `memory write-snapshot` with `--owned-task` for each owned section and
-   `RIG_SESSION_FILE`/`RIG_SESSION_ANCHOR` set to the exact values from step 2.
-   If no task handoff is owned, use `--shared-only`. The writer preserves other
+   `memory write-snapshot` with `--shared-only` for the shared header, then
+   `--owned-task` for each owned section with `RIG_SESSION_FILE` and
+   `RIG_SESSION_ANCHOR` set to the exact values from step 2. If no task handoff
+   is owned, use only `--shared-only`. The writer preserves other
    owners' sections. On a writer error, release the lock and keep the draft for
    retry. In the shell executing the snapshot block, set
    `WRAP_SNAPSHOT_MODE=checkpoint`, `RIG_SESSION_FILE="$CHECKPOINT_FILE"`,
@@ -257,6 +258,15 @@ memory maintenance that does not require an exact session record, write
 session UUID or move any record to `sessions/done/`. If it returns `ambiguous`,
 `duplicate_native_id`, `cross_project`, malformed data, or an unsafe path, stop
 before writing because the session state is unsafe.
+
+An `ended_record` cannot write an owned-task handoff. If the task remains active,
+use the exact active continuation returned by retrofit (or start a new exact
+session) before calling `memory write-snapshot --owned-task TASK`. The writer
+backs up and transfers a handoff owned by the completed session. If an exact
+active continuation is unavailable, write only the shared section with
+`--shared-only`, preserve the existing handoff, and report that its update is
+pending. Never pass the completed session file as an owner or edit snapshot
+markers by hand.
 
 ### Execution
 
@@ -555,6 +565,7 @@ updated without an owner. Then run the owner-aware writer:
 
 ```bash
 SNAP_DRAFT="$RIG_DIR/memory/.snapshot-draft-${SNAP_LOCK_TOKEN}.md"
+SNAP_SHARED_DRAFT="$RIG_DIR/memory/.snapshot-shared-draft-${SNAP_LOCK_TOKEN}.md"
 snapshot_write_failed() {
   "$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json
   echo "Snapshot update failed; draft preserved at $SNAP_DRAFT" >&2
@@ -583,6 +594,11 @@ if [[ "${#OWNED_TASKS[@]}" -eq 0 ]]; then
   checkpoint_verify_snapshot_identity || snapshot_write_failed
   "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || snapshot_write_failed
 else
+  awk '/^## Resuming from: / { exit } { print }' "$SNAP_DRAFT" > "$SNAP_SHARED_DRAFT" || snapshot_write_failed
+  if grep -q '[^[:space:]]' "$SNAP_SHARED_DRAFT"; then
+    checkpoint_verify_snapshot_identity || snapshot_write_failed
+    "$REPO/bin/rig" memory write-snapshot --file "$SNAP_SHARED_DRAFT" --shared-only --json || snapshot_write_failed
+  fi
   if [[ "$WRAP_SNAPSHOT_MODE" == checkpoint ]]; then
     CURRENT_JSON=$(RIG_SESSION_FILE="$CHECKPOINT_FILE" RIG_SESSION_ANCHOR="$CHECKPOINT_ANCHOR" \
       "$REPO/bin/rig" session current --json) || snapshot_write_failed
@@ -599,7 +615,7 @@ else
   RIG_SESSION_FILE="$CURRENT_FILE" RIG_SESSION_ANCHOR="$CURRENT_ANCHOR" \
     "$REPO/bin/rig" memory write-snapshot "${SNAP_ARGS[@]}" || snapshot_write_failed
 fi
-rm -f "$SNAP_DRAFT"
+rm -f "$SNAP_DRAFT" "$SNAP_SHARED_DRAFT"
 ```
 
 For a pre-existing unowned section with the same task slug, inspect it first.

@@ -21,6 +21,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Owned-task snapshot updates now retain the current shared context even when their drafts contain only a handoff or an older shared header; wrap and post-merge explain how to continue handoff updates after a session record completes (#689).
 - Claude pre-tool policy now enforces protected-file and command checks on real hook payloads (#593).
 - Native Git commit hooks now remove recognized AI attribution while preserving human trailers (#594).
 - Session current and resolve now work with macOS Bash 3.2 and read-only process sandboxes (#595).

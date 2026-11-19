@@ -193,6 +193,11 @@ In degraded mode for `not_found` or `ended_record`, continue project-level
 post-merge housekeeping and write `CONTEXT_SNAPSHOT.md`, but do not fabricate a
 session UUID, do not move any session record to `sessions/done/`, and do not
 clear exact-session obligations that require a resolvable active session.
+Use `memory write-snapshot --shared-only` for the shared refresh. A completed
+session file cannot author `--owned-task`; after an exact active continuation
+exists, its owner may update the handoff, with the writer backing up any
+transfer from the completed owner. Until then, preserve the existing handoff
+and report its update as pending rather than editing snapshot markers directly.
 Record the exact session anchor selected during collection as
 `POST_MERGE_SESSION_ANCHOR` only when resolution is exact; keep it unset in
 degraded mode.

@@ -574,7 +574,10 @@ def write_snapshot(memory, rig_dir, sentinel, token, args, new_shared, new_secti
                     if current and current["owner"] is None and not args.adopt_legacy:
                         fail("legacy_adoption_required")
                     old_sections[task] = {"owner": owner, "body": new_sections[task]["body"]}
-            content = render(new_shared, old_sections)
+            # An owned-task draft may contain only handoffs, or an older copy of
+            # the shared header. Only shared-mode writes may replace that header.
+            shared = old_shared if args.mode == "owned" and previous else new_shared
+            content = render(shared, old_sections)
         backup = backup_snapshot(memory, previous, "legacy") if legacy and previous and (old_sections or recovered) else None
         mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
         atomic_write(path, content, mode)
