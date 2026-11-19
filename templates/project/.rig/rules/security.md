@@ -16,6 +16,19 @@
 
 ---
 
+## External tracker writes
+
+- Before creating, editing, deleting, or commenting on any issue, ticket, card,
+  label, milestone, or project item, show the exact target and complete proposed
+  title, body, labels, and other changed fields. Obtain explicit approval for
+  that individual write immediately before executing it. A plan, task launch,
+  prior approval, or `issue-creator: agent` setting is not approval for the write.
+- If the user declines or changes the content, do not write the old proposal.
+  Show the revised action and seek its own approval. For a batch, repeat the
+  preview and approval for each item. Record skipped actions as pending.
+
+---
+
 ## Auth
 
 - Always verify session tokens or JWTs server-side on protected routes. Never trust the client's claim.

@@ -247,6 +247,16 @@ git -C "$ROOT" add .rig/memory/PROGRESS.md
 touch "$ROOT/.rig/memory/.rig-commit-ok"
 RIG_COMMIT_POLICY=guarded git -C "$ROOT" commit -m "chore: post-merge housekeeping for PR #N"
 git -C "$ROOT" push -u origin chore/post-merge-[N]
+```
+
+The PR creation below applies an external label. **Exact tracker write
+approval:** show the target repository, PR title, and `type: chore` label;
+wait for the user's approval to apply that label to this PR immediately
+before creation. The housekeeping commit approval does not cover the label.
+If declined, leave the pushed branch ready and wait for a separately approved
+label action before opening the PR.
+
+```bash
 gh pr create --title "chore: post-merge housekeeping for PR #N" \
   --body "Memory updates and task file move for merged PR #N." \
   --label "type: chore" --base [BASE_BRANCH]

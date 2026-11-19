@@ -481,7 +481,10 @@ Wait for confirmation. Do not submit without it.
 
 For each unsubmitted entry, in order:
 
-1. **Show the entry** formatted as it will appear in the GitHub issue body:
+1. **Show the exact issue action:** target repository
+   `laudtetteh/the-rig`, title derived from the entry header, complete body,
+   and `type: gap-report` label if it exists (otherwise show that no label will
+   be applied). Format the body as it will appear in the GitHub issue:
 
    ```
    ## Entry [N of M]: [title]
@@ -494,7 +497,7 @@ For each unsubmitted entry, in order:
 
 2. **Ask the user:**
 
-   > "Submit this entry as a GitHub issue? Options:
+   > "Approve creation of this exact GitHub issue? Options:
    > - **yes** — submit as shown
    > - **edit** — paste a revised body, then submit
    > - **skip** — leave this entry unsubmitted
@@ -502,6 +505,11 @@ For each unsubmitted entry, in order:
 
 3. **If yes:**
    - Derive the issue title: take the text after `— ` in the `## [date] — [title]` header line. Strip the date prefix.
+   - **Exact tracker write approval:** only this entry's explicit **yes** to
+     the displayed target, title, full body, and label authorizes the one
+     issue creation below. The earlier **go** only starts review. If the
+     proposal changed after that **yes**, preview it again and seek a new
+     approval immediately before writing.
    - Run:
      ```bash
      gh issue create \
@@ -517,7 +525,8 @@ For each unsubmitted entry, in order:
 4. **If edit:**
    - Ask: "Paste the revised entry body:"
    - Wait for the user to provide text.
-   - Submit using the revised body (same `gh issue create` call).
+   - Return to Step 1 with the revised body and show the exact action again.
+     Submit only after the user explicitly approves that revised action.
 
 5. **If skip:**
    - Note: "[title] skipped."

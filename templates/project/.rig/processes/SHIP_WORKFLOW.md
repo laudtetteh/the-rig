@@ -32,7 +32,8 @@ valid empty active task list.
 - **If `issue-tracking: none`:** skip this entire step. Issue numbers are not required in commit messages. Continue to Step 1.
 - **If `issue-tracking: github`** (or field absent — default): follow the full step below.
 
-**Before writing any code, create the GitHub issue.**
+**Before writing any code, obtain the GitHub issue number.** If no issue exists
+and the agent is configured to draft one, use the approval gate below.
 
 The commit message must reference the issue number: `feat(scope): description [#N]`.
 If you create the issue after the commit, you cannot reference it honestly — the
@@ -56,22 +57,32 @@ when a project issue template exists.**
 gh label list --repo <owner>/<repo>
 ```
 
-If `type: feat`, `type: fix`, `type: chore`, etc. are missing, create them before
-proceeding — `gh issue create` with an unknown label silently drops it or errors:
+If `type: feat`, `type: fix`, `type: chore`, etc. are missing, draft the
+needed label and target repository. **Exact tracker write approval:** show
+the complete label name, color, description, and target, then wait for the
+user's approval of each individual creation immediately before the command.
+Do not treat approval for another label, issue, plan, or ship action as approval
+here. If declined, leave the label absent and resolve the label requirement
+before proceeding — `gh issue create` with an unknown label silently drops it
+or errors:
 
 ```bash
-gh label create "type: feat" --color "#0075ca" --description "New feature"
-gh label create "type: fix"  --color "#d73a4a" --description "Bug fix"
-gh label create "type: chore" --color "#e4e669" --description "Tooling and maintenance"
+gh label create "type: feat" --color "#0075ca" --description "New feature" --repo <owner>/<repo>
+gh label create "type: fix"  --color "#d73a4a" --description "Bug fix" --repo <owner>/<repo>
+gh label create "type: chore" --color "#e4e669" --description "Tooling and maintenance" --repo <owner>/<repo>
 ```
 
-Then create the issue:
+Then prepare the issue body and title. **Exact tracker write approval:** show
+the target repository, title, complete body, and labels; wait for explicit
+approval of this issue creation immediately before `gh issue create`. A
+general task or ship approval does not count. If the draft changes, show the
+revised action and ask again; if declined, do not file it:
 
 ```bash
 cat > /tmp/issue-body.md << 'EOF'
 [filled-in template body, or freeform if no template exists]
 EOF
-gh issue create --title "..." --body-file /tmp/issue-body.md --label "type: feat"
+gh issue create --repo <owner>/<repo> --title "..." --body-file /tmp/issue-body.md --label "type: feat"
 ```
 
 Note the issue number. It goes in every commit on this branch.
@@ -314,7 +325,12 @@ In this order:
 
 6. If anything about The Rig's workflow was missing or felt wrong, log it in `$RIG_DIR/memory/RIG_GAPS.md`
 
-7. **Post a closing comment on the GitHub Issue:**
+7. **Post a closing comment on the GitHub Issue:** Show the exact issue
+   number, target repository, and complete comment body. **Exact tracker
+   write approval:** wait for the user's approval of this individual comment
+   immediately before the command. A merge or ship approval does not cover
+   it; repeat for each issue. If declined, record the comment as pending and
+   continue local housekeeping without posting it.
    ```bash
    gh issue comment [N] --body "Implemented in PR #[M].
 
@@ -377,7 +393,12 @@ Closes #M
 Do not write `Closes #N, #M`; GitHub does not reliably auto-close every issue in
 that form across all repository settings and cross-repository references.
 
-Then create the PR:
+Then create the PR. The `--label` flags change external label assignments.
+**Exact tracker write approval:** show the target repository, PR title, and
+complete label list, and obtain the user's approval to apply those labels to
+this PR immediately before the create command. A plan, commit, or earlier
+label discussion does not count. If declined, keep the branch ready and
+resolve required labels before opening the PR:
 
 ```bash
 cat > /tmp/pr-body.md << 'EOF'

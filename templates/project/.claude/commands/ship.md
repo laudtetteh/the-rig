@@ -76,6 +76,12 @@ strip the YAML frontmatter (lines starting with `---`, `name:`, `about:`, `title
 `labels:`, `assignees:`), and use the remaining content as the issue body. **Never
 use a freeform issue body when an issue template exists.**
 
+If the agent will file the issue, show the exact target repository, title,
+complete body, and labels. **Exact tracker write approval:** ask the user to
+approve this one issue creation immediately before it is submitted. A task
+plan or ship approval does not count. If declined, wait for the user to
+provide an existing issue number or approve a later exact draft.
+
 Do not proceed to Step 3 until a valid issue number is confirmed (or `issue-tracking: none` is set).
 
 ---
@@ -91,9 +97,14 @@ Display the available labels. Determine which `type:` label matches this
 commit type (`feat`, `fix`, `chore`, `refactor`, `docs`, `devops`, etc.) and
 which `area:` labels apply.
 
-If the required labels do not exist, offer to create them before continuing:
+If a required label does not exist, draft its exact name, color, description,
+and target repository. **Exact tracker write approval:** show that proposal and
+wait for the user's approval of this label creation immediately before running
+it. Repeat for each missing label; approval of the ship plan or another label
+does not count. If declined, leave the label absent and resolve the label
+requirement with the user before continuing:
 ```bash
-gh label create "type: feat" --color "#0e8a16" --description "New functionality"
+gh label create "type: feat" --color "#0e8a16" --description "New functionality" --repo "[owner/repo]"
 ```
 
 State which labels will be applied to the PR. Wait for confirmation before
@@ -519,7 +530,12 @@ In this order:
    handoffs; do not edit `CONTEXT_SNAPSHOT.md` directly.
 5. If anything surprised you, log it in `.rig/memory/ERRORS.md`
 6. If anything about The Rig's workflow was missing or felt wrong, log it in `.rig/memory/RIG_GAPS.md`
-7. **Post a closing comment on the GitHub Issue:**
+7. **Post a closing comment on the GitHub Issue:** First show the exact issue
+   number, target repository, and complete comment body below. **Exact tracker
+   write approval:** wait for the user's approval of this one comment
+   immediately before posting. A merge or ship approval does not cover it.
+   Repeat for each issue. If declined, record the comment as pending and
+   continue local housekeeping without posting it.
    ```bash
    gh issue comment [N] --body "Implemented in PR #[M].
 
@@ -650,7 +666,12 @@ Closes #13
 Do not combine issue numbers on one `Closes` line. If one issue is only partially
 delivered, list it under `Notes` or a progress section instead of `Closes`.
 
-Then create the PR:
+Then create the PR. The `--label` flags change external label assignments.
+**Exact tracker write approval:** show the target repository, PR title, and
+complete label list, and obtain the user's approval to apply those labels to
+this PR immediately before the create command. The earlier Step 3 label
+discussion is not this approval. If approval is declined, keep the branch
+ready and resolve the required labels before opening the PR:
 
 ```bash
 cat > /tmp/ship-pr-body.md << 'EOF'

@@ -259,6 +259,80 @@ PY
   if grep -Fq '**Issue**:' "$process"; then return 1; fi
 }
 
+@test "shipped tracker mutation examples require nearby exact action approval" {
+  run python3 - "$REPO_ROOT" <<'PY'
+import pathlib
+import re
+import sys
+
+root = pathlib.Path(sys.argv[1]) / "templates/project"
+paths = list((root / ".claude/commands").glob("*.md"))
+paths += list((root / ".rig/processes").glob("*.md"))
+mutation = re.compile(r"\bgh\s+(?:issue\s+(?:create|edit|comment)|label\s+create|pr\s+comment|pr\s+edit\b[^\n]*--add-label)\b")
+for command in ("gh issue create", "gh issue edit", "gh issue comment",
+                "gh label create", "gh pr comment", "gh pr edit 1 --add-label bug"):
+    assert mutation.search(command), command
+assert not mutation.search("gh issue view 42")
+
+def unguarded(lines):
+    violations = []
+    fence_start = None
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith("```"):
+            fence_start = index if fence_start is None else None
+            continue
+        if fence_start is None:
+            continue
+        label_assignment = bool(re.search(r"\bgh\s+pr\s+create\b", line)
+                                and "--label" in "\n".join(lines[index:index + 15]).split("```")[0])
+        if not mutation.search(line) and not label_assignment:
+            continue
+        context = " ".join(lines[max(0, fence_start - 16):fence_start]).lower()
+        context = re.sub(r"\s+", " ", context)
+        if "exact tracker write approval" not in context:
+            violations.append((index + 1, line.strip()))
+    return violations
+
+for command in ("gh issue create", "gh issue edit", "gh issue comment",
+                "gh label create", "gh pr comment", "gh pr edit 1 --add-label bug",
+                "gh pr create --label bug"):
+    assert unguarded(["```bash", command, "```"]), command
+    assert not unguarded(["Exact tracker write approval: show and ask first.",
+                          "```bash", command, "```"]), command
+
+violations = []
+for path in paths:
+    for number, line in unguarded(path.read_text().splitlines()):
+        violations.append(f"{path.relative_to(root)}:{number}: {line}")
+assert not violations, "Unguarded tracker mutation examples:\n" + "\n".join(violations)
+PY
+  if [ "$status" -ne 0 ]; then printf '%s\n' "$output"; return 1; fi
+  [ "$status" -eq 0 ]
+}
+
+@test "generated Codex task ship and rig-gaps retain tracker approval gates" {
+  local generated="$BATS_TEST_TMPDIR/tracker-skills"
+  run python3 "$REPO_ROOT/installer/generate-codex-skills.py" \
+    --output "$generated" --base-branch main \
+    "$COMMAND_DIR/task.md" "$COMMAND_DIR/ship.md" "$COMMAND_DIR/rig-gaps.md"
+  [ "$status" -eq 0 ]
+  for command in task ship rig-gaps; do
+    [ -f "$generated/$command/references/command.md" ]
+    grep -Fq 'Exact tracker write approval' "$generated/$command/references/command.md"
+  done
+}
+
+@test "global and project policies require approval for each tracker write" {
+  grep -Fq 'Require exact approval before every external tracker write' \
+    "$REPO_ROOT/templates/global/CLAUDE.md"
+  grep -Fq 'For a batch, repeat the' \
+    "$REPO_ROOT/templates/project/.rig/rules/security.md"
+  grep -Fq 'files it only after the user approves that individual write' \
+    "$REPO_ROOT/templates/project/CLAUDE.md"
+  grep -Fq 'Existing installations may retain a user-owned' \
+    "$REPO_ROOT/docs/customizing.md"
+}
+
 @test "rig-gaps triage process names Claude and Codex collect commands" {
   local process="$REPO_ROOT/templates/project/.rig/processes/RIG_GAPS_TRIAGE.md"
   grep -Fq 'Claude `/rig-gaps --collect` or Codex' "$process"

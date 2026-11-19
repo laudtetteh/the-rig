@@ -15,13 +15,15 @@ in the project `CLAUDE.md`. Set these once and every session inherits them:
 base-branch: main          # integration branch all PRs target
 housekeeping: direct-push  # direct-push | pr-required (how /post-merge commits)
 issue-tracking: github     # github | linear | trello | gus | none
-issue-creator: user        # user (default) | agent — GitHub only: agent auto-creates issues
+issue-creator: user        # user (default) | agent — GitHub only: agent drafts and files after approval
 secret-scanner: gitleaks   # gitleaks | none
 commit-cleanup: yes        # yes | no (filter known tool footers; warn on late additions)
 rig-gaps-push-target:      # optional: absolute path to RIG_GAPS.md in the local Rig repo
 ```
 
 **`issue-tracking:`** shapes the entire task intake and commit workflow. The ref format enforced in the `commit-msg` hook (`[#N]`, `[TEAM-123]`, `[trello:ID]`, `[W-N]`) and the intake question in Claude `/task` or Codex `$task` both follow the configured tracker. Set to `none` for personal projects, prototypes, or repos without an issue tracker.
+
+**`issue-creator: agent`** asks the agent to prepare a GitHub issue when none exists. It is not standing permission to file one: the agent shows the exact target repository, title, body, and labels, then waits for approval of that individual issue creation. The same rule applies to tracker comments, labels, edits, and other tracker writes. Existing installations may retain a user-owned `CLAUDE.md` description that says "auto-creates"; update that description when upgrading. The setting value stays `agent`, but approval is now required for each write.
 
 **`rig-gaps-push-target:`** enables `/rig-gaps --push` — a same-machine shortcut that appends unsubmitted gap entries directly to The Rig's own `RIG_GAPS.md` without copy-paste. Only useful if you maintain The Rig (or a fork) on this machine. Example:
 
