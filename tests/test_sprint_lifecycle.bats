@@ -31,6 +31,43 @@ open(os.environ["TASK_F"],"w").write("\n".join(lines)+"\n")'
   printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["schema_version"]==1 and d["result"]["tasks"][0]["canonical_ref"]=="#10"; assert d["result"]["parity"][0]["class"]=="evidence_unavailable"; assert "tracker_evidence_unavailable" in d["warnings"]'
 }
 
+@test "placeholder issue values keep cards distinct and out of tracker parity" {
+  task no-tracker-a 'N/A (issue-tracking: none)' P1 src/a.py
+  task no-tracker-b 'N/A (issue-tracking: none)' P1 src/b.py
+  task pending-a 'TBD' P1 src/c.py
+  task pending-b 'TBD' P1 src/d.py
+  task local-explanation 'none — local card' P1 src/e.py
+  task real-github '#10' P1 src/f.py
+  task real-custom 'NONE-123' P1 src/g.py
+  task fallback 'TBD' P1 src/h.py
+  task annotated-tbd 'TBD: will file' P1 src/i.py
+  task real-pending 'pending review' P1 src/j.py
+  task real-unknown 'unknown project' P1 src/k.py
+  task real-tbd-prefix 'TBD-123' P1 src/l.py
+  TASK_F="$CASE_DIR/.rig/tasks/backlog/fallback.md" python3 -c 'import os,pathlib; p=pathlib.Path(os.environ["TASK_F"]); p.write_text(p.read_text().replace("**GitHub issue**: TBD", "**GitHub issue**: TBD\n**Issue**: #12"))'
+
+  run "$CASE_DIR/bin/rig" sprint audit --all --json
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c '
+import json, sys
+r = json.load(sys.stdin)["result"]
+refs = {task["slug"]: task["canonical_ref"] for task in r["tasks"]}
+assert not r["duplicates"]
+assert all(refs[slug] is None for slug in (
+    "no-tracker-a", "no-tracker-b", "pending-a", "pending-b",
+    "local-explanation", "annotated-tbd"))
+assert {refs[slug] for slug in ("real-github", "real-custom", "fallback",
+                                "real-pending", "real-unknown", "real-tbd-prefix")} == {
+    "#10", "NONE-123", "#12", "pending review", "unknown project", "TBD-123"}
+assert {item["canonical_ref"] for item in r["parity"]} == {
+    "#10", "NONE-123", "#12", "pending review", "unknown project", "TBD-123"}
+'
+
+  run "$CASE_DIR/bin/rig" sprint plan --all --mode plan-only --json
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; p=json.load(sys.stdin)["result"]["plan"]; assert {s for wave in p["waves"] for s in wave}=={"no-tracker-a","no-tracker-b","pending-a","pending-b","local-explanation","real-github","real-custom","fallback","annotated-tbd","real-pending","real-unknown","real-tbd-prefix"}'
+}
+
 @test "plan deterministically separates prefix conflicts and non-execution lanes" {
   task feat-a '#10' P1 src
   task feat-b '#11' P2 src/b.py

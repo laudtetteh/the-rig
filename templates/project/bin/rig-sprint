@@ -30,10 +30,19 @@ ISSUE_FIELDS=("GitHub issue","Issue","GitHub")
 TERMINAL_STATUSES={"done","complete","completed","closed","cancelled","canceled"}
 # Declared statuses that clearly mean open work; only these contradict done/.
 OPEN_STATUSES={"backlog","active","open","proposed","planned","blocked","todo","wip"}
+PLACEHOLDER_REF=re.compile(
+    r"(?:n/?a|none|tbd|not applicable|no issue)"
+    r"(?:\s*\([^)]*\)|:\s+\S.*|\s+[—–-]\s+\S.*)?"
+)
+def placeholder_ref(value):
+    # Accept standard placeholders and explicitly delimited explanations only;
+    # arbitrary tracker refs such as NONE-123 and "pending review" stay valid.
+    value=value.replace("`", "").strip().casefold()
+    return value in {"-", "–", "—"} or bool(PLACEHOLDER_REF.fullmatch(value))
 def issue_ref(text):
     for key in ISSUE_FIELDS:
         value=metadata(text,key)
-        if value: return value
+        if value and not placeholder_ref(value): return value
     return ""
 def declared_status(text):
     # First whole word, ignoring decoration such as backticks, emoji or a
