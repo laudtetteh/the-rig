@@ -128,7 +128,7 @@ issue-tracking: github
 
 | Value | Behaviour |
 |---|---|
-| `github` | GitHub issues required. `/task` blocks until issue number provided (or agent creates one if `issue-creator: agent`). Ref format: `[#N]`. `gh` CLI used for all PR/issue operations. |
+| `github` | GitHub issues required. `/task` blocks until an issue number is provided (or drafts one and files it after exact approval when `issue-creator: agent`). Ref format: `[#N]`. `gh` CLI used for all PR/issue operations. |
 | `linear` | Linear tickets required. User provides existing ticket ID (e.g. `ENG-123`). Ref format: `[ENG-123]`. Agent never creates Linear tickets. |
 | `trello` | Trello cards required. User provides existing card ID. Ref format: `[trello:CARD-ID]`. Agent never creates Trello cards. |
 | `gus` | GUS work items required. User provides existing item ID (e.g. `W-1234567`). Ref format: `[W-1234567]`. Agent never creates GUS items. |
@@ -141,7 +141,7 @@ issue-creator: user
 | Value | Behaviour |
 |---|---|
 | `user` | (Default) Agent blocks and waits for the user to provide a ticket number before starting any task. |
-| `agent` | Agent creates the GitHub issue itself using the task description, then proceeds immediately. **Only applies when `issue-tracking: github`.** For all other trackers, `user` behavior is always used regardless of this setting. |
+| `agent` | Agent drafts the GitHub issue, shows its exact title, body, labels, and target repository, and files it only after the user approves that individual write. It proceeds after the issue number exists. **Only applies when `issue-tracking: github`.** For all other trackers, `user` behavior is always used regardless of this setting. |
 
 ```
 secret-scanner: gitleaks

@@ -29,8 +29,13 @@
 
 Also read `issue-creator:` (default: `user`).
 - `issue-creator: user`: block until the user provides `#N`. Do not proceed without it.
-- `issue-creator: agent`: create the issue now with `gh issue create`, note the `#N`, proceed.
-  If the user already provided a number, use that instead — skip creation.
+- `issue-creator: agent`: draft the issue title, complete body, labels, and target
+  repository. Show that exact proposed action and ask for the user's explicit
+  approval immediately before `gh issue create`; the setting, task launch, or
+  plan approval is not permission to file it. If the draft changes, show the
+  revised action and ask again. If approval is declined, wait for an existing
+  `#N` or later approval. After approval, create the issue, note its `#N`, and
+  proceed. If the user already provided a number, skip creation.
 
 **Ticket validation — required before Step 1.** Open the task file and find the
 tracker-specific field; for GitHub projects this is `**GitHub issue**: [ref]`.

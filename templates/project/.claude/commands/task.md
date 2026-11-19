@@ -56,9 +56,9 @@ Ask the user the following. Collect all answers before moving to Part 2.
      - **`issue-creator: user`**: A GitHub issue is required. If the user already provided a number (e.g. `#42`), note it and continue. If none exists yet, stop and say exactly:
        > "Every task needs a GitHub issue before we start. Create one now and share the number — I'll wait. It goes in the task file and every commit."
        Do not proceed to Part 2 until a real issue number is provided.
-     - **`issue-creator: agent`**: Create the GitHub issue now using the task description from question 1. Run:
+     - **`issue-creator: agent`**: Draft the GitHub issue using the task description from question 1. Resolve the target repository, then show the complete proposed title, body, and labels. **Exact tracker write approval:** ask the user to approve creation of this one issue immediately before the command. The setting and any approval to start or plan the task are not approval to file it. If the user changes the draft, show the revised action and ask again; if they decline, wait for an existing issue number or a later exact approval. After approval, run:
        ```bash
-       gh issue create --title "[task title]" --body "[one-line context]"
+       gh issue create --repo "[owner/repo]" --title "[approved task title]" --body "[approved body]"
        ```
        Note the number, tell the user: "Created issue #[N]. Proceeding." If the user already provided a number, use that instead — skip creation.
 

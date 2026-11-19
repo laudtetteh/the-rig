@@ -92,7 +92,7 @@ Do not summarise these back to me unless asked.
 
 ---
 
-## Hard rules (non-negotiable) — 12 total
+## Hard rules (non-negotiable) — 13 total
 
 1. **Never delete files without explicit permission.** Move to `_archive/` instead.
 2. **Never run destructive DB commands** (`DROP`, `TRUNCATE`, `DELETE` without `WHERE`)
@@ -133,6 +133,14 @@ Do not summarise these back to me unless asked.
     client. At the start of every session, identify the main repo root with
     `git rev-parse --show-toplevel` and target ALL Write/Edit tool calls and `git`
     commands there. Never create branches or write files inside the worktree path.
+13. **Require exact approval before every external tracker write.** Before creating,
+    editing, deleting, or commenting on an issue, ticket, card, label, milestone,
+    or project item, show the target and complete proposed content, then wait for
+    the user's explicit approval of that one action immediately before writing.
+    A task launch, sprint plan, general "go", `issue-creator: agent` setting, or
+    approval for another tracker action does not authorize this write. If the
+    user declines, leave the external item unchanged and continue only where
+    the workflow can proceed without it.
 
 ---
 
