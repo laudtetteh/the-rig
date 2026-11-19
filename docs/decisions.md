@@ -469,3 +469,44 @@ downstream-pilot blocker, automatic convergence resolves 5 of 16 customized
 Rig-owned files and reports the other 11 as genuine overlapping edits. That
 ceiling is intentional release evidence, not a claim that convergence unblocks
 the rollout by itself.
+
+---
+
+## 23. Project conventions can vary without changing Rig-owned files
+
+**Decided (owner approved 2026-11-17, issue #674):** Add four separately
+implemented configuration choices while preserving current behavior when each
+new setting is absent:
+
+1. `git-remote: origin` selects the remote used for base fetches and reads.
+   Branch pushes follow the branch's own upstream. A fork may therefore fetch
+   from `upstream` and push its feature branch to `origin`.
+2. `pr-host: github | none` defaults to `github`. With `none`, the ship workflow
+   stops after push and gives manual PR instructions. GitHub CLI remains the
+   supported automated PR host.
+3. `pr-labels: on | off` defaults to `on`. With `off`, ship, post-merge, and
+   metadata review omit `type:` and `area:` label actions. With `on`, a missing
+   label produces a warning and is skipped instead of failing the PR edit.
+4. Global installation honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`. A changed
+   Claude configuration directory must account for an existing manifest under
+   `$HOME/.claude` so an upgrade does not silently create a second baseline.
+
+**Rejected for this scope:** A fixed `origin` prerequisite, GitHub-only ship
+flow for non-GitHub projects, mandatory `type:`/`area:` labels, hardcoded
+provider configuration directories, configurable label prefixes, and full
+GitLab or Bitbucket PR adapters. The latter two remain out of scope until a
+user asks for them.
+
+**Rationale:** The current defaults work for existing GitHub projects, while
+forks, other trackers, repositories without Rig's label taxonomy, and custom
+provider configuration directories need explicit choices. Defaults matching
+the current behavior keep existing installations stable. `RIG_INSTALLER_SRC`
+already supplies an installer-source override; its documentation gap was
+resolved in #672/#681 and needs no new implementation ticket.
+
+**Consequences:** The four implementation changes are separate proposed issue
+creations, awaiting approval of each exact tracker action. Each must verify
+fresh install, upgrade from the previous release, generated Claude/Codex
+guidance, and the relevant remote, label, or provider-directory edge cases.
+This entry records the design; it does not claim that those settings are
+implemented yet.
