@@ -487,15 +487,18 @@ new setting is absent:
 3. `pr-labels: on | off` defaults to `on`. With `off`, ship, post-merge, and
    metadata review omit `type:` and `area:` label actions. With `on`, a missing
    label produces a warning and is skipped instead of failing the PR edit.
-4. Global installation honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`. A changed
-   Claude configuration directory must account for an existing manifest under
-   `$HOME/.claude` so an upgrade does not silently create a second baseline.
+4. Global installation honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`. The
+   settings hook command uses the resolved absolute Claude configuration path.
+   When the configuration directory changes, the upgrade falls back to reading
+   an existing `$HOME/.claude` manifest instead of silently creating a second
+   baseline.
 
 **Rejected for this scope:** A fixed `origin` prerequisite, GitHub-only ship
 flow for non-GitHub projects, mandatory `type:`/`area:` labels, hardcoded
-provider configuration directories, configurable label prefixes, and full
-GitLab or Bitbucket PR adapters. The latter two remain out of scope until a
-user asks for them.
+provider configuration directories, a `RIG_INSTALLER_SRC` rename, configurable
+label prefixes, and full GitLab or Bitbucket PR adapters. Configurable label
+prefixes are a won't-fix under this decision; full multi-host adapters are
+deferred until a user requests them.
 
 **Rationale:** The current defaults work for existing GitHub projects, while
 forks, other trackers, repositories without Rig's label taxonomy, and custom
