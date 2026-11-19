@@ -57,7 +57,7 @@ Three locations work together. The installer repo produces the other two:
 │  Once per machine.       │  │  Once per project.                │
 │                          │  │                                   │
 │  ~/.claude/CLAUDE.md     │  │  CLAUDE.md       ← project brain  │
-│    └─ Hard rules (12),   │  │  .rig/           ← Rig system     │
+│    └─ Hard rules (13),   │  │  .rig/           ← Rig system     │
 │       working style,     │  │  .rig/processes/ ← workflows      │
 │       memory discipline, │  │  .rig/rules/     ← standards      │
 │       planning, git,     │  │  .rig/memory/    ← PROGRESS +     │
