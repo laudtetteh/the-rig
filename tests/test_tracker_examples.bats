@@ -66,3 +66,29 @@ PY
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c 'import json,sys; assert json.load(sys.stdin)["tracker"]=="linear"'
 }
+
+@test "ship and status normalize quoted GitHub settings and process supports generic refs" {
+  local project="$BATS_TEST_TMPDIR/quoted-tracker" script="$BATS_TEST_TMPDIR/ship-tracker.sh"
+  mkdir -p "$project/bin"
+  git -C "$project" init -q
+  cp "$REPO_ROOT/templates/project/bin/rig-tracker-config.py" "$project/bin/rig-tracker-config.py"
+  printf "issue-tracking: 'GitHub' # comment\n" > "$project/CLAUDE.md"
+  python3 - "$COMMANDS/ship.md" "$script" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+section = text.split('## Step 9.5 — Final merge-boundary metadata review', 1)[1]
+code = section.split('```bash\n', 1)[1].split('```', 1)[0]
+Path(sys.argv[2]).write_text(code.split('REVIEW_DIR=', 1)[0] + 'printf "%s\\n" "$TRACKING"\n')
+PY
+  run bash -c 'cd "$1" && bash "$2"' _ "$project" "$script"
+  [ "$status" -eq 0 ]
+  [ "$output" = github ]
+  grep -Fq 'bin/rig-tracker-config.py" show "$REPO/CLAUDE.md"' "$COMMANDS/rig-status.md"
+  local process="$REPO_ROOT/templates/project/.rig/processes/SHIP_WORKFLOW.md"
+  grep -Fq 'validate-ref CLAUDE.md "REF"' "$process"
+  grep -Fq 'read the task' "$process"
+  grep -Fq 'create a GitHub issue for this mode' "$process"
+  grep -Fq 'type(scope): short description [REF]' "$process"
+  grep -Fq 'including the later housekeeping commit' "$process"
+}

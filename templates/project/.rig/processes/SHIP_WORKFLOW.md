@@ -25,12 +25,23 @@ valid empty active task list.
 
 ---
 
-## Step 0 — Create the GitHub issue first
+## Step 0 — Confirm the configured tracker reference
 
-**Read `issue-tracking:` from `CLAUDE.md` before proceeding.**
+From the project root, run
+`python3 bin/rig-tracker-config.py show CLAUDE.md` and use its normalized
+`tracker`, `pattern`, and `example` values. Stop on a configuration error.
 
-- **If `issue-tracking: none`:** skip this entire step. Issue numbers are not required in commit messages. Continue to Step 1.
-- **If `issue-tracking: github`** (or field absent — default): follow the full step below.
+- **If `tracker` is `none`:** skip this entire step. No tracker reference is
+  required in commit messages; continue to Step 1.
+- **If `tracker` is neither `github` nor `none`:** read the task's existing
+  `**Issue**:` reference; if absent, obtain it from the user before writing
+  code. Validate it with
+  `python3 bin/rig-tracker-config.py validate-ref CLAUDE.md "REF"`, substituting
+  the supplied value for `REF`; ask for a corrected reference if validation
+  fails. Record it in the task file and use `[REF]` in commit subjects. Do not
+  create a GitHub issue for this mode. Continue to Step 1.
+- **If `tracker` is `github`** (the default when absent): follow the GitHub
+  issue flow below.
 
 **Before writing any code, obtain the GitHub issue number.** If no issue exists
 and the agent is configured to draft one, use the approval gate below.
@@ -260,10 +271,13 @@ for this task). Skip this step if you are already on a suitable feature branch.
 
 ## Step 4 — Commit
 
-Use conventional commit format:
+Use conventional commit format. Replace `REF` in every commit example below,
+including the later housekeeping commit, with the validated reference from
+Step 0; for GitHub this is `#N`. Omit the bracketed reference when the tracker
+is `none`:
 
 ```
-type(scope): short description [#N]
+type(scope): short description [REF]
 
 Body: explain WHY, not what. The diff shows what.
 ```
@@ -275,7 +289,7 @@ Rig directory. Do this before the separate `git commit` call:
 
 ```bash
 cat > /tmp/commit-msg.txt << 'EOF'
-feat(scope): description [#N]
+feat(scope): description [REF]
 
 Body explaining the why.
 EOF
@@ -433,7 +447,7 @@ if [[ "$RIG_DIR" == "$ROOT/.rig" ]] && ! git -C "$ROOT" check-ignore -q .rig/mem
     git -C "$ROOT" add -u -- .rig/tasks/active/TASK_[name].md
   fi
   touch "$RIG_DIR/memory/.rig-commit-ok"
-  RIG_COMMIT_POLICY=guarded git -C "$ROOT" commit -m "chore: post-task housekeeping [#N]"
+  RIG_COMMIT_POLICY=guarded git -C "$ROOT" commit -m "chore: post-task housekeeping [REF]"
 else
   echo "Rig memory and task files are external or locally ignored; no housekeeping commit is needed."
 fi
@@ -447,14 +461,15 @@ When made, this commit goes on the same PR branch before the PR is merged.
 
 After the last commit is pushed and the user asks to merge, fetch the PR's
 `number,state,isDraft,headRefOid,title,body,labels,commits` with
-`gh pr view --json` into a temporary JSON file. Read `issue-tracking:` from
-`CLAUDE.md`, defaulting to `github` when absent. Only for GitHub tracking, fetch
+`gh pr view --json` into a temporary JSON file. Read the normalized tracker
+from `python3 bin/rig-tracker-config.py show CLAUDE.md`. Stop on a config error.
+Only for GitHub tracking, fetch
 the PR's closing issue references with `gh api graphql`; if that fetch fails,
 report that the reviewer will use closing keywords from the body. Run
 `bin/rig pr review-metadata --pr FILE --issue-tracking TRACKING --payload-out FILE`
-with the configured tracker value, `--closing FILE` when available,
-`--issue NUMBER` for every scoped issue,
-`--not-closing NUMBER` for partial issues, and `--require-label LABEL` for each
+with the normalized tracker value, `--closing FILE` when available,
+`--issue NUMBER` for every scoped GitHub issue,
+`--not-closing NUMBER` for partial GitHub issues, and `--require-label LABEL` for each
 required `area:` label. This review is read-only.
 
 Exit 0 means the metadata is clean: show the reviewed head SHA and final commits,
