@@ -5,7 +5,8 @@ KICKOFF="$REPO_ROOT/templates/project/.claude/commands/kickoff.md"
 
 setup() {
   TEST_REPO="$BATS_TEST_TMPDIR/project"
-  mkdir -p "$TEST_REPO"
+  mkdir -p "$TEST_REPO/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-tracker-config.py" "$TEST_REPO/bin/rig-tracker-config.py"
   git -C "$TEST_REPO" init -q
   git -C "$TEST_REPO" config user.email test@example.com
   git -C "$TEST_REPO" config user.name "Kickoff Guard Test"
@@ -215,35 +216,68 @@ kickoff_section() {
   [ "$output" = "tracking=github creator=user" ]
 }
 
-@test "kickoff tracker probe: reads every supported tracker and the issue creator" {
+@test "kickoff tracker probe: reads presets and arbitrary trackers through the shared parser" {
   local mode
-  for mode in github linear trello gus none; do
+  for mode in github linear trello gus none jira; do
     printf '# Project\n\n```\nissue-tracking: %s\n```\n\n```\nissue-creator: agent\n```\n' "$mode" > "$TEST_REPO/CLAUDE.md"
     run_tracker_probe
     [ "$status" -eq 0 ] || return 1
     [ "$output" = "tracking=$mode creator=agent" ] || return 1
   done
+  printf "issue-tracking: Jira # team tracker\nissue-ref-pattern: '[A-Z]+-[0-9]+'\nissue-creator: agent\n" > "$TEST_REPO/CLAUDE.md"
+  run_tracker_probe
+  [ "$status" -eq 0 ]
+  [ "$output" = "tracking=jira creator=agent" ]
+  run python3 "$TEST_REPO/bin/rig-tracker-config.py" validate-ref "$TEST_REPO/CLAUDE.md" APP-123
+  [ "$status" -eq 0 ]
+}
+
+@test "fresh Jira install runs kickoff probe and ships generic Claude and Codex guidance" {
+  local project="$BATS_TEST_TMPDIR/jira-installed"
+  mkdir -p "$project"
+  git -C "$project" init -q
+  run bash "$REPO_ROOT/install.sh" --project-only --target "$project" \
+    --project-name Jira --tracking repo --project-agent both --strategy merge
+  [ "$status" -eq 0 ]
+  python3 - "$project/CLAUDE.md" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+assert "\nissue-tracking: github\n" in text
+path.write_text(text.replace("\nissue-tracking: github\n",
+                             "\nissue-tracking: jira\nissue-ref-pattern: '[A-Z]+-[0-9]+'\n", 1))
+PY
+  TEST_REPO="$project"
+  KICKOFF="$project/.claude/commands/kickoff.md"
+  run_tracker_probe
+  [ "$status" -eq 0 ]
+  [ "$output" = "tracking=jira creator=user" ]
+  run python3 "$project/bin/rig-tracker-config.py" validate-ref "$project/CLAUDE.md" APP-123
+  [ "$status" -eq 0 ]
+  grep -Fq 'Any other `tracking=` value' "$KICKOFF"
+  grep -Fq 'Any other `tracking=` value' "$project/.agents/skills/kickoff/references/command.md"
 }
 
 @test "kickoff: every tracker mode has plan, record, and handoff guidance" {
   local mode
-  for mode in github-agent github-user github-deferred linear trello gus none; do
+  for mode in github-agent github-user github-deferred tracker-user none; do
     /usr/bin/grep -q "^| \`$mode\` | \*\*3\. " "$KICKOFF" || return 1
     kickoff_section '^#### 5c\.' '^#### 5d\.' | /usr/bin/grep -q "\`$mode\`" || return 1
     kickoff_section '^### Step 6' '^## Notes' | /usr/bin/grep -q "\`$mode\`" || return 1
   done
-  run /usr/bin/grep -q 'is not a supported tracker' "$KICKOFF"
+  run /usr/bin/grep -q 'Any other `tracking=` value' "$KICKOFF"
   [ "$status" -eq 0 ]
 }
 
 @test "kickoff: GitHub issue creation is confined to the agent-creator github mode" {
   local total agent_only
   total=$(/usr/bin/grep -c 'gh issue create' "$KICKOFF")
-  agent_only=$(kickoff_section '^\*\*`github-agent`:\*\*' '^\*\*`github-user`, `linear`, `trello`, or `gus`:\*\*' \
+  agent_only=$(kickoff_section '^\*\*`github-agent`:\*\*' '^\*\*`github-user` or `tracker-user`:\*\*' \
     | /usr/bin/grep -c 'gh issue create')
   [ "$total" -ge 1 ]
   [ "$total" -eq "$agent_only" ]
-  run /usr/bin/grep -q 'never creates Linear tickets, Trello cards, or GUS work items' "$KICKOFF"
+  run /usr/bin/grep -q 'never creates tickets for another tracker' "$KICKOFF"
   [ "$status" -eq 0 ]
   run /usr/bin/grep -q 'never creates GitHub issues in mode `github-user`' "$KICKOFF"
   [ "$status" -eq 0 ]
@@ -292,7 +326,7 @@ kickoff_section() {
 
 @test "kickoff: issue creation creates missing labels and reports partial failures" {
   local agent_block
-  agent_block="$(kickoff_section '^\*\*`github-agent`:\*\*' '^\*\*`github-user`, `linear`, `trello`, or `gus`:\*\*')"
+  agent_block="$(kickoff_section '^\*\*`github-agent`:\*\*' '^\*\*`github-user` or `tracker-user`:\*\*')"
   [[ "$agent_block" == *'gh label create "type: feat" --color "#0075ca" --description "New feature"'* ]] || return 1
   [[ "$agent_block" == *'never invent a label'* ]] || return 1
   [[ "$agent_block" == *'which issue numbers were already created'* ]] || return 1
@@ -300,6 +334,16 @@ kickoff_section() {
   run /usr/bin/grep -q 'gh label create "type: feat" --color "#0075ca" --description "New feature"' \
     "$REPO_ROOT/templates/project/.rig/processes/SHIP_WORKFLOW.md"
   [ "$status" -eq 0 ]
+}
+
+@test "kickoff requires approval for each exact GitHub label and issue write" {
+  local agent_block
+  agent_block="$(kickoff_section '^\*\*`github-agent`:\*\*' '^\*\*`github-user` or `tracker-user`:\*\*')"
+  [[ "$agent_block" == *'Step 4 **go** authorizes only local scaffolding'* ]] || return 1
+  [[ "$agent_block" == *'target repository, name `type: feat`, color'* ]] || return 1
+  [[ "$agent_block" == *'Ask for approval to create this exact'* ]] || return 1
+  [[ "$agent_block" == *'exact title, full body, and every label'* ]] || return 1
+  [[ "$agent_block" == *'If declined, set'* ]] || return 1
 }
 
 @test "kickoff: generated Codex skill carries the tracker-aware guidance" {
@@ -314,6 +358,8 @@ kickoff_section() {
   run /usr/bin/grep -q 'kickoff-github-preflight-start' "$skill"
   [ "$status" -eq 0 ]
   run /usr/bin/grep -q 'N/A (issue-tracking: none)' "$skill"
+  [ "$status" -eq 0 ]
+  run /usr/bin/grep -q 'bin/rig-tracker-config.py' "$skill"
   [ "$status" -eq 0 ]
 }
 

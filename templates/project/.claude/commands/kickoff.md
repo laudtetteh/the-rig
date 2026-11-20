@@ -199,17 +199,19 @@ Record all decisions in `PROJECT_BRIEF.md` under the relevant section (or under
 
 ### Step 4 — Confirm the build plan
 
-First, read the configured issue tracker and issue creator from `CLAUDE.md`. An
-absent `issue-tracking:` field means `github`; an absent `issue-creator:` field
-means `user`. The marker comments are used by the focused tracker tests; keep the
-commands between them executable:
+First, read the normalized tracker configuration through the shared parser and
+read `issue-creator:` from `CLAUDE.md`. An absent `issue-tracking:` field means
+`github`; an absent `issue-creator:` field means `user`. Stop on a parser error
+before scaffolding. The marker comments are used by the focused tracker tests;
+keep the commands between them executable:
 
 ```bash
 # kickoff-tracker-probe-start
 REPO=$(git rev-parse --show-toplevel)
-TRACKING=$(grep "^issue-tracking:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+TRACKER_JSON=$(python3 "$REPO/bin/rig-tracker-config.py" show "$REPO/CLAUDE.md") || exit 1
+TRACKING=$(printf '%s' "$TRACKER_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tracker"])') || exit 1
 CREATOR=$(grep "^issue-creator:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
-printf 'tracking=%s creator=%s\n' "${TRACKING:-github}" "${CREATOR:-user}"
+printf 'tracking=%s creator=%s\n' "$TRACKING" "${CREATOR:-user}"
 # kickoff-tracker-probe-end
 ```
 
@@ -218,13 +220,9 @@ Pick the tracker mode from the printed values:
 - `tracking=github` with any other creator value → mode `github-user`
   (`issue-creator: user` is the default, and any creator other than `agent`
   falls back to `user`, as in `/task`)
-- `tracking=linear`, `tracking=trello`, `tracking=gus`, or `tracking=none` → mode
-  `linear`, `trello`, `gus`, or `none` (`issue-creator:` only applies to GitHub)
-
-If `tracking=` is anything else, stop and tell the user:
-"`issue-tracking: [value]` in `CLAUDE.md` is not a supported tracker. Set it to
-`github`, `linear`, `trello`, `gus`, or `none`, then run `/kickoff` again." Do not
-scaffold until the value is supported.
+- `tracking=none` → mode `none`
+- Any other `tracking=` value → mode `tracker-user`. This includes the `linear`,
+  `trello`, and `gus` presets. `issue-creator:` applies only to GitHub.
 
 **GitHub preflight — mode `github-agent` only.** Before presenting the plan, check
 that the agent can actually open issues in this repository. Run:
@@ -262,9 +260,10 @@ printf 'github_ready=%s type_feat_label=%s\n' "$github_ready" "$type_feat_label"
 ```
 
 - If `github_ready=1`, keep mode `github-agent`. If `type_feat_label=missing`, item
-  3 of the plan must also say that Step 5c will create the `type: feat` label
-  first. Also note which existing labels whose names start with `area:` fit the
-  tasks. Use only labels that already exist; never invent an area label.
+  3 of the plan must also say that Step 5c will propose the exact `type: feat`
+  label for separate approval before creating it. Also note which existing
+  labels whose names start with `area:` fit the tasks. Use only labels that
+  already exist; never invent an area label.
 - If `github_ready=0`, switch to mode `github-deferred`. Show each `preflight:` line
   to the user in the plan, and offer to continue with task files only. The user
   can also fix the cause and run `/kickoff` again before saying **go**.
@@ -273,12 +272,10 @@ Choose item 3's wording for the tracker mode from this table:
 
 | Tracker mode | Item 3 of the plan |
 |---|---|
-| `github-agent` | **3. Open GitHub issues** — I open one issue per task, labelled `type: feat` plus an existing `area:` label when one fits |
+| `github-agent` | **3. Propose GitHub issues** — I draft one issue per task and seek separate approval for each exact issue and any missing `type: feat` label before writing |
 | `github-user` | **3. Link GitHub issues** — you create one GitHub issue per task and give me each number (`issue-creator: user`); I record them in the task files |
 | `github-deferred` | **3. GitHub issues deferred** — preflight failed ([each `preflight:` line]); task files get `**GitHub issue**: TBD` and each one needs an issue before work starts |
-| `linear` | **3. Link Linear tickets** — you create one Linear ticket per task and give me each ticket ID (e.g. `ENG-123`); I record them in the task files |
-| `trello` | **3. Link Trello cards** — you create one Trello card per task and give me each card ID or short URL; I record them in the task files |
-| `gus` | **3. Link GUS work items** — you create one GUS work item per task and give me each item ID (e.g. `W-1234567`); I record them in the task files |
+| `tracker-user` | **3. Link [tracker] items** — you create one item per task and provide each reference (for example, [configured example]); I validate and record them |
 | `none` | **3. No tracker items** — `issue-tracking: none` is set, so the local task files are the backlog |
 
 Use this tracker mode for item 3 of the plan below and for Steps 5c, 5d, and 6.
@@ -296,7 +293,9 @@ Present the full scaffolding plan before touching any files:
 >
 > Say **go** to scaffold, or adjust the plan."
 
-Wait for explicit go-ahead.
+Wait for explicit go-ahead to scaffold. This **go** does not authorize a
+GitHub issue, label, comment, edit, or any other tracker write. Step 5c seeks
+separate approval immediately before each exact tracker action.
 
 ---
 
@@ -359,14 +358,27 @@ features that build on them.
 
 Use the tracker mode chosen in Step 4. The agent opens issues only in mode
 `github-agent`. It never creates GitHub issues in mode `github-user`, and the
-agent never creates Linear tickets, Trello cards, or GUS work items.
+agent never creates tickets for another tracker.
 
-**`github-agent`:** The user's **go** in Step 4 authorizes these issues and any
-missing `type: feat` label. If the Step 4 preflight printed
-`type_feat_label=missing`, create the label first, with the same name, color, and
-description that `.rig/processes/SHIP_WORKFLOW.md` uses. A label that already
-exists counts as success (the preflight list can miss it in very large label
-sets):
+**`github-agent`:** The Step 4 **go** authorizes only local scaffolding. Before
+any GitHub write, show the target repository and the exact action to the user
+and obtain separate approval for that one action immediately before it runs.
+Do not infer approval from `issue-creator: agent`, the scaffold plan, or approval
+of another item. Resolve the target repository with
+`gh repo view --json nameWithOwner -q .nameWithOwner` from the project root;
+if this read fails, mark remaining task references `TBD` and continue to
+Steps 5d and 6 without a tracker write. If the Step 4 preflight printed
+`type_feat_label=missing`,
+first present this label draft: target repository, name `type: feat`, color
+`#0075ca`, description `New feature`. Ask for approval to create this exact
+label. If declined, do not create the label or any issue requiring it; set all
+unlinked task files to `**GitHub issue**: TBD` and continue to Steps 5d and 6.
+If approved, run the label step below. A label that already exists counts as
+success (the preflight list can miss it in very large label sets):
+
+**Exact tracker write approval:** Run this label command only after the user
+approves the displayed repository, name, color, and description for this one
+label creation.
 
 ```bash
 # kickoff-type-label-start
@@ -383,14 +395,17 @@ printf 'type_feat_ready=%s\n' "$type_feat_ready"
 # kickoff-type-label-end
 ```
 
-Then, for each task file in dependency order, open a GitHub issue:
+Then, for each task file in dependency order, prepare one exact GitHub issue draft:
 - Title: matches the task goal
 - Body: copy the `## Goal`, `## Context`, and `## Acceptance criteria` from the task file
 - Labels: `type: feat`, plus one existing `area:` label when one fits. If none
   fits, use `type: feat` alone; never invent a label.
-- Run `gh issue create --title "[task goal]" --body-file [file holding the body] --label "type: feat"`,
-  adding `--label "[existing area label]"` only when one fits
-- Set the task file's `**GitHub issue**:` field to the issue number, e.g. `#42`
+- Show the target repository, exact title, full body, and every label to the
+  user. Ask for approval to create that specific issue now. If declined, set
+  only this task's `**GitHub issue**:` to `TBD` and continue to the next draft.
+- After approval, run `gh issue create --title "[task goal]" --body-file [file holding the body] --label "type: feat"`,
+  adding `--label "[existing area label]"` only when one fits. Set the task
+  file's `**GitHub issue**:` field to the returned number, e.g. `#42`.
 
 If the label step prints `type_feat_ready=0` or any `gh issue create` fails, show
 the exact error and stop creating issues. Set `**GitHub issue**: TBD` in every task file that does not yet
@@ -399,19 +414,21 @@ task slugs) and which task files still need an issue. Then continue to Step 5d a
 Step 6 and report the same split there. Do not report issues as opened until each
 one has a real number.
 
-**`github-user`, `linear`, `trello`, or `gus`:** List every task file with its title,
+**`github-user` or `tracker-user`:** List every task file with its title,
 goal, and acceptance criteria so the user can create one item per task in their
 tracker. Then say exactly:
 
-> "Create one [GitHub issue / Linear ticket / Trello card / GUS work item] per task
+> "Create one [GitHub issue / configured tracker item] per task
 > listed above and share each reference next to its task slug — I'll wait. The
 > references go in the task files and every commit."
 
 Wait for the references. Record them in each task file in the tracker's format:
 - `github-user`: keep the `**GitHub issue**:` line and set it, e.g. `**GitHub issue**: #42`
-- `linear`: replace the `**GitHub issue**: #[N]` line with `**Issue**: ENG-123`
-- `trello`: replace the `**GitHub issue**: #[N]` line with `**Issue**: trello:CARD-ID`
-- `gus`: replace the `**GitHub issue**: #[N]` line with `**Issue**: W-1234567`
+- `tracker-user`: run `python3 bin/rig-tracker-config.py validate-ref CLAUDE.md "REF"`
+  with each supplied reference replacing `REF`. Stop and ask for a corrected
+  value if validation fails. Replace the old `**GitHub issue**:` line with
+  `**Issue**: REF`. Use the configured `example` from Step 4 when showing the
+  user the expected format; `linear`, `trello`, and `gus` have preset examples.
 
 If the user cannot provide a reference for a task yet, set that task's line to
 `TBD` (`**GitHub issue**: TBD` for `github-user`, `**Issue**: TBD` otherwise) and
@@ -433,7 +450,7 @@ Append a dated entry:
 - Ran /kickoff from PROJECT_BRIEF.md
 - Filled in CLAUDE.md with real project content
 - Generated [N] tasks in .rig/tasks/backlog/
-- [Tracker line for the tracker mode chosen in Step 4: `github-agent` → "Opened GitHub issues #[X]–#[Y]", plus any task files left at `TBD` after a failure; `github-user` → "Linked GitHub issues #[X]–#[Y]", plus any `TBD`; `github-deferred` → "GitHub issues deferred (preflight failed); all task files at TBD"; `linear` / `trello` / `gus` → "Linked [tracker] items [references]", plus any `TBD`; `none` → "No tracker items (issue-tracking: none)"]
+- [Tracker line for the tracker mode chosen in Step 4: `github-agent` → "Opened approved GitHub issues [numbers]", plus every task left at `TBD` after a declined action or failure; `github-user` → "Linked GitHub issues [numbers]", plus any `TBD`; `github-deferred` → "GitHub issues deferred (preflight failed); all task files at TBD"; `tracker-user` → "Linked [configured tracker] items [references]", plus any `TBD`; `none` → "No tracker items (issue-tracking: none)"]
 - Stack confirmed: [one-line summary]
 - Open decisions deferred: [list, or 'none']
 ```
@@ -448,7 +465,7 @@ After scaffolding is complete:
 >
 > - `CLAUDE.md` is filled in — The Rig is oriented on your project
 > - [N] tasks are in `.rig/tasks/backlog/` — ordered by dependency
-> - [Tracker line for the tracker mode chosen in Step 4: `github-agent` → "GitHub issues #[X]–#[Y] are open and labelled", plus the task files still at `TBD` if creation failed partway; `github-user` → "GitHub issues #[X]–#[Y] are recorded in the task files", plus any still at `TBD`; `github-deferred` → "GitHub issues were not opened ([preflight reason]); every task file is at `TBD` and needs an issue before work starts"; `linear` / `trello` / `gus` → "[Tracker] items [references] are recorded in the task files", plus any still at `TBD`; `none` → "No tracker items — `issue-tracking: none` keeps the backlog in local task files"]
+> - [Tracker line for the tracker mode chosen in Step 4: `github-agent` → "Approved GitHub issues [numbers] are open with approved labels", plus every task still at `TBD` after a declined action or failure; `github-user` → "GitHub issues [numbers] are recorded in task files", plus any still at `TBD`; `github-deferred` → "GitHub issues were not opened ([preflight reason]); every task file is at `TBD` and needs an issue before work starts"; `tracker-user` → "[Configured tracker] items [references] are recorded in task files", plus any still at `TBD`; `none` → "No tracker items — `issue-tracking: none` keeps the backlog in local task files"]
 >
 > [Next-move line. If no task file is at `TBD`: "Suggested first move: run
 > `/run [first-task-slug]` — that's the foundation everything else builds on."
