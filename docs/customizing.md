@@ -14,14 +14,22 @@ in the project `CLAUDE.md`. Set these once and every session inherits them:
 ```
 base-branch: main          # integration branch all PRs target
 housekeeping: direct-push  # direct-push | pr-required (how /post-merge commits)
-issue-tracking: github     # github | linear | trello | gus | none
+issue-tracking: github     # github | none | any tracker name
+# issue-ref-pattern: '[A-Z]+-[0-9]+'  # optional full-reference ERE for other trackers
+# issue-ref-example: APP-123          # optional example shown in instructions
 issue-creator: user        # user (default) | agent — GitHub only: agent drafts and files after approval
 secret-scanner: gitleaks   # gitleaks | none
 commit-cleanup: yes        # yes | no (filter known tool footers; warn on late additions)
 rig-gaps-push-target:      # optional: absolute path to RIG_GAPS.md in the local Rig repo
 ```
 
-**`issue-tracking:`** shapes the entire task intake and commit workflow. The ref format enforced in the `commit-msg` hook (`[#N]`, `[TEAM-123]`, `[trello:ID]`, `[W-N]`) and the intake question in Claude `/task` or Codex `$task` both follow the configured tracker. Set to `none` for personal projects, prototypes, or repos without an issue tracker.
+**`issue-tracking:`** shapes task intake and commit references. `github`
+requires `[#N]`; `none` skips the ticket requirement. Any other name accepts
+a user-supplied existing reference in brackets. Set `issue-ref-pattern:` to
+an extended regular expression matched against the full reference, and
+`issue-ref-example:` to the example shown in instructions. Without a pattern,
+any nonempty bracketed reference is accepted. `linear`, `trello`, and `gus`
+retain their existing preset patterns and examples, which can be overridden.
 
 **`issue-creator: agent`** asks the agent to prepare a GitHub issue when none exists. It is not standing permission to file one: the agent shows the exact target repository, title, body, and labels, then waits for approval of that individual issue creation. The same rule applies to tracker comments, labels, edits, and other tracker writes. Existing installations may retain a user-owned `CLAUDE.md` description that says "auto-creates"; update that description when upgrading. The setting value stays `agent`, but approval is now required for each write.
 
@@ -681,7 +689,7 @@ runs these current postflight checks:
 | `codex_project_instructions` | Codex has an effective `AGENTS*` file or configured `CLAUDE.md` fallback when Codex is an installed target | Codex is not an installed project target, or present target metadata is invalid |
 | `codex_project_target_runtime` | A live Codex runtime has the project target infrastructure it needs | Codex runtime is not detected, or present target metadata is invalid |
 | `codex_session_runtime` | A live Codex thread is bound to an active Rig session record | Codex runtime is not detected, or present target metadata is invalid |
-| `issue_tracking` | `CLAUDE.md` has at most one supported `issue-tracking:` value | Never; unsupported tracker configuration is a failure |
+| `issue_tracking` | `CLAUDE.md` has at most one valid `issue-tracking:` value and a valid optional reference pattern | Never; invalid or duplicate tracker configuration is a failure |
 | `github_auth` | GitHub authentication is available when `issue-tracking: github` | A non-GitHub or invalid tracker is configured |
 | `tracker_command_guidance` | `/task` and `/ship` guidance covers the configured tracker | Tracker configuration is invalid, or either command source is absent |
 | `recent_commit_references` | Recent authored commits follow the configured tracker reference convention; multi-parent merge commits are excluded | Tracker configuration is invalid or `none`, or there are no authored commits to inspect |

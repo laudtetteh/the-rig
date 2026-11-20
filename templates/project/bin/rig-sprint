@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Public, provider-neutral sprint audit/plan/status engine."""
-import argparse, datetime, fcntl, fnmatch, hashlib, json, os, pathlib, re, subprocess, sys, tempfile, uuid
+import argparse, datetime, fcntl, fnmatch, functools, hashlib, json, os, pathlib, re, subprocess, sys, tempfile, uuid
 
 SCHEMA="https://the-rig.dev/schemas/sprint-result/v1"
 DOC_SCHEMA="https://the-rig.dev/schemas/sprint-document/v1"
@@ -17,6 +17,15 @@ def rig_dir():
     if p.exists():
         value=p.read_text().strip(); return pathlib.Path(value if os.path.isabs(value) else r/value)
     return r/".rig"
+@functools.lru_cache(maxsize=1)
+def tracker_settings():
+    helper=root()/"bin"/"rig-tracker-config.py"
+    if not helper.is_file():
+        raise ValueError("tracker_config_helper_missing")
+    result=subprocess.run([sys.executable,str(helper),"show",str(root()/"CLAUDE.md")],capture_output=True,text=True)
+    if result.returncode:
+        raise ValueError("invalid_tracker_config: "+result.stderr.strip())
+    return json.loads(result.stdout)
 def section(text,name):
     match=re.search(r"(?ms)^## "+re.escape(name)+r"\s*$\n(.*?)(?=^## |\Z)",text)
     return match.group(1).strip() if match else ""
@@ -51,7 +60,9 @@ def declared_status(text):
     return match.group(1) if match else ""
 def task_record(path,done_refs):
     text=path.read_text(); issue=issue_ref(text)
-    deps=re.findall(r"(?:#\d+|[A-Z]+-\d+|trello:[^,\s]+|W-\d+)",metadata(text,"Depends on"))
+    deps=[ref for part in re.split(r"\s*,\s*|\s+and\s+",metadata(text,"Depends on"),flags=re.I)
+          if (ref := part.strip().strip("`[]").split(" (",1)[0].split(" —",1)[0])
+          and not placeholder_ref(ref)]
     files=bullets(section(text,"Files likely affected")); blockers=bullets(section(text,"Blockers"))
     title=text.splitlines()[0].removeprefix("# Task:").strip() if text else path.stem
     explicit=metadata(text,"Sprint lane").lower(); lane=explicit if explicit in {"execution","blocked","decision","research","oversized","release","deferred","cancelled"} else "execution"
@@ -91,6 +102,7 @@ def tracker(path):
     if data.get("schema")!=EVIDENCE_SCHEMA or data.get("schema_version")!=1 or not isinstance(data.get("items"),list): raise ValueError("unsupported_tracker_evidence")
     return data,[]
 def audit(selection,evidence_path):
+    tracker_settings()
     tasks,_,mismatches=load_tasks(selection); evidence,warnings=tracker(evidence_path)
     warnings=warnings+["task_status_folder_mismatch:"+m["task"] for m in mismatches]
     local={t["canonical_ref"]:t for t in tasks if t["canonical_ref"]}; tracked={i.get("canonical_ref"):i for i in (evidence or {}).get("items",[]) if i.get("canonical_ref")}

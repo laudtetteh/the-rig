@@ -6,6 +6,7 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-sprint" "$CASE_DIR/bin/rig-sprint"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-tracker-config.py" "$CASE_DIR/bin/rig-tracker-config.py"
   chmod +x "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-sprint"
   git -C "$CASE_DIR" init -q
   git -C "$CASE_DIR" checkout -q -b feat/sprint
@@ -29,6 +30,22 @@ open(os.environ["TASK_F"],"w").write("\n".join(lines)+"\n")'
   run "$CASE_DIR/bin/rig" sprint audit --all --json
   [ "$status" -eq 0 ]
   printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["schema_version"]==1 and d["result"]["tasks"][0]["canonical_ref"]=="#10"; assert d["result"]["parity"][0]["class"]=="evidence_unavailable"; assert "tracker_evidence_unavailable" in d["warnings"]'
+}
+
+@test "audit retains dependencies from an arbitrary tracker" {
+  printf "issue-tracking: azure\nissue-ref-pattern: 'AB#[0-9]+'\n" > "$CASE_DIR/CLAUDE.md"
+  task first 'AB#12' P1 src/a.py
+  task second 'AB#13' P1 src/b.py 'AB#12'
+  run "$CASE_DIR/bin/rig" sprint audit --all --json
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); rows={x["canonical_ref"]:x for x in d["result"]["tasks"]}; assert rows["AB#13"]["dependencies"]==["AB#12"]'
+}
+
+@test "audit treats a none dependency value as no dependency" {
+  task no-dependency '#15' P1 src/a.py none
+  run "$CASE_DIR/bin/rig" sprint audit --all --json
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["result"]["tasks"][0]["dependencies"]==[]'
 }
 
 @test "placeholder issue values keep cards distinct and out of tracker parity" {

@@ -18,14 +18,15 @@ setup() {
   done
 }
 
-@test "each naming command reads issue-tracking and defines REF for every supported tracker" {
+@test "each naming command reads shared tracker configuration and defines generic REF" {
   local file tracker
   for file in "$COMMANDS/wrap.md" "$COMMANDS/session-name.md" "$COMMANDS/post-merge.md"; do
-    grep -Fq 'grep "^issue-tracking:" "$REPO/CLAUDE.md"' "$file" || { echo "no tracker read in $file" >&3; return 1; }
+    grep -Fq 'bin/rig-tracker-config.py" show "$REPO/CLAUDE.md"' "$file" || { echo "no shared tracker read in $file" >&3; return 1; }
     for tracker in '`github` (or absent) | `#184`' '`linear` | `ENG-184`' '`trello` | `trello:a1B2c3`' \
       '`gus` | `W-1234567`' '`none` | omit it'; do
       grep -Fq "| $tracker" "$file" || { echo "missing $tracker in $file" >&3; return 1; }
     done
+    grep -Fq 'Any other tracker' "$file"
   done
 }
 
@@ -63,5 +64,5 @@ print(re.search(r"```bash\n(.*?)```", section, re.S).group(1))
 PY
   run bash -c 'cd "$1/.claude" && bash "$2"' _ "$project" "$BATS_TEST_TMPDIR/lookup.sh"
   [ "$status" -eq 0 ]
-  [ "$output" = linear ]
+  printf '%s' "$output" | python3 -c 'import json,sys; assert json.load(sys.stdin)["tracker"]=="linear"'
 }

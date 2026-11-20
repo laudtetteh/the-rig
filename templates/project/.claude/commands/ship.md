@@ -46,9 +46,11 @@ Wait for the user to confirm this is the right task before continuing.
 
 ---
 
-## Step 2 — Confirm the GitHub issue
+## Step 2 — Confirm the configured tracker reference
 
-First, read `issue-tracking:` from `CLAUDE.md`.
+First, run `python3 bin/rig-tracker-config.py show CLAUDE.md` and use its
+normalized `tracker`, `pattern`, and `example` values. Stop on a
+configuration error.
 
 **If `issue-tracking: none`:** skip this step entirely — proceed to Step 3.
 
@@ -82,7 +84,15 @@ approve this one issue creation immediately before it is submitted. A task
 plan or ship approval does not count. If declined, wait for the user to
 provide an existing issue number or approve a later exact draft.
 
-Do not proceed to Step 3 until a valid issue number is confirmed (or `issue-tracking: none` is set).
+**For any other tracker:** Read the task's `**Issue**:` field. Require an
+existing nonempty reference. Run
+`python3 bin/rig-tracker-config.py validate-ref CLAUDE.md "REF"` for each
+reference, replacing `REF` with its actual value. Ask the user
+to supply a missing reference and record it before continuing. The agent
+does not create tickets through a non-GitHub tracker.
+
+Do not proceed to Step 3 until the configured tracker's reference is confirmed
+(or `issue-tracking: none` is set).
 
 ---
 

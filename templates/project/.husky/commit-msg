@@ -5,7 +5,7 @@
 #    to keep history clean and human-authored in tone.
 # 2. Validates Conventional Commits subject-line format.
 # 3. Requires an issue/ticket reference in the subject line, format depending on
-#    issue-tracking: in CLAUDE.md (github | linear | trello | gus | none).
+#    issue-tracking: and optional issue-ref-pattern: in CLAUDE.md.
 #
 # To disable format/ticket validation: set SKIP_COMMIT_VALIDATION=1 before committing.
 # This never bypasses commit approval or the base-branch policy.
@@ -159,12 +159,7 @@ fi
 
 # ── Step 4: Require issue/ticket reference based on issue-tracking setting ───
 CLAUDE_MD="${ROOT}/CLAUDE.md"
-ISSUE_TRACKING=""
-if [ -f "$CLAUDE_MD" ]; then
-  ISSUE_TRACKING=$(grep "^issue-tracking:" "$CLAUDE_MD" | awk '{print $2}' | tr -d '[:space:]' | head -1)
-fi
-# Default to github if not set
-: "${ISSUE_TRACKING:=github}"
+TRACKER_CONFIG="${ROOT}/bin/rig-tracker-config.py"
 
 # Allow the # no-issue trailer to skip the ref check for any tracker.
 # Used when a commit legitimately has no associated ticket (e.g. one-off fixes,
@@ -174,64 +169,10 @@ if grep -q "^# no-issue" "$COMMIT_MSG_FILE" 2>/dev/null; then
   accept_commit
 fi
 
-case "$ISSUE_TRACKING" in
-  github)
-    # Accept both [#N] (convention) and (#N) (GitHub squash-merge auto-format)
-    if ! echo "$SUBJECT" | grep -qE '(\[#[0-9]+\]|\(#[0-9]+\))'; then
-      echo ""
-      echo "ERROR: Commit message must include a GitHub issue reference."
-      echo "  Expected: type(scope): description [#N]"
-      echo "  Got:      $SUBJECT"
-      echo "  Create the issue first: gh issue create ..."
-      echo ""
-      echo "  Per-commit bypass (no ticket needed): add  # no-issue  as a line in the commit body"
-      echo "  Full validation bypass:               SKIP_COMMIT_VALIDATION=1 git commit ..."
-      echo ""
-      exit 1
-    fi
-    ;;
-  linear)
-    # Linear ticket format: [TEAM-123] where TEAM is one or more uppercase letters
-    if ! echo "$SUBJECT" | grep -qE '\[[A-Z]+-[0-9]+\]'; then
-      echo ""
-      echo "ERROR: Commit message must include a Linear ticket reference."
-      echo "  Expected: type(scope): description [TEAM-123]"
-      echo "  Got:      $SUBJECT"
-      echo ""
-      echo "  To bypass: SKIP_COMMIT_VALIDATION=1 git commit ..."
-      echo ""
-      exit 1
-    fi
-    ;;
-  trello)
-    # Trello card format: [trello:CARD-ID]
-    if ! echo "$SUBJECT" | grep -qE '\[trello:[^]]+\]'; then
-      echo ""
-      echo "ERROR: Commit message must include a Trello card reference."
-      echo "  Expected: type(scope): description [trello:CARD-ID]"
-      echo "  Got:      $SUBJECT"
-      echo ""
-      echo "  To bypass: SKIP_COMMIT_VALIDATION=1 git commit ..."
-      echo ""
-      exit 1
-    fi
-    ;;
-  gus)
-    # GUS work item format: [W-1234567]
-    if ! echo "$SUBJECT" | grep -qE '\[W-[0-9]+\]'; then
-      echo ""
-      echo "ERROR: Commit message must include a GUS work item reference."
-      echo "  Expected: type(scope): description [W-1234567]"
-      echo "  Got:      $SUBJECT"
-      echo ""
-      echo "  To bypass: SKIP_COMMIT_VALIDATION=1 git commit ..."
-      echo ""
-      exit 1
-    fi
-    ;;
-  none|*)
-    # No tracker configured — no reference required
-    ;;
-esac
+if [ ! -f "$TRACKER_CONFIG" ] || ! python3 "$TRACKER_CONFIG" validate-subject "$CLAUDE_MD" "$SUBJECT"; then
+  echo "  Got: $SUBJECT" >&2
+  echo "  Per-commit bypass: add # no-issue as a line in the commit body" >&2
+  exit 1
+fi
 
 accept_commit

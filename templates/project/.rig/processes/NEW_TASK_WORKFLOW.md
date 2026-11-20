@@ -15,14 +15,14 @@
 
 ## Step 0 — Issue/ticket first
 
-**Read `issue-tracking:` from `CLAUDE.md` before proceeding.**
+**Run `python3 bin/rig-tracker-config.py show CLAUDE.md` before proceeding.**
+Use its normalized `tracker`, `pattern`, and `example` values. Stop if the
+configuration is invalid.
 
 | `issue-tracking` value | Required before Step 1 |
 |---|---|
 | `github` (or absent) | GitHub issue `#N`; read `issue-creator:` to decide who creates it |
-| `linear` | Linear ticket ID (e.g. `ENG-123`); user always provides |
-| `trello` | Trello card ID; user always provides |
-| `gus` | GUS work item ID (e.g. `W-1234567`); user always provides |
+| Any other name | Existing tracker reference; user always provides. `linear`, `trello`, and `gus` have preset patterns/examples |
 | `none` | No ticket required — skip this step |
 
 **If `issue-tracking: github`** (or absent):
@@ -42,7 +42,9 @@ tracker-specific field; for GitHub projects this is `**GitHub issue**: [ref]`.
 Apply these rules:
 - If the field is empty, `N/A`, `TBD`, or absent: **stop. Do not proceed to Step 1.**
   Either run `/task` to create a proper intake, or add the ticket reference manually.
-- If the field contains a valid reference for the configured tracker: proceed.
+- Run `python3 bin/rig-tracker-config.py validate-ref CLAUDE.md "REF"`
+  with the field's reference replacing `REF`. Proceed only on exit 0.
+  For a multi-issue field, validate every reference separately.
 
 This check applies whether the task was opened via `/task`, picked from the backlog,
 or resumed from `.rig/tasks/active/`.
@@ -51,9 +53,8 @@ The ticket reference belongs in:
 - The task file's tracker field, for GitHub projects `**GitHub issue**: [ref]`
 - Every commit message on this branch (format per tracker):
   - GitHub: `feat(scope): description [#N]`
-  - Linear: `feat(scope): description [ENG-123]`
-  - Trello: `feat(scope): description [trello:CARD-ID]`
-  - GUS: `feat(scope): description [W-1234567]`
+  - Any other tracker: `feat(scope): description [REF]`, where `REF`
+    follows `issue-ref-pattern:` when configured
 
 ### 0a — Multi-issue task intake
 

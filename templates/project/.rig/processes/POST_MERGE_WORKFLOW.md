@@ -310,10 +310,12 @@ type short-desc REF | type short-desc REF | ...
 
 - `type` matches the git commit type (`fix`, `feat`, `chore`, `refactor`, `devops`, `docs`, `test`)
 - `short-desc` — 3–6 words; enough to identify the work at a glance
-- `REF` — one ticket reference in the format of the `issue-tracking:` value in the
-  project `CLAUDE.md`, without brackets: `github` (or absent) `#91`, `linear`
-  `ENG-91`, `trello` `trello:a1B2c3`, `gus` `W-1234567`; omit it for `none`. A
-  merged pull request may be named `PR 12` under any tracker.
+- `REF` — run `python3 bin/rig-tracker-config.py show CLAUDE.md` and use
+  the configured tracker reference without brackets. GitHub (or absent) uses
+  `#91`; `linear`, `trello`, and `gus` have preset examples. For any other
+  tracker, use the actual reference or `issue-ref-example:` when configured.
+  Omit it for `none`. A merged pull request may be named `PR 12` under any
+  tracker.
 - Keep the full string under ~100 characters
 
 ### Output

@@ -129,10 +129,22 @@ issue-tracking: github
 | Value | Behaviour |
 |---|---|
 | `github` | GitHub issues required. `/task` blocks until an issue number is provided (or drafts one and files it after exact approval when `issue-creator: agent`). Ref format: `[#N]`. `gh` CLI used for all PR/issue operations. |
-| `linear` | Linear tickets required. User provides existing ticket ID (e.g. `ENG-123`). Ref format: `[ENG-123]`. Agent never creates Linear tickets. |
-| `trello` | Trello cards required. User provides existing card ID. Ref format: `[trello:CARD-ID]`. Agent never creates Trello cards. |
-| `gus` | GUS work items required. User provides existing item ID (e.g. `W-1234567`). Ref format: `[W-1234567]`. Agent never creates GUS items. |
+| Any other tracker name | User provides an existing reference. Commits use `[reference]`. Optional `issue-ref-pattern:` validates the reference; without it, any nonempty bracketed reference is accepted. The agent does not create tickets in that tracker. |
 | `none` | No issue tracker. Issue requirement is skipped in `/task`, `/ship`, and commit messages. Use for personal projects or prototypes. |
+
+`linear`, `trello`, and `gus` remain built-in reference presets for existing
+projects: `ENG-123`, `trello:CARD-ID`, and `W-1234567` respectively. Any
+tracker can override the preset with `issue-ref-pattern:` and
+`issue-ref-example:`. The pattern is an extended regular expression matched
+against the complete reference without brackets; the example appears in
+instructions and error messages. Replace the existing `issue-tracking:` line
+and uncomment the optional keys if you use this example:
+
+```
+# issue-tracking: jira
+# issue-ref-pattern: '[A-Z]+-[0-9]+'
+# issue-ref-example: APP-123
+```
 
 ```
 issue-creator: user

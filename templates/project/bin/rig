@@ -6,7 +6,7 @@ readonly RIG_EXIT_UNAVAILABLE=69
 # Keep bootstrap and doctor's completeness check on the same source paths.
 # These fixed relative names contain no whitespace; Python splits on spaces.
 readonly RIG_WORKTREE_BOOTSTRAP_PATHS=".rigpath CLAUDE.md PROJECT_BRIEF.md .gitleaks.toml \
-  bin/rig bin/rig-session-resolve.py bin/rig-session-index.py bin/rig-snapshot.py .claude .agents .codex \
+  bin/rig bin/rig-session-resolve.py bin/rig-session-index.py bin/rig-snapshot.py bin/rig-tracker-config.py .claude .agents .codex \
   .mcp.json .playwright-mcp .github docs/INDEX.md docs/features/README.md"
 
 usage() { cat <<'EOF'
@@ -2125,15 +2125,15 @@ else:
     check("codex_project_target_runtime", True, "Codex runtime not detected", state=SKIPPED)
     check("codex_session_runtime", True, "Codex runtime not detected", state=SKIPPED)
 
-claude_md = read(root / "CLAUDE.md")
-matches = re.findall(r"(?m)^issue-tracking:\s*([^\s#]+)", claude_md)
-tracker = matches[-1].lower() if matches else "github"
-supported = {"github", "linear", "trello", "gus", "none"}
-tracker_valid = len(matches) <= 1 and tracker in supported
+tracker_helper = root / "bin" / "rig-tracker-config.py"
+tracker_result = run([sys.executable, str(tracker_helper), "show", str(root / "CLAUDE.md")]) if tracker_helper.is_file() else None
+tracker_valid = tracker_result is not None and tracker_result.returncode == 0
+tracker_config = json.loads(tracker_result.stdout) if tracker_valid else {}
+tracker = tracker_config.get("tracker", "")
 check("issue_tracking", tracker_valid,
-      (f"configured: {tracker}" if len(matches) <= 1 else f"{len(matches)} issue-tracking lines; last wins: {tracker}")
-      if tracker in supported else f"unsupported: {tracker}",
-      fix="grep -n '^issue-tracking:' CLAUDE.md (keep exactly one of: " + ", ".join(sorted(supported)) + ")")
+      f"configured: {tracker}" if tracker_valid else
+      (tracker_result.stderr.strip() if tracker_result is not None else "tracker config helper missing"),
+      fix="bin/rig-tracker-config.py show CLAUDE.md")
 
 authenticated = False
 if not tracker_valid:
@@ -2159,9 +2159,10 @@ elif not all(path.is_file() for path in guidance_paths):
     check("tracker_command_guidance", True, "requires command source: " + ", ".join(missing_guidance), state=SKIPPED)
 else:
     guidance = "\n".join(read(path) for path in guidance_paths)
-    check("tracker_command_guidance", tokens[tracker] in guidance,
-          f"command guidance covers {tracker}" if tokens[tracker] in guidance else f"command guidance missing {tracker}",
-          fix="grep -n 'issue-tracking:' .claude/commands/task.md .claude/commands/ship.md")
+    guidance_token = tokens.get(tracker, "issue-ref-pattern:")
+    check("tracker_command_guidance", guidance_token in guidance,
+          f"command guidance covers {tracker}" if guidance_token in guidance else f"command guidance missing {tracker}",
+          fix="grep -En 'issue-ref-pattern:|issue-tracking:' .claude/commands/task.md .claude/commands/ship.md")
 
 if not tracker_valid:
     check("recent_commit_references", True, "requires a valid issue-tracking setting", state=SKIPPED)
@@ -2170,20 +2171,19 @@ else:
     commits = [line.split("\t", 1) for line in log.stdout.splitlines()] if log is not None and log.returncode == 0 else []
     authored = [subject for parents, subject in commits if len(parents.split()) <= 1]
     merge_count = len(commits) - len(authored)
-    if tracker == "github": pattern = re.compile(r"\[#\d+\]")
-    elif tracker == "linear": pattern = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")
-    elif tracker == "trello": pattern = re.compile(r"\btrello:[A-Za-z0-9_-]+\b", re.I)
-    elif tracker == "gus": pattern = re.compile(r"\bW-\d+\b", re.I)
-    else: pattern = None
-    if pattern and authored:
-        drift = [subject for subject in authored if not pattern.search(subject)]
+    def valid_subject_ref(subject):
+        result = run([sys.executable, str(tracker_helper), "validate-subject",
+                      str(root / "CLAUDE.md"), subject])
+        return result is not None and result.returncode == 0
+    if tracker != "none" and authored:
+        drift = [subject for subject in authored if not valid_subject_ref(subject)]
         detail = f"{len(authored)-len(drift)}/{len(authored)} authored commits match {tracker}; {merge_count} merge commits excluded"
         if drift:
             detail += f"; first drift: {drift[0]}"
         check("recent_commit_references", not drift, detail,
               fix="git log -20 --format='%P%x09%s'")
     else:
-        detail = ("no convention required" if pattern is None else
+        detail = ("no convention required" if tracker == "none" else
                   f"no authored commits to inspect; {merge_count} merge commits excluded")
         check("recent_commit_references", True, detail,
               state=SKIPPED)
