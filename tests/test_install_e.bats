@@ -115,7 +115,9 @@ _sha256() {
   [ -f "$TEST_PROJECT/.claude/hooks/pre-tool.sh" ]
   [ -f "$TEST_PROJECT/.rig/memory/RIG_GAPS.md" ]
   [ -x "$TEST_PROJECT/bin/rig" ]
+  [ -f "$TEST_PROJECT/bin/rig-tracker-config.py" ]
   grep -q "  bin/rig$" "$TEST_PROJECT/.rig/memory/.rig-manifest"
+  grep -q "  bin/rig-tracker-config.py$" "$TEST_PROJECT/.rig/memory/.rig-manifest"
 }
 
 @test "dispatcher: help, version, and memory validation follow the contract" {

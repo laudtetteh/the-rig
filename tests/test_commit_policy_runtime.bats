@@ -29,7 +29,68 @@ install_hooks() {
   cp "$REPO_ROOT/templates/project/.husky/post-commit" "$hook_dir/post-commit"
   cp "$REPO_ROOT/templates/project/.husky/post-merge" "$hook_dir/post-merge"
   cp "$REPO_ROOT/templates/project/.husky/filter-commit-message-inplace.sh" "$hook_dir/filter-commit-message-inplace.sh"
+  mkdir -p "$TEST_PROJECT/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-tracker-config.py" "$TEST_PROJECT/bin/rig-tracker-config.py"
   chmod +x "$hook_dir/commit-msg" "$hook_dir/post-commit" "$hook_dir/post-merge"
+}
+
+@test "commit-msg accepts a configured tracker and reference pattern" {
+  printf "issue-tracking: Jira # team tracker\nissue-ref-pattern: '[A-Z]+-[0-9]+'\nissue-ref-example: APP-123\n" > "$TEST_PROJECT/CLAUDE.md"
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: add intake [APP-123]'
+  [ "$status" -eq 0 ]
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: reject wrong ref [bad-123]'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'[APP-123]'* ]] || return 1
+}
+
+@test "tracker helper uses POSIX extended regular expressions for task references" {
+  printf "issue-tracking: jira\nissue-ref-pattern: '[[:upper:]]+-[[:digit:]]+'\n" > "$TEST_PROJECT/CLAUDE.md"
+  run python3 "$TEST_PROJECT/bin/rig-tracker-config.py" validate-ref "$TEST_PROJECT/CLAUDE.md" APP-123
+  [ "$status" -eq 0 ]
+  run python3 "$TEST_PROJECT/bin/rig-tracker-config.py" validate-ref "$TEST_PROJECT/CLAUDE.md" app-123
+  [ "$status" -ne 0 ]
+}
+
+@test "tracker helper refuses a nonregular project configuration" {
+  mkfifo "$BATS_TEST_TMPDIR/config-pipe"
+  run python3 - "$TEST_PROJECT/bin/rig-tracker-config.py" "$BATS_TEST_TMPDIR/config-pipe" <<'PY'
+import subprocess, sys
+result = subprocess.run([sys.executable, sys.argv[1], "show", sys.argv[2]],
+                        capture_output=True, text=True, timeout=3)
+print(result.stderr)
+raise SystemExit(result.returncode)
+PY
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"regular file"* ]] || return 1
+}
+
+@test "commit-msg accepts generic bracketed refs without a pattern" {
+  printf 'issue-tracking: shortcut\n' > "$TEST_PROJECT/CLAUDE.md"
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: add intake [sc-123]'
+  [ "$status" -eq 0 ]
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: missing ref'
+  [ "$status" -ne 0 ]
+}
+
+@test "commit-msg preserves Linear Trello and GUS reference presets" {
+  local tracker ref
+  for tracker in linear trello gus; do
+    case "$tracker" in
+      linear) ref=ENG-123 ;;
+      trello) ref=trello:a1B2c3 ;;
+      gus) ref=W-1234567 ;;
+    esac
+    printf 'issue-tracking: %s\n' "$tracker" > "$TEST_PROJECT/CLAUDE.md"
+    run git -C "$TEST_PROJECT" commit --allow-empty -m "feat: preset [$ref]"
+    [ "$status" -eq 0 ] || return 1
+  done
+}
+
+@test "commit-msg rejects duplicate tracker settings instead of disabling validation" {
+  printf 'issue-tracking: github\nissue-tracking: none\n' > "$TEST_PROJECT/CLAUDE.md"
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: missing ref'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'duplicate issue-tracking'* ]] || return 1
 }
 
 approval() { touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"; }
@@ -161,6 +222,8 @@ commit_count() { git -C "$TEST_PROJECT" rev-list --count HEAD; }
   linked="$BATS_TEST_TMPDIR/linked"
   git -C "$TEST_PROJECT" worktree add -qb fix/linked "$linked"
   mkdir -p "$linked/.rig/memory"
+  mkdir -p "$linked/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-tracker-config.py" "$linked/bin/rig-tracker-config.py"
   printf '# Linked progress\n\n---\n' > "$linked/.rig/memory/PROGRESS.md"
   approval
   linked_git_dir="$(git -C "$linked" rev-parse --absolute-git-dir)"

@@ -115,8 +115,7 @@ Ticket references follow the project's tracker. Read it before writing a name:
 
 ```bash
 REPO=$(git rev-parse --show-toplevel)
-TRACKING=$(grep "^issue-tracking:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
-echo "${TRACKING:-github}"
+python3 "$REPO/bin/rig-tracker-config.py" show "$REPO/CLAUDE.md"
 ```
 
 `REF` is one ticket reference in that tracker's format, without brackets, and
@@ -129,6 +128,7 @@ trackers whose IDs are not ordered:
 | `linear` | `ENG-184` | `ENG-130–ENG-152` |
 | `trello` | `trello:a1B2c3` | up to three card references, then `+N more` |
 | `gus` | `W-1234567` | `W-1234501–W-1234567` |
+| Any other tracker | Configured `issue-ref-example:`, or the user's actual reference | Up to three references, then `+N more` |
 | `none` | omit it | omit it |
 
 A merged pull request may still be named as `PR 12` under any tracker.

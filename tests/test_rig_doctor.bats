@@ -7,6 +7,7 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-snapshot.py" "$CASE_DIR/bin/rig-snapshot.py"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-tracker-config.py" "$CASE_DIR/bin/rig-tracker-config.py"
   chmod +x "$CASE_DIR/bin/rig"
   printf '{"hooks":{}}\n' > "$CASE_DIR/.claude/settings.json"
   printf 'issue-tracking: none\n' > "$CASE_DIR/CLAUDE.md"
@@ -153,6 +154,16 @@ PY
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["issue_tracking"]["state"]=="fail"; assert all(c[n]["state"]=="skipped" for n in ("github_auth","tracker_command_guidance","recent_commit_references","recent_pr_references"))'
+}
+
+@test "doctor accepts a custom tracker and checks its commit references" {
+  printf "issue-tracking: Jira # team\nissue-ref-pattern: '[A-Z]+-[0-9]+'\n" > "$CASE_DIR/CLAUDE.md"
+  printf 'issue-ref-pattern:\n' >> "$CASE_DIR/.claude/commands/task.md"
+  printf 'issue-ref-pattern:\n' >> "$CASE_DIR/.claude/commands/ship.md"
+  git -C "$CASE_DIR" -c user.name=Test -c user.email=test@example.test -c core.hooksPath=/dev/null commit --allow-empty -qm 'feat: valid [APP-123]'
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["issue_tracking"]["state"]=="pass"; assert c["recent_commit_references"]["state"]=="pass"'
 }
 
 @test "Codex-only project does not fail checks for absent Claude artifacts" {

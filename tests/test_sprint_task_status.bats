@@ -5,6 +5,7 @@ setup() {
   CASE_DIR="$BATS_TEST_TMPDIR/project"
   mkdir -p "$CASE_DIR/bin" "$CASE_DIR/.rig/tasks/backlog" "$CASE_DIR/.rig/tasks/active" "$CASE_DIR/.rig/tasks/done"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-sprint" "$CASE_DIR/bin/rig-sprint"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-tracker-config.py" "$CASE_DIR/bin/rig-tracker-config.py"
   git -C "$CASE_DIR" init -q
 }
 

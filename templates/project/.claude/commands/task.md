@@ -43,7 +43,7 @@ Ask the user the following. Collect all answers before moving to Part 2.
    the codebase (what service, module, or directory will this touch?).
 3. **Hard constraints?** Any deadline, off-limits paths, technology restrictions, or
    things that must not change?
-4. **Issue/ticket?** Read `issue-tracking:` and `issue-creator:` from `CLAUDE.md` first.
+4. **Issue/ticket?** Run `python3 bin/rig-tracker-config.py show CLAUDE.md` to read the normalized `tracker`, `pattern`, and `example`; also read `issue-creator:` from `CLAUDE.md`. Stop on a configuration error.
 5. **Tests required?** Should this task include tests?
    - **yes** — tests are required before this task can ship
    - **no** — tests are explicitly out of scope (state why, e.g. "pure config change")
@@ -62,11 +62,7 @@ Ask the user the following. Collect all answers before moving to Part 2.
        ```
        Note the number, tell the user: "Created issue #[N]. Proceeding." If the user already provided a number, use that instead — skip creation.
 
-   - **`issue-tracking: linear`**: Ask for the existing Linear ticket ID (e.g. `ENG-123`). Note in the task file: `**Issue**: ENG-123`. Agent never creates Linear tickets. If no ticket exists, stop and ask the user to create one.
-
-   - **`issue-tracking: trello`**: Ask for the existing Trello card ID or short URL. Note in the task file: `**Issue**: trello:CARD-ID`. Agent never creates Trello cards.
-
-   - **`issue-tracking: gus`**: Ask for the existing GUS work item ID (e.g. `W-1234567`). Note in the task file: `**Issue**: W-1234567`. Agent never creates GUS items.
+   - **Any other tracker name:** Ask for an existing reference. Use the configured `example` when present; `linear`, `trello`, and `gus` have preset examples. Run `python3 bin/rig-tracker-config.py validate-ref CLAUDE.md "REF"` with the supplied reference replacing `REF`; stop on a nonzero exit. Record `**Issue**: REF` in the task file. The agent never creates a ticket in this tracker. If no reference exists, stop and ask the user to create one.
 
    - **`issue-tracking: none`**: Skip the issue requirement. Note in the task file: `**Issue**: N/A (issue-tracking: none)`. Continue to Part 2 immediately.
 

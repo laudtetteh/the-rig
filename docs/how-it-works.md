@@ -612,6 +612,7 @@ git commit
      │       linear → [TEAM-123]
      │       trello → [trello:CARD-ID]
      │       gus    → [W-1234567]
+     │       any other tracker → [REF], optionally checked by issue-ref-pattern:
      │       none   → no requirement
      │     `SKIP_COMMIT_VALIDATION=1` skips format/ticket checks only;
      │       `# no-issue` skips the tracker ref check only
@@ -865,13 +866,17 @@ These sit alongside the existing `base-branch:` and `housekeeping:` fields:
 |---|---|---|---|
 | `base-branch:` | `main` | Any branch name | The integration branch all PRs target |
 | `housekeeping:` | `direct-push` | `direct-push` \| `pr-required` | How `/post-merge` handles memory-update commits |
-| `issue-tracking:` | `github` | `github` \| `linear` \| `trello` \| `gus` \| `none` | Which issue tracker is required; shapes ref format in commit messages and intake wizard |
+| `issue-tracking:` | `github` | `github`, `none`, or any tracker name | Which issue tracker is required; shapes ref format in commit messages and intake wizard |
 | `issue-creator:` | `user` | `user` \| `agent` | GitHub only: `agent` drafts the exact issue and files it after separate approval; `user` waits for the user to provide a number |
 | `secret-scanner:` | `gitleaks` | `gitleaks` \| `none` | Secret scanning on commit; disabling requires editing `.husky/pre-commit` |
 | `commit-cleanup:` | `yes` | `yes` \| `no` | Whether auto-injected tool footers are stripped from commit messages |
 | `rig-gaps-push-target:` | *(unset)* | Absolute file path | Path to `RIG_GAPS.md` in the local Rig repo on this machine; enables `/rig-gaps --push` to append entries directly. Leave blank if The Rig repo isn't on this machine. |
 
-The `issue-tracking:` setting shapes the entire task intake and commit workflow: the ref format expected in commit messages (`[#N]`, `[TEAM-123]`, `[trello:ID]`, `[W-N]`) and the intake question in `/task` both follow the configured tracker. Set to `none` for personal projects, prototypes, or repos without an issue tracker.
+The `issue-tracking:` setting shapes the entire task intake and commit workflow.
+`github` uses `[#N]`; `none` skips references. Any other tracker name uses
+a user-provided reference in brackets, optionally constrained by
+`issue-ref-pattern:` and illustrated by `issue-ref-example:`.
+`linear`, `trello`, and `gus` keep their existing preset formats.
 
 Branch creation behavior is also parameterized by autonomy level:
 - **Low/Medium**: always confirm the base branch before `git checkout -b`
