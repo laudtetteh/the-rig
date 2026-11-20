@@ -787,7 +787,7 @@ skills covering the full development lifecycle:
 ### Project bootstrap
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/kickoff` | `NEW_TASK_WORKFLOW` | Reads `PROJECT_BRIEF.md`, confirms understanding, scaffolds `CLAUDE.md` + task backlog + GitHub issues in one pass. Run once at project creation — the command file can be deleted after use. |
+| `/kickoff` | `NEW_TASK_WORKFLOW` | Reads `PROJECT_BRIEF.md`, confirms understanding, scaffolds `CLAUDE.md` and a task backlog, then links items for the configured `issue-tracking:` mode. GitHub issues are created only with `issue-creator: agent` and separate approval for each exact write; `none` needs no tracker items. Run once at project creation. |
 
 ### Daily work
 | Command | Triggers | Key behaviour |
