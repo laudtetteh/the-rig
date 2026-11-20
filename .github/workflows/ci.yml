@@ -233,6 +233,9 @@ jobs:
             python3 -m compileall -q -f --invalidation-mode unchecked-hash \
             installer templates tests
 
+      - name: Check portability of tracked public files
+        run: python3 tests/lint-portability.py
+
       - name: Run ShellCheck
         run: |
           find . -type f -name '*.sh' -print0 \

@@ -1,5 +1,7 @@
 {
   "_default": 5.0,
+  "tests/test_project_roots.bats": 180.0,
+  "tests/test_portability_lint.bats": 5.0,
   "tests/test_upgrade_rollback.bats": 620.0,
   "tests/test_upgrade_reports.bats": 596.0,
   "tests/test_upgrade_agent_contract.bats": 530.0,

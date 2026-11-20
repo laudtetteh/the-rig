@@ -16,7 +16,7 @@ source gap entries submitted.
 Run the provider's collect command first — Claude `/rig-gaps --collect` or Codex
 `$rig-gaps --collect` — or reuse a fresh collector report from the same calendar
 day. Collection covers canonical `memory/RIG_GAPS.md` files in external Rig
-storage and direct `~/code` projects, including `.rigpath` targets, and excludes
+storage and direct configured project-root projects (legacy `~/code` fallback), including `.rigpath` targets, and excludes
 backups and duplicate physical paths. Preserve source file and heading line,
 project, scope, title, date, category, severity, workflow, observation, and
 suggested fix for every candidate.

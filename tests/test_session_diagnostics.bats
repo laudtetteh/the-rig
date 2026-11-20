@@ -6,6 +6,7 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-index.py" "$CASE_DIR/bin/rig-session-index.py"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig_project_roots.py" "$CASE_DIR/bin/rig_project_roots.py"
   chmod +x "$CASE_DIR/bin/rig"
   git -C "$CASE_DIR" init -q
   git -C "$CASE_DIR" checkout -q -b feat/current
@@ -51,7 +52,7 @@ json.dump(d,open(p,"w"),indent=2)
   bind_record claude current-secret >/dev/null
   other="$BATS_TEST_TMPDIR/other"; mkdir -p "$other/bin" "$other/.rig/memory/sessions"
   other=$(cd "$other" && pwd -P)
-  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$other/bin/"
+  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$CASE_DIR/bin/rig_project_roots.py" "$other/bin/"
   git -C "$other" init -q
   git -C "$other" checkout -q -b feat/other
   "$other/bin/rig" session bind --agent codex --native-session-id other-secret --source startup >/dev/null
@@ -61,7 +62,7 @@ json.dump(d,open(p,"w"),indent=2)
   remote=$(cd "$remote" && pwd -P)
   catalog=$(cd "$catalog" && pwd -P)
   test_home=$(cd "$BATS_TEST_TMPDIR/home" && pwd -P)
-  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$remote/bin/"
+  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$CASE_DIR/bin/rig_project_roots.py" "$remote/bin/"
   printf '%s\n' "$catalog" > "$remote/.rigpath"
   git -C "$remote" init -q
   git -C "$remote" checkout -q -b feat/remote

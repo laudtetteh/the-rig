@@ -30,7 +30,7 @@ No arguments. Output the table below directly — do not read individual command
 | `/post-merge` | Post-merge housekeeping. Fetches the base branch and verifies each exact merge SHA before logging the PR to `PROGRESS.md`, moving the task file to done, refreshing `CONTEXT_SNAPSHOT.md`, checking feature doc freshness, and surfacing what's next. A clean base checkout is fast-forwarded only when tracked housekeeping needs it. |
 | `/status` | Project state dashboard. Shows current branch, active tasks, backlog count, and recent `PROGRESS.md` entries. |
 | `/session-name` | Derive and set a session name from work completed so far. Uses the same tiered format as `/wrap` and `/post-merge` but callable at any time without triggering a full cycle. |
-| `bin/rig session index` | Search Rig session records across the current project, immediate `~/code/` projects, and external `~/.rig/projects/` directories. Use `--root PROJECT` for another location. The index is read-only, reports coverage and ambiguity, and never scans provider transcripts. |
+| `bin/rig session index` | Search Rig session records across the current project, immediate configured project-root projects (legacy `~/code/` fallback), and external `~/.rig/projects/` directories. Use `--root PROJECT` for another location. The index is read-only, reports coverage and ambiguity, and never scans provider transcripts. |
 
 ### Provider-native aids for concurrent conversations
 

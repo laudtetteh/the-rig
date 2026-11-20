@@ -25,7 +25,8 @@ The Rig itself — for review and optional submission.
 ```
 
 Use `/rig-gaps --collect` from any project to review unsubmitted gaps in canonical
-external Rig storage and direct project checkouts under `~/code`, including their
+external Rig storage and direct project checkouts under configured project roots
+(legacy `~/code` fallback), including their
 `.rigpath` targets. Collector mode is read-only: it does not modify source logs,
 mark entries submitted, or create GitHub issues.
 
@@ -108,7 +109,7 @@ If the user says **"collect"**, **"--collect"**, or **"collect across projects"*
 run this flow instead of Steps 1–4. Do not run push or submit mode as part of it.
 
 Run the reference collector below exactly as a single Bash script. It selects only
-canonical `memory/RIG_GAPS.md` files from external storage and direct `~/code`
+canonical `memory/RIG_GAPS.md` files from external storage and direct configured roots
 projects, follows `.rigpath`, and reads each physical file once. Backups and
 `RIG_GAPS.md.bak` are outside these exact paths. It recognizes bracketed dates,
 bare dates, and numbered undated reports outside fenced examples. The report
@@ -117,34 +118,39 @@ includes the source file and heading line; numbered reports retain `date: unknow
 <!-- rig-gaps-collector:start -->
 ```bash
 set -eu
-python3 - <<'PY'
+REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
+ROOTS_BIN="$REPO/bin"
+[[ -f "$ROOTS_BIN/rig_project_roots.py" ]] || ROOTS_BIN="$REPO/templates/project/bin"
+PYTHONPATH="$ROOTS_BIN" python3 - <<'PY'
 import pathlib
 import re
+from rig_project_roots import read_project_roots
 
 home = pathlib.Path.home()
 external_root = home / ".rig/projects"
-code_root = home / "code"
+project_roots, roots_source, missing_roots = read_project_roots(home=home)
 sources = []
 
-# The external registry and direct code projects are the two canonical layouts.
+# External storage remains discoverable independently of project roots.
 # A project's .rigpath may point to another external location.
 for project_dir in sorted(external_root.glob("*")):
     sources.append((project_dir.name, project_dir / "memory/RIG_GAPS.md"))
-for project_dir in sorted(code_root.glob("*")):
-    if not project_dir.is_dir():
-        continue
-    rig_dir = project_dir / ".rig"
-    pointer = project_dir / ".rigpath"
-    if pointer.is_file():
-        try:
-            value = pointer.read_text().splitlines()[0].strip()
-        except (OSError, IndexError, UnicodeError):
-            value = ""
-        if value:
-            rig_dir = pathlib.Path(value)
-            if not rig_dir.is_absolute():
-                rig_dir = project_dir / rig_dir
-    sources.append((project_dir.name, rig_dir / "memory/RIG_GAPS.md"))
+for code_root in project_roots:
+    for project_dir in sorted(code_root.glob("*")):
+        if not project_dir.is_dir() or project_dir.is_symlink():
+            continue
+        rig_dir = project_dir / ".rig"
+        pointer = project_dir / ".rigpath"
+        if pointer.is_file() and not pointer.is_symlink():
+            try:
+                value = pointer.read_text().splitlines()[0].strip()
+            except (OSError, IndexError, UnicodeError):
+                value = ""
+            if value:
+                rig_dir = pathlib.Path(value)
+                if not rig_dir.is_absolute():
+                    rig_dir = project_dir / rig_dir
+        sources.append((project_dir.name, rig_dir / "memory/RIG_GAPS.md"))
 
 seen_files = set()
 canonical_logs = []
@@ -221,7 +227,8 @@ for project, path in sources:
         entries.append(current)
 
 if not canonical_logs:
-    print("No project RIG_GAPS.md files found below " + str(external_root) + " or " + str(code_root) + ".")
+    selected = ", ".join(map(str, project_roots)) or "no selected project roots"
+    print("No project RIG_GAPS.md files found below " + str(external_root) + " or " + selected + ".")
     raise SystemExit(0)
 
 groups = {}

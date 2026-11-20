@@ -372,10 +372,14 @@ a subsequent native resume may create a continuation anchor.
 ### Cross-project Rig record index
 
 `bin/rig session index --json` searches Rig session records in the current
-project, immediate installed projects under `~/code/`, and immediate external
-Rig directories under `~/.rig/projects/`. Add a project elsewhere or nested
-under `~/code/` with `--root /path/to/project` (repeat for multiple
-projects). This is a bounded index of Rig records: it
+project, immediate installed projects under the configured project roots, and
+immediate external Rig directories under `~/.rig/projects/`. Set
+`~/.rig/config.json` to `{"schema_version":1,"projects_roots":["/absolute/path"]}`
+or use the `RIG_PROJECTS_ROOTS` environment variable (colon-separated on Unix).
+The environment overrides config; an existing config, even with an empty list,
+disables the legacy `~/code/` fallback. With neither setting, an existing
+`~/code/` remains the default. Add one project with `--root /path/to/project`
+(repeat for multiple projects). This is a bounded index of Rig records: it
 does not search Claude or Codex transcript databases, and an unbound native
 conversation will not appear. The JSON `coverage` field lists each Rig
 directory examined and its record count.

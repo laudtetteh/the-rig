@@ -670,6 +670,26 @@ Tradeoff summary:
 - `/rig-upgrade` / `$rig-upgrade`: preferred user-facing flow because it runs
   the preview, applies the selected mode, and follows with doctor checks.
 
+### Project discovery roots
+
+`rig session index` and `/rig-gaps --collect` read user-level
+`~/.rig/config.json`:
+
+```json
+{"schema_version": 1, "projects_roots": ["/absolute/path/to/projects"]}
+```
+
+Each root contains immediate project directories. The optional installer
+`--projects-root /absolute/path` adds one existing root to this file only when
+the project layer runs; `--target` alone never changes user-level discovery.
+The interactive project installer also offers an optional root prompt. An
+existing config, even with an empty list, replaces the legacy `~/code` default.
+With no config, an existing `~/code` directory remains the default. The
+`RIG_PROJECTS_ROOTS` environment variable overrides config with paths separated
+by the platform path separator (colon on Unix); `--root` on `rig session index`
+adds individual projects for that invocation. External `~/.rig/projects`
+discovery remains independent of these roots.
+
 ### Verifying an upgrade: `bin/rig doctor` gates
 
 After any upgrade, `bin/rig doctor` (or `bin/rig doctor --json` for scripting)
@@ -677,6 +697,7 @@ runs these current postflight checks:
 
 | Gate | What it verifies | Degrades to "skipped" (not "failed") when |
 |---|---|---|
+| `projects_roots` | User-level `~/.rig/config.json` and `RIG_PROJECTS_ROOTS` parse correctly; missing configured directories are advisory; a missing manifest-owned helper fails | The roots helper was never installed |
 | `worktree_bootstrap` | A linked worktree has every copyable stealth artifact present in the primary checkout, including `.gitleaks.toml` when present | Not a linked worktree with a primary `.rigpath` |
 | `rig_directory` | The resolved Rig directory exists and has a readable `memory/` directory | Never; missing Rig state is a failure |
 | `rigpath` | `.rigpath` is a single non-empty line resolving to a usable Rig directory, or local `.rig/` is selected | Never; malformed path state is a failure |
