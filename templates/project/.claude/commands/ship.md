@@ -711,8 +711,8 @@ for every `area:` label chosen in Step 3:
 ```bash
 REPO=$(git rev-parse --show-toplevel)
 PR_NUMBER=[N]
-TRACKING=$(grep "^issue-tracking:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
-TRACKING="${TRACKING:-github}"
+TRACKER_JSON=$(python3 "$REPO/bin/rig-tracker-config.py" show "$REPO/CLAUDE.md") || exit 1
+TRACKING=$(printf '%s' "$TRACKER_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tracker"])') || exit 1
 REVIEW_DIR=$(mktemp -d)
 gh pr view "$PR_NUMBER" --json number,state,isDraft,headRefOid,title,body,labels,commits > "$REVIEW_DIR/pr.json"
 REVIEW_ARGS=(--pr "$REVIEW_DIR/pr.json" --issue-tracking "$TRACKING" --payload-out "$REVIEW_DIR/payload.json")

@@ -5,10 +5,11 @@ setup() {
   export FAKE_BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$CASE_DIR/bin" "$CASE_DIR/.rig/memory" "$CASE_DIR/.claude/commands" "$CASE_DIR/.git/info" "$FAKE_BIN"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-sprint" "$CASE_DIR/bin/rig-sprint"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-snapshot.py" "$CASE_DIR/bin/rig-snapshot.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-tracker-config.py" "$CASE_DIR/bin/rig-tracker-config.py"
-  chmod +x "$CASE_DIR/bin/rig"
+  chmod +x "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-sprint"
   printf '{"hooks":{}}\n' > "$CASE_DIR/.claude/settings.json"
   printf 'issue-tracking: none\n' > "$CASE_DIR/CLAUDE.md"
   printf 'issue-tracking: github\nissue-tracking: linear\nissue-tracking: trello\nissue-tracking: gus\nissue-tracking: none\n' > "$CASE_DIR/.claude/commands/task.md"
@@ -314,12 +315,24 @@ PY
   grep -q '^linked customization$' "$linked/CLAUDE.md"
   [ -f "$linked/.rigpath" ]
   [ -x "$linked/bin/rig" ]
+  [ -x "$linked/bin/rig-sprint" ]
   [ -f "$linked/.claude/settings.json" ]
   [ -f "$linked/.gitleaks.toml" ]
 
   run bash -c "cd '$linked' && '$linked/bin/rig' doctor --json"
   [ "$status" -eq 0 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="worktree_bootstrap"); assert c["ok"] and c["detail"]=="complete"'
+  run bash -c "cd '$linked' && '$linked/bin/rig' sprint audit --all --json"
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); assert d["ok"] and d["command"]=="audit"'
+
+  rm "$linked/bin/rig-sprint"
+  run bash -c "cd '$linked' && '$linked/bin/rig' doctor --json"
+  [ "$status" -eq 1 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="worktree_bootstrap"); assert not c["ok"] and "bin/rig-sprint" in c["detail"]'
+  run bash -c "cd '$linked' && '$linked/bin/rig' worktree bootstrap"
+  [ "$status" -eq 0 ]
+  [ -x "$linked/bin/rig-sprint" ]
 
   rm "$linked/.gitleaks.toml"
   run bash -c "cd '$linked' && '$linked/bin/rig' doctor --json"

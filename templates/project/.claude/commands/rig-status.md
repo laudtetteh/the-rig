@@ -59,14 +59,15 @@ Read from `CLAUDE.md` and `$RIG_DIR/VERSION`:
 ```bash
 RIG_VERSION=$(cat "$RIG_DIR/VERSION" 2>/dev/null || echo "unknown")
 BASE_BRANCH=$(grep "^base-branch:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
-ISSUE_TRACKING=$(grep "^issue-tracking:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
+TRACKER_JSON=$(python3 "$REPO/bin/rig-tracker-config.py" show "$REPO/CLAUDE.md") || exit 1
+ISSUE_TRACKING=$(printf '%s' "$TRACKER_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tracker"])') || exit 1
 ```
 
 Output:
 ```
 **Rig version:** [RIG_VERSION]
 **Base branch:** [BASE_BRANCH or "not set in CLAUDE.md"]
-**Issue tracking:** [ISSUE_TRACKING or "not set in CLAUDE.md"]
+**Issue tracking:** [ISSUE_TRACKING (normalized; `github` when absent)]
 ```
 
 **Tracking mode** — detect from the file system:

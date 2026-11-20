@@ -367,7 +367,11 @@ Do not infer approval from `issue-creator: agent`, the scaffold plan, or approva
 of another item. Resolve the target repository with
 `gh repo view --json nameWithOwner -q .nameWithOwner` from the project root;
 if this read fails, mark remaining task references `TBD` and continue to
-Steps 5d and 6 without a tracker write. If the Step 4 preflight printed
+Steps 5d and 6 without a tracker write. Use the returned `owner/repo` as the
+exact target in the approval request and replace `[approved owner/repo]` in
+every write command below with that same value. Stop if the resolved and
+approved repositories differ; never rely on the current working directory for
+a write. If the Step 4 preflight printed
 `type_feat_label=missing`,
 first present this label draft: target repository, name `type: feat`, color
 `#0075ca`, description `New feature`. Ask for approval to create this exact
@@ -383,7 +387,7 @@ label creation.
 ```bash
 # kickoff-type-label-start
 type_feat_ready=1
-if ! label_out=$(gh label create "type: feat" --color "#0075ca" --description "New feature" 2>&1); then
+if ! label_out=$(gh label create "type: feat" --color "#0075ca" --description "New feature" --repo "[approved owner/repo]" 2>&1); then
   if grep -qi 'already exists' <<< "$label_out"; then
     printf 'type: feat label already exists\n'
   else
@@ -403,7 +407,7 @@ Then, for each task file in dependency order, prepare one exact GitHub issue dra
 - Show the target repository, exact title, full body, and every label to the
   user. Ask for approval to create that specific issue now. If declined, set
   only this task's `**GitHub issue**:` to `TBD` and continue to the next draft.
-- After approval, run `gh issue create --title "[task goal]" --body-file [file holding the body] --label "type: feat"`,
+- After approval, run `gh issue create --repo "[approved owner/repo]" --title "[task goal]" --body-file [file holding the body] --label "type: feat"`,
   adding `--label "[existing area label]"` only when one fits. Set the task
   file's `**GitHub issue**:` field to the returned number, e.g. `#42`.
 

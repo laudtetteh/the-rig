@@ -6,7 +6,7 @@ readonly RIG_EXIT_UNAVAILABLE=69
 # Keep bootstrap and doctor's completeness check on the same source paths.
 # These fixed relative names contain no whitespace; Python splits on spaces.
 readonly RIG_WORKTREE_BOOTSTRAP_PATHS=".rigpath CLAUDE.md PROJECT_BRIEF.md .gitleaks.toml \
-  bin/rig bin/rig-session-resolve.py bin/rig-session-index.py bin/rig-snapshot.py bin/rig-tracker-config.py .claude .agents .codex \
+  bin/rig bin/rig-sprint bin/rig-session-resolve.py bin/rig-session-index.py bin/rig-snapshot.py bin/rig-tracker-config.py .claude .agents .codex \
   .mcp.json .playwright-mcp .github docs/INDEX.md docs/features/README.md"
 
 usage() { cat <<'EOF'

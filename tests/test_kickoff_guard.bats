@@ -163,6 +163,7 @@ install_fake_gh() {
   mkdir -p "$bin"
   cat > "$bin/gh" <<'GH'
 #!/usr/bin/env bash
+if [[ -n "${FAKE_GH_CALLS:-}" ]]; then printf '%s\n' "$*" >> "$FAKE_GH_CALLS"; fi
 if [[ "$1" == "auth" ]]; then
   [[ "${FAKE_GH_AUTH:-ok}" == "ok" ]] || exit 1
   exit 0
@@ -387,6 +388,28 @@ PY
   [ "$status" -eq 0 ]
   [[ "$output" == *"HTTP 403"* ]] || return 1
   [[ "$output" == *"type_feat_ready=0" ]] || return 1
+}
+
+@test "kickoff binds approved GitHub writes to the displayed repository from another cwd" {
+  install_fake_gh
+  local other="$BATS_TEST_TMPDIR/other-repo" script="$BATS_TEST_TMPDIR/approved-label.sh"
+  mkdir -p "$other"
+  git -C "$other" init -q
+  sed -n '/# kickoff-type-label-start/,/# kickoff-type-label-end/p' "$KICKOFF" \
+    | sed 's#\[approved owner/repo\]#owner/project#g' > "$script"
+  export FAKE_GH_CALLS="$BATS_TEST_TMPDIR/gh-calls"
+  run bash -c 'cd "$1" && bash "$2"' _ "$other" "$script"
+  [ "$status" -eq 0 ]
+  [ "$output" = "type_feat_ready=1" ]
+  grep -Fq -- 'label create type: feat --color #0075ca --description New feature --repo owner/project' "$FAKE_GH_CALLS"
+  python3 - "$KICKOFF" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+block = text.split('**`github-agent`:**', 1)[1].split('**`github-user` or `tracker-user`:**', 1)[0]
+command = re.search(r'gh issue create[^`]+', block).group(0)
+assert '--repo "[approved owner/repo]"' in command
+assert 'never rely on the current working directory' in block
+PY
 }
 
 @test "kickoff hand-off requires tracker references before /run when any task is TBD" {
