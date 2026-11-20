@@ -468,6 +468,30 @@ PY
   grep -Fq '## Resuming from: legacy-task' "$backup"
 }
 
+@test "owned handoff updates retain the current shared snapshot after a shared-only write" {
+  snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
+  printf '# Context Snapshot\n\n## Current state\n\n- Shared state version one.\n' > "$BATS_TEST_TMPDIR/shared.md"
+  run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only --json
+  [ "$status" -eq 0 ]
+  printf '## Resuming from: task-a\n\n**Next action:** Continue task-a.\n' > "$BATS_TEST_TMPDIR/owned.md"
+  run env RIG_SESSION_FILE="$file_a" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/owned.md" --owned-task task-a --json
+  [ "$status" -eq 0 ]
+  grep -Fq '## Current state' "$snapshot"
+  grep -Fq 'Shared state version one.' "$snapshot"
+  grep -Fq '## Resuming from: task-a' "$snapshot"
+
+  printf '# Context Snapshot\n\n## Current state\n\n- Shared state version two.\n' > "$BATS_TEST_TMPDIR/shared.md"
+  run "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/shared.md" --shared-only --json
+  [ "$status" -eq 0 ]
+  candidate "$BATS_TEST_TMPDIR/stale-owned.md" feat/old task-a
+  run env RIG_SESSION_FILE="$file_a" "$rig" memory write-snapshot --file "$BATS_TEST_TMPDIR/stale-owned.md" --owned-task task-a --json
+  [ "$status" -eq 0 ]
+  grep -Fq 'Shared state version two.' "$snapshot"
+  if grep -Fq 'Shared state version one.' "$snapshot"; then return 1; fi
+  if grep -Fq '**Branch:** feat/old' "$snapshot"; then return 1; fi
+  grep -Fq '## Resuming from: task-a' "$snapshot"
+}
+
 @test "shared refresh preserves an annotated legacy handoff through repeated writes" {
   snapshot="$CASE_DIR/.rig/memory/CONTEXT_SNAPSHOT.md"
   heading='## Resuming from: website-sprint-3-form-deploy (issue #5, active, blocked)'
