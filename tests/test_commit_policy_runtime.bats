@@ -40,7 +40,7 @@ install_hooks() {
   [ "$status" -eq 0 ]
   run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: reject wrong ref [bad-123]'
   [ "$status" -ne 0 ]
-  [[ "$output" == *'[APP-123]'* ]]
+  [[ "$output" == *'[APP-123]'* ]] || return 1
 }
 
 @test "tracker helper uses POSIX extended regular expressions for task references" {
@@ -61,7 +61,7 @@ print(result.stderr)
 raise SystemExit(result.returncode)
 PY
   [ "$status" -ne 0 ]
-  [[ "$output" == *"regular file"* ]]
+  [[ "$output" == *"regular file"* ]] || return 1
 }
 
 @test "commit-msg accepts generic bracketed refs without a pattern" {
@@ -90,7 +90,7 @@ PY
   printf 'issue-tracking: github\nissue-tracking: none\n' > "$TEST_PROJECT/CLAUDE.md"
   run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: missing ref'
   [ "$status" -ne 0 ]
-  [[ "$output" == *'duplicate issue-tracking'* ]]
+  [[ "$output" == *'duplicate issue-tracking'* ]] || return 1
 }
 
 approval() { touch "$TEST_PROJECT/.rig/memory/.rig-commit-ok"; }

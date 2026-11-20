@@ -107,10 +107,13 @@ def main():
     if valid:
         return 0
     example = config["example"] or "TICKET-123"
+    tracker_name = {"github": "GitHub", "gus": "GUS"}.get(
+        config["tracker"], config["tracker"].title())
     if args.action == "validate-ref":
-        print(f"ERROR: invalid {config['tracker']} reference; expected {example}.", file=sys.stderr)
+        print(f"ERROR: invalid {tracker_name} reference; expected {example}.", file=sys.stderr)
     else:
-        print(f"ERROR: Commit message must include a {config['tracker']} reference such as [{example}].", file=sys.stderr)
+        kind = "issue reference" if config["tracker"] == "github" else "reference"
+        print(f"ERROR: Commit message must include a {tracker_name} {kind} such as [{example}].", file=sys.stderr)
     return 1
 
 
