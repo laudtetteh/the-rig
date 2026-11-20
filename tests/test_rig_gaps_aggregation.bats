@@ -214,7 +214,7 @@ This heading is documentation, not a gap.
   printf '## [2026-11-20] — Legacy root gap\n\n**Scope**: rig-core\n' > "$TEST_HOME/code/legacy/.rig/memory/RIG_GAPS.md"
   run env HOME="$TEST_HOME" bash "$COLLECTOR"
   [ "$status" -eq 0 ] || { printf '%s\n' "$output"; return 1; }
-  [[ "$output" == *"Selected root gap"* && "$output" != *"Legacy root gap"* ]]
+  [[ "$output" == *"Selected root gap"* && "$output" != *"Legacy root gap"* ]] || return 1
 }
 
 @test "collector runs from an installed non-Git project" {
@@ -224,7 +224,7 @@ This heading is documentation, not a gap.
   printf '## [2026-11-20] — Non Git report\n\n**Scope**: rig-core\n' > "$TEST_HOME/.rig/projects/sample/memory/RIG_GAPS.md"
   run env HOME="$TEST_HOME" bash -c 'cd "$1" && bash "$2"' _ "$project" "$COLLECTOR"
   [ "$status" -eq 0 ] || { printf '%s\n' "$output"; return 1; }
-  [[ "$output" == *"Non Git report"* ]]
+  [[ "$output" == *"Non Git report"* ]] || return 1
 }
 
 @test "command documents explicit scope, read-only collection, and no automatic issues" {

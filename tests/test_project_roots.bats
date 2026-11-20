@@ -61,7 +61,7 @@ setup() {
   printf '{"schema_version":1,"projects_roots":["relative"]}\n' > "$TEST_HOME/.rig/config.json"
   run env HOME="$TEST_HOME" "$CASE_DIR/bin/rig" session index --json
   [ "$status" -ne 0 ]
-  [[ "$output" == *invalid_projects_roots* ]]
+  [[ "$output" == *invalid_projects_roots* ]] || return 1
   run env HOME="$TEST_HOME" RIG_PROJECTS_ROOTS='' "$CASE_DIR/bin/rig" session index --json
   [ "$status" -ne 0 ]
 }

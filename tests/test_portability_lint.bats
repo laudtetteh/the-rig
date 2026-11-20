@@ -19,7 +19,7 @@ setup() {
   git -C "$CASE_DIR" add README.md
   run python3 "$LINT" --root "$CASE_DIR"
   [ "$status" -eq 1 ]
-  [[ "$output" == *pilot_name* ]]
+  [[ "$output" == *pilot_name* ]] || return 1
 }
 
 @test "portability lint rejects private names and home paths in tracked docs" {
@@ -27,7 +27,7 @@ setup() {
   git -C "$CASE_DIR" add docs/example.md
   run python3 "$LINT" --root "$CASE_DIR"
   [ "$status" -eq 1 ]
-  [[ "$output" == *private_identifier* && "$output" == *personal_home* ]]
+  [[ "$output" == *private_identifier* && "$output" == *personal_home* ]] || return 1
 }
 
 @test "portability lint ignores untracked local notes" {
