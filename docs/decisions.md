@@ -507,8 +507,9 @@ the current behavior keep existing installations stable. `RIG_INSTALLER_SRC`
 already supplies an installer-source override; its documentation gap was
 resolved in #672/#681 and needs no new implementation ticket.
 
-**Consequences:** The four implementation changes are separate proposed issue
-creations, awaiting approval of each exact tracker action. Each must verify
+**Consequences:** The four implementation changes are separately tracked in
+#703 (base remote), #704 (PR host and templates), #705 (PR labels), and #706
+(provider config directories). Each must verify
 fresh install, upgrade from the previous release, generated Claude/Codex
 guidance, and the relevant remote, label, or provider-directory edge cases.
 This entry records the design; it does not claim that those settings are
