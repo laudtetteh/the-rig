@@ -243,3 +243,41 @@ PY
   run grep -n 'RIG_INSTALLER_SRC' "$REPO_ROOT/install.sh"
   [ "$status" -eq 1 ]
 }
+
+@test "public memory inventories list every scaffolded memory document" {
+  python3 - "$REPO_ROOT" <<'PY'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+names = {path.name for path in (root / "templates/project/.rig/memory").glob("*.md")}
+readme = next(line for line in (root / "README.md").read_text().splitlines()
+              if line.startswith("| Memory system |"))
+brief = next(line for line in (root / "PROJECT_BRIEF.md").read_text().splitlines()
+             if line.startswith("- **Memory system**:"))
+for document, row in (("README.md", readme), ("PROJECT_BRIEF.md", brief)):
+    missing = sorted(name for name in names if name not in row)
+    if missing:
+        raise SystemExit(f"{document} memory inventory omits: {', '.join(missing)}")
+PY
+}
+
+@test "release verification lists every hosted CI job" {
+  python3 - "$REPO_ROOT" <<'PY'
+import pathlib
+import re
+import sys
+
+root = pathlib.Path(sys.argv[1])
+workflow = (root / ".github/workflows/ci.yml").read_text()
+checks = (root / "docs/release-verification.md").read_text().split(
+    "## Required hosted checks", 1)[1].split("\n## ", 1)[0]
+job_names = re.findall(r"(?m)^    name:\s*(.+)$", workflow)
+if not job_names:
+    raise SystemExit("CI workflow has no named jobs")
+for name in job_names:
+    documented = name.split(" (", 1)[0] if "${{" in name else name
+    if documented not in checks:
+        raise SystemExit(f"release verification omits CI job: {name}")
+PY
+}

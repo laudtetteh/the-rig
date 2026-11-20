@@ -47,11 +47,12 @@ The Rig has two layers that load in sequence at every session start:
 │  .rig/processes/    ← new-task, ship, debug, post-merge flows   │
 │  .rig/rules/        ← coding standards, git, security, verify   │
 │  .rig/memory/       ← PROGRESS, ERRORS, DECISIONS, SNAPSHOT      │
+│                       PROJECT_CONVENTIONS, RIG_GAPS             │
 │  .rig/tasks/        ← active / backlog / done lifecycle         │
 │  .claude/           ← Claude hook wiring + slash commands       │
 │  .agents/skills/    ← generated Codex skills from commands      │
 │  .codex/            ← Codex hook manifest + adapter             │
-│  .husky/            ← secret scanning + tool footer cleanup     │
+│  .husky/            ← secret scan, commit checks, footer cleanup │
 │  .github/           ← PR template + issue templates             │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -68,11 +69,11 @@ The Rig has two layers that load in sequence at every session start:
 | Project brain | `templates/project/CLAUDE.md` | Project-specific identity, stack, conventions, off-limits paths |
 | Processes (9) | `templates/project/.rig/processes/` | Step-by-step workflows, including work modes, new-task, ship, debug, post-merge, sprint, connector preflight, Rig gaps triage, and upgrade |
 | Rules (7) | `templates/project/.rig/rules/` | Coding, git, security, verification, session identity, session naming, and protected-path contracts |
-| Memory system | `templates/project/.rig/memory/` | PROGRESS log, ERRORS log, DECISIONS log, CONTEXT_SNAPSHOT (session state), RIG_GAPS (self-improvement feedback) |
+| Memory system | `templates/project/.rig/memory/` | `PROGRESS.md` (log), `ERRORS.md` (pitfalls), `DECISIONS.md` (decisions), `PROJECT_CONVENTIONS.md` (approved rules), `CONTEXT_SNAPSHOT.md` (session state), `RIG_GAPS.md` (improvement feedback) |
 | Task lifecycle | `templates/project/.rig/tasks/` | Structured task files through backlog → active → done |
 | Claude/Codex adapters | `templates/project/.claude/`, `.codex/`, generated `.agents/skills/` | Shared command behavior and protected-path enforcement across both agents |
 | Feature docs | `templates/project/docs/features/` | README index + `/doc-feature` and `/refresh-feature-doc` commands for capturing and maintaining business-critical feature knowledge |
-| Git hooks | `templates/project/.husky/` | Secret scanning (gitleaks) + auto-injected tool footer removal |
+| Git hooks | `templates/project/.husky/` | Secret scanning; commit format, tracker-reference and guarded-commit checks; tool footer cleanup; progress stubs and merge reminders |
 | GitHub templates | `templates/project/.github/` | PR template + 3 issue templates |
 | Installer | `install.sh` | Interactive setup script — handles both layers |
 | CI | `.github/workflows/ci.yml` | Runs the sharded Bats suite on pushes to main and PRs targeting main |
@@ -450,7 +451,7 @@ See [docs/INDEX.md](docs/INDEX.md) for the canonical documentation index, includ
 
 The Rig grew organically out of real project work, starting with an AI-powered interactive resume project where each session revealed a new failure mode and prompted a new layer of scaffolding. Every component exists because something went wrong without it.
 
-It was subsequently piloted on [4Culture.org](https://4culture.org), a shared-repo WordPress platform with multiple contributors. That engagement surface stealth mode, the housekeeping commit convention, and several robustness improvements to the hook system.
+It was subsequently piloted on [4Culture.org](https://4culture.org), a shared-repo WordPress platform with multiple contributors. That engagement surfaced stealth mode, the housekeeping commit convention, and several robustness improvements to the hook system.
 
 That first project's history — 100+ PRs, clean conventional commits, linked issues, documented architecture — is the original proof of concept.
 

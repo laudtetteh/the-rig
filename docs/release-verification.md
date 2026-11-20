@@ -40,15 +40,18 @@ upgrades and interrupted operations:
 
 The required checks are:
 
-1. `bats test suite` — complete `bats tests/` coverage, sharded.
-2. `bats test suite (shard coverage check)` — verifies every `tests/*.bats`
+1. `plan bats shards` — builds the weighted shard matrix.
+2. `bats test suite` — complete `bats tests/` coverage, sharded.
+3. `bats test suite (shard coverage check)` — verifies every `tests/*.bats`
    file was claimed by some shard. Sharding's own failure mode is a file
    silently belonging to no shard and therefore never running.
-3. `shell and static checks` — Bash syntax, Python compilation, ShellCheck, and
+4. `macOS bash 3.2 portability subset` — checks the selected installer, command,
+   hook and CLI paths on macOS's stock Bash.
+5. `shell and static checks` — Bash syntax, Python compilation, ShellCheck, and
    whitespace/error checks.
-4. `security and recovery gates` — focused path, symlink, permission,
+6. `security and recovery gates` — focused path, symlink, permission,
    redaction, and upgrade-recovery regression tests plus gitleaks.
-5. GitGuardian — hosted secret scanning for the repository and pull request.
+7. GitGuardian — hosted secret scanning for the repository and pull request.
 
 If an upgrade is interrupted by a failed write, permission error, process exit,
 or disk-full condition, the operator must preserve the failure output, inspect

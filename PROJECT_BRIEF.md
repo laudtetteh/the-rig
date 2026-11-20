@@ -49,13 +49,13 @@ The Rig is actively developed; the current release is recorded in [`VERSION`](VE
 - A Bats test suite, sharded in hosted CI
 
 ### Project layer (scaffolded into target projects)
-- **Memory system**: `PROGRESS.md` (auto-logged by post-commit hook), `ERRORS.md`, `CONTEXT_SNAPSHOT.md` (written by `/wrap`), `DECISIONS.md`, `RIG_GAPS.md`
+- **Memory system**: `PROGRESS.md` (auto-logged by post-commit hook), `ERRORS.md`, `PROJECT_CONVENTIONS.md` (approved rules), `CONTEXT_SNAPSHOT.md` (written by `/wrap`), `DECISIONS.md`, `RIG_GAPS.md`
 - **Processes**: nine process files covering task intake, work modes, sprint
   planning, shipping, debugging, connector preflight, upgrades, post-merge
   housekeeping, and Rig gaps triage
 - **Command/skill adapters**: Claude slash commands are generated as corresponding Codex `$name` skills from one canonical source
 - **Agent hooks**: canonical Claude handlers plus a Codex hook manifest/adapter enforce the same safety and lifecycle contracts
-- **Git hooks**: `pre-commit` (gitleaks secret scanning), `commit-msg` + `post-commit` (tool footer removal), `post-merge` (post-merge-pending flag)
+- **Git hooks**: `pre-commit` (gitleaks secret scanning), `commit-msg` (tool footer removal, Conventional Commits, tracker references and guarded-commit approval), `post-commit` (late-footer checks and progress stubs), `post-merge` (merge reminder)
 - **Configurable project settings**: `issue-tracking`, `secret-scanner`, `commit-cleanup`, `base-branch`, `housekeeping`
 
 ### Global agent layers
