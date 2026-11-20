@@ -9,6 +9,7 @@ import re
 import stat
 import subprocess
 import sys
+from rig_project_roots import RootsConfigError, read_project_roots
 
 ROOT = pathlib.Path(os.environ["RIG_ROOT"]).absolute()
 RIG_DIR = pathlib.Path(os.environ["RIG_DIR"]).absolute()
@@ -119,22 +120,27 @@ def catalog_entries(directory, reason):
 
 
 add_scope(RIG_DIR, "current", ROOT)
-code_home = pathlib.Path.home() / "code"
-if code_home.exists() or code_home.is_symlink():
-    if not safe_dir(code_home):
-        errors.append({"scope": str(code_home), "reason": "unsafe_code_catalog"})
-    else:
-        for child in catalog_entries(code_home, "unreadable_code_catalog"):
-            if child.is_symlink():
-                skipped_code_symlinks.append(str(child))
-            elif child.is_dir() and ((child / ".rig").exists() or
-                                     (child / ".rigpath").exists() or
-                                     (child / ".rigpath").is_symlink()):
-                directory, reason = project_dir(child)
-                if reason:
-                    errors.append({"scope": str(child), "reason": reason})
-                else:
-                    add_scope(directory, "code_catalog", child.resolve())
+try:
+    project_roots, roots_source, missing_roots = read_project_roots()
+except RootsConfigError as exc:
+    fail("invalid_projects_roots: " + str(exc))
+for code_home in project_roots:
+    if code_home.exists() or code_home.is_symlink():
+        if not safe_dir(code_home):
+            errors.append({"scope": str(code_home), "reason": "unsafe_project_catalog"})
+        else:
+            for child in catalog_entries(code_home, "unreadable_project_catalog"):
+                if child.is_symlink():
+                    skipped_code_symlinks.append(str(child))
+                elif child.is_dir() and ((child / ".rig").exists() or
+                                         (child / ".rigpath").exists() or
+                                         (child / ".rigpath").is_symlink()):
+                    directory, reason = project_dir(child)
+                    if reason:
+                        errors.append({"scope": str(child), "reason": reason})
+                    else:
+                        add_scope(directory, "code_catalog" if roots_source == "legacy"
+                                  else "project_catalog", child.resolve())
 external = pathlib.Path.home() / ".rig" / "projects"
 if external.exists() or external.is_symlink():
     if not safe_dir(external):
@@ -527,13 +533,17 @@ for row in rows:
     for key in ("_created", "_activity", "_native", "_lineage"):
         row.pop(key)
 result = {"ok": not errors,
-          "coverage": {"discovery": "current project, ~/code/*, ~/.rig/projects/*, and explicit --root projects",
+          "coverage": {"discovery": "current project, configured project roots, ~/.rig/projects/*, and explicit --root projects",
+                       "projects_roots_source": roots_source,
+                       "projects_roots": [str(path) for path in project_roots],
+                       "missing_projects_roots": missing_roots,
                        "scopes": coverage, "omitted_unrelated_errors": omitted_errors,
                        "skipped_code_symlinks": skipped_code_symlinks},
           "sessions": rows, "errors": errors}
 if not VERBOSE and native_ids:
     sensitive_fields = {"scope", "record", "rig_dir", "project",
                         "skipped_code_symlinks",
+                        "projects_roots", "missing_projects_roots",
                         "project_label", "name", "branch", "anchor"}
     def scrub(value, field=None):
         if isinstance(value, str) and field in sensitive_fields:

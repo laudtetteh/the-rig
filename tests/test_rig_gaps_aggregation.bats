@@ -205,6 +205,28 @@ This heading is documentation, not a gap.
   [[ "$output" == *"No project RIG_GAPS.md files found"* ]] || return 1
 }
 
+@test "collector uses configured direct roots without the legacy code root" {
+  configured="$TEST_HOME/projects"
+  mkdir -p "$configured/selected/.rig/memory" "$TEST_HOME/code/legacy/.rig/memory" "$TEST_HOME/.rig"
+  configured=$(cd "$configured" && pwd -P)
+  printf '{"schema_version":1,"projects_roots":["%s"]}\n' "$configured" > "$TEST_HOME/.rig/config.json"
+  printf '## [2026-11-20] — Selected root gap\n\n**Scope**: rig-core\n' > "$configured/selected/.rig/memory/RIG_GAPS.md"
+  printf '## [2026-11-20] — Legacy root gap\n\n**Scope**: rig-core\n' > "$TEST_HOME/code/legacy/.rig/memory/RIG_GAPS.md"
+  run env HOME="$TEST_HOME" bash "$COLLECTOR"
+  [ "$status" -eq 0 ] || { printf '%s\n' "$output"; return 1; }
+  [[ "$output" == *"Selected root gap"* && "$output" != *"Legacy root gap"* ]] || return 1
+}
+
+@test "collector runs from an installed non-Git project" {
+  project="$TEST_HOME/non-git-project"
+  mkdir -p "$project/bin" "$TEST_HOME/.rig/projects/sample/memory"
+  cp "$REPO_ROOT/templates/project/bin/rig_project_roots.py" "$project/bin/rig_project_roots.py"
+  printf '## [2026-11-20] — Non Git report\n\n**Scope**: rig-core\n' > "$TEST_HOME/.rig/projects/sample/memory/RIG_GAPS.md"
+  run env HOME="$TEST_HOME" bash -c 'cd "$1" && bash "$2"' _ "$project" "$COLLECTOR"
+  [ "$status" -eq 0 ] || { printf '%s\n' "$output"; return 1; }
+  [[ "$output" == *"Non Git report"* ]] || return 1
+}
+
 @test "command documents explicit scope, read-only collection, and no automatic issues" {
   run /usr/bin/grep -F '**Scope**: project | rig-core' "$COMMAND"
   [ "$status" -eq 0 ]

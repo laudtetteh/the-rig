@@ -90,7 +90,7 @@ sha256_file() {
 # strategy applies manifest-aware logic uniformly. is_rig_owned() is used for
 # messaging/warning decisions only, not as a skip gate.
 #
-# Rig-owned:   bin/rig, bin/rig-sprint, bin/rig-session-resolve.py, bin/rig-session-index.py, bin/rig-snapshot.py, bin/rig-tracker-config.py, .claude/hooks/,
+# Rig-owned:   bin/rig, bin/rig-sprint, bin/rig-session-resolve.py, bin/rig-session-index.py, bin/rig_project_roots.py, bin/rig-snapshot.py, bin/rig-tracker-config.py, .claude/hooks/,
 #              .claude/commands/, .agents/skills/,
 #              .codex/hooks.json, .codex/hooks/, .rig/processes/,
 #              .rig/rules/protected-paths.txt, .husky/, .gitleaks.toml,
@@ -101,7 +101,7 @@ sha256_file() {
 is_rig_owned() {
   local rel="$1"
   case "$rel" in
-    bin/rig|bin/rig-sprint|bin/rig-session-resolve.py|bin/rig-session-index.py|bin/rig-snapshot.py|bin/rig-tracker-config.py|\
+    bin/rig|bin/rig-sprint|bin/rig-session-resolve.py|bin/rig-session-index.py|bin/rig_project_roots.py|bin/rig-snapshot.py|bin/rig-tracker-config.py|\
     .claude/hooks/*|\
     .claude/commands/*|\
     .claude/agents/*|\
@@ -698,6 +698,7 @@ _FLAG_TARGET=""       # set via --target <path>     (skips interactive prompt)
 _FLAG_PROJECT_NAME="" # set via --project-name <n>  (skips interactive prompt)
 _FLAG_BASE_BRANCH=""  # set via --base-branch <n>   (skips interactive prompt)
 _FLAG_TRACKING=""     # set via --tracking <mode>   (skips tracking prompt; orthogonal to --target)
+_FLAG_PROJECTS_ROOT="" # explicit user-level project discovery root
 RECOVER_ONLY=false
 RECOVERY_ONLY_COMPLETE=false
 REPAIR_STALE=false
@@ -733,9 +734,9 @@ for arg in "$@"; do
     --recover)          RECOVER_ONLY=true; _FLAG_STRATEGY="upgrade" ;;
     --repair-stale)     REPAIR_STALE=true; _FLAG_STRATEGY="upgrade" ;;
     --json)             JSON_OUTPUT=true ;;
-    --global-agent|--project-agent)
+    --global-agent|--project-agent|--projects-root)
       ;;
-    --rig-dir|--strategy|--target|--project-name|--base-branch|--tracking)
+    --rig-dir|--strategy|--target|--project-name|--base-branch|--tracking|--projects-root)
       # two-arg flags; value captured in the loop below
       ;;
     --version|-v)
@@ -788,6 +789,7 @@ for arg in "$@"; do
       echo "                        external — .rig/ outside the repo (requires --rig-dir)"
       echo "                        stealth  — zero Rig traces; hooks go to .git/hooks/"
       echo "                        Orthogonal to --target: both can be used together."
+      echo "  --projects-root <dir> Add an existing absolute directory to user-level project discovery."
       blank
       echo "Other:"
       echo "  --rig-dir <path>      Install .rig/ to an external path outside the repo."
@@ -819,8 +821,8 @@ done
 args=("$@")
 for (( i=0; i<${#args[@]}; i++ )); do
   case "${args[$i]}" in
-    --global-agent|--project-agent)
-      if [[ $((i+1)) -ge ${#args[@]} || "${args[$((i+1))]}" == --* ]]; then
+    --global-agent|--project-agent|--projects-root)
+      if [[ $((i+1)) -ge ${#args[@]} || -z "${args[$((i+1))]:-}" || "${args[$((i+1))]:-}" == --* ]]; then
         error "${args[$i]} requires a value"
         exit 2
       fi ;;
@@ -843,6 +845,9 @@ for (( i=0; i<${#args[@]}; i++ )); do
   if [[ "${args[$i]}" == "--tracking" && $((i+1)) -lt ${#args[@]} ]]; then
     _FLAG_TRACKING="${args[$((i+1))]}"
   fi
+  if [[ "${args[$i]}" == "--projects-root" && $((i+1)) -lt ${#args[@]} ]]; then
+    _FLAG_PROJECTS_ROOT="${args[$((i+1))]}"
+  fi
   if [[ "${args[$i]}" == "--global-agent" && $((i+1)) -lt ${#args[@]} ]]; then
     _FLAG_GLOBAL_AGENT="${args[$((i+1))]}"
   fi
@@ -850,6 +855,14 @@ for (( i=0; i<${#args[@]}; i++ )); do
     _FLAG_PROJECT_AGENT="${args[$((i+1))]}"
   fi
 done
+
+if [[ -n "$_FLAG_PROJECTS_ROOT" && "$DO_PROJECT" != true ]]; then
+  error "--projects-root requires the project layer"
+  exit 2
+fi
+if [[ -n "$_FLAG_PROJECTS_ROOT" ]]; then
+  _FLAG_PROJECTS_ROOT="$(python3 "$SCRIPT_DIR/installer/set-projects-root.py" check "$_FLAG_PROJECTS_ROOT")" || exit 2
+fi
 
 # Set AGENT_MODE/AGENT_DRY_RUN as soon as --strategy is known (rather than
 # down in the intent-menu bypass block below) so the info/success/warn/bold/
@@ -2523,7 +2536,7 @@ preflight_snapshot_project() {
   local -a rel_paths=(
     "CLAUDE.md" "PROJECT_BRIEF.md" ".claude" ".agents" ".codex" ".mcp.json"
     ".playwright-mcp" ".github" ".gitleaks.toml" "docs/INDEX.md" "docs/features/README.md"
-    ".husky" ".rigpath" "bin/rig" "bin/rig-session-resolve.py" "bin/rig-session-index.py" "bin/rig-snapshot.py" "bin/rig-tracker-config.py" ".git/hooks"
+    ".husky" ".rigpath" "bin/rig" "bin/rig-session-resolve.py" "bin/rig-session-index.py" "bin/rig_project_roots.py" "bin/rig-snapshot.py" "bin/rig-tracker-config.py" ".git/hooks"
   )
   # Tracked .rig/ lives at $base/.rig for repo/exclude tracking, so it's just
   # another base-relative path. external/stealth tracking is handled below —
@@ -3884,6 +3897,16 @@ if [[ "$DO_PROJECT" == true ]]; then
   if [[ ! -d "$TARGET" ]]; then
     error "Directory does not exist: $TARGET"
     exit 1
+  fi
+
+  # This user-level setting is never inferred from --target, including test
+  # targets. A flag or interactive answer is the only write authorization.
+  if [[ -z "$_FLAG_PROJECTS_ROOT" && -z "$_FLAG_TARGET" && -z "$_FLAG_STRATEGY" && -t 0 && -z "$AGENT_MODE" ]]; then
+    ask "Add a project discovery root to ~/.rig/config.json? (blank skips)"
+    read -r -p "    Absolute directory: " _FLAG_PROJECTS_ROOT || true
+  fi
+  if [[ -n "$_FLAG_PROJECTS_ROOT" ]]; then
+    _FLAG_PROJECTS_ROOT="$(python3 "$SCRIPT_DIR/installer/set-projects-root.py" check "$_FLAG_PROJECTS_ROOT")" || exit 2
   fi
 
   if [[ ! -d "$TARGET/.git" ]]; then
@@ -5425,6 +5448,11 @@ fi
 # closes this class of gap structurally instead of per call site.
 # finish_upgrade_transaction() already no-ops safely when nothing is open.
 finish_upgrade_transaction
+
+# Commit the explicit user-level selection only after a successful install.
+if [[ "$DO_PROJECT" == true && -n "$_FLAG_PROJECTS_ROOT" && "$AGENT_DRY_RUN" != true && "$PREFLIGHT_ONLY" != true ]]; then
+  python3 "$SCRIPT_DIR/installer/set-projects-root.py" write "$_FLAG_PROJECTS_ROOT" >/dev/null
+fi
 
 bold "── Done ──"
 blank

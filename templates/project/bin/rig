@@ -6,7 +6,7 @@ readonly RIG_EXIT_UNAVAILABLE=69
 # Keep bootstrap and doctor's completeness check on the same source paths.
 # These fixed relative names contain no whitespace; Python splits on spaces.
 readonly RIG_WORKTREE_BOOTSTRAP_PATHS=".rigpath CLAUDE.md PROJECT_BRIEF.md .gitleaks.toml \
-  bin/rig bin/rig-sprint bin/rig-session-resolve.py bin/rig-session-index.py bin/rig-snapshot.py bin/rig-tracker-config.py .claude .agents .codex \
+  bin/rig bin/rig-sprint bin/rig-session-resolve.py bin/rig-session-index.py bin/rig_project_roots.py bin/rig-snapshot.py bin/rig-tracker-config.py .claude .agents .codex \
   .mcp.json .playwright-mcp .github docs/INDEX.md docs/features/README.md"
 
 usage() { cat <<'EOF'
@@ -1470,7 +1470,7 @@ doctor() {
     [[ "$arg" == --json ]] || { usage_error "unknown doctor option: $arg" "$@"; return; }
   done
   RIG_ROOT="$(rig_root)" RIG_DIR="$(rig_dir)" RIG_BOOTSTRAP_PATHS="$RIG_WORKTREE_BOOTSTRAP_PATHS" python3 - "$@" <<'PY'
-import hashlib, json, os, pathlib, re, shlex, stat, subprocess, sys
+import hashlib, importlib.util, json, os, pathlib, re, shlex, stat, subprocess, sys
 
 try:
     import tomllib
@@ -1500,6 +1500,37 @@ def check(name, ok, detail, fix=None, state=None):
     if state == "fail" and fix:
         item["fix"] = str(fix)
     checks.append(item)
+
+roots_helper = root / "bin" / "rig_project_roots.py"
+if roots_helper.is_file() and not roots_helper.is_symlink():
+    try:
+        spec = importlib.util.spec_from_file_location("rig_project_roots", roots_helper)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        project_roots, roots_source, missing_roots = module.read_project_roots()
+        if roots_source == "none":
+            check("projects_roots", True, "no configured roots or legacy ~/code directory", state=ADVISORY)
+        elif roots_source == "legacy" and not module.safe_directory(project_roots[0]):
+            check("projects_roots", True, "legacy ~/code root is not a safe directory", state=ADVISORY)
+        elif missing_roots:
+            check("projects_roots", True, "missing configured roots: " + ", ".join(missing_roots), state=ADVISORY)
+        else:
+            check("projects_roots", True, roots_source + ": " + ", ".join(map(str, project_roots)))
+    except (OSError, ValueError) as exc:
+        check("projects_roots", False, str(exc), "Inspect ~/.rig/config.json or RIG_PROJECTS_ROOTS")
+else:
+    manifest = rig / "memory" / ".rig-manifest"
+    try:
+        expected = (manifest.is_file() and not manifest.is_symlink() and
+                    manifest.stat().st_size <= 1024 * 1024 and
+                    "  bin/rig_project_roots.py" in manifest.read_text(errors="replace"))
+    except OSError:
+        expected = False
+    if expected:
+        check("projects_roots", False, "installed roots helper is missing",
+              "Re-run the Rig installer or worktree bootstrap")
+    else:
+        check("projects_roots", True, "roots helper is not installed", state=SKIPPED)
 
 unsafe_content_inputs = set()
 extra_content_anchors = []
@@ -4290,8 +4321,9 @@ Usage: rig session index [--root PROJECT]... [--project current|PROJECT]
                          [--provider claude|codex] [--state STATE]
                          [--search TEXT] [--sort created|activity] [--json] [--verbose]
 
-Searches Rig records in the current project, immediate ~/code/* projects,
-~/.rig/projects/*, and explicit project roots. Never scans provider
+Searches Rig records in the current project, configured project roots,
+~/.rig/projects/*, and explicit --root projects. With no configuration,
+an existing ~/code/* remains the legacy default. Never scans provider
 transcripts. Native IDs are shown only with --verbose. Read-only.
 EOF
       ;;
