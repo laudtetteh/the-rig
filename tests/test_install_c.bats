@@ -91,11 +91,12 @@ _sha256() {
 is_rig_owned_stub() {
   local rel="$1"
   case "$rel" in
-    bin/rig|\
+    bin/rig|bin/rig-connector-preflight|bin/rig-sprint|bin/rig-tab-title-watch|bin/rig-session-resolve.py|bin/rig-session-index.py|bin/rig_project_roots.py|bin/rig-snapshot.py|bin/rig-tracker-config.py|\
     .claude/hooks/*|\
     .claude/commands/*|\
     .claude/agents/*|\
     .agents/skills/*|\
+    .codex/skills/sprint/SKILL.md|\
     .codex/hooks.json|\
     .codex/hooks/*|\
     .rig/processes/*|\
@@ -110,6 +111,17 @@ is_rig_owned_stub() {
 
 @test "is_rig_owned: dispatcher is Rig-owned" {
   is_rig_owned_stub "bin/rig"
+}
+
+@test "is_rig_owned: shipped command helpers and sprint skill are Rig-owned" {
+  local definition
+  definition="$(awk '/^is_rig_owned\(\) \{/{found=1} found{print} found && /^\}/{exit}' "$INSTALLER")"
+  [[ -n "$definition" ]]
+  eval "$definition"
+  is_rig_owned "bin/rig-connector-preflight"
+  is_rig_owned "bin/rig-sprint"
+  is_rig_owned "bin/rig-tab-title-watch"
+  is_rig_owned ".codex/skills/sprint/SKILL.md"
 }
 
 @test "is_rig_owned: hook script is Rig-owned" {

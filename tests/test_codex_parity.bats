@@ -32,6 +32,14 @@ setup() {
   CODEX_SESSION_PID="$(( $$ + 1 ))"
 }
 
+@test "hand-maintained Codex sprint adapter names current batch and validation gates" {
+  local skill="$REPO_ROOT/templates/project/.codex/skills/sprint/SKILL.md"
+  for phrase in 'N-issues-to-M-PRs' 'Dependency Surface Audit' \
+    'shared-file exclusivity' 'closing keywords' 'full local `bats tests/`'; do
+    grep -Fq "$phrase" "$skill"
+  done
+}
+
 teardown() {
   rm -rf "$TEST_ROOT"
   rm -f "/tmp/.rig-session-${DIRECT_SESSION_PID}.uuid" \

@@ -230,6 +230,41 @@ PY
   [ "$status" -ne 0 ]
 }
 
+@test "rig-help lists every shipped command and only documented sprint selection" {
+  run python3 - "$COMMAND_DIR" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+commands = Path(sys.argv[1])
+help_text = (commands / "rig-help.md").read_text()
+listed = set(re.findall(r"^\| `/([a-z-]+)(?: <[^`]+>)?` \|", help_text, re.M))
+shipped = {path.stem for path in commands.glob("*.md")}
+assert shipped <= listed, f"missing commands: {sorted(shipped - listed)}"
+row = next(line for line in help_text.splitlines() if line.startswith("| `/sprint` |"))
+assert "--issues" not in row
+for term in ("issue refs", "--all", "audit-only", "plan-only", "repair-and-plan", "resume"):
+    assert term in row, term
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "post-merge summary specifies an input for snapshot writing" {
+  run python3 - "$COMMAND_DIR/post-merge.md" <<'PY'
+from pathlib import Path
+import sys
+
+text = Path(sys.argv[1]).read_text()
+summary = text.split("### Execution", 1)[1].split("All steps execute automatically", 1)[0]
+line = next(line for line in summary.splitlines() if "memory write-snapshot" in line)
+assert "--file" in line or "--stdin" in line, line
+assert "--shared-only" in line
+assert '"$SNAP_DRAFT"' in line, line
+assert 'SNAP_DRAFT="$RIG_DIR/memory/.snapshot-draft-' in text
+PY
+  [ "$status" -eq 0 ]
+}
+
 @test "rig-gaps.md: quick-add mode uses structured memory helper" {
   grep -Fq '/rig-gaps --add "short title"' "$COMMAND_DIR/rig-gaps.md"
   grep -Fq '## Quick-add mode (`--add`)' "$COMMAND_DIR/rig-gaps.md"

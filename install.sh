@@ -90,9 +90,9 @@ sha256_file() {
 # strategy applies manifest-aware logic uniformly. is_rig_owned() is used for
 # messaging/warning decisions only, not as a skip gate.
 #
-# Rig-owned:   bin/rig, bin/rig-sprint, bin/rig-session-resolve.py, bin/rig-session-index.py, bin/rig_project_roots.py, bin/rig-snapshot.py, bin/rig-tracker-config.py, .claude/hooks/,
+# Rig-owned:   bin/rig and its shipped helpers, .claude/hooks/,
 #              .claude/commands/, .agents/skills/,
-#              .codex/hooks.json, .codex/hooks/, .rig/processes/,
+#              .codex/skills/sprint/SKILL.md, .codex/hooks.json, .codex/hooks/, .rig/processes/,
 #              .rig/rules/protected-paths.txt, .husky/, .gitleaks.toml,
 #              .git/hooks/ (stealth-mode installed hook scripts only)
 # User-owned:  CLAUDE.md, PROJECT_BRIEF.md, other .rig/rules/, .rig/memory/*.md,
@@ -101,11 +101,12 @@ sha256_file() {
 is_rig_owned() {
   local rel="$1"
   case "$rel" in
-    bin/rig|bin/rig-sprint|bin/rig-session-resolve.py|bin/rig-session-index.py|bin/rig_project_roots.py|bin/rig-snapshot.py|bin/rig-tracker-config.py|\
+    bin/rig|bin/rig-connector-preflight|bin/rig-sprint|bin/rig-tab-title-watch|bin/rig-session-resolve.py|bin/rig-session-index.py|bin/rig_project_roots.py|bin/rig-snapshot.py|bin/rig-tracker-config.py|\
     .claude/hooks/*|\
     .claude/commands/*|\
     .claude/agents/*|\
     .agents/skills/*|\
+    .codex/skills/sprint/SKILL.md|\
     .codex/hooks.json|\
     .codex/hooks/*|\
     .rig/processes/*|\
