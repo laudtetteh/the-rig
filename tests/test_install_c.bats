@@ -116,7 +116,7 @@ is_rig_owned_stub() {
 @test "is_rig_owned: shipped command helpers and sprint skill are Rig-owned" {
   local definition
   definition="$(awk '/^is_rig_owned\(\) \{/{found=1} found{print} found && /^\}/{exit}' "$INSTALLER")"
-  [[ -n "$definition" ]]
+  [ -n "$definition" ]
   eval "$definition"
   is_rig_owned "bin/rig-connector-preflight"
   is_rig_owned "bin/rig-sprint"
