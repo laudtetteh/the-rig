@@ -2,6 +2,7 @@
 """Read-only index of Rig session records in bounded project locations."""
 import datetime
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -16,6 +17,7 @@ RIG_DIR = pathlib.Path(os.environ["RIG_DIR"]).absolute()
 ARGS = sys.argv[1:]
 AS_JSON = "--json" in ARGS
 VERBOSE = "--verbose" in ARGS
+STALE = "--stale" in ARGS
 
 
 def fail(reason):
@@ -28,10 +30,10 @@ options = {"--root": []}
 i = 0
 while i < len(ARGS):
     key = ARGS[i]
-    if key in ("--json", "--verbose"):
+    if key in ("--json", "--verbose", "--stale"):
         i += 1
         continue
-    if key not in ("--root", "--project", "--provider", "--state", "--search", "--sort"):
+    if key not in ("--root", "--project", "--provider", "--state", "--search", "--sort", "--older-than"):
         fail("invalid_input")
     if i + 1 >= len(ARGS) or not ARGS[i + 1] or ARGS[i + 1].startswith("--"):
         fail("invalid_input")
@@ -45,6 +47,12 @@ while i < len(ARGS):
 if options.get("--provider") not in (None, "claude", "codex"):
     fail("invalid_input")
 if options.get("--sort") not in (None, "created", "activity"):
+    fail("invalid_input")
+try:
+    stale_days = int(options.get("--older-than", "30"))
+except ValueError:
+    fail("invalid_input")
+if ("--older-than" in options and not STALE) or not 7 <= stale_days <= 36500:
     fail("invalid_input")
 
 
@@ -299,6 +307,24 @@ for rig_dir, scope in scopes.items():
             data = None
             try:
                 data = read_record(path)
+                if (isinstance(data, dict) and data.get("schema_version") == 1 and
+                    not any(key in data for key in ("native", "project", "lifecycle")) and
+                    isinstance(data.get("anchor"), str) and
+                    data.get("agent") in ("claude", "codex") and
+                    data.get("status") in ("active", "inactive", "complete", "ended_no_wrap") and
+                    isinstance(data.get("binding"), str) and
+                    isinstance(data.get("project_root"), str) and
+                    (data.get("status") != "active" or
+                     (isinstance(data.get("native_session_id_sha256_prefix"), str) and
+                      re.fullmatch(r"[0-9a-f]{16}", data["native_session_id_sha256_prefix"]) and
+                      isinstance(data.get("started_at"), str) and
+                      isinstance(data.get("privacy_note"), str)))):
+                    error = {"scope": str(rig_dir), "record": relative,
+                             "reason": "historical_flat_record"}
+                    if re.fullmatch(r"(?:done/)?session-[A-Za-z0-9._-]+\.json", relative):
+                        error["next_step"] = "bin/rig session legacy --file " + relative + " --json"
+                    errors.append(error)
+                    continue
                 if isinstance(data, dict) and "schema_version" not in data:
                     reason = legacy_error(data)
                     if reason:
@@ -371,6 +397,9 @@ for rig_dir, scope in scopes.items():
                        "resume_hint": "claude --resume" if data["agent"] == "claude" else "codex resume --all",
                        "ambiguous": False, "_created": created, "_activity": activity,
                        "_native": native_id, "_lineage": lineage}
+                if STALE:
+                    row["_data"] = data
+                    row["_path"] = path
                 if VERBOSE:
                     row["native_session_id"] = native_id
                 rows.append(row)
@@ -529,9 +558,72 @@ if query:
             query in (row["branch"] or "").casefold()]
 rows.sort(key=lambda row: (row["_created" if options.get("--sort") == "created" else "_activity"],
                            row["project"] or row["provenance"]["rig_dir"], row["anchor"]), reverse=True)
+if STALE:
+    helper = pathlib.Path(__file__).with_name("rig-session-archive.py")
+    if not helper.is_file():
+        fail("archive_helper_unavailable")
+    spec = importlib.util.spec_from_file_location("rig_session_archive", helper)
+    archive = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(archive)
+    try:
+        component_items = archive.records()
+        component_anchors = archive.components(component_items)
+        component_by_anchor = {item["data"]["anchor"]: item for item in component_items}
+        component_error = "archive_recovery_required" if archive.pending_transactions() else None
+    except archive.Refusal as exc:
+        component_anchors, component_by_anchor, component_error = {}, {}, exc.reason
+    for row in rows:
+        if row["schema"] != "v1":
+            row["stale_evidence"] = {"provider_live_state": "unknown", "archive_eligible": False,
+                                     "refusal_reasons": ["historical_record_use_session_legacy"]}
+            continue
+        rig_scope = pathlib.Path(row["provenance"]["rig_dir"])
+        if rig_scope != RIG_DIR or not row["project_verified"] or row["ambiguous"]:
+            prior_memory = archive.MEMORY
+            archive.MEMORY = rig_scope / "memory"
+            try:
+                report = archive.evidence({"path": row["_path"], "name": row["provenance"]["record"],
+                                           "data": row["_data"]}, stale_days)
+            except archive.Refusal as exc:
+                report = {"provider_live_state": "unknown", "refusal_reasons": [exc.reason]}
+            finally:
+                archive.MEMORY = prior_memory
+            report["archive_eligible"] = False
+            report.setdefault("refusal_reasons", []).append("cross_project_or_ambiguous")
+            row["stale_evidence"] = report
+            continue
+        item = {"path": row["_path"], "name": row["provenance"]["record"],
+                "data": row["_data"]}
+        try:
+            report = archive.evidence(item, stale_days)
+        except archive.Refusal as exc:
+            report = {"provider_live_state": "unknown", "archive_eligible": False,
+                      "refusal_reasons": [exc.reason]}
+        group = component_anchors.get(row["anchor"])
+        if component_error or not group:
+            report["archive_eligible"] = False
+            report["refusal_reasons"].append(component_error or "invalid_lineage")
+        else:
+            report["lineage_component_anchors"] = sorted(group)
+            try:
+                group_reports = [archive.evidence(component_by_anchor[anchor], stale_days) for anchor in group]
+                if any(not member["archive_eligible"] for member in group_reports):
+                    report["archive_eligible"] = False
+                    report["refusal_reasons"].append("lineage_component_ineligible")
+            except archive.Refusal as exc:
+                report["archive_eligible"] = False
+                report["refusal_reasons"].append(exc.reason)
+        row["stale_evidence"] = report
+        if report["archive_eligible"]:
+            command = "bin/rig session archive" + "".join(" --anchor " + anchor for anchor in sorted(group))
+            if stale_days != 30:
+                command += " --older-than " + str(stale_days)
+            if any(member["state"] == "active" for member in group_reports):
+                command += " --acknowledge-active"
+            row["next_step"] = command + " --json"
 for row in rows:
-    for key in ("_created", "_activity", "_native", "_lineage"):
-        row.pop(key)
+    for key in ("_created", "_activity", "_native", "_lineage", "_data", "_path"):
+        row.pop(key, None)
 result = {"ok": not errors,
           "coverage": {"discovery": "current project, configured project roots, ~/.rig/projects/*, and explicit --root projects",
                        "projects_roots_source": roots_source,
