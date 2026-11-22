@@ -9,6 +9,7 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import stat
 import subprocess
 import sys
@@ -264,7 +265,7 @@ def records():
                 data = json.loads(raw)
             except (UnicodeError, ValueError):
                 raise Refusal('malformed_record') from None
-            if not isinstance(data, dict) or data.get('schema_version') != 1:
+            if not isinstance(data, dict) or type(data.get('schema_version')) is not int or data['schema_version'] != 1:
                 raise Refusal('unsupported_or_malformed_record')
             if not all(isinstance(data.get(key), dict) for key in ('native', 'project', 'lifecycle')):
                 # The existing legacy command owns historical flat records.
@@ -439,7 +440,8 @@ def selected(anchors, days, acknowledge):
 
 @contextlib.contextmanager
 def locks(items):
-    paths = [MEMORY / '.snapshot-write.lock', MEMORY / '.session-obligations.lock', SESSIONS / '.bind.lock']
+    paths = [MEMORY / '.memory-workflow-gate.lock', MEMORY / '.snapshot-write.lock',
+             MEMORY / '.session-obligations.lock', SESSIONS / '.bind.lock']
     paths.extend(item['path'].with_name(item['path'].name + '.lock') for item in items)
     held = []
     try:
@@ -456,7 +458,25 @@ def locks(items):
             handle.close()
 
 
-def private_write(path, raw):
+def private_write(path, raw, staging_dir=None):
+    if staging_dir is not None:
+        with pinned_dir(staging_dir) as staging, pinned_dir(path.parent) as parent:
+            temp_name = '.archive-' + uuid.uuid4().hex
+            fd = os.open(temp_name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600, dir_fd=staging)
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.fsync(staging)
+            try:
+                os.link(temp_name, path.name, src_dir_fd=staging, dst_dir_fd=parent,
+                        follow_symlinks=False)
+            except FileExistsError:
+                raise Refusal('destination_exists') from None
+            os.fsync(parent)
+            os.unlink(temp_name, dir_fd=staging)
+            os.fsync(staging)
+        return
     with pinned_dir(path.parent) as parent:
         temp_name = '.archive-' + uuid.uuid4().hex
         fd = os.open(temp_name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600, dir_fd=parent)
@@ -539,10 +559,59 @@ def recover_state(archive_id):
         manifest = json.loads(raw_manifest)
     except (UnicodeError, ValueError):
         raise Refusal('invalid_manifest') from None
-    if manifest.get('archive_id') != archive_id or manifest.get('project_identity') != PROJECT_ID:
+    if (not isinstance(manifest, dict) or type(manifest.get('schema_version')) is not int or
+            manifest['schema_version'] != 1 or
+            manifest.get('archive_id') != archive_id or manifest.get('project_identity') != PROJECT_ID):
         raise Refusal('invalid_manifest')
+    members = manifest.get('members')
+    if not isinstance(members, list) or not members:
+        raise Refusal('invalid_manifest')
+    if any(not isinstance(member, dict) or not isinstance(member.get('record'), str) or
+           not NAME.fullmatch(member['record']) or not isinstance(member.get('sha256'), str)
+           for member in members):
+        raise Refusal('invalid_manifest')
+    declared = {member['record'] for member in members}
+    if len(declared) != len(members):
+        raise Refusal('invalid_manifest')
+    intent_digest = None
+    if kind == 'restore':
+        intent_path = path / 'intent.json'
+        if not intent_path.exists() and not intent_path.is_symlink():
+            # Cleanup may have unlinked intent before failing to remove the
+            # directory. Only durable restored_at plus exact live members
+            # below can classify this as a completed restore.
+            if not manifest.get('restored_at'):
+                raise Refusal('invalid_journal')
+            intent_digest = 'removed_during_finalization'
+        else:
+            intent_raw = read_file(intent_path)
+            intent_digest = sha(intent_raw)
+            try:
+                intent = json.loads(intent_raw)
+            except (UnicodeError, ValueError):
+                raise Refusal('invalid_journal') from None
+            expected_members = sorted([member['record'], member['sha256']] for member in members)
+            if (not isinstance(intent, dict) or intent.get('archive_id') != archive_id or
+                    intent.get('members') != expected_members):
+                raise Refusal('invalid_journal')
+            baseline_manifest = {key: value for key, value in manifest.items() if key != 'restored_at'}
+            baseline_raw = (json.dumps(baseline_manifest, indent=2) + '\n').encode()
+            if intent.get('manifest_sha256') != sha(baseline_raw):
+                raise Refusal('recovery_changed')
+    else:
+        def staged_files(directory):
+            safe_dir(directory, private=True)
+            names = set()
+            for entry in directory.rglob('*'):
+                if entry.is_symlink() or (not entry.is_dir() and not entry.is_file()):
+                    raise Refusal('unsafe_storage')
+                if entry.is_file():
+                    names.add(str(entry.relative_to(directory)))
+            return names
+        if staged_files(path / 'records') != declared or not staged_files(path / 'moved') <= declared:
+            raise Refusal('invalid_journal')
     entries = []
-    for member in manifest.get('members', []):
+    for member in members:
         name = member.get('record')
         if not isinstance(name, str) or not NAME.fullmatch(name):
             raise Refusal('invalid_manifest')
@@ -580,6 +649,7 @@ def recover_state(archive_id):
                             os.stat(entry['path']).st_ino if entry['raw'] is not None else None,
                             os.stat(entry['other']).st_ino if other_raw is not None else None))
     token = sha(json.dumps({'manifest': sha(raw_manifest), 'kind': kind,
+                            'intent': intent_digest,
                             'pending_inode': pending_inode,
                             'fingerprint': fingerprint}, sort_keys=True).encode())[:20]
     return path, kind, entries, token, pending_inode
@@ -597,6 +667,8 @@ def recover(archive_id, confirm):
         raise Refusal('workflow_busy')
     lock_items = [{'path': entry['path']} for entry in entries]
     with locks(lock_items):
+        if workflow_busy():
+            raise Refusal('workflow_busy')
         current_path, current_kind, current_entries, current_token, current_inode = recover_state(archive_id)
         if current_token != token or current_kind != kind or current_inode != pending_inode:
             raise Refusal('record_changed')
@@ -674,8 +746,9 @@ def apply_archive(anchors, days, acknowledge, token):
             secure_mkdir(ARCHIVE)
         safe_dir(ARCHIVE, private=True)
         recovery_required()
-        dest = ARCHIVE / ('.pending-' + token)
-        final = ARCHIVE / token
+        archive_id = secrets.token_hex(10)
+        dest = ARCHIVE / ('.pending-' + archive_id)
+        final = ARCHIVE / archive_id
         if final.exists() or final.is_symlink():
             raise Refusal('destination_exists')
         if dest.exists() or dest.is_symlink():
@@ -698,7 +771,7 @@ def apply_archive(anchors, days, acknowledge, token):
                         'lineage_kind': (item['data'].get('lineage') or {}).get('kind', 'root')} for item in current]
             version_path = RIG / 'VERSION'
             rig_version = read_file(version_path).decode(errors='replace').strip() if version_path.exists() else 'unknown'
-            manifest = {'schema_version': 1, 'archive_id': token,
+            manifest = {'schema_version': 1, 'archive_id': archive_id,
                         'archived_at': dt.datetime.now(dt.timezone.utc).isoformat(),
                         'project_identity': PROJECT_ID, 'older_than': days,
                         'acknowledge_active': acknowledge, 'rig_version': rig_version,
@@ -716,9 +789,9 @@ def apply_archive(anchors, days, acknowledge, token):
             rename_directory(dest, final)
         except (OSError, Refusal):
             raise Refusal('archive_recovery_required', {'no_write': False,
-                                                         'next_step': 'bin/rig session archive --recover ' + token + ' --json'}) from None
-    return {'archive_id': token, 'members': members,
-            'audit_ok': audit_event('archive', token, members)}
+                                                         'next_step': 'bin/rig session archive --recover ' + archive_id + ' --json'}) from None
+    return {'archive_id': archive_id, 'members': members,
+            'audit_ok': audit_event('archive', archive_id, members)}
 
 
 def restore_state(archive_id):
@@ -731,7 +804,8 @@ def restore_state(archive_id):
         manifest = json.loads(manifest_raw)
     except (UnicodeError, ValueError):
         raise Refusal('invalid_manifest') from None
-    if (not isinstance(manifest, dict) or manifest.get('schema_version') != 1 or
+    if (not isinstance(manifest, dict) or type(manifest.get('schema_version')) is not int or
+            manifest['schema_version'] != 1 or
             manifest.get('archive_id') != archive_id or manifest.get('project_identity') != PROJECT_ID or
             not isinstance(manifest.get('members'), list) or not manifest['members']):
         raise Refusal('invalid_manifest')
@@ -739,10 +813,21 @@ def restore_state(archive_id):
     anchors = {item['data']['anchor'] for item in current}
     natives = {(item['data']['agent'], item['data']['native']['session_id']) for item in current}
     restored = []
+    seen_paths = set()
+    seen_anchors = set()
     for member in manifest['members']:
+        if not isinstance(member, dict):
+            raise Refusal('invalid_manifest')
         name = member.get('record')
         if not isinstance(name, str) or not NAME.fullmatch(name):
             raise Refusal('invalid_manifest')
+        member_anchor = member.get('anchor')
+        if not isinstance(member_anchor, str) or not ANCHOR.fullmatch(member_anchor):
+            raise Refusal('invalid_manifest')
+        if name in seen_paths or member_anchor in seen_anchors:
+            raise Refusal('invalid_manifest')
+        seen_paths.add(name)
+        seen_anchors.add(member_anchor)
         path = SESSIONS / name
         if path.exists() or path.is_symlink():
             raise Refusal('destination_exists')
@@ -760,7 +845,14 @@ def restore_state(archive_id):
         if (data['agent'], (data.get('native') or {}).get('session_id')) in natives:
             raise Refusal('native_rebound')
         restored.append({'path': path, 'name': name, 'raw': raw, 'data': data})
-    components(current + restored)
+    graph = components(current + restored)
+    native_components = {}
+    for item in current + restored:
+        binding = (item['data']['agent'], item['data']['native']['session_id'])
+        component = frozenset(graph[item['data']['anchor']])
+        if binding in native_components and native_components[binding] != component:
+            raise Refusal('invalid_manifest')
+        native_components[binding] = component
     baseline = {'manifest': sha(manifest_raw),
                 'destinations': [(item['name'], 'missing') for item in restored],
                 'current': [(item['name'], sha(item['raw'])) for item in current]}
@@ -841,6 +933,8 @@ def main():
         if confirm != token or workflow_busy():
             raise Refusal('record_changed' if confirm != token else 'workflow_busy')
         with locks(chosen):
+            if workflow_busy():
+                raise Refusal('workflow_busy')
             new_manifest, current, observed = restore_state(restore)
             if observed != token:
                 raise Refusal('record_changed')
@@ -850,12 +944,15 @@ def main():
                 raise Refusal('archive_recovery_required')
             secure_mkdir(journal)
             journal_inode = journal.stat().st_ino
-            private_write(journal / 'intent.json', json.dumps({'archive_id': restore,
-                                                                'members': [item['name'] for item in current]}).encode())
+            manifest_raw = read_file(ARCHIVE / restore / 'manifest.json')
+            intent = {'archive_id': restore, 'manifest_sha256': sha(manifest_raw),
+                      'members': sorted((member['record'], member['sha256'])
+                                        for member in new_manifest['members'])}
+            private_write(journal / 'intent.json', (json.dumps(intent, sort_keys=True) + '\n').encode())
             written = []
             try:
                 for item in current:
-                    private_write(item['path'], item['raw'])
+                    private_write(item['path'], item['raw'], staging_dir=journal)
                     written.append(item)
                 resolver = pathlib.Path(__file__).with_name('rig-session-resolve.py')
                 check = subprocess.run([sys.executable, str(resolver), '--graph-check'],
@@ -872,7 +969,11 @@ def main():
             except (OSError, Refusal):
                 raise Refusal('archive_recovery_required', {'no_write': False,
                                                              'next_step': 'bin/rig session archive --recover ' + restore + ' --json'}) from None
-            safe_remove_tree(journal, expected_inode=journal_inode)
+            try:
+                safe_remove_tree(journal, expected_inode=journal_inode)
+            except (OSError, Refusal):
+                raise Refusal('archive_recovery_required', {'no_write': False,
+                                                             'next_step': 'bin/rig session archive --recover ' + restore + ' --json'}) from None
         emit(True, 'archive_restored', {'archive_id': restore, 'members': new_manifest['members'],
                                       'audit_ok': audit_event('restore', restore, new_manifest['members']),
                                       'verification': verify(restore, new_manifest['members'], restored=True)})
