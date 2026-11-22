@@ -181,7 +181,7 @@ After printing the report, **execute POST_MERGE_WORKFLOW steps 1–9 automatical
 - Fetch [BASE_BRANCH] and confirm each expected merge SHA is in its history
 - Update PROGRESS.md, one entry per PR or an explicit combined batch summary
 - Move an installed task file to `$RIG_DIR/tasks/done/` only when its batch ledger rows are terminal; skip this step when task lifecycle was omitted
-- Refresh the shared CONTEXT_SNAPSHOT.md header with `bin/rig memory write-snapshot --shared-only`
+- Write a shared-state draft under `$RIG_DIR/memory/`, then refresh the shared CONTEXT_SNAPSHOT.md header with `bin/rig memory write-snapshot --file "$SNAP_DRAFT" --shared-only --json`
 - Add inferred ERRORS.md entries (if any)
 - Make a housekeeping commit only for stageable in-repo memory or task changes
 - Acknowledge the exact processed merge SHA before session naming

@@ -19,7 +19,7 @@ No arguments. Output the table below directly — do not read individual command
 | `/task` | Start a new unit of work. Runs the intake wizard: goal, area, constraints, issue number, operating mode (autonomy / check-ins / risk). Creates a task file in `.rig/tasks/`. |
 | `/run` | Work through the task backlog. Surveys ready tasks, proposes an execution order, and drives them to completion in the configured autonomy mode. Accepts an optional `[task-slug]` to run one specific task. Surfaces the operating mode wizard if `## Operating mode` is absent from the task file. |
 | `/ship` | Commit and close a task. Sequential hard gate: task ID → issue → labels → branch → pre-commit cleanup → checklist → dependency impact → testing pause → commit message → commit → post-housekeeping → PR → final merge-boundary metadata review → merge verification when authorized. |
-| `/sprint` | Execute a batch of tasks with conflict detection and wave-based ordering to minimize merge friction. Accepts `[slug ...]` to target specific tasks or `--issues #N ...` to resolve by GitHub issue number. Use `/run` for simple sequential execution without conflict analysis. |
+| `/sprint` | Audit, plan, resume, and coordinate a batch of tasks. Select task slugs, issue refs, or `--all`, and choose `audit-only`, `plan-only`, `repair-and-plan`, or `resume` mode. Use `/run` to execute an individual task. |
 
 ## Session management
 
@@ -29,6 +29,7 @@ No arguments. Output the table below directly — do not read individual command
 | `/handoff-checklist` | Consent-gated wrap-and-handoff routine for large or costly sessions. Asks before doing any checklist work. |
 | `/post-merge` | Post-merge housekeeping. Fetches the base branch and verifies each exact merge SHA before logging the PR to `PROGRESS.md`, moving the task file to done, refreshing `CONTEXT_SNAPSHOT.md`, checking feature doc freshness, and surfacing what's next. A clean base checkout is fast-forwarded only when tracked housekeeping needs it. |
 | `/status` | Project state dashboard. Shows current branch, active tasks, backlog count, and recent `PROGRESS.md` entries. |
+| `/rig-status` | Check Rig installation health, versions, and local state without changing the project. |
 | `/session-name` | Derive and set a session name from work completed so far. Uses the same tiered format as `/wrap` and `/post-merge` but callable at any time without triggering a full cycle. |
 | `bin/rig session index` | Search Rig session records across the current project, immediate configured project-root projects (legacy `~/code/` fallback), and external `~/.rig/projects/` directories. Use `--root PROJECT` for another location. The index is read-only, reports coverage and ambiguity, and never scans provider transcripts. |
 
@@ -77,6 +78,7 @@ Check the installed CLI's help if a native control is unavailable. See the [Clau
 | Command | What it does | Key flags |
 |---|---|---|
 | `/rig-upgrade` | Upgrade The Rig to the latest version. | `--version` (print versions only, no upgrade), `--scope=project\|global\|both`, `--mode=agent\|classic` (skip the mode prompt) |
+| `/connector-preflight` | Check declared connector dependencies before a workflow needs them. | — |
 | `/rig-propose` | _(opt-in: `--contribute`)_ Propose a change to Rig governance files (hooks, processes, rules, CLAUDE.md). Writes a diff for human review — never applies it directly. | — |
 | `/rig-gaps` | _(opt-in: `--contribute`)_ Log and submit workflow friction observed during a task. | `--push` (append to local Rig repo), `--submit` (create GitHub issue) |
 | `/rig-help` | This command. | — |
