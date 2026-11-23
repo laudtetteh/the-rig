@@ -319,7 +319,7 @@ PY
 }
 
 @test "failed legacy upgrade removes only its provisional owner record" {
-  local app="$BATS_TEST_TMPDIR/app" rig="$HOME/.rig/projects/app"
+  local app="$BATS_TEST_TMPDIR/app" rig="$HOME/.rig/projects/app" wrappers="$BATS_TEST_TMPDIR/wrappers" marker="$BATS_TEST_TMPDIR/copy-failed"
   make_repo "$app"
   mkdir -p "$rig/memory"
   printf '1.20.0\n' > "$rig/VERSION"
@@ -328,11 +328,24 @@ PY
   printf '%s  CLAUDE.md\n%s  .rig/VERSION\n' \
     "$(shasum -a 256 "$app/CLAUDE.md" | awk '{print $1}')" \
     "$(shasum -a 256 "$rig/VERSION" | awk '{print $1}')" > "$rig/memory/.rig-manifest"
-  chmod 500 "$app"
-  run bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
-    --tracking external --strategy upgrade --adopt-legacy-rig-dir
-  chmod 700 "$app"
+  mkdir -p "$wrappers"
+  cat > "$wrappers/cp" <<'SH'
+#!/bin/bash
+destination=''
+for argument in "$@"; do destination="$argument"; done
+if [[ -f "$RIG_TEST_OWNER_FILE" && "$destination" == "$RIG_TEST_PROJECT/"* ]]; then
+  : > "$RIG_TEST_FAIL_MARKER"
+  exit 87
+fi
+exec /bin/cp "$@"
+SH
+  chmod +x "$wrappers/cp"
+  run env PATH="$wrappers:$PATH" RIG_TEST_OWNER_FILE="$rig/install-targets.json" \
+    RIG_TEST_PROJECT="$app" RIG_TEST_FAIL_MARKER="$marker" \
+    bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
+      --tracking external --strategy upgrade --adopt-legacy-rig-dir
   [ "$status" -ne 0 ]
+  [ -f "$marker" ]
   [[ "$output" == *'Adopted legacy Rig directory for this project'* ]]
   [[ "$output" == *'Removed provisional legacy Rig owner record after failed upgrade'* ]]
   [ ! -e "$rig/install-targets.json" ]
