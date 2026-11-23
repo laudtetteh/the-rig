@@ -7,6 +7,7 @@ setup() {
   TEST_REPO="$BATS_TEST_TMPDIR/project"
   mkdir -p "$TEST_REPO/bin"
   cp "$REPO_ROOT/templates/project/bin/rig-tracker-config.py" "$TEST_REPO/bin/rig-tracker-config.py"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$TEST_REPO/bin/rig-path.py"
   git -C "$TEST_REPO" init -q
   git -C "$TEST_REPO" config user.email test@example.com
   git -C "$TEST_REPO" config user.name "Kickoff Guard Test"

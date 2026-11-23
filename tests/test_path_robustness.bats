@@ -101,7 +101,7 @@ PY
   run sh -c 'cd "$1" && RIG_GITLEAKS_PATH_ONLY=1 sh "$2"' sh \
     "$TEST_PROJECT" "$REPO_ROOT/templates/project/.husky/pre-commit"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"file with spaces.js"* ]]
+  [[ "$output" == *"file with spaces.js"* ]] || return 1
 }
 
 @test "pre-commit scans staged filenames Git would C-quote" {
@@ -112,8 +112,8 @@ PY
   run sh -c 'cd "$1" && RIG_GITLEAKS_PATH_ONLY=1 sh "$2"' sh \
     "$TEST_PROJECT" "$REPO_ROOT/templates/project/.husky/pre-commit"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"quoted"* ]]
-  [[ "$output" == *"Debug artifact check blocked"* ]]
+  [[ "$output" == *"quoted"* ]] || return 1
+  [[ "$output" == *"Debug artifact check blocked"* ]] || return 1
 }
 
 @test "rig CLI refuses malformed pointer before any stateful command" {
@@ -153,7 +153,7 @@ PY
   payload='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/tmp/rig660-write.txt"}}'
   run bash -c 'printf "%s" "$1" | bash "$2"' bash "$payload" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"project .rigpath is invalid"* ]]
+  [[ "$output" == *"project .rigpath is invalid"* ]] || return 1
 }
 
 @test "pre-tool never executes a target worktree's path helper" {
@@ -169,10 +169,10 @@ PY
 import pathlib, sys
 pathlib.Path(sys.argv[2]).write_text('from pathlib import Path\nPath(' + repr(sys.argv[1]) + ').touch()\n')
 PY
+  printf 'invalid\npointer\n' > "$linked/.rigpath"
   payload=$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":sys.argv[1]}}))' "$linked/new.txt")
   run bash -c 'printf "%s" "$1" | bash "$2"' bash "$payload" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"protected-path policy is missing or unreadable"* ]]
-  [[ "$output" == *"$linked/.rig/rules/protected-paths.txt"* ]]
+  [[ "$output" == *"write target .rigpath is invalid"* ]] || return 1
   [ ! -e "$sentinel" ]
 }

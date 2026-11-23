@@ -1740,7 +1740,11 @@ fi
   _repo_state="$_preflight_target/.rig/install-targets.json"
   _stealth_state="$HOME/.rig/projects/${_FLAG_PROJECT_NAME:-$(basename "$_preflight_target")}/install-targets.json"
   _pointer_state=""
-  if [[ -e "$_preflight_target/.rigpath" || -L "$_preflight_target/.rigpath" ]]; then
+  # Explicit storage selection does not need to read an existing pointer.
+  # In particular, a symlink is a destination conflict handled by the
+  # installer/agent-plan later; never follow it during state discovery.
+  if [[ -z "${_FLAG_TRACKING:-}" && -z "$EXTERNAL_RIG_DIR" ]] &&
+     [[ -e "$_preflight_target/.rigpath" || -L "$_preflight_target/.rigpath" ]]; then
     _pointer_state="$(python3 "$PROJECT_TEMPLATES/bin/rig-path.py" "$_preflight_target")/install-targets.json"
   fi
   _preflight_project_state="$_repo_state"

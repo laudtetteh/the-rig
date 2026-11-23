@@ -19,7 +19,7 @@ setup() {
   mkdir -p "$neighbor/bin" "$neighbor/.rig/memory/sessions"
   catalog=$(cd "$catalog" && pwd -P)
   neighbor=$(cd "$neighbor" && pwd -P)
-  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-session-resolve.py" "$neighbor/bin/"
+  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-path.py" "$CASE_DIR/bin/rig-session-resolve.py" "$neighbor/bin/"
   git -C "$neighbor" init -q
   "$neighbor/bin/rig" session bind --agent codex --native-session-id configured-neighbor --source startup >/dev/null
   printf '{"schema_version":1,"projects_roots":["%s"]}\n' "$catalog" > "$TEST_HOME/.rig/config.json"

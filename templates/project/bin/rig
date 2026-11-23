@@ -4467,10 +4467,10 @@ help_requested() {
 
 main() {
   local command="${1:-}" subcommand
-  # Every non-help command must stop before resolving paths if .rigpath is
-  # malformed. Doctor and version also resolve Rig storage; several callers
-  # use rig_dir() inside command substitutions that can lose its exit status.
-  if [[ -n "$command" && "$command" != -h && "$command" != --help ]]; then
+  # Stop commands that can use Rig storage before a malformed .rigpath reaches
+  # unchecked command substitutions. Task inventory has its own read-only
+  # diagnostic contract for malformed pointers, so let it report ambiguity.
+  if [[ -n "$command" && "$command" != -h && "$command" != --help && "$command" != task ]]; then
     local project_root
     project_root="$(rig_root)" || return 3
     python3 "$(dirname "${BASH_SOURCE[0]}")/rig-path.py" "$project_root" >/dev/null || return 3

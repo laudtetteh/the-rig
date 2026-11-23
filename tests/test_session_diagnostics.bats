@@ -53,7 +53,7 @@ json.dump(d,open(p,"w"),indent=2)
   bind_record claude current-secret >/dev/null
   other="$BATS_TEST_TMPDIR/other"; mkdir -p "$other/bin" "$other/.rig/memory/sessions"
   other=$(cd "$other" && pwd -P)
-  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$CASE_DIR/bin/rig_project_roots.py" "$other/bin/"
+  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-path.py" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$CASE_DIR/bin/rig_project_roots.py" "$other/bin/"
   git -C "$other" init -q
   git -C "$other" checkout -q -b feat/other
   "$other/bin/rig" session bind --agent codex --native-session-id other-secret --source startup >/dev/null
@@ -63,7 +63,7 @@ json.dump(d,open(p,"w"),indent=2)
   remote=$(cd "$remote" && pwd -P)
   catalog=$(cd "$catalog" && pwd -P)
   test_home=$(cd "$BATS_TEST_TMPDIR/home" && pwd -P)
-  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$CASE_DIR/bin/rig_project_roots.py" "$remote/bin/"
+  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-path.py" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$CASE_DIR/bin/rig_project_roots.py" "$remote/bin/"
   printf '%s\n' "$catalog" > "$remote/.rigpath"
   git -C "$remote" init -q
   git -C "$remote" checkout -q -b feat/remote
@@ -106,7 +106,7 @@ json.dump(d,open(p,"w"),indent=2)
   mkdir -p "$neighbor/bin" "$neighbor/.rig/memory/sessions"
   neighbor=$(cd "$neighbor" && pwd -P)
   test_home=$(cd "$BATS_TEST_TMPDIR/home" && pwd -P)
-  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$neighbor/bin/"
+  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-path.py" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$neighbor/bin/"
   git -C "$neighbor" init -q
   "$neighbor/bin/rig" session bind --agent codex --native-session-id native-secret --source startup >/dev/null
   run env HOME="$test_home" "$CASE_DIR/bin/rig" session index --json
@@ -217,7 +217,7 @@ json.dump(d,open(p,"w"),indent=2)
   mkdir -p "$neighbor/bin" "$neighbor/.rig/memory/sessions"
   neighbor=$(cd "$neighbor" && pwd -P)
   test_home=$(cd "$BATS_TEST_TMPDIR/home" && pwd -P)
-  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$neighbor/bin/"
+  cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-path.py" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$neighbor/bin/"
   git -C "$neighbor" init -q
   "$neighbor/bin/rig" session bind --agent codex --native-session-id secret --source startup >/dev/null
   run env HOME="$test_home" "$CASE_DIR/bin/rig" session index --json
@@ -240,7 +240,7 @@ json.dump(d,open(p,"w"),indent=2)
   shared=$(cd "$shared" && pwd -P); first=$(cd "$first" && pwd -P); second=$(cd "$second" && pwd -P)
   test_home=$(cd "$BATS_TEST_TMPDIR/home" && pwd -P)
   for project in "$first" "$second"; do
-    cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$project/bin/"
+    cp "$CASE_DIR/bin/rig" "$CASE_DIR/bin/rig-path.py" "$CASE_DIR/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-index.py" "$project/bin/"
     printf '%s\n' "$shared" > "$project/.rigpath"
     git -C "$project" init -q
   done
