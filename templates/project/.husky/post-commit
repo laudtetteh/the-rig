@@ -5,10 +5,7 @@
 # created commit changes its SHA, so automatic amend requires explicit opt-in.
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-RIG_DIR="$ROOT/.rig"
-if [ -f "$ROOT/.rigpath" ]; then
-  IFS= read -r RIG_DIR < "$ROOT/.rigpath"
-fi
+RIG_DIR=$(python3 "$ROOT/bin/rig-path.py" "$ROOT") || exit 1
 
 # A manually completed merge runs post-commit. Its pending marker is only for
 # generated `git merge` commits, which reach the same logger via post-merge.

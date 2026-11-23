@@ -13,6 +13,7 @@ make_project() {
   mkdir -p "$CASE_PROJECT/bin"
   git -C "$CASE_PROJECT" init -q
   cp "$REPO_ROOT/templates/project/bin/rig" "$CASE_PROJECT/bin/rig"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$CASE_PROJECT/bin/rig-path.py"
   cp "$REPO_ROOT/templates/project/bin/rig-session-resolve.py" "$CASE_PROJECT/bin/rig-session-resolve.py"
   chmod +x "$CASE_PROJECT/bin/rig"
   if [ "$layout" = external ]; then

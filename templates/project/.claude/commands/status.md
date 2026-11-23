@@ -7,8 +7,8 @@ Print a project state dashboard: branch, active tasks, backlog, and recent progr
 > **RIG_DIR resolution (stealth mode):** Resolve `.rig/` path before reading any files.
 > ```bash
 > REPO=$(git rev-parse --show-toplevel)
-> if [[ -f "$REPO/.rigpath" ]]; then
->   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+> if [[ -e "$REPO/.rigpath" || -L "$REPO/.rigpath" ]]; then
+>   RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 1
 > else
 >   RIG_DIR="$REPO/.rig"
 > fi

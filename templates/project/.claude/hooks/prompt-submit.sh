@@ -26,11 +26,7 @@
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 [[ -z "$REPO" ]] && exit 0
 
-if [[ -f "$REPO/.rigpath" ]]; then
-  RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
-else
-  RIG_DIR="$REPO/.rig"
-fi
+RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 2
 
 # ── Provider-correct housekeeping reminders ──────────────────────────────────
 # Keep this block identical in prompt-submit.sh and session-start.sh; a test
@@ -307,11 +303,11 @@ if [[ "$NUDGE_PENDING" == true ]] && command -v python3 >/dev/null 2>&1; then
     allowed_count=$(python3 -c "
 import json, sys
 try:
-    d = json.load(open('$SETTINGS'))
+    d = json.load(open(sys.argv[1]))
     print(len(d.get('permissions', {}).get('allow', [])))
 except Exception:
     print(99)
-" 2>/dev/null || echo 99)
+" "$SETTINGS" 2>/dev/null || echo 99)
     touch "$NUDGE_FLAG"
     if [[ "$allowed_count" -lt 5 ]]; then
       [[ -n "$WARNINGS" ]] && WARNINGS+=$'\n\n'

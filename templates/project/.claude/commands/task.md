@@ -18,8 +18,8 @@ file will inherit the same operating mode — no need to re-configure.
 >
 > ```bash
 > REPO=$(git rev-parse --show-toplevel)
-> if [[ -f "$REPO/.rigpath" ]]; then
->   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+> if [[ -e "$REPO/.rigpath" || -L "$REPO/.rigpath" ]]; then
+>   RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 1
 > else
 >   RIG_DIR="$REPO/.rig"
 > fi

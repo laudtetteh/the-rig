@@ -8,6 +8,7 @@ setup() {
   mkdir -p "$TEST_PROJECT/bin" "$TEST_PROJECT/.rig/memory"
   git -C "$TEST_PROJECT" init -q
   cp "$REPO_ROOT/templates/project/bin/rig" "$TEST_PROJECT/bin/rig"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$TEST_PROJECT/bin/rig-path.py"
   chmod +x "$TEST_PROJECT/bin/rig"
 }
 

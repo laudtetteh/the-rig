@@ -8,6 +8,7 @@ setup() {
   CASE_DIR="$BATS_TEST_TMPDIR/project"
   mkdir -p "$CASE_DIR/bin" "$CASE_DIR/.rig/memory" "$BATS_TEST_TMPDIR/fakebin"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-path.py" "$CASE_DIR/bin/rig-path.py"
   chmod +x "$CASE_DIR/bin/rig"
   git -C "$CASE_DIR" init -q
   # A gh on PATH that records any call proves the review never contacts GitHub.

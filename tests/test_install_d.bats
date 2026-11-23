@@ -732,8 +732,11 @@ _perm_invoke() {
 
 _perm_bash_invoke() {
   local command="$1"
+  mkdir -p "$TEST_PROJECT/bin" "$TEST_PROJECT/.claude/hooks"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$TEST_PROJECT/bin/rig-path.py"
+  cp "$REPO_ROOT/templates/project/.claude/hooks/permission-request.sh" "$TEST_PROJECT/.claude/hooks/permission-request.sh"
   python3 -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}))' "$command" | \
-    bash "$REPO_ROOT/templates/project/.claude/hooks/permission-request.sh" 2>/dev/null
+    (cd "$TEST_PROJECT" && bash "$TEST_PROJECT/.claude/hooks/permission-request.sh") 2>/dev/null
 }
 
 @test "permission-request: read-only assignment preamble and file inspection are auto-approved" {

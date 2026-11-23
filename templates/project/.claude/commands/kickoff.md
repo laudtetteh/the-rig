@@ -25,8 +25,8 @@ the start, before there's anything to `/task` on.
 >
 > ```bash
 > REPO=$(git rev-parse --show-toplevel)
-> if [[ -f "$REPO/.rigpath" ]]; then
->   RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+> if [[ -e "$REPO/.rigpath" || -L "$REPO/.rigpath" ]]; then
+>   RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 1
 > else
 >   RIG_DIR="$REPO/.rig"
 > fi
@@ -55,8 +55,8 @@ used by the focused guard tests; keep the commands between them executable):
 ```bash
 # kickoff-maturity-probe-start
 REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
-if [[ -f "$REPO/.rigpath" ]]; then
-  RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+if [[ -e "$REPO/.rigpath" || -L "$REPO/.rigpath" ]]; then
+  RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 1
 else
   RIG_DIR="$REPO/.rig"
 fi

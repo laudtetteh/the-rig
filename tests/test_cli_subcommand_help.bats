@@ -4,7 +4,7 @@
 setup() {
   export CASE_DIR="$BATS_TEST_TMPDIR/project"
   mkdir -p "$CASE_DIR/bin" "$CASE_DIR/.claude/hooks" "$CASE_DIR/.rig/memory/sessions/done"
-  for helper in rig rig-session-resolve.py rig-session-index.py rig-snapshot.py rig-sprint; do
+  for helper in rig rig-path.py rig-session-resolve.py rig-session-index.py rig-snapshot.py rig-sprint; do
     cp "$BATS_TEST_DIRNAME/../templates/project/bin/$helper" "$CASE_DIR/bin/$helper"
   done
   cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/session-start.sh" "$CASE_DIR/.claude/hooks/session-start.sh"

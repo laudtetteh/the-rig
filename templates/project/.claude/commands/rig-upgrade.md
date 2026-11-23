@@ -21,10 +21,10 @@ gated — survey before touching anything, confirm before committing.
 >
 > ```bash
 > REPO=$(git rev-parse --show-toplevel)
-> if [[ -f "$REPO/.rigpath" ]]; then
+> if [[ -e "$REPO/.rigpath" || -L "$REPO/.rigpath" ]]; then
 >   # First line only, CR/LF stripped -- never strip interior spaces, or a
 >   # path such as ".../projects/my app" silently becomes ".../projects/myapp".
->   IFS= read -r RIG_DIR < "$REPO/.rigpath" || true; RIG_DIR="${RIG_DIR%$'\r'}"
+>   RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 1
 > else
 >   RIG_DIR="$REPO/.rig"
 > fi
@@ -59,8 +59,8 @@ If the user passes `--version`, skip all phases and print version info only:
 
 ```bash
 if REPO=$(git rev-parse --show-toplevel 2>/dev/null); then
-  if [[ -f "$REPO/.rigpath" ]]; then
-    IFS= read -r RIG_DIR < "$REPO/.rigpath" || true; RIG_DIR="${RIG_DIR%$'\r'}"
+  if [[ -e "$REPO/.rigpath" || -L "$REPO/.rigpath" ]]; then
+    RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 1
   else
     RIG_DIR="$REPO/.rig"
   fi
@@ -355,8 +355,8 @@ if [[ -f "$CLAUDE_MD" ]]; then
   # through git so a linked worktree (where .git is a file) still works.
   _git_exclude=$(git -C "$REPO" rev-parse --git-path info/exclude 2>/dev/null || echo ".git/info/exclude")
   [[ "$_git_exclude" == /* ]] || _git_exclude="$REPO/$_git_exclude"
-  if [[ -f "$REPO/.rigpath" ]]; then
-    IFS= read -r _rigpath_dir < "$REPO/.rigpath" || true
+  if [[ -e "$REPO/.rigpath" || -L "$REPO/.rigpath" ]]; then
+    _rigpath_dir=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 1
     _rigpath_dir="${_rigpath_dir%$'\r'}"
     if [[ "$_rigpath_dir" == "$HOME/.rig/projects/"* ]]; then
       TRACKING="stealth"
@@ -489,8 +489,8 @@ the `.rigpath` target and by git state, never by whether `.husky/` exists):
 # The git exclude file is resolved through git so linked worktrees work too.
 GIT_EXCLUDE=$(git -C "$REPO" rev-parse --git-path info/exclude 2>/dev/null || echo ".git/info/exclude")
 [[ "$GIT_EXCLUDE" == /* ]] || GIT_EXCLUDE="$REPO/$GIT_EXCLUDE"
-if [[ -f "$REPO/.rigpath" ]]; then
-  IFS= read -r RIG_DIR < "$REPO/.rigpath" || true; RIG_DIR="${RIG_DIR%$'\r'}"
+if [[ -e "$REPO/.rigpath" || -L "$REPO/.rigpath" ]]; then
+  RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 1
   if [[ "$RIG_DIR" == "$HOME/.rig/projects/"* ]]; then
     TRACKING="stealth"
     HOOKS_DIR="$REPO/.git/hooks"

@@ -22,11 +22,7 @@
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 [[ -z "$REPO" ]] && exit 0
 
-if [[ -f "$REPO/.rigpath" ]]; then
-  RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
-else
-  RIG_DIR="$REPO/.rig"
-fi
+RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 2
 
 # ── Provider-correct housekeeping reminders ──────────────────────────────────
 # Keep this block identical in prompt-submit.sh and session-start.sh; a test

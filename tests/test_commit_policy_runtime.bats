@@ -30,6 +30,7 @@ install_hooks() {
   cp "$REPO_ROOT/templates/project/.husky/post-merge" "$hook_dir/post-merge"
   cp "$REPO_ROOT/templates/project/.husky/filter-commit-message-inplace.sh" "$hook_dir/filter-commit-message-inplace.sh"
   mkdir -p "$TEST_PROJECT/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$TEST_PROJECT/bin/rig-path.py"
   cp "$REPO_ROOT/templates/project/bin/rig-tracker-config.py" "$TEST_PROJECT/bin/rig-tracker-config.py"
   chmod +x "$hook_dir/commit-msg" "$hook_dir/post-commit" "$hook_dir/post-merge"
 }
@@ -223,6 +224,7 @@ commit_count() { git -C "$TEST_PROJECT" rev-list --count HEAD; }
   git -C "$TEST_PROJECT" worktree add -qb fix/linked "$linked"
   mkdir -p "$linked/.rig/memory"
   mkdir -p "$linked/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$linked/bin/rig-path.py"
   cp "$REPO_ROOT/templates/project/bin/rig-tracker-config.py" "$linked/bin/rig-tracker-config.py"
   printf '# Linked progress\n\n---\n' > "$linked/.rig/memory/PROGRESS.md"
   approval
@@ -257,6 +259,8 @@ commit_count() { git -C "$TEST_PROJECT" rev-list --count HEAD; }
   linked="$BATS_TEST_TMPDIR/progress-linked"
   external="$BATS_TEST_TMPDIR/shared-progress-rig"
   git -C "$TEST_PROJECT" worktree add -qb fix/progress-linked "$linked"
+  mkdir -p "$linked/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$linked/bin/rig-path.py"
   mkdir -p "$external/memory"
   progress="$external/memory/PROGRESS.md"
   printf '# Shared progress\n\n---\n' > "$progress"

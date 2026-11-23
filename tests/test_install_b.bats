@@ -183,6 +183,8 @@ _seed_untracked_user_owned_file() {
 @test "pre-compact: writes checkpoint file with branch and commit info" {
   local tmpdir
   tmpdir=$(mktemp -d)
+  mkdir -p "$tmpdir/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$tmpdir/bin/rig-path.py"
   git -C "$tmpdir" init -q
   git -C "$tmpdir" config user.email "test@test.com"
   git -C "$tmpdir" config user.name "Test"
@@ -204,6 +206,8 @@ _seed_untracked_user_owned_file() {
 @test "post-compact: outputs systemMessage JSON when checkpoint exists" {
   local tmpdir
   tmpdir=$(mktemp -d)
+  mkdir -p "$tmpdir/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$tmpdir/bin/rig-path.py"
   git -C "$tmpdir" init -q
   mkdir -p "$tmpdir/.rig/memory"
   printf '## Compact checkpoint\n\n**Branch:** test-branch\n' \
@@ -227,6 +231,8 @@ assert 'test-branch' in d['systemMessage']
 @test "post-compact: exits silently when neither checkpoint nor snapshot exists" {
   local tmpdir
   tmpdir=$(mktemp -d)
+  mkdir -p "$tmpdir/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$tmpdir/bin/rig-path.py"
   git -C "$tmpdir" init -q
   mkdir -p "$tmpdir/.rig/memory"
 
@@ -242,6 +248,8 @@ assert 'test-branch' in d['systemMessage']
 @test "pre-compact: concurrent sessions write separate checkpoints, no clobbering" {
   local tmpdir
   tmpdir=$(mktemp -d)
+  mkdir -p "$tmpdir/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$tmpdir/bin/rig-path.py"
   git -C "$tmpdir" init -q
   git -C "$tmpdir" config user.email "test@test.com"
   git -C "$tmpdir" config user.name "Test"
@@ -269,6 +277,8 @@ assert 'test-branch' in d['systemMessage']
 @test "post-compact: reads own PPID-scoped checkpoint when multiple checkpoints exist" {
   local tmpdir
   tmpdir=$(mktemp -d)
+  mkdir -p "$tmpdir/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$tmpdir/bin/rig-path.py"
   git -C "$tmpdir" init -q
   git -C "$tmpdir" config user.email "test@test.com"
   git -C "$tmpdir" config user.name "Test"
@@ -301,6 +311,8 @@ assert 'Branch:' in ctx, 'Expected branch info in checkpoint: ' + ctx
 @test "session-start: compact source uses most-recent checkpoint when no PPID-scoped file exists" {
   local tmpdir
   tmpdir=$(mktemp -d)
+  mkdir -p "$tmpdir/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$tmpdir/bin/rig-path.py"
   git -C "$tmpdir" init -q
   mkdir -p "$tmpdir/.rig/memory"
 

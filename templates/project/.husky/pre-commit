@@ -119,50 +119,62 @@ if [ -z "$COMBINED" ]; then
   exit 0
 fi
 
-# Scan staged text files
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
-FOUND=""
+# Scan staged text files using NUL-delimited Git paths. Git C-quotes names
+# containing quotes, backslashes, tabs and newlines in ordinary --name-only
+# output, which would let the debug scan silently skip them.
+RIG_SCAN_REGEX="$COMBINED" RIG_SCAN_EXCLUDES="$RIG_SCAN_EXCLUDES" python3 - <<'RIG_SCAN_PY'
+import fnmatch
+import os
+import subprocess
+import sys
 
-for f in $STAGED_FILES; do
-  # Skip binary files and hook files (which contain the patterns as definitions)
-  case "$f" in
-    *.png|*.jpg|*.jpeg|*.gif|*.ico|*.svg|*.woff|*.woff2|*.ttf|*.eot|\
-    *.pdf|*.zip|*.tar|*.gz|*.mp4|*.mp3|*.mov) continue ;;
-    .husky/*|.claude/hooks/*|.claude/commands/*|.claude/agents/*|.rig/processes/*) continue ;;
-  esac
 
-  # Skip paths matching .rig-debug-scan-exclude glob patterns
-  if [ -n "$RIG_SCAN_EXCLUDES" ]; then
-    _rig_skip=0
-    while IFS= read -r _rig_excl; do
-      case "$f" in $_rig_excl) _rig_skip=1; break ;; esac
-    done <<_RIG_EXCL_EOF
-$RIG_SCAN_EXCLUDES
-_RIG_EXCL_EOF
-    [ "$_rig_skip" -eq 1 ] && continue
-  fi
+def git(*args):
+    return subprocess.run(["git", *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-  # Get the staged version of the file and scan it
-  # || true: grep exits 1 on no match; sh -e (used by Husky) treats that as failure
-  hits=$(git show ":$f" 2>/dev/null \
-    | grep -nE "$COMBINED" \
-    | grep -v 'rig-debug-ok' || true)
 
-  if [ -n "$hits" ]; then
-    FOUND="$FOUND
-  $f:
-$(printf '%s\n' "$hits" | head -5 | sed 's/^/    /')"
-  fi
-done
+names = git("diff", "--cached", "--name-only", "--diff-filter=ACM", "-z")
+if names.returncode:
+    print("Debug artifact check could not read staged paths.", file=sys.stderr)
+    sys.exit(1)
 
-if [ -n "$FOUND" ]; then
-  echo ""
-  echo "Debug artifact check blocked this commit."
-  echo "Remove or clean up the following before committing:"
-  echo "$FOUND"
-  echo ""
-  echo "  To allow a specific line:  append  # rig-debug-ok  to that source line"
-  echo "  To skip this check once:   git commit --no-verify"
-  echo ""
-  exit 1
-fi
+excluded = [line for line in os.environ["RIG_SCAN_EXCLUDES"].splitlines() if line]
+binary_ext = (".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff",
+              ".woff2", ".ttf", ".eot", ".pdf", ".zip", ".tar", ".gz",
+              ".mp4", ".mp3", ".mov")
+excluded_dirs = (".husky/", ".claude/hooks/", ".claude/commands/",
+                 ".claude/agents/", ".rig/processes/")
+findings = []
+for raw in names.stdout.split(b"\0"):
+    if not raw:
+        continue
+    name = os.fsdecode(raw)
+    if name.endswith(binary_ext) or name.startswith(excluded_dirs):
+        continue
+    if any(fnmatch.fnmatchcase(name, pattern) for pattern in excluded):
+        continue
+    staged = git("show", ":" + name)
+    if staged.returncode:
+        print("Debug artifact check could not read staged file: " + repr(name), file=sys.stderr)
+        sys.exit(1)
+    scan = subprocess.run(["grep", "-nE", os.environ["RIG_SCAN_REGEX"]],
+                          input=staged.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if scan.returncode not in (0, 1):
+        print("Debug artifact scan failed: " + scan.stderr.decode(errors="replace"), file=sys.stderr)
+        sys.exit(1)
+    hits = [line.decode(errors="replace") for line in scan.stdout.splitlines()
+            if b"rig-debug-ok" not in line][:5]
+    if hits:
+        findings.append((name, hits))
+
+if findings:
+    print("\nDebug artifact check blocked this commit.")
+    print("Remove or clean up the following before committing:")
+    for name, hits in findings:
+        print("  " + repr(name) + ":")
+        for hit in hits:
+            print("    " + hit)
+    print("\n  To allow a specific line: append  # rig-debug-ok  to that source line")
+    print("  To skip this check once: git commit --no-verify\n")
+    sys.exit(1)
+RIG_SCAN_PY

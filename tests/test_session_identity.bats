@@ -20,6 +20,7 @@ setup() {
   git -C "$REPO" commit --allow-empty -m "initial" -q
   mkdir -p "$REPO/bin"
   cp "$(pwd)/templates/project/bin/rig" "$REPO/bin/rig"
+  cp "$(pwd)/templates/project/bin/rig-path.py" "$REPO/bin/rig-path.py"
   cp "$(pwd)/templates/project/bin/rig-session-resolve.py" "$REPO/bin/rig-session-resolve.py"
   chmod +x "$REPO/bin/rig"
   unset CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID

@@ -406,6 +406,8 @@ _run_pre_tool_write() {
   mkdir -p "$TEST_PROJECT/.claude/hooks"
   cp "$REPO_ROOT/templates/project/.claude/hooks/pre-tool.sh" \
     "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
+  mkdir -p "$TEST_PROJECT/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$TEST_PROJECT/bin/rig-path.py"
   input=$(printf '{"file_path":"%s"}' "$file_path")
   run bash -c 'cd "$1" && printf "%s" "$2" | RIG_SESSION_LOG="$3" bash "$4" Write' \
     _ "$TEST_PROJECT" "$input" "$TEMP_DIR/session.log" \

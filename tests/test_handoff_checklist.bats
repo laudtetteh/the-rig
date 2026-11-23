@@ -8,6 +8,8 @@ setup() {
   RIG_DIR="$REPO/.rig"
   mkdir -p "$REPO/.claude/hooks" "$RIG_DIR/memory/sessions"
   cp "$REPO_ROOT/templates/project/.claude/hooks/prompt-submit.sh" "$REPO/.claude/hooks/prompt-submit.sh"
+  mkdir -p "$REPO/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$REPO/bin/rig-path.py"
   git -C "$REPO" init -q
 }
 

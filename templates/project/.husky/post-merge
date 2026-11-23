@@ -53,11 +53,7 @@ if [ -n "$REPO" ]; then
       fi
     fi
   fi
-  if [ -f "$REPO/.rigpath" ]; then
-    RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
-  else
-    RIG_DIR="$REPO/.rig"
-  fi
+  RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 2
   if [ -d "$RIG_DIR/memory" ]; then
     MERGE_SHA=$(git -C "$REPO" rev-parse HEAD 2>/dev/null || printf 'unknown')
     MERGED_AT=$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || printf 'unknown')

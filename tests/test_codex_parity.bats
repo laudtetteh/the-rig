@@ -20,6 +20,7 @@ setup() {
     "$TEST_PROJECT/.codex/hooks/rig-adapter.sh"
   mkdir -p "$TEST_PROJECT/bin"
   cp "$REPO_ROOT/templates/project/bin/rig" "$TEST_PROJECT/bin/rig"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$TEST_PROJECT/bin/rig-path.py"
   cp "$REPO_ROOT/templates/project/bin/rig-session-resolve.py" "$TEST_PROJECT/bin/rig-session-resolve.py"
   chmod +x "$TEST_PROJECT/bin/rig"
   cp "$REPO_ROOT/templates/project/.rig/rules/protected-paths.txt" \
@@ -65,6 +66,8 @@ setup_linked_hook_worktrees() {
   mkdir -p "$LINKED_FEATURE/.claude/hooks" "$LINKED_FEATURE/.rig/rules" \
     "$LINKED_FEATURE/.rig/memory"
   cp "$TEST_PROJECT/.claude/hooks/pre-tool.sh" "$LINKED_FEATURE/.claude/hooks/pre-tool.sh"
+  mkdir -p "$LINKED_FEATURE/bin"
+  cp "$TEST_PROJECT/bin/rig-path.py" "$LINKED_FEATURE/bin/rig-path.py"
   cp "$TEST_PROJECT/.rig/rules/protected-paths.txt" "$LINKED_FEATURE/.rig/rules/protected-paths.txt"
 }
 
