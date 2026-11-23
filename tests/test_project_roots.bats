@@ -5,6 +5,7 @@ setup() {
   export TEST_HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$CASE_DIR/bin" "$CASE_DIR/.rig/memory/sessions" "$TEST_HOME/.rig"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-path.py" "$CASE_DIR/bin/rig-path.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-index.py" "$CASE_DIR/bin/rig-session-index.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig_project_roots.py" "$CASE_DIR/bin/rig_project_roots.py"

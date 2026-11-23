@@ -20,6 +20,8 @@ install_hook_layout() {
   fi
   cp "$REPO_ROOT/templates/project/.husky/commit-msg" "$hook_dir/commit-msg"
   cp "$REPO_ROOT/templates/project/.husky/post-commit" "$hook_dir/post-commit"
+  mkdir -p "$TEST_PROJECT/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$TEST_PROJECT/bin/rig-path.py"
   cp "$REPO_ROOT/templates/project/.husky/filter-commit-message-inplace.sh" "$hook_dir/filter-commit-message-inplace.sh"
   chmod +x "$hook_dir/commit-msg" "$hook_dir/post-commit"
 }

@@ -5,6 +5,7 @@ setup() {
   export FAKE_BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$CASE_DIR/bin" "$CASE_DIR/.rig/memory" "$CASE_DIR/.claude/commands" "$CASE_DIR/.git/info" "$FAKE_BIN"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-path.py" "$CASE_DIR/bin/rig-path.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-sprint" "$CASE_DIR/bin/rig-sprint"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-snapshot.py" "$CASE_DIR/bin/rig-snapshot.py"

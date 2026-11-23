@@ -9,6 +9,8 @@ setup() {
     "$RIG_DIR/memory/sessions" "$RIG_DIR/tasks/active"
   cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/session-start.sh" \
     "$REPO/.claude/hooks/session-start.sh"
+  mkdir -p "$REPO/bin"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-path.py" "$REPO/bin/rig-path.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/.rig/contextual-tips.sh" \
     "$RIG_DIR/contextual-tips.sh"
   for command in debug rig-gaps code-review sprint task session-name; do

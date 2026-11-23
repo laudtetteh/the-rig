@@ -352,6 +352,7 @@ teardown() { rm -rf "$TEST_ROOT"; }
   checker="$REPO_ROOT/installer/check-capabilities.py"
   mkdir -p "$TEST_PROJECT/bin"
   cp "$REPO_ROOT/templates/project/bin/rig" "$TEST_PROJECT/bin/rig"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$TEST_PROJECT/bin/rig-path.py"
   chmod +x "$TEST_PROJECT/bin/rig"
   cp "$REPO_ROOT/templates/project/bin/rig-session-resolve.py" "$TEST_PROJECT/bin/rig-session-resolve.py"
   cp "$REPO_ROOT/templates/project/bin/rig-session-index.py" "$TEST_PROJECT/bin/rig-session-index.py"

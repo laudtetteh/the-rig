@@ -14,6 +14,7 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../templates/project/.codex/hooks/rig-adapter.sh" "$CASE_DIR/.codex/hooks/rig-adapter.sh"
   cp "$BATS_TEST_DIRNAME/../templates/project/.rig/rules/protected-paths.txt" "$RIG_DIR/rules/protected-paths.txt"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig" "$CASE_DIR/bin/rig"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-path.py" "$CASE_DIR/bin/rig-path.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-session-resolve.py" "$CASE_DIR/bin/rig-session-resolve.py"
   chmod +x "$CASE_DIR/bin/rig"
   git -C "$CASE_DIR" init -q

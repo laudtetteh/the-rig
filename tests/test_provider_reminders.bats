@@ -11,6 +11,8 @@ setup() {
   for hook in prompt-submit.sh session-start.sh pre-tool.sh; do
     cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/$hook" "$HOOKS/$hook"
   done
+  mkdir -p "$CASE_DIR/bin"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-path.py" "$CASE_DIR/bin/rig-path.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/.codex/hooks/rig-adapter.sh" "$CASE_DIR/.codex/hooks/rig-adapter.sh"
   cp "$BATS_TEST_DIRNAME/../templates/project/.rig/rules/protected-paths.txt" "$RIG_DIR/rules/protected-paths.txt"
   git -C "$CASE_DIR" init -q

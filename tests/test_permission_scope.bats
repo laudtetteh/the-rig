@@ -24,6 +24,8 @@ setup() {
   for hook in permission-request.sh pre-tool.sh; do
     cp "$REPO_ROOT/templates/project/.claude/hooks/$hook" "$TEST_PROJECT/.claude/hooks/$hook"
   done
+  mkdir -p "$TEST_PROJECT/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$TEST_PROJECT/bin/rig-path.py"
   cp "$REPO_ROOT/templates/project/.codex/hooks/rig-adapter.sh" \
     "$TEST_PROJECT/.codex/hooks/rig-adapter.sh"
   cp "$REPO_ROOT/templates/project/.rig/contextual-tips.sh" "$RIG_DIR/contextual-tips.sh"

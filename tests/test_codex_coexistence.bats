@@ -18,6 +18,8 @@ install_adapter_fixture() {
   cp "$REPO_ROOT/templates/project/.codex/hooks/rig-adapter.sh" \
     "$TEST_PROJECT/.codex/hooks/rig-adapter.sh"
   cp "$REPO_ROOT/templates/project/.claude/hooks/"*.sh "$TEST_PROJECT/.claude/hooks/"
+  mkdir -p "$TEST_PROJECT/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$TEST_PROJECT/bin/rig-path.py"
   cp "$REPO_ROOT/templates/project/.rig/rules/protected-paths.txt" \
     "$TEST_PROJECT/.rig/rules/protected-paths.txt"
   printf 'abc123  .rig/rules/protected-paths.txt\n' > "$TEST_PROJECT/.rig/memory/.rig-manifest"

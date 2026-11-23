@@ -10,6 +10,8 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/prompt-submit.sh" "$HOOK_DIR/"
   cp "$BATS_TEST_DIRNAME/../templates/project/.claude/hooks/session-start.sh" "$HOOK_DIR/"
   cp "$BATS_TEST_DIRNAME/../templates/project/.husky/post-merge" "$HOOK_DIR/"
+  mkdir -p "$CASE_DIR/bin"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-path.py" "$CASE_DIR/bin/rig-path.py"
   chmod +x "$HOOK_DIR"/*
   git -C "$CASE_DIR" init -q
   git -C "$CASE_DIR" config user.email test@example.com
