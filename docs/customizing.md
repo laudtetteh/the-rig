@@ -46,8 +46,7 @@ Leave blank (or omit the line) if The Rig repo isn't on this machine.
 `/rig-gaps --submit` creates public GitHub issues in `laudtetteh/the-rig` directly via the `gh` CLI. It requires explicit opt-in:
 
 ```bash
-RIG_DIR=.rig
-[ -f .rigpath ] && RIG_DIR=$(head -1 .rigpath)
+RIG_DIR="$(python3 bin/rig-path.py "$PWD")" || exit 1
 touch "$RIG_DIR/memory/.rig-contribute-enabled"
 ```
 

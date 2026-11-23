@@ -33,20 +33,20 @@ setup() {
   [ -z "$(git -C "$linked" status --short)" ]
   run python3 "$REPO_ROOT/installer/audit-stealth.py" "$linked"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"leak_count": 0'* ]]
+  [[ "$output" == *'"leak_count": 0'* ]] || return 1
   run python3 "$REPO_ROOT/installer/repair-stealth.py" "$linked"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"repaired": []'* ]]
+  [[ "$output" == *'"repaired": []'* ]] || return 1
 
   printf '\n# local customization\n' >> "$hooks/pre-commit"
   run bash "$REPO_ROOT/install.sh" --project-only --project-agent claude \
     --target "$linked" --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *'Stale/missing tracked artifacts: 0'* ]]
-  ! grep -qF '# local customization' "$hooks/pre-commit"
+  [[ "$output" == *'Stale/missing tracked artifacts: 0'* ]] || return 1
+  if grep -qF '# local customization' "$hooks/pre-commit"; then return 1; fi
   run "$linked/bin/rig" upgrade rollback --last --dry-run --json
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"path":"hooks/pre-commit"'* ]]
+  [[ "$output" == *'"path":"hooks/pre-commit"'* ]] || return 1
   rid="$(printf '%s' "$output" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rollback_id"])')"
   mkdir -p "$linked/custom-hooks"
   git -C "$linked" config core.hooksPath custom-hooks
@@ -57,7 +57,7 @@ setup() {
   run bash "$REPO_ROOT/install.sh" --project-only --project-agent claude \
     --target "$linked" --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *'Stale/missing tracked artifacts: 0'* ]]
+  [[ "$output" == *'Stale/missing tracked artifacts: 0'* ]] || return 1
 
   mkdir -p "$BATS_TEST_TMPDIR/outside-info"
   mv "$(dirname "$exclude")" "$BATS_TEST_TMPDIR/original-info"
@@ -65,7 +65,7 @@ setup() {
   ln -s "$BATS_TEST_TMPDIR/outside-info" "$(dirname "$exclude")"
   run python3 "$REPO_ROOT/installer/repair-stealth.py" "$linked"
   [ "$status" -eq 2 ]
-  [[ "$output" == *'not a regular contained Git exclude file'* ]]
+  [[ "$output" == *'not a regular contained Git exclude file'* ]] || return 1
   [ "$(cat "$BATS_TEST_TMPDIR/outside-info/exclude")" = outside ]
 }
 
@@ -78,13 +78,13 @@ setup() {
   run bash "$REPO_ROOT/install.sh" --project-only --project-agent claude \
     --target "$first" --project-name app --tracking stealth --strategy merge
   [ "$status" -eq 0 ]
-  [[ "$output" == *'core.hooksPath is configured'* ]]
+  [[ "$output" == *'core.hooksPath is configured'* ]] || return 1
   [ ! -e "$first/custom-hooks/pre-commit" ]
 
   run bash "$REPO_ROOT/install.sh" --project-only --project-agent claude \
     --target "$second" --project-name app --tracking stealth --strategy merge
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Rig directory already belongs to another project'* ]]
+  [[ "$output" == *'Rig directory already belongs to another project'* ]] || return 1
   [ ! -e "$second/.rigpath" ]
   # A manually added pointer must not disguise an occupied directory while
   # the recorded owner still exists at a different project root.
@@ -92,12 +92,12 @@ setup() {
   run bash "$REPO_ROOT/install.sh" --project-only --project-agent claude \
     --target "$second" --project-name app --tracking stealth --strategy merge
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Rig directory already belongs to another project'* ]]
+  [[ "$output" == *'Rig directory already belongs to another project'* ]] || return 1
   mv "$first" "$BATS_TEST_TMPDIR/one/moved-app"
   run bash "$REPO_ROOT/install.sh" --project-only --project-agent claude \
     --target "$second" --project-name app --tracking stealth --strategy merge
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Rig directory already belongs to another project'* ]]
+  [[ "$output" == *'Rig directory already belongs to another project'* ]] || return 1
   mv "$BATS_TEST_TMPDIR/one/moved-app" "$first"
   python3 - "$HOME/.rig/projects/app/install-targets.json" <<'PY'
 import json, sys
@@ -111,7 +111,7 @@ PY
   run bash "$REPO_ROOT/install.sh" --project-only --project-agent claude \
     --target "$first" --project-name app --tracking stealth --strategy merge
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Rig directory already belongs to another project'* ]]
+  [[ "$output" == *'Rig directory already belongs to another project'* ]] || return 1
 }
 
 @test "nested target refuses parent Git exclude and hooks in install audit and repair" {
@@ -126,16 +126,16 @@ PY
   run bash "$REPO_ROOT/install.sh" --project-only --project-agent claude \
     --target "$nested" --project-name nested --tracking stealth --strategy merge
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Target must be the Git worktree root'* ]]
+  [[ "$output" == *'Target must be the Git worktree root'* ]] || return 1
   [ ! -e "$nested/.rigpath" ]
   [ "$(shasum -a 256 "$exclude")" = "$before" ]
   [ ! -e "$hooks/pre-commit" ]
   run python3 "$REPO_ROOT/installer/audit-stealth.py" "$nested"
   [ "$status" -eq 2 ]
-  [[ "$output" == *'"code": "not-a-git-root"'* ]]
+  [[ "$output" == *'"code": "not-a-git-root"'* ]] || return 1
   run python3 "$REPO_ROOT/installer/repair-stealth.py" "$nested"
   [ "$status" -eq 2 ]
-  [[ "$output" == *'"code": "not-a-git-root"'* ]]
+  [[ "$output" == *'"code": "not-a-git-root"'* ]] || return 1
   [ "$(shasum -a 256 "$exclude")" = "$before" ]
 }
 
@@ -150,7 +150,7 @@ PY
   run bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
     --tracking external --strategy merge
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Rig directory already belongs to another project'* ]]
+  [[ "$output" == *'Rig directory already belongs to another project'* ]] || return 1
   [ ! -e "$app/bin/rig" ]
   [ ! -d "$rig/preflight-snapshots" ]
   [ "$(shasum -a 256 "$outside")" = "$before" ]
@@ -158,7 +158,7 @@ PY
   run bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
     --tracking external --strategy merge
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Rig directory already belongs to another project'* ]]
+  [[ "$output" == *'Rig directory already belongs to another project'* ]] || return 1
   [ ! -e "$app/bin/rig" ]
   rm "$rig/install-targets.json"
   printf '{"schema_version":1,"layer":"project","agents":["claude"],"project_root":"%s"}\n' "$app" > "$rig/install-targets.json"
@@ -167,7 +167,7 @@ PY
   run bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
     --tracking external --strategy merge
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Rig directory already belongs to another project'* ]]
+  [[ "$output" == *'Rig directory already belongs to another project'* ]] || return 1
   [ ! -e "$app/bin/rig" ]
 }
 
@@ -196,14 +196,14 @@ PY
   done
   [ ! -e "$BATS_TEST_TMPDIR/elsewhere/secret" ]
   run "$linked/bin/rig" doctor --json
-  [[ "$output" == *'"name":"worktree_bootstrap"'* ]]
-  [[ "$output" != *'"name":"worktree_bootstrap","ok":false'* ]]
+  [[ "$output" == *'"name":"worktree_bootstrap"'* ]] || return 1
+  [[ "$output" != *'"name":"worktree_bootstrap","ok":false'* ]] || return 1
   mv "$primary/bin" "$BATS_TEST_TMPDIR/outside-bin"
   ln -s "$BATS_TEST_TMPDIR/outside-bin" "$primary/bin"
   rm "$linked/bin/rig-tab-title-watch"
   run bash -c 'cd "$1" && "$2" worktree bootstrap' bash "$linked" "$linked/bin/rig"
   [ "$status" -eq 3 ]
-  [[ "$output" == *'source path escapes primary worktree'* ]]
+  [[ "$output" == *'source path escapes primary worktree'* ]] || return 1
   [ ! -e "$linked/bin/rig-tab-title-watch" ]
 }
 
@@ -235,7 +235,7 @@ PY
     run bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
       --tracking "$tracking" --strategy upgrade
     [ "$status" -ne 0 ]
-    [[ "$output" == *'Rig directory already belongs to another project'* ]]
+    [[ "$output" == *'Rig directory already belongs to another project'* ]] || return 1
     [ ! -e "$rig/install-targets.json" ]
 
     run bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
@@ -243,7 +243,7 @@ PY
     # Historical customized hooks can make an otherwise read-only plan
     # return review-required; adoption eligibility itself is still checked.
     [ "$status" -eq 0 ] || [ "$status" -eq 3 ]
-    [[ "$output" == *'"mode":"plan"'* ]]
+    [[ "$output" == *'"mode":"plan"'* ]] || return 1
     [ ! -e "$rig/install-targets.json" ]
     [ "$(shasum -a 256 "$rig/memory/.rig-manifest")" = "$before" ]
     [ ! -d "$rig/preflight-snapshots" ]
@@ -251,12 +251,12 @@ PY
     run bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
       --tracking "$tracking" --strategy upgrade --adopt-legacy-rig-dir
     [ "$status" -eq 0 ]
-    [[ "$output" == *'Adopted legacy Rig directory for this project'* ]]
+    [[ "$output" == *'Adopted legacy Rig directory for this project'* ]] || return 1
     [ -d "$rig/preflight-snapshots" ]
     [ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["project_root"])' "$rig/install-targets.json")" = "$app" ]
     run "$app/bin/rig" upgrade rollback --last --dry-run --json
     [ "$status" -eq 0 ]
-    [[ "$output" == *'"path":"install-targets.json"'* ]]
+    [[ "$output" == *'"path":"install-targets.json"'* ]] || return 1
 
     run bash "$REPO_ROOT/install.sh" --project-only --target "$other" --rig-dir "$rig" \
       --tracking "$tracking" --strategy upgrade --adopt-legacy-rig-dir
@@ -278,18 +278,18 @@ PY
   run bash "$REPO_ROOT/install.sh" --project-only --target "$app" \
     --tracking external --strategy upgrade --adopt-legacy-rig-dir
   [ "$status" -eq 2 ]
-  [[ "$output" == *'requires --project-only, --target, --rig-dir'* ]]
+  [[ "$output" == *'requires --project-only, --target, --rig-dir'* ]] || return 1
   run bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
     --tracking external --strategy upgrade --adopt-legacy-rig-dir
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Legacy Rig adoption refused'* ]]
+  [[ "$output" == *'Legacy Rig adoption refused'* ]] || return 1
   [ ! -e "$rig/install-targets.json" ]
   printf '%s\n' "$rig" > "$app/.rigpath"
   ln -s "$outside" "$rig/preflight-snapshots"
   run bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
     --tracking external --strategy upgrade --adopt-legacy-rig-dir
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Legacy Rig adoption refused'* ]]
+  [[ "$output" == *'Legacy Rig adoption refused'* ]] || return 1
   [ ! -e "$rig/install-targets.json" ]
   [ -z "$(ls -A "$outside")" ]
   rm "$rig/preflight-snapshots"
@@ -297,7 +297,7 @@ PY
   run bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
     --tracking external --strategy upgrade --adopt-legacy-rig-dir
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Legacy Rig adoption refused'* ]]
+  [[ "$output" == *'Legacy Rig adoption refused'* ]] || return 1
   [ ! -e "$rig/install-targets.json" ]
   printf 'brain\n' > "$app/CLAUDE.md"
   mv "$rig" "${rig}-real"
@@ -305,7 +305,7 @@ PY
   run bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
     --tracking external --strategy upgrade --adopt-legacy-rig-dir
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Legacy Rig adoption refused'* ]]
+  [[ "$output" == *'Legacy Rig adoption refused'* ]] || return 1
   [ ! -e "$rig/install-targets.json" ]
   rm "$rig"
   mv "${rig}-real" "$rig"
@@ -314,7 +314,7 @@ PY
   run bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
     --tracking external --strategy upgrade --adopt-legacy-rig-dir
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Legacy Rig adoption refused'* ]]
+  [[ "$output" == *'Legacy Rig adoption refused'* ]] || return 1
   [ ! -e "$rig/install-targets.json" ]
 }
 
@@ -346,8 +346,8 @@ SH
       --tracking external --strategy upgrade --adopt-legacy-rig-dir
   [ "$status" -ne 0 ]
   [ -f "$marker" ]
-  [[ "$output" == *'Adopted legacy Rig directory for this project'* ]]
-  [[ "$output" == *'Removed provisional legacy Rig owner record after failed upgrade'* ]]
+  [[ "$output" == *'Adopted legacy Rig directory for this project'* ]] || return 1
+  [[ "$output" == *'Removed provisional legacy Rig owner record after failed upgrade'* ]] || return 1
   [ ! -e "$rig/install-targets.json" ]
 }
 
@@ -374,7 +374,7 @@ SH
     bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \
       --tracking external --strategy upgrade --adopt-legacy-rig-dir
   [ "$status" -ne 0 ]
-  [[ "$output" == *'lost the owner-record race'* ]]
+  [[ "$output" == *'lost the owner-record race'* ]] || return 1
   [ -f "$rig/install-targets.json" ]
   before="$(python3 -c 'import os,sys; p=sys.argv[1]; s=os.stat(p); print(s.st_dev,s.st_ino)' "$rig/install-targets.json")"
   run bash "$REPO_ROOT/install.sh" --project-only --target "$app" --rig-dir "$rig" \

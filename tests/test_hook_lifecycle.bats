@@ -46,6 +46,15 @@ _sha256() {
   fi
 }
 
+git_common_dir() {
+  local raw
+  raw="$(git -C "$TEST_PROJECT" rev-parse --git-common-dir)" || return 1
+  case "$raw" in
+    /*) printf '%s\n' "$raw" ;;
+    *) printf '%s\n' "$TEST_PROJECT/$raw" ;;
+  esac
+}
+
 # Content+path snapshot of the target tree AND the external stealth .rig/
 # dir (manifest lives there, not under TEST_PROJECT, in stealth mode). Used
 # to prove agent-plan performs zero writes anywhere: two snapshots taken
@@ -78,18 +87,15 @@ tree_snapshot() {
   # as "created" -- proving this run actually journaled recovery state for
   # its first-ever hook writes, not just silently created them.
   #
-  # A single project-only install opens more than one backup transaction
-  # (each distinct `base` path passed to ensure_upgrade_transaction() gets
-  # its own timestamped .rig-backup/<ts>_N dir and .journal), and the
-  # git-hook "created" lines land in whichever one covers .git/hooks/. Search
-  # every journal, not just the first one `find` happens to enumerate --
-  # that enumeration order isn't guaranteed to put the hook-owning journal
-  # first, which made this test flaky when it grabbed only `head -1`.
-  [ ! -e "$TEST_PROJECT/.rig-backup/.in-progress" ]
-  local journals
-  journals="$(find "$TEST_PROJECT/.rig-backup" -name .journal -type f)"
+  # Hook recovery lives under Git's common directory so linked worktrees
+  # share the exact hook path. Search every finalized journal there; other
+  # project and external Rig transactions use separate backup roots.
+  local common journals
+  common="$(git_common_dir)"
+  [ ! -e "$common/.rig-backup/.in-progress" ]
+  journals="$(find "$common/.rig-backup" -name .journal -type f)"
   [ -n "$journals" ]
-  echo "$journals" | xargs /usr/bin/grep -qE '^created[[:space:]]+\.git/hooks/pre-commit$'
+  echo "$journals" | xargs /usr/bin/grep -qE '^created[[:space:]]+hooks/pre-commit$'
 }
 
 @test "ordinary upgrade backs up a customized git hook before overwriting it" {
@@ -106,7 +112,7 @@ tree_snapshot() {
   # Ordinary mode keeps its existing overwrite behavior — the Rig hook wins...
   if grep -q 'hand-written-hook-marker' "$TEST_PROJECT/.git/hooks/pre-commit"; then return 1; fi
   # ...but the replaced content is now recoverable from a backup.
-  run grep -rl 'hand-written-hook-marker' "$TEST_PROJECT/.rig-backup"
+  run grep -rl 'hand-written-hook-marker' "$(git_common_dir)/.rig-backup"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
 }

@@ -230,7 +230,15 @@ json.dump(d, open(p, 'w'), indent=2)
     --project-name Test --tracking stealth --rig-dir "$rig_ext" --strategy upgrade
   [ "$status" -eq 0 ]
 
-  printf '%s\n' "/tmp/some-other-rig-dir-that-does-not-exist" > "$TEST_PROJECT/.rigpath"
+  # A relative pointer that resolves to the same owned Rig directory is safe
+  # to canonicalize; a pointer to another directory now fails closed.
+  local relative_rig
+  relative_rig="$(python3 - "$TEST_PROJECT" "$rig_ext" <<'PY'
+import os, sys
+print(os.path.relpath(sys.argv[2], sys.argv[1]))
+PY
+)"
+  printf '%s\n' "$relative_rig" > "$TEST_PROJECT/.rigpath"
 
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking stealth --rig-dir "$rig_ext" --strategy upgrade
@@ -238,10 +246,21 @@ json.dump(d, open(p, 'w'), indent=2)
 
   # .rigpath is corrected back to the real external dir...
   grep -Fxq "$rig_ext" "$TEST_PROJECT/.rigpath"
-  # ...and the corrupted value it replaced is recoverable from a backup.
-  run grep -rl 'some-other-rig-dir-that-does-not-exist' "$TEST_PROJECT/.rig-backup"
+  # ...and the prior relative value is recoverable from a backup.
+  run grep -rlF "$relative_rig" "$TEST_PROJECT/.rig-backup"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
+
+  # A pointer to a different directory must fail before any upgrade write.
+  local owner_before
+  owner_before="$(shasum -a 256 "$rig_ext/install-targets.json")"
+  printf '%s\n' '/tmp/some-other-rig-dir-that-does-not-exist' > "$TEST_PROJECT/.rigpath"
+  run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
+    --project-name Test --tracking stealth --rig-dir "$rig_ext" --strategy upgrade
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'Rig directory already belongs to another project'* ]] || return 1
+  [ "$(shasum -a 256 "$rig_ext/install-targets.json")" = "$owner_before" ]
+  grep -Fxq '/tmp/some-other-rig-dir-that-does-not-exist' "$TEST_PROJECT/.rigpath"
 }
 
 @test "finalized transactions against the same base never collide within one run" {

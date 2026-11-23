@@ -31,7 +31,7 @@ make_repo() {
   grep -q '^name: code-review$' "$skills/code-review/SKILL.md"
   grep -q '~/.claude/skills/code-review/SKILL.md' "$skills/code-review/SKILL.md"
   grep -q '~/.agents/skills/code-review/SKILL.md' "$home/.agents/skills/code-review/SKILL.md"
-  ! grep -q '~/.claude/skills/code-review/SKILL.md' "$home/.agents/skills/code-review/SKILL.md"
+  if grep -q '~/.claude/skills/code-review/SKILL.md' "$home/.agents/skills/code-review/SKILL.md"; then return 1; fi
   python3 - "$skills" "$manifest" <<'PY'
 import json, pathlib, shutil, sys
 skills, manifest = map(pathlib.Path, sys.argv[1:])
@@ -56,7 +56,15 @@ PY
   ln -s "$BATS_TEST_TMPDIR/external-refactor" "$skills/refactor"
   run env HOME="$home" bash "$REPO_ROOT/install.sh" --global-only --global-agent both --strategy agent-plan
   [ "$status" -eq 3 ]
-  [[ "$output" == *'Migrated legacy Claude skill: skills/code-review.md'* ]]
+  python3 - "$output" <<'PY' || return 1
+import json, sys
+plan = json.loads(sys.argv[1])
+artifacts = {item["path"]: item for item in plan["artifacts"]}
+assert plan["mode"] == "plan" and plan["status"] == "refused"
+assert artifacts["skills/code-review.md"]["action"] == "remove"
+assert artifacts["skills/explain.md"]["classification"] == "customized"
+assert artifacts["skills/debug/SKILL.md"]["classification"] == "conflict"
+PY
   [ -f "$skills/code-review.md" ]
   [ ! -e "$skills/code-review/SKILL.md" ]
   run env HOME="$home" bash "$REPO_ROOT/install.sh" --global-only --global-agent both --strategy upgrade
@@ -71,7 +79,7 @@ PY
   [ ! -e "$skills/debug/SKILL.md" ]
   [ -f "$skills/refactor.md" ]
   [ -L "$skills/refactor" ]
-  ! grep -q 'skills/code-review.md' "$manifest"
+  if grep -q 'skills/code-review.md' "$manifest"; then return 1; fi
   grep -q 'skills/code-review/SKILL.md' "$manifest"
-  [[ "$output" == *'Preserved customized legacy Claude skill: skills/explain.md'* ]]
+  [[ "$output" == *'Preserved customized legacy Claude skill: skills/explain.md'* ]] || return 1
 }
