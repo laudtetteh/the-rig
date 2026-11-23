@@ -68,11 +68,32 @@ def main():
         }, indent=2, sort_keys=True))
         return 0
 
-    exclude_path = os.path.join(target, ".git", "info", "exclude")
-    if not os.path.isfile(exclude_path):
+    git_common = subprocess.run(
+        ["git", "-C", target, "rev-parse", "--git-common-dir"],
+        capture_output=True, text=True, check=False,
+    )
+    git_path = subprocess.run(
+        ["git", "-C", target, "rev-parse", "--git-path", "info/exclude"],
+        capture_output=True, text=True, check=False,
+    )
+    if (git_common.returncode != 0 or not git_common.stdout.strip()
+            or git_path.returncode != 0 or not git_path.stdout.strip()):
+        print(json.dumps({"ok": False, "error": {"code": "no-exclude-file", "message": "could not resolve Git exclude file"}}))
+        return 2
+    raw_common = git_common.stdout.strip()
+    common_dir = raw_common if os.path.isabs(raw_common) else os.path.join(target, raw_common)
+    expected_path = os.path.join(common_dir, "info", "exclude")
+    common_dir = os.path.realpath(common_dir)
+    raw_path = git_path.stdout.strip()
+    exclude_path = raw_path if os.path.isabs(raw_path) else os.path.abspath(os.path.join(target, raw_path))
+    info_path = os.path.join(common_dir, "info")
+    if (os.path.normpath(exclude_path) != os.path.normpath(expected_path)
+            or os.path.islink(info_path) or os.path.islink(exclude_path)
+            or os.path.realpath(exclude_path) != os.path.join(common_dir, "info", "exclude")
+            or not os.path.isfile(exclude_path)):
         print(json.dumps({
             "ok": False,
-            "error": {"code": "no-exclude-file", "message": f"{exclude_path} not found"},
+            "error": {"code": "no-exclude-file", "message": f"{exclude_path} is not a regular contained Git exclude file"},
         }))
         return 2
 

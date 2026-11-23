@@ -276,11 +276,11 @@ Install them at `~/.claude/skills/`.
 
 | Skill | Trigger phrase | File |
 |---|---|---|
-| Refactor | "refactor this to…" | `~/.claude/skills/refactor.md` |
-| Write tests | "write tests for…" | `~/.claude/skills/write-tests.md` |
-| Code review | "review this" | `~/.claude/skills/code-review.md` |
-| Debug | "why is this broken" | `~/.claude/skills/debug.md` |
-| Explain | "explain this to me" | `~/.claude/skills/explain.md` |
+| Refactor | "refactor this to…" | `~/.claude/skills/refactor/SKILL.md` |
+| Write tests | "write tests for…" | `~/.claude/skills/write-tests/SKILL.md` |
+| Code review | "review this" | `~/.claude/skills/code-review/SKILL.md` |
+| Debug | "why is this broken" | `~/.claude/skills/debug/SKILL.md` |
+| Explain | "explain this to me" | `~/.claude/skills/explain/SKILL.md` |
 
 ---
 

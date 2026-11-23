@@ -80,6 +80,41 @@ sha256_file() {
   printf '%s\n' "$hash"
 }
 
+# Git places info/exclude and hooks in the common directory of a linked
+# worktree. Resolve their actual paths rather than assuming TARGET/.git is a
+# directory; avoid --path-format=absolute so older Git versions still work.
+git_metadata_path() {
+  local target="$1" relative="$2" resolved
+  resolved="$(git -C "$target" rev-parse --git-path "$relative" 2>/dev/null)" || return 1
+  [[ -n "$resolved" ]] || return 1
+  case "$resolved" in
+    /*) printf '%s\n' "$resolved" ;;
+    *) printf '%s\n' "$(cd "$target" && pwd -P)/$resolved" ;;
+  esac
+}
+
+git_common_dir() {
+  local target="$1" resolved
+  resolved="$(git -C "$target" rev-parse --git-common-dir 2>/dev/null)" || return 1
+  [[ -n "$resolved" ]] || return 1
+  case "$resolved" in
+    /*) printf '%s\n' "$resolved" ;;
+    *) printf '%s\n' "$(cd "$target" && pwd -P)/$resolved" ;;
+  esac
+}
+
+git_hooks_dir() {
+  local common
+  common="$(git_common_dir "$1")" || return 1
+  printf '%s/hooks\n' "$common"
+}
+
+git_exclude_contains() {
+  local exclude
+  exclude="$(git_metadata_path "$1" info/exclude)" || return 1
+  grep -qF "$2" "$exclude" 2>/dev/null
+}
+
 # ── Rig-owned file classification ─────────────────────────────────────────────
 # Returns 0 (true) if the file is infrastructure owned by The Rig (hooks, commands,
 # processes). Used in overwrite mode to gate the user-modification warning — Rig-owned
@@ -455,11 +490,19 @@ report_stale_manifest_entries() {
       UPGRADE_STALE_UNREPAIRED_COUNT=$((UPGRADE_STALE_UNREPAIRED_COUNT + 1))
     fi
   done < <(python3 - "$metadata_file" "$artifact_root" "$rig_root" <<'PYEOF'
-import json, os, sys
+import json, os, subprocess, sys
 
 metadata, root, rig_root = sys.argv[1:]
 
 def resolve(rel):
+    if rel.startswith(".git/hooks/"):
+        result = subprocess.run(["git", "-C", root, "rev-parse", "--git-common-dir"],
+                                capture_output=True, text=True, check=False)
+        if result.returncode == 0 and result.stdout.strip():
+            common = result.stdout.strip()
+            if not os.path.isabs(common):
+                common = os.path.join(root, common)
+            return os.path.join(common, "hooks", rel[len(".git/hooks/"):])
     if rig_root and (rel == ".rig" or rel.startswith(".rig/")):
         stripped = rel[len(".rig/"):] if rel.startswith(".rig/") else ""
         return os.path.join(rig_root, stripped) if stripped else rig_root
@@ -511,22 +554,22 @@ repair_stale_manifest_entry() {
 import json, os, sys, tempfile
 
 metadata_file, manifest_file, rel = sys.argv[1:]
-with open(metadata_file) as fh:
-    data = json.load(fh)
-entries = data.get("entries", {})
-if rel not in entries:
-    raise SystemExit(0)
-del entries[rel]
-directory = os.path.dirname(metadata_file) or "."
-fd, temporary = tempfile.mkstemp(prefix=".rig-manifest.", dir=directory, text=True)
-try:
-    with os.fdopen(fd, "w") as fh:
-        json.dump(data, fh, indent=2, sort_keys=True)
-        fh.write("\n")
-    os.replace(temporary, metadata_file)
-finally:
-    if os.path.exists(temporary):
-        os.unlink(temporary)
+if os.path.isfile(metadata_file):
+    with open(metadata_file) as fh:
+        data = json.load(fh)
+    entries = data.get("entries", {})
+    if rel in entries:
+        del entries[rel]
+        directory = os.path.dirname(metadata_file) or "."
+        fd, temporary = tempfile.mkstemp(prefix=".rig-manifest.", dir=directory, text=True)
+        try:
+            with os.fdopen(fd, "w") as fh:
+                json.dump(data, fh, indent=2, sort_keys=True)
+                fh.write("\n")
+            os.replace(temporary, metadata_file)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 if os.path.isfile(manifest_file):
     with open(manifest_file) as fh:
         lines = fh.readlines()
@@ -713,6 +756,8 @@ fi
 # ── Parse flags ───────────────────────────────────────────────────────────────
 DO_GLOBAL=true
 DO_PROJECT=true
+_FLAG_PROJECT_ONLY=false
+ADOPT_LEGACY_RIG_DIR=false # explicit migration of pre-owner external installs
 EXTERNAL_RIG_DIR=""   # set via --rig-dir <path>
 RIG_TRACKING=""       # set during project-layer tracking detection; empty for global-only runs
 _FLAG_STRATEGY=""     # set via --strategy <name>   (skips interactive prompt)
@@ -746,7 +791,8 @@ AGENT_DRY_RUN=false
 for arg in "$@"; do
   case "$arg" in
     --global-only)      DO_PROJECT=false ;;
-    --project-only)     DO_GLOBAL=false ;;
+    --project-only)     DO_GLOBAL=false; _FLAG_PROJECT_ONLY=true ;;
+    --adopt-legacy-rig-dir) ADOPT_LEGACY_RIG_DIR=true ;;
     --skip-git-hooks)   SKIP_GIT_HOOKS=true ;;
     --feature-docs)     INSTALL_FEATURE_DOCS=true ;;
     --subagents)        INSTALL_SUBAGENTS=true ;;
@@ -817,6 +863,9 @@ for arg in "$@"; do
       echo "  --rig-dir <path>      Install .rig/ to an external path outside the repo."
       echo "                        Writes a .rigpath pointer file at the project root."
       echo "                        Useful for shared repos where teammates don't use The Rig."
+      echo "  --adopt-legacy-rig-dir  Adopt an old external/stealth install with a manifest"
+      echo "                        but no owner record. Requires --project-only, --target,"
+      echo "                        --rig-dir, --tracking and --strategy upgrade."
       echo "  --feature-docs        Install feature-documentation commands (opt-in)."
       echo "                        Includes: /doc-feature, /doc-list, /feature-context,"
       echo "                        /refresh-feature-doc, docs/INDEX.md, and docs/features/README.md."
@@ -922,6 +971,15 @@ done
 GLOBAL_AGENT="${_FLAG_GLOBAL_AGENT:-claude}"
 PROJECT_AGENT="${_FLAG_PROJECT_AGENT:-claude}"
 
+if [[ "$ADOPT_LEGACY_RIG_DIR" == true ]] &&
+   { [[ "$_FLAG_PROJECT_ONLY" != true || -z "$_FLAG_TARGET" || -z "$EXTERNAL_RIG_DIR" ]] ||
+     [[ "$_FLAG_TRACKING" != external && "$_FLAG_TRACKING" != stealth ]] ||
+     [[ "$_FLAG_STRATEGY" != upgrade && "$_FLAG_STRATEGY" != agent-plan &&
+        "$_FLAG_STRATEGY" != agent-upgrade ]]; }; then
+  error "--adopt-legacy-rig-dir requires --project-only, --target, --rig-dir, --tracking external|stealth, and an upgrade strategy"
+  exit 2
+fi
+
 if [[ -t 0 && "$PREFLIGHT_ONLY" != true && "$INSTALL_NOTIFICATIONS" != true ]]; then
   confirm "Enable audible/visual agent notifications?" "n" && INSTALL_NOTIFICATIONS=true || true
 fi
@@ -965,8 +1023,19 @@ read_agent_state() {
   python3 "$SCRIPT_DIR/installer/read-target-state.py" "$state_file"
 }
 
+legacy_owner_identity() {
+  python3 - "$1" <<'PYEOF'
+import os, sys
+try:
+    st = os.lstat(sys.argv[1])
+except OSError:
+    raise SystemExit(1)
+print(f"{st.st_dev}:{st.st_ino}")
+PYEOF
+}
+
 write_agent_state() {
-  local state_file="$1" layer="$2" selection="$3" project_root="${4:-}" tmp selection_json
+  local state_file="$1" layer="$2" selection="$3" project_root="${4:-}" exclusive="${5:-false}" tmp selection_json
   # agent-plan: classification only, never write target-state metadata.
   [[ "$AGENT_DRY_RUN" == true ]] && return 0
   mkdir -p "$(dirname "$state_file")"
@@ -988,7 +1057,21 @@ with open(path, "w") as f:
     json.dump(data, f, separators=(",", ":"))
     f.write("\n")
 PYEOF
-  mv "$tmp" "$state_file"
+  if [[ "$exclusive" == true ]]; then
+    # Atomic ownership claim: never replace a state file created after the
+    # legacy-adoption validation, even if another installer raced this one.
+    LEGACY_ADOPTION_OWNER_ID="$(legacy_owner_identity "$tmp")"
+    LEGACY_ADOPTION_OWNER_SHA="$(sha256_file "$tmp")"
+    if ! ln "$tmp" "$state_file"; then
+      rm -f "$tmp"
+      return 1
+    fi
+    LEGACY_ADOPTION_CREATED=true
+    trap cleanup_legacy_adoption_on_exit EXIT
+    rm -f "$tmp" || true
+  else
+    mv "$tmp" "$state_file"
+  fi
 }
 
 read_project_root() {
@@ -1700,6 +1783,10 @@ else
   esac
 fi
 
+# The explicit scope flag wins even when an intent menu choice enables the
+# global layer for its usual combined workflow.
+[[ "$_FLAG_PROJECT_ONLY" != true ]] || DO_GLOBAL=false
+
 [[ "$JSON_OUTPUT" != true ]] && blank
 if [[ "$JSON_OUTPUT" != true ]]; then info "Strategy: ${COLLISION_STRATEGY}"; blank; fi
 
@@ -1761,7 +1848,7 @@ fi
   elif [[ -d "$_preflight_target/.rig" && -n "$(git -C "$_preflight_target" ls-files -- ".rig/" 2>/dev/null)" ]]; then
     _preflight_project_state="$_repo_state"
   elif [[ -d "$_preflight_target/.rig" ]] &&
-       { /usr/bin/grep -qF '.rig/' "$_preflight_target/.git/info/exclude" 2>/dev/null ||
+       { git_exclude_contains "$_preflight_target" '.rig/' ||
          /usr/bin/grep -qF '.rig/' "$_preflight_target/.gitignore" 2>/dev/null; }; then
     _preflight_project_state="$_repo_state"
   else
@@ -1834,6 +1921,23 @@ BACKUP_TS="$(date +%Y%m%d_%H%M%S)"
 UPGRADE_JOURNAL=""
 UPGRADE_TRANSACTION_ACTIVE=false
 UPGRADE_TRANSACTION_BASE=""
+LEGACY_ADOPTION_CREATED=false
+LEGACY_ADOPTION_OWNER_SHA=""
+LEGACY_ADOPTION_OWNER_ID=""
+
+cleanup_legacy_adoption_on_exit() {
+  local status=$?
+  [[ "$status" -ne 0 && "$LEGACY_ADOPTION_CREATED" == true ]] || return 0
+  # The owner record is created before the rest of the upgrade and its
+  # transaction may be finalized as writes switch between project and Rig
+  # roots. A failed run must not leave that provisional ownership behind.
+  if [[ -f "$PROJECT_TARGET_STATE" && ! -L "$PROJECT_TARGET_STATE" ]] &&
+     [[ "$(legacy_owner_identity "$PROJECT_TARGET_STATE")" == "$LEGACY_ADOPTION_OWNER_ID" ]] &&
+     [[ "$(sha256_file "$PROJECT_TARGET_STATE")" == "$LEGACY_ADOPTION_OWNER_SHA" ]]; then
+    rm -f "$PROJECT_TARGET_STATE"
+    warn "Removed provisional legacy Rig owner record after failed upgrade."
+  fi
+}
 
 # ── Durable upgrade report (issue #562) ───────────────────────────────────────
 # The recovery journal above is deliberately minimal and is never copied into a
@@ -3487,6 +3591,62 @@ _copy_global_file_upgrade() {
     "$manifest_file" none "$rig_owned_default"
 }
 
+# Migrate the old flat Claude skill only when its manifest hash still matches.
+# Customized or untracked files remain untouched for the operator to review.
+retire_flat_global_skill() {
+  local name="$1" new_path="$2" incoming="$3"
+  local rel="skills/$1.md" new_rel="skills/$1/SKILL.md" legacy="$SKILLS_DIR/$1.md" state baseline current incoming_hash new_state new_hash new_baseline
+  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  [[ -e "$legacy" || -L "$legacy" ]] || return 0
+  incoming_hash="$(sha256_file "$incoming")"
+  if [[ "$AGENT_DRY_RUN" == true ]]; then
+    new_state="$(upgrade_destination_state "$CLAUDE_DIR" "$new_path")"
+    case "$new_state" in
+      missing) ;;
+      regular-file)
+        new_hash="$(sha256_file "$new_path")"
+        new_baseline="$(read_manifest_hash "$new_rel" "$GLOBAL_MANIFEST_FILE")"
+        if [[ "$new_hash" != "$incoming_hash" && "$new_hash" != "$new_baseline" ]]; then
+          info "Preserved legacy Claude skill until the new skill is installed: $rel"
+          return 0
+        fi
+        ;;
+      *) info "Preserved legacy Claude skill until the new skill is installed: $rel"; return 0 ;;
+    esac
+  elif [[ "$(upgrade_destination_state "$CLAUDE_DIR" "$new_path")" != regular-file ||
+          -L "$new_path" || ! -f "$new_path" ||
+          "$(sha256_file "$new_path")" != "$incoming_hash" ||
+          "$(read_manifest_hash "$new_rel" "$GLOBAL_MANIFEST_FILE")" != "$incoming_hash" ]]; then
+    info "Preserved legacy Claude skill until the new skill is installed: $rel"
+    return 0
+  fi
+  state="$(upgrade_destination_state "$CLAUDE_DIR" "$legacy")"
+  if [[ "$state" != regular-file ]]; then
+    warn "Preserved legacy Claude skill requiring review: $rel ($state)"
+    record_upgrade_result skipped-conflict "$rel"
+    return 0
+  fi
+  baseline="$(read_manifest_hash "$rel" "$GLOBAL_MANIFEST_FILE")"
+  current="$(sha256_file "$legacy")"
+  if [[ -z "$baseline" || "$baseline" != "$current" ]]; then
+    warn "Preserved customized legacy Claude skill: $rel"
+    record_upgrade_result skipped-customized "$rel"
+    return 0
+  fi
+  if ! upgrade_manifest_mutation_allowed "$GLOBAL_MANIFEST_FILE" "$rel"; then
+    return 0
+  fi
+  ensure_upgrade_transaction "$CLAUDE_DIR"
+  snapshot_upgrade_metadata
+  backup_file "$legacy" "$CLAUDE_DIR"
+  if [[ "$AGENT_DRY_RUN" != true ]]; then
+    rm -f "$legacy" || return 1
+    repair_stale_manifest_entry "${GLOBAL_MANIFEST_FILE}.json" "$GLOBAL_MANIFEST_FILE" "$rel"
+  fi
+  success "Migrated legacy Claude skill: $rel"
+  record_upgrade_result removed "$rel"
+}
+
 # Retire the hook merged into stop.sh in v1.21.0 only when the manifest proves
 # that the installed regular file is an unchanged Rig artifact. Untracked,
 # customized, symlinked, dangling, and wrong-type paths are user state until
@@ -3581,6 +3741,7 @@ retire_legacy_session_end() {
 _stealth_install_git_hook() {
   local hook_src="$1" hook_dest="$2" hook_name="$3"
   local rel=".git/hooks/${hook_name}"
+  local storage_rel="hooks/${hook_name}"
   local customized=false
   local src_hash
   src_hash="$(sha256_file "$hook_src")"
@@ -3653,7 +3814,7 @@ _stealth_install_git_hook() {
   # run: calling the wrapper here made this whole check a silent no-op
   # under merge/skip/overwrite/interactive, so the #451 symlink-refusal
   # fix never actually applied outside an explicit --strategy upgrade run.
-  guard_destination_before_write "$TARGET" "$hook_dest" "$rel" || return 0
+  guard_destination_before_write "$GIT_COMMON_DIR" "$hook_dest" "$storage_rel" || return 0
   # Capture the pre-state before the write. This function never routes through
   # copy_file()/_upgrade_write(), so without an explicit record a stealth
   # .git/hooks/ rewrite sits entirely outside the rollback contract: the hook
@@ -3674,10 +3835,10 @@ _stealth_install_git_hook() {
   [[ "$AGENT_DRY_RUN" == true ]] || cp "$hook_src" "$hook_dest"
   [[ "$AGENT_DRY_RUN" == true ]] || chmod +x "$hook_dest"
   if [[ "$AGENT_DRY_RUN" != true ]] && upgrade_report_enabled; then
-    [[ -n "$BACKUP_DIR" && -f "$BACKUP_DIR/$rel" ]] && _gh_backup="$BACKUP_DIR/$rel"
+    [[ -n "$BACKUP_DIR" && -f "$BACKUP_DIR/$storage_rel" ]] && _gh_backup="$BACKUP_DIR/$storage_rel"
     local _gh_op="modified"
     [[ "$_gh_pre_type" == absent ]] && _gh_op="created"
-    record_report_artifact "$_gh_op" "$TARGET" "$rel" \
+    record_report_artifact "$_gh_op" "$GIT_COMMON_DIR" "$storage_rel" \
       "$_gh_pre_hash" "$_gh_pre_mode" "$_gh_pre_type" \
       "$(sha256_file "$hook_dest")" "$(manifest_artifact_mode "$hook_dest")" "file" \
       "$_gh_backup"
@@ -3798,15 +3959,35 @@ PYEOF
   fi
 
   # ── Skills ────────────────────────────────────────────────────────────────
+  _CLAUDE_SKILL_STAGE="$(mktemp -d /tmp/rig-claude-global-skills-XXXXXX)"
   for skill_src in "$GLOBAL_TEMPLATES/skills/"*.md; do
     skill_name="$(basename "$skill_src")"
-    skill_dest="$SKILLS_DIR/$skill_name"
+    skill_stem="${skill_name%.md}"
+    skill_rel="skills/$skill_stem/SKILL.md"
+    skill_dest="$CLAUDE_DIR/$skill_rel"
+    skill_generated="$_CLAUDE_SKILL_STAGE/$skill_name"
+    python3 - "$skill_src" "$skill_generated" "$skill_stem" <<'PYEOF'
+import json, pathlib, re, sys
+source, destination, name = sys.argv[1:]
+body = pathlib.Path(source).read_text(encoding="utf-8")
+body = body.replace(f"~/.claude/skills/{name}.md", f"~/.claude/skills/{name}/SKILL.md")
+trigger = re.search(r'^> Triggered by: (.+)$', body, re.M)
+description = f"Run The Rig {name} workflow"
+if trigger:
+    description += f" when asked {trigger.group(1)}"
+pathlib.Path(destination).write_text(
+    f"---\nname: {name}\ndescription: {json.dumps(description)}\n---\n\n{body}",
+    encoding="utf-8",
+)
+PYEOF
     if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
-      _copy_global_file_upgrade "$skill_src" "$skill_dest" "$CLAUDE_DIR" "skills/$skill_name"
+      _copy_global_file_upgrade "$skill_generated" "$skill_dest" "$CLAUDE_DIR" "$skill_rel"
+      retire_flat_global_skill "$skill_stem" "$skill_dest" "$skill_generated"
     else
-      copy_file "$skill_src" "$skill_dest" "$CLAUDE_DIR" "skills/$skill_name"
+      copy_file "$skill_generated" "$skill_dest" "$CLAUDE_DIR" "$skill_rel"
     fi
   done
+  rm -rf "$_CLAUDE_SKILL_STAGE"
 
   # ── Global commands ───────────────────────────────────────────────────────
   if compgen -G "$GLOBAL_TEMPLATES/commands/*.md" >/dev/null; then
@@ -3974,7 +4155,13 @@ if [[ "$DO_PROJECT" == true ]]; then
     _FLAG_PROJECTS_ROOT="$(python3 "$SCRIPT_DIR/installer/set-projects-root.py" check "$_FLAG_PROJECTS_ROOT")" || exit 2
   fi
 
-  if [[ ! -d "$TARGET/.git" ]]; then
+  _TARGET_GIT_TOP="$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ -n "$_TARGET_GIT_TOP" ]] &&
+     [[ "$(cd "$_TARGET_GIT_TOP" && pwd -P)" != "$(cd "$TARGET" && pwd -P)" ]]; then
+    error "Target must be the Git worktree root, not a directory inside another repository: $TARGET"
+    exit 1
+  fi
+  if [[ -z "$_TARGET_GIT_TOP" ]]; then
     warn "$TARGET does not appear to be a git repository."
     if [[ -n "$_FLAG_TARGET" ]]; then
       warn "Continuing non-interactively (--target provided)."
@@ -4096,7 +4283,7 @@ if [[ "$DO_PROJECT" == true ]]; then
     if [[ -n "$(git -C "$TARGET" ls-files -- ".rig/" 2>/dev/null)" ]]; then
       _FLAG_TRACKING="repo"
       info "Auto-detected existing tracking mode: repo (.rig/ is git-committed)"
-    elif grep -qF '.rig/' "$TARGET/.git/info/exclude" 2>/dev/null \
+    elif git_exclude_contains "$TARGET" '.rig/' \
          || grep -qF '.rig/' "$TARGET/.gitignore" 2>/dev/null; then
       _FLAG_TRACKING="local"
       info "Auto-detected existing tracking mode: local (.rig/ is git-excluded)"
@@ -4196,6 +4383,131 @@ if [[ "$DO_PROJECT" == true ]]; then
   if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
     # Expand ~ and resolve to absolute path
     EXTERNAL_RIG_DIR="${EXTERNAL_RIG_DIR/#\~/$HOME}"
+    LEGACY_ADOPTION_PENDING=false
+    if [[ "$ADOPT_LEGACY_RIG_DIR" == true ]]; then
+      # The flag is the owner's explicit authorization to bind a pre-owner
+      # manifest to this checkout. Validate before any project-layer write;
+      # the first write below will be the guarded owner record, after the
+      # pre-flight snapshot has captured the old installation.
+      if ! python3 - "$TARGET" "$EXTERNAL_RIG_DIR" "$PROJECT_TEMPLATES/bin/rig-path.py" <<'PYEOF'
+import hashlib, os, pathlib, re, stat, subprocess, sys
+
+target, rig, helper = map(pathlib.Path, sys.argv[1:])
+pointer = target / ".rigpath"
+state = rig / "install-targets.json"
+manifest = rig / "memory" / ".rig-manifest"
+
+def regular(path):
+    try:
+        return stat.S_ISREG(path.lstat().st_mode)
+    except OSError:
+        return False
+
+def matching_artifact(base, rel, digest):
+    path = base / rel
+    if not regular(path):
+        return False
+    current = path.parent
+    while current != base:
+        if current.is_symlink():
+            return False
+        current = current.parent
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest() == digest.lower()
+    except OSError:
+        return False
+
+if not target.is_dir() or target.is_symlink() or not rig.is_dir() or rig.is_symlink():
+    raise SystemExit(1)
+home = pathlib.Path(os.environ["HOME"])
+if home.is_symlink():
+    raise SystemExit(1)
+boundary = home if rig == home or home in rig.parents else pathlib.Path(rig.anchor)
+current = rig
+while current != boundary:
+    if current.is_symlink():
+        raise SystemExit(1)
+    current = current.parent
+if state.exists() or state.is_symlink():
+    raise SystemExit(1)
+if not regular(pointer) or not regular(manifest):
+    raise SystemExit(1)
+for path in (rig / "memory", rig / "backups", rig / "preflight-snapshots", rig / ".rig-backup"):
+    if path.is_symlink() or (path.exists() and not path.is_dir()):
+        raise SystemExit(1)
+resolved = subprocess.run([sys.executable, str(helper), str(target)],
+                          capture_output=True, text=True, check=False)
+if resolved.returncode or os.path.realpath(resolved.stdout.strip()) != os.path.realpath(rig):
+    raise SystemExit(1)
+target_files = {"CLAUDE.md", "bin/rig", ".claude/settings.json"}
+target_prefixes = (".claude/commands/", ".claude/hooks/", ".codex/", "bin/")
+rig_files = {".rig/VERSION", ".rig/memory/PROGRESS.md", ".rig/memory/ERRORS.md"}
+tracked_target = tracked_rig = False
+try:
+    lines = manifest.read_text(encoding="utf-8").splitlines()
+except (OSError, UnicodeError):
+    raise SystemExit(1)
+for line in lines:
+    if line.startswith("#") or not line.strip():
+        continue
+    match = re.fullmatch(r"[0-9a-fA-F]{64}  (.+)", line)
+    if not match:
+        raise SystemExit(1)
+    rel = match.group(1)
+    digest = line[:64]
+    parts = pathlib.PurePosixPath(rel).parts
+    if not parts or rel.startswith("/") or any(part in (".", "..") for part in parts):
+        raise SystemExit(1)
+    if (rel in target_files or rel.startswith(target_prefixes)) and matching_artifact(target, rel, digest):
+        tracked_target = True
+    if rel in rig_files and matching_artifact(rig, rel[5:], digest):
+        tracked_rig = True
+if not tracked_target or not tracked_rig:
+    raise SystemExit(1)
+PYEOF
+      then
+        error "Legacy Rig adoption refused: pointer, manifest, artifact, owner, or backup boundary is unsafe: $EXTERNAL_RIG_DIR"
+        exit 1
+      fi
+      LEGACY_ADOPTION_PENDING=true
+    fi
+    # A same-name project must not inherit another project's memory or
+    # manifest. An existing install is accepted only when its own pointer
+    # names this directory and its recorded root is this exact target.
+    if [[ "$LEGACY_ADOPTION_PENDING" != true ]] &&
+       { [[ -f "$EXTERNAL_RIG_DIR/install-targets.json" ]] ||
+         [[ -L "$EXTERNAL_RIG_DIR/install-targets.json" ]] ||
+         [[ -f "$EXTERNAL_RIG_DIR/memory/.rig-manifest" ]]; }; then
+      if ! python3 - "$TARGET" "$EXTERNAL_RIG_DIR" "$PROJECT_TEMPLATES/bin/rig-path.py" <<'PYEOF'
+import json, os, pathlib, subprocess, sys
+
+target, rig, helper = sys.argv[1:]
+pointer = pathlib.Path(target) / ".rigpath"
+state = pathlib.Path(rig) / "install-targets.json"
+if state.is_symlink() or not state.is_file():
+    raise SystemExit(1)
+try:
+    prior = json.loads(state.read_text(encoding="utf-8")).get("project_root")
+except (OSError, ValueError, TypeError):
+    raise SystemExit(1)
+if not isinstance(prior, str) or not prior:
+    raise SystemExit(1)
+if os.path.realpath(prior) != os.path.realpath(target):
+    raise SystemExit(1)
+if pointer.is_symlink():
+    raise SystemExit(1)
+elif pointer.is_file():
+    resolved = subprocess.run([sys.executable, helper, target],
+                              capture_output=True, text=True, check=False)
+    if resolved.returncode or os.path.realpath(resolved.stdout.strip()) != os.path.realpath(rig):
+        raise SystemExit(1)
+PYEOF
+      then
+        error "Rig directory already belongs to another project: $EXTERNAL_RIG_DIR"
+        error "Choose a distinct --rig-dir or project name before installing."
+        exit 1
+      fi
+    fi
     if [[ "$AGENT_DRY_RUN" == true ]]; then
       # agent-plan: classification only, never create the external .rig/ dir.
       # An existing install (the realistic agent-plan target) already has this
@@ -4233,6 +4545,10 @@ if [[ "$DO_PROJECT" == true ]]; then
       if [[ "$RIG_TRACKING" == "external" || "$RIG_TRACKING" == "stealth" ]]; then
         recover_upgrade_transaction "$EXTERNAL_RIG_DIR"
       fi
+      if [[ "$RIG_TRACKING" == "stealth" ]]; then
+        _GIT_COMMON_PATH="$(git_common_dir "$TARGET" || true)"
+        [[ -z "$_GIT_COMMON_PATH" ]] || recover_upgrade_transaction "$_GIT_COMMON_PATH"
+      fi
     fi
     if [[ "$RECOVER_ONLY" == true ]]; then exit 0; fi
     # Take the whole-tree "known good before" snapshot only after any
@@ -4257,7 +4573,6 @@ if [[ "$DO_PROJECT" == true ]]; then
     fi
   fi
   maybe_enable_codex_runtime_project_target "$TARGET" "$PROJECT_TARGET_STATE"
-
   # ── BREAKING CHANGE GATE (upgrade only) ───────────────────────────────────
   # Read the project's installed Rig version and surface any breaking changes
   # between it and the incoming installer version before touching any files.
@@ -4439,6 +4754,30 @@ if [[ "$DO_PROJECT" == true ]]; then
        grep -Fq 'subagent-start.sh' "$TARGET/CLAUDE.md"; then
       warn "CLAUDE.md references subagent files that Upgrade will skip; rerun with --subagents."
     fi
+  fi
+
+  if [[ "${LEGACY_ADOPTION_PENDING:-false}" == true && "$AGENT_DRY_RUN" != true ]]; then
+    [[ -n "$PREFLIGHT_SNAPSHOT_DIR" && -d "$PREFLIGHT_SNAPSHOT_DIR/.rig" ]] || {
+      error "Legacy Rig adoption requires a completed pre-flight backup."
+      exit 1
+    }
+    if [[ "$(upgrade_destination_state "$EXTERNAL_RIG_DIR" "$PROJECT_TARGET_STATE")" != missing ]]; then
+      error "Legacy Rig adoption found a conflicting owner record."
+      exit 1
+    fi
+    ensure_upgrade_transaction "$EXTERNAL_RIG_DIR"
+    begin_direct_writer_report "$EXTERNAL_RIG_DIR" "$PROJECT_TARGET_STATE" "install-targets.json"
+    if ! write_agent_state "$PROJECT_TARGET_STATE" project "$PROJECT_AGENT" "$(cd "$TARGET" && pwd)" true; then
+      error "Legacy Rig adoption lost the owner-record race; no owner was overwritten."
+      exit 1
+    fi
+    # Journal creation only after the exclusive link succeeds. A losing
+    # installer must not leave a `created` entry that recovery could use to
+    # delete the winner's record.
+    record_created "$EXTERNAL_RIG_DIR" "$PROJECT_TARGET_STATE"
+    mark_written_this_run "$PROJECT_TARGET_STATE"
+    finish_direct_writer_report
+    success "Adopted legacy Rig directory for this project: $EXTERNAL_RIG_DIR"
   fi
 
   # ── COPY PROJECT FILES ────────────────────────────────────────────────────
@@ -4806,10 +5145,11 @@ PYEOF
     fi
 
     # Exclude .rigpath from git tracking (per-clone, not shared via .gitignore)
-    GIT_EXCLUDE="$TARGET/.git/info/exclude"
+    GIT_EXCLUDE="$(git_metadata_path "$TARGET" info/exclude || true)"
+    GIT_COMMON_DIR="$(dirname "$(dirname "$GIT_EXCLUDE")")"
     if [[ -f "$GIT_EXCLUDE" ]]; then
-      if guard_destination_before_write "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"; then
-        begin_direct_writer_report "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"
+      if guard_destination_before_write "$GIT_COMMON_DIR" "$GIT_EXCLUDE" "info/exclude"; then
+        begin_direct_writer_report "$GIT_COMMON_DIR" "$GIT_EXCLUDE" "info/exclude"
         if ! grep -qF ".rigpath" "$GIT_EXCLUDE"; then
           echo ".rigpath" >> "$GIT_EXCLUDE"
           success "Added .rigpath to .git/info/exclude"
@@ -4875,10 +5215,11 @@ PYEOF
 
   # ── LOCAL-ONLY: add .rig/ to .git/info/exclude ───────────────────────────
   if [[ "$RIG_TRACKING" == "exclude" ]]; then
-    GIT_EXCLUDE="$TARGET/.git/info/exclude"
+    GIT_EXCLUDE="$(git_metadata_path "$TARGET" info/exclude || true)"
+    GIT_COMMON_DIR="$(dirname "$(dirname "$GIT_EXCLUDE")")"
     if [[ -f "$GIT_EXCLUDE" ]]; then
-      if guard_destination_before_write "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"; then
-        begin_direct_writer_report "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"
+      if guard_destination_before_write "$GIT_COMMON_DIR" "$GIT_EXCLUDE" "info/exclude"; then
+        begin_direct_writer_report "$GIT_COMMON_DIR" "$GIT_EXCLUDE" "info/exclude"
         if ! grep -qF ".rig/" "$GIT_EXCLUDE"; then
           printf "\n# The Rig system files — local only, not shared with teammates\n.rig/\n" >> "$GIT_EXCLUDE"
           success "Added .rig/ to .git/info/exclude (local only — teammates won't see it)"
@@ -4896,10 +5237,11 @@ PYEOF
 
   # ── STEALTH MODE: exclude all Rig artifacts + wire hooks to .git/hooks/ ──
   if [[ "$RIG_TRACKING" == "stealth" ]]; then
-    GIT_EXCLUDE="$TARGET/.git/info/exclude"
+    GIT_EXCLUDE="$(git_metadata_path "$TARGET" info/exclude || true)"
+    GIT_COMMON_DIR="$(dirname "$(dirname "$GIT_EXCLUDE")")"
     if [[ -f "$GIT_EXCLUDE" ]]; then
-      if guard_destination_before_write "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"; then
-        begin_direct_writer_report "$TARGET" "$GIT_EXCLUDE" ".git/info/exclude"
+      if guard_destination_before_write "$GIT_COMMON_DIR" "$GIT_EXCLUDE" "info/exclude"; then
+        begin_direct_writer_report "$GIT_COMMON_DIR" "$GIT_EXCLUDE" "info/exclude"
         # Helper: append entry only if not already present.
         # -x (whole-line) matters here: without it, a substring match on
         # "bin/rig" is satisfied by an already-written "bin/rig-sprint" line,
@@ -4975,9 +5317,14 @@ PYEOF
   # zero filesystem mutations under agent-plan — only classification.
   if [[ "$RIG_TRACKING" == "stealth" ]]; then
     # Copy .husky/ hook scripts directly to .git/hooks/ (Husky-free, per-clone)
-    GIT_HOOKS_DIR="$TARGET/.git/hooks"
+    GIT_COMMON_DIR="$(git_common_dir "$TARGET" || true)"
+    GIT_HOOKS_DIR="$GIT_COMMON_DIR/hooks"
     HUSKY_SRC="$PROJECT_TEMPLATES/.husky"
-    if [[ "$SKIP_GIT_HOOKS" == true ]]; then
+    CUSTOM_HOOKS_PATH="$(git -C "$TARGET" config --get core.hooksPath 2>/dev/null || true)"
+    if [[ -n "$CUSTOM_HOOKS_PATH" ]]; then
+      warn "Stealth: core.hooksPath is configured ($CUSTOM_HOOKS_PATH); Rig cannot safely replace hooks there."
+      warn "Rig git hooks were not installed. Integrate them into core.hooksPath manually or unset it and rerun."
+    elif [[ "$SKIP_GIT_HOOKS" == true ]]; then
       info "Stealth: --skip-git-hooks set — skipping .git/hooks/ writes."
     else
       # Warn when the target project already manages hooks via Husky — the Rig
@@ -5128,7 +5475,13 @@ PYEOF
       _project_state_base="$TARGET"
       _project_state_rel=".rig/install-targets.json"
     fi
-    if guard_destination_before_write "$_project_state_base" "$PROJECT_TARGET_STATE" "$_project_state_rel"; then
+    if [[ "${LEGACY_ADOPTION_PENDING:-false}" == true && "$AGENT_DRY_RUN" != true ]]; then
+      [[ -f "$PROJECT_TARGET_STATE" && ! -L "$PROJECT_TARGET_STATE" &&
+         "$(sha256_file "$PROJECT_TARGET_STATE")" == "$LEGACY_ADOPTION_OWNER_SHA" ]] || {
+        error "Legacy Rig owner record changed during upgrade; preserving the conflicting record."
+        exit 1
+      }
+    elif guard_destination_before_write "$_project_state_base" "$PROJECT_TARGET_STATE" "$_project_state_rel"; then
       begin_direct_writer_report "$_project_state_base" "$PROJECT_TARGET_STATE" "$_project_state_rel"
       write_agent_state "$PROJECT_TARGET_STATE" project "$PROJECT_AGENT" "$TARGET_ABS"
       finish_direct_writer_report

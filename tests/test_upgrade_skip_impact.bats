@@ -99,12 +99,12 @@ assert_codex_retrofit_reports_divergence() {
     --target "$TEST_PROJECT" --project-name Fixture --tracking repo \
     --global-agent claude --project-agent claude --strategy merge </dev/null
   [ "$status" -eq 0 ]
-  printf '\n<!-- custom global skill -->\n' >> "$fixture_home/.claude/skills/explain.md"
+  printf '\n<!-- custom global skill -->\n' >> "$fixture_home/.claude/skills/explain/SKILL.md"
   run env HOME="$fixture_home" bash "$REPO_ROOT/install.sh" \
     --target "$TEST_PROJECT" --project-name Fixture --tracking repo \
     --global-agent claude --project-agent claude --strategy upgrade </dev/null
   [ "$status" -eq 0 ]
-  [[ "$output" == *"skipping customized file: skills/explain.md"* ]] || return 1
+  [[ "$output" == *"skipping customized file: skills/explain/SKILL.md"* ]] || return 1
   [[ "$output" != *"To converge customized project files"* ]] || return 1
   [[ "$output" == *"Review each listed file"* ]] || return 1
 }

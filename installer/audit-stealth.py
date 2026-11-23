@@ -177,10 +177,18 @@ def main():
     args = parser.parse_args()
     target = os.path.abspath(args.target)
 
-    if not os.path.isdir(os.path.join(target, ".git")):
+    repository = git(target, "rev-parse", "--is-inside-work-tree")
+    if repository.returncode != 0 or repository.stdout.strip() != "true":
         print(json.dumps({
             "ok": False,
             "error": {"code": "not-a-git-repo", "message": f"{target} is not a git repository"},
+        }))
+        return 2
+    top = git(target, "rev-parse", "--show-toplevel")
+    if top.returncode != 0 or os.path.realpath(top.stdout.strip()) != os.path.realpath(target):
+        print(json.dumps({
+            "ok": False,
+            "error": {"code": "not-a-git-root", "message": f"{target} is not the Git worktree root"},
         }))
         return 2
 
