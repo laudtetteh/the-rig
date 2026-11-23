@@ -32,6 +32,7 @@ No arguments. Output the table below directly — do not read individual command
 | `/rig-status` | Check Rig installation health, versions, and local state without changing the project. |
 | `/session-name` | Derive and set a session name from work completed so far. Uses the same tiered format as `/wrap` and `/post-merge` but callable at any time without triggering a full cycle. |
 | `bin/rig session index` | Search Rig session records across the current project, immediate configured project-root projects (legacy `~/code/` fallback), and external `~/.rig/projects/` directories. Use `--root PROJECT` for another location. The index is read-only, reports coverage and ambiguity, and never scans provider transcripts. |
+| `bin/rig session archive` | Preview stale v1 records by exact anchor, confirm a content-bound token to archive, or preview and confirm byte-exact restore. `session index --stale` reports evidence. Active records require explicit acknowledgement; archives stay in the current project's Rig memory. |
 
 ### Provider-native aids for concurrent conversations
 

@@ -371,6 +371,33 @@ a subsequent native resume may create a continuation anchor.
 
 ### Cross-project Rig record index
 
+`bin/rig session index --stale --project current --json` adds age, local PID
+observation, obligation and handoff evidence to the read-only index. Provider
+liveness remains unknown, even when a recorded PID is absent. The index gives
+an archive preview command only for an unambiguous record in the current Rig
+directory; records from other projects remain read-only. If the index's Rig
+directory and the CLI's `.rigpath` resolution disagree, it suppresses the
+archive suggestion until the path is corrected.
+
+`bin/rig session archive --anchor ANCHOR --json` previews an exact v1 record.
+The default minimum age is 30 days; `--older-than DAYS` accepts 7 or more.
+An active record requires `--acknowledge-active` in both preview and apply.
+Archive requires `--confirm TOKEN`, where the token binds the selected bytes,
+obligation markers, snapshot, threshold and acknowledgement. A lineage component
+must be selected in full with repeated `--anchor` flags. Live PID evidence,
+pending obligations, checkpoint handoffs, malformed records and changed input
+block the operation. `--list` shows archives, and `--restore ARCHIVE_ID` previews
+a separate confirmation token before restoring the original bytes. An archived
+conversation that resumes may create a new binding, in which case restore
+refuses the old record. Provider transcripts are never changed.
+If an interrupted archive or restore leaves a pending journal, the command
+reports `archive_recovery_required`. Run `bin/rig session archive --recover ID
+--json` to preview rollback or finalization, then repeat with its `--confirm
+TOKEN`. Recovery checks saved hashes, current bindings, and lineage before any
+write. A changed or rebound record requires manual investigation. The private
+manifest preserves record hashes, original modes, and a reason; a redacted
+`archive-audit.jsonl` records archive and restore actions.
+
 `bin/rig session index --json` searches Rig session records in the current
 project, immediate installed projects under the configured project roots, and
 immediate external Rig directories under `~/.rig/projects/`. Set

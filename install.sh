@@ -101,7 +101,7 @@ sha256_file() {
 is_rig_owned() {
   local rel="$1"
   case "$rel" in
-    bin/rig|bin/rig-connector-preflight|bin/rig-sprint|bin/rig-tab-title-watch|bin/rig-session-resolve.py|bin/rig-session-index.py|bin/rig_project_roots.py|bin/rig-snapshot.py|bin/rig-tracker-config.py|\
+    bin/rig|bin/rig-connector-preflight|bin/rig-sprint|bin/rig-tab-title-watch|bin/rig-session-resolve.py|bin/rig-session-index.py|bin/rig-session-archive.py|bin/rig_project_roots.py|bin/rig-snapshot.py|bin/rig-tracker-config.py|\
     .claude/hooks/*|\
     .claude/commands/*|\
     .claude/agents/*|\
@@ -2537,7 +2537,7 @@ preflight_snapshot_project() {
   local -a rel_paths=(
     "CLAUDE.md" "PROJECT_BRIEF.md" ".claude" ".agents" ".codex" ".mcp.json"
     ".playwright-mcp" ".github" ".gitleaks.toml" "docs/INDEX.md" "docs/features/README.md"
-    ".husky" ".rigpath" "bin/rig" "bin/rig-session-resolve.py" "bin/rig-session-index.py" "bin/rig_project_roots.py" "bin/rig-snapshot.py" "bin/rig-tracker-config.py" ".git/hooks"
+    ".husky" ".rigpath" "bin/rig" "bin/rig-session-resolve.py" "bin/rig-session-index.py" "bin/rig-session-archive.py" "bin/rig_project_roots.py" "bin/rig-snapshot.py" "bin/rig-tracker-config.py" ".git/hooks"
   )
   # Tracked .rig/ lives at $base/.rig for repo/exclude tracking, so it's just
   # another base-relative path. external/stealth tracking is handled below —
