@@ -19,10 +19,11 @@ teardown() {
 
 validate_progress_sid_contract() {
   local progress_file="$1"
-  local uuid_note="Read the current session's UUID from \`/tmp/.rig-session-\${PPID}.uuid\`."
 
   /usr/bin/grep -Fqx '## [YYYY-MM-DD] — [one-line summary] <!-- sid:UUID -->' "$progress_file" &&
-    /usr/bin/grep -Fqx "$uuid_note" "$progress_file"
+    /usr/bin/grep -Fq 'bin/rig session resolve --json' "$progress_file" &&
+    /usr/bin/grep -Fq '`confidence: exact`' "$progress_file" &&
+    /usr/bin/grep -Fq 'Do not infer identity from a parent PID' "$progress_file"
 }
 
 @test "installed PROGRESS.md documents the sid suffix and UUID source" {

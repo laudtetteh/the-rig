@@ -647,10 +647,12 @@ PY
 
 @test "wrap.md: transcript pruning skips ambiguous provider paths" {
   grep -q "transcript-retention-days" "$COMMAND_DIR/wrap.md"
-  ! grep -Fq '$HOME/.claude/projects' "$COMMAND_DIR/wrap.md"
+  run grep -Fq '$HOME/.claude/projects' "$COMMAND_DIR/wrap.md"
+  [ "$status" -ne 0 ]
   grep -Fq 'Codex has no documented project-scoped transcript directory' "$COMMAND_DIR/wrap.md"
   grep -Fq 'Claude project directory mapping can collide' "$COMMAND_DIR/wrap.md"
-  ! grep -Fq 'find "$TRANSCRIPT_DIR"' "$COMMAND_DIR/wrap.md"
+  run grep -Fq 'find "$TRANSCRIPT_DIR"' "$COMMAND_DIR/wrap.md"
+  [ "$status" -ne 0 ]
 }
 
 @test "post-merge housekeeping subjects pass the configured GitHub commit guard" {
