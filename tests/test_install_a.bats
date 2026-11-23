@@ -676,7 +676,7 @@ _sha256() {
   cmp -s "$TEMP_DIR/settings-after-move.json" "$TEST_PROJECT/.claude/settings.json"
 }
 
-@test "upgrade strategy: preserves an external .rigpath symlink" {
+@test "upgrade strategy: refuses an external .rigpath symlink without following it" {
   local rig_ext="$TEMP_DIR/external-rig"
   run_installer --strategy skip --tracking stealth --rig-dir "$rig_ext"
   [ "$status" -eq 0 ]
@@ -688,18 +688,15 @@ _sha256() {
   ln -s "$outside_pointer" "$pointer"
 
   run_installer --strategy upgrade --tracking stealth --rig-dir "$rig_ext"
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
   [ -L "$pointer" ]
   [ "$(cat "$outside_pointer")" = "$rig_ext" ]
-  [[ "$output" == *"Preserved conflicting upgrade destination: .rigpath (symlink)"* ]] || return 1
+  [[ "$output" == *"Rig directory already belongs to another project"* ]] || return 1
 }
 
-@test "agent-plan detects a symlinked .rigpath conflict instead of silently missing it (retro-audit finding, PR #460)" {
-  # Same bug class issue #458 fixed for the stealth git-hook install loop:
-  # the .rigpath conflict-detection call used to live entirely inside the
-  # AGENT_DRY_RUN guard, so agent-plan never evaluated it at all -- a real
-  # conflict here would surface for the first time as an agent-upgrade
-  # refusal the plan never warned about.
+@test "agent-plan refuses a symlinked .rigpath before planning without following it" {
+  # The ownership preflight now rejects symlinked pointers before a plan can
+  # be generated. Preserve the no-write guarantee for this earlier conflict.
   local rig_ext="$TEMP_DIR/external-rig"
   run_installer --strategy skip --tracking stealth --rig-dir "$rig_ext"
   [ "$status" -eq 0 ]
@@ -711,8 +708,8 @@ _sha256() {
   ln -s "$outside_pointer" "$pointer"
 
   run_installer --strategy agent-plan --tracking stealth --rig-dir "$rig_ext"
-  [ "$status" -eq 3 ]
-  [[ "$output" == *'".rigpath"'* ]] || return 1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Rig directory already belongs to another project"* ]] || return 1
   # Zero writes: agent-plan must never mutate the symlink itself.
   [ -L "$pointer" ]
   [ "$(cat "$outside_pointer")" = "$rig_ext" ]

@@ -16,6 +16,10 @@ setup() {
   printf 'issue-tracking: github\nissue-tracking: linear\nissue-tracking: trello\nissue-tracking: gus\nissue-tracking: none\n' > "$CASE_DIR/.claude/commands/task.md"
   cp "$CASE_DIR/.claude/commands/task.md" "$CASE_DIR/.claude/commands/ship.md"
   printf 'hash .claude/commands/task.md\nhash .claude/commands/ship.md\n' > "$CASE_DIR/.rig/memory/.rig-manifest"
+  local launcher
+  for launcher in "$CASE_DIR"/bin/*; do
+    printf 'hash bin/%s\n' "${launcher##*/}" >> "$CASE_DIR/.rig/memory/.rig-manifest"
+  done
   git -C "$CASE_DIR" init -q
   unset CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID
 }
@@ -382,6 +386,10 @@ PY
   local linked="$BATS_TEST_TMPDIR/linked"
   rm -rf "$CASE_DIR/.claude"
   mkdir -p "$external/memory" "$CASE_DIR/.codex" "$CASE_DIR/.agents/skills"
+  local launcher
+  for launcher in "$CASE_DIR"/bin/*; do
+    printf 'hash bin/%s\n' "${launcher##*/}" >> "$external/memory/.rig-manifest"
+  done
   printf '%s\n' "$external" > "$CASE_DIR/.rigpath"
   printf '{"hooks":{}}\n' > "$CASE_DIR/.codex/hooks.json"
   printf 'CLAUDE.md\nPROJECT_BRIEF.md\n.claude/\n.codex/\n.agents/\n.rigpath\n' > "$CASE_DIR/.git/info/exclude"
