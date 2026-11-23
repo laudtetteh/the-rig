@@ -466,6 +466,7 @@ _install_protected_path_policy() {
   run bash "$rig_dir/install.sh" --project-only \
     --target "$rig_dir" \
     --project-name "TestProject" \
+    --tracking repo \
     --strategy skip
 
   [ "$status" -eq 0 ]
@@ -487,6 +488,7 @@ _install_protected_path_policy() {
   run bash "$rig_dir/install.sh" --project-only \
     --target "$rig_dir" \
     --project-name "TestProject" \
+    --tracking repo \
     --strategy skip
 
   [ "$status" -eq 0 ]

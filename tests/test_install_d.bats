@@ -135,6 +135,7 @@ _sha256() {
     --target "$TEST_PROJECT" \
     --project-name "TestProject" \
     --tracking stealth \
+    --rig-dir "$TEMP_DIR/stealth-rig" \
     --strategy merge <<< ""
   [ "$status" -eq 0 ]
   [ -f "$TEST_PROJECT/.claude/settings.json" ]
