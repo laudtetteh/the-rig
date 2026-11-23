@@ -177,10 +177,11 @@ commit-cleanup: yes
 # transcript-retention-days: 14
 ```
 
-Optional. When set to a positive integer, the wrap workflow prunes transcript
-files only from the current provider's documented persistence location (Claude
-projects or Codex sessions) when retention is enabled. Prevents disk from filling up
-after long-running projects. Commented out by default — uncomment and set a value to enable.
+Optional retention preference, commented out by default. The wrap workflow
+currently skips automatic transcript pruning even when this is a positive
+integer: Claude project directory names can collide, and Codex has no documented
+project-scoped session directory. Pruning can resume only after a trustworthy
+project ownership check is available.
 
 ```
 rig-gaps-push-target:
@@ -310,11 +311,10 @@ When starting a new session, read in this order:
 
 ## Feature documentation
 
-End-to-end traces for business-critical features. Feature docs live in
-`$RIG_DIR/docs/features/` — for repo-tracked projects this is `docs/features/`;
-for stealth/external projects it resolves to the external `.rig/` directory via
-`.rigpath`. The `/doc-feature`, `/refresh-feature-doc`, and `/feature-doc` commands
-all resolve this path automatically.
+End-to-end traces for business-critical features. Feature docs live in the
+project repository's `docs/features/` directory in every tracking mode,
+including stealth and external installs. The `/doc-feature`, `/feature-context`,
+and `/refresh-feature-doc` commands resolve this path from the repository root.
 
 - **Before touching code** that overlaps with a documented feature, run
   `/feature-context <feature>` to load the doc into context

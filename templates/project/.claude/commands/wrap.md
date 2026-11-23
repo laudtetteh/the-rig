@@ -20,7 +20,7 @@ between sessions:
 10. **Suggests a session name** — derives a name from this session's work via `/session-name` logic (see Session naming step below)
 11. When tasks are installed, surfaces the next priority from `$RIG_DIR/tasks/backlog/` and asks: "What's next?"
 12. **Cleans up housekeeping flags** — deletes `.rig/memory/.wrap-needed` if present
-13. **(opt-in) Auto-scans JSONL transcripts** for frequent Bash patterns and appends new `permissions.allow` entries to `.claude/settings.json` — enable with `touch $RIG_DIR/memory/.fewer-prompts-enabled`
+13. **Reports a safe skip** when the legacy `.fewer-prompts-enabled` sentinel is present; automatic transcript scanning and permission promotion are disabled until project ownership can be verified
 
 `/wrap` is scoped to the current project only. Do not update another project's
 Rig memory, task files, or session records during this workflow. If the
@@ -146,6 +146,7 @@ through the same writer and preserve unrelated handoffs.
 >   exit 1
 > }
 > RIG_DIR=$(printf '%s' "$TASK_INVENTORY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rig_dir"])')
+> DOCS_DIR="$REPO/docs"
 > ```
 >
 > Substitute `$RIG_DIR` for `.rig/` in every step below.
@@ -390,7 +391,8 @@ session touched files covered by documented features.
 
 **How:**
 
-1. Resolve `$RIG_DIR` and `$DOCS_DIR` (see RIG_DIR resolution block above).
+1. Resolve `$RIG_DIR` (see RIG_DIR resolution block above), then set
+   `DOCS_DIR="$REPO/docs"` using the already resolved project root.
 2. If `$DOCS_DIR` doesn't exist or has no `.md` files (other than `README.md`): skip silently.
 3. For this advisory feature-doc check only, bound the legacy commit sweep by the most recent session-end marker or prior snapshot date when needed. These bounds are not session naming evidence; name the session from the current conversation and exact session UUID evidence.
 4. Collect all files changed across those commits:
@@ -819,23 +821,43 @@ project state only (branch, PRs, roadmap, key facts). Session names live in sess
 
 ### Step 6 — Surface orphan sessions
 
-After completing this session, scan `$SESSION_DIR` for remaining `.json` files
+After completing this session, set `SESSION_DIR="$RIG_DIR/memory/sessions"` and
+`DONE_DIR="$SESSION_DIR/done"`, then scan `$SESSION_DIR` for remaining `.json` files
 (not in `done/`) with `"status": "active"`:
 
 ```bash
+# orphan-session-scan:start
+SESSION_DIR="$RIG_DIR/memory/sessions"
+DONE_DIR="$SESSION_DIR/done"
 for f in "$SESSION_DIR"/session-*.json; do
   [[ -f "$f" ]] || continue
-  STATUS=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('lifecycle',{}).get('state') or d.get('status',''))" 2>/dev/null)
-  STARTED=$(python3 -c "import json; print(json.load(open('$f')).get('started_at','?'))" 2>/dev/null)
-  NAME=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('names',{}).get('tentative') or d.get('tentative_name') or d.get('anchor','?'))" 2>/dev/null)
+  STATUS=$(python3 - "$f" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(d.get('lifecycle', {}).get('state') or d.get('status', ''))
+PY
+  ) || continue
+  STARTED=$(python3 - "$f" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(d.get('created_at') or d.get('started_at') or '?')
+PY
+  ) || continue
+  NAME=$(python3 - "$f" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(d.get('names', {}).get('tentative') or d.get('tentative_name') or d.get('anchor', '?'))
+PY
+  ) || continue
   if [[ "$STATUS" == "active" ]]; then
-    echo "⚠ Orphan session (active, unwrapped): $NAME (started $STARTED, file: $(basename $f))"
+    echo "⚠ Orphan session (active, unwrapped): $NAME (started $STARTED, file: $(basename "$f"))"
   elif [[ "$STATUS" == "complete" ]]; then
     # complete but not moved to done/ — write step finished but rename was interrupted
-    echo "⚠ Orphan session (complete, not moved to done/): $NAME (file: $(basename $f))"
+    echo "⚠ Orphan session (complete, not moved to done/): $NAME (file: $(basename "$f"))"
     echo "   Move manually: mv '$f' '$DONE_DIR/'"
   fi
 done
+# orphan-session-scan:end
 ```
 
 Surface any found to the user. They may be active in another tab — do not delete
@@ -884,169 +906,59 @@ second detector based on installed files, processes, or transcript contents. Rep
 the block.
 
 The `transcript-retention-days:` field in `$REPO/CLAUDE.md` enables age-based pruning
-when it is a positive integer. Claude transcripts live under the documented
-`$HOME/.claude/projects` location. Codex active sessions live under
-`${CODEX_HOME:-$HOME/.codex}/sessions`; never read or parse their rollout contents.
-Codex `archived_sessions` is excluded unless
-`transcript-retention-include-archived: true` explicitly opts it in.
+only when a provider offers a provably project-owned transcript location. Claude's
+slash-to-hyphen project directory mapping can collide for distinct repository paths;
+Codex stores sessions under a shared directory without a documented project-specific
+path. Skip both providers until a safe ownership check is available. Never read
+provider-private rollout contents to infer ownership. A retention setting in one
+project must never delete another project's transcripts.
 
 ```bash
 # transcript-pruning:start
 TRANSCRIPT_AGENT="CURRENT_AGENT"
 RETENTION_DAYS=$(grep "^transcript-retention-days:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
-INCLUDE_ARCHIVED=$(grep "^transcript-retention-include-archived:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
 
 if [[ ! "$RETENTION_DAYS" =~ ^[1-9][0-9]*$ ]]; then
   echo "Transcript pruning skipped: transcript persistence retention is disabled."
+elif [[ "$TRANSCRIPT_AGENT" == "claude" ]]; then
+  echo "Transcript pruning skipped: Claude project directory mapping can collide between repositories."
+elif [[ "$TRANSCRIPT_AGENT" == "codex" ]]; then
+  echo "Transcript pruning skipped: Codex has no documented project-scoped transcript directory."
 else
-  TRANSCRIPT_DIRS=()
-  case "$TRANSCRIPT_AGENT" in
-    claude)
-      TRANSCRIPT_DIRS+=("$HOME/.claude/projects")
-      ;;
-    codex)
-      CODEX_TRANSCRIPT_HOME="${CODEX_HOME:-$HOME/.codex}"
-      TRANSCRIPT_DIRS+=("$CODEX_TRANSCRIPT_HOME/sessions")
-      if [[ "$INCLUDE_ARCHIVED" == "true" ]]; then
-        TRANSCRIPT_DIRS+=("$CODEX_TRANSCRIPT_HOME/archived_sessions")
-      fi
-      ;;
-    *)
-      echo "Transcript pruning skipped: current agent identity is unavailable."
-      TRANSCRIPT_DIRS=()
-      ;;
-  esac
-
-  EXISTING_TRANSCRIPT_DIRS=()
-  for TRANSCRIPT_DIR in "${TRANSCRIPT_DIRS[@]}"; do
-    if [[ -d "$TRANSCRIPT_DIR" ]]; then
-      EXISTING_TRANSCRIPT_DIRS+=("$TRANSCRIPT_DIR")
-    else
-      echo "Transcript pruning skipped missing path: $TRANSCRIPT_DIR"
-    fi
-  done
-
-  PRUNED=0
-  if [[ "${#EXISTING_TRANSCRIPT_DIRS[@]}" -gt 0 ]]; then
-    while IFS= read -r -d '' TRANSCRIPT_FILE; do
-      if rm -f -- "$TRANSCRIPT_FILE"; then
-        PRUNED=$((PRUNED + 1))
-      fi
-    done < <(find "${EXISTING_TRANSCRIPT_DIRS[@]}" -type f -name "*.jsonl" -mtime "+${RETENTION_DAYS}" -print0 2>/dev/null)
-  fi
-  if [[ "$PRUNED" -gt 0 ]]; then
-    echo "Pruned ${PRUNED} JSONL transcript file(s) older than ${RETENTION_DAYS} days."
-  fi
+  echo "Transcript pruning skipped: current agent identity is unavailable."
 fi
 # transcript-pruning:end
 ```
 
-Missing transcript directories and absent, zero, or invalid retention settings skip
-cleanly with an explicit note. Report the pruned count only when files were actually
-deleted. The block only examines paths, file names, types, and modification times; it
-must never inspect transcript contents.
+Absent, zero, or invalid retention settings skip cleanly with an explicit note.
+No transcript contents or provider-private rollout data are inspected.
 
 ---
 
 ## Permission scan (opt-in)
 
-After transcript pruning, scan recent JSONL transcripts for frequently-used Bash patterns
-and append new `permissions.allow` entries to `.claude/settings.json`.
+The legacy `.fewer-prompts-enabled` sentinel remains recognized, but automatic
+permission promotion is disabled until a trustworthy project-to-transcript
+binding exists. Claude's slash-to-hyphen directory mapping can collide across
+repositories. Reading that shared directory could copy another project's Bash
+commands into this project's `permissions.allow`. Do not read provider JSONL
+or edit `.claude/settings.json` based on that mapping.
 
-**Sentinel check:** run only if `$RIG_DIR/memory/.fewer-prompts-enabled` exists.
-If absent: skip silently.
+If the sentinel is present, report the safe skip so users know why no patterns
+were promoted:
 
 ```bash
+# permission-scan:start
 if [[ -f "$RIG_DIR/memory/.fewer-prompts-enabled" ]]; then
-  # Claude Code encodes the project path by replacing / with - in the directory name
-  TRANSCRIPT_DIR="$HOME/.claude/projects/$(echo "$REPO" | sed 's|/|-|g')"
-  SETTINGS_FILE="$REPO/.claude/settings.json"
-
-  if [[ -d "$TRANSCRIPT_DIR" && -f "$SETTINGS_FILE" ]]; then
-    python3 - "$TRANSCRIPT_DIR" "$SETTINGS_FILE" <<'PYEOF'
-import json, sys, time
-from collections import Counter
-from pathlib import Path
-
-transcript_dir, settings_file = sys.argv[1], sys.argv[2]
-
-try:
-    d = json.load(open(settings_file))
-    existing = set(d.get("permissions", {}).get("allow", []))
-except Exception:
-    existing = set()
-
-SKIP = {
-    "rm", "mv", "cp", "chmod", "chown", "kill", "sudo",
-    "curl", "wget", "bash", "sh", "zsh", "fish",
-    "python3", "node", "ruby", "perl", "php",
-    "pip", "npm", "yarn", "brew",
-    "make", "docker", "kubectl",
-}
-
-cutoff = time.time() - 30 * 86400
-commands = []
-for jsonl_path in sorted(Path(transcript_dir).glob("*.jsonl")):
-    try:
-        if jsonl_path.stat().st_mtime < cutoff:
-            continue
-        with open(jsonl_path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except Exception:
-                    continue
-                if obj.get("type") != "assistant":
-                    continue
-                for item in obj.get("message", {}).get("content", []):
-                    if (isinstance(item, dict) and
-                            item.get("type") == "tool_use" and
-                            item.get("name") == "Bash"):
-                        cmd = item.get("input", {}).get("command", "").strip()
-                        if cmd:
-                            first = cmd.split()[0].split("/")[-1]
-                            if first:
-                                commands.append(first)
-    except Exception:
-        continue
-
-counter = Counter(commands)
-new_patterns = []
-for cmd, count in counter.most_common():
-    if count < 3:
-        break
-    if cmd in SKIP:
-        continue
-    pattern = f"Bash({cmd}*)"
-    if pattern not in existing:
-        new_patterns.append(pattern)
-
-if not new_patterns:
-    sys.exit(0)
-
-try:
-    with open(settings_file) as f:
-        d = json.load(f)
-    allows = d.setdefault("permissions", {}).setdefault("allow", [])
-    added = [p for p in new_patterns if p not in allows]
-    allows.extend(added)
-    with open(settings_file, "w") as f:
-        json.dump(d, f, indent=2)
-        f.write("\n")
-    if added:
-        print(f"Auto-approved {len(added)} new permission pattern(s): {', '.join(added)}")
-except Exception as e:
-    print(f"Permission scan: failed to update settings.json — {e}")
-PYEOF
-  fi
+  echo "Permission scan skipped: Claude transcript directory mapping can collide between repositories; no project-owned transcript binding is available."
 fi
+# permission-scan:end
 ```
 
-To enable: `touch "$RIG_DIR/memory/.fewer-prompts-enabled"` (per-machine, gitignored).
-In Claude Code, its bundled `/fewer-permission-prompts` skill remains available for one-off manual scans. Codex does not provide this slash skill.
+A future explicit ownership design must verify the repository before any
+transcript read or permission update. The bundled one-off
+`/fewer-permission-prompts` skill should be used only after its transcript scope
+is checked independently.
 
 ---
 

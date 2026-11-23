@@ -71,9 +71,13 @@ if [[ -s "$REPO/CLAUDE.md" ]] && ! /usr/bin/grep -q '\[' "$REPO/CLAUDE.md"; then
   claude_filled=1
 fi
 backlog_nonempty=0
-if [[ -d "$RIG_DIR/tasks" ]] && find "$RIG_DIR/tasks" -type f -print -quit 2>/dev/null | /usr/bin/grep -q .; then
-  backlog_nonempty=1
-fi
+for task_dir in "$RIG_DIR/tasks/backlog" "$RIG_DIR/tasks/active"; do
+  if [[ -d "$task_dir" ]] && [[ -n "$(find "$task_dir" -type f -name '*.md' \
+    ! -name 'TASK_example.md' -print -quit 2>/dev/null)" ]]; then
+    backlog_nonempty=1
+    break
+  fi
+done
 
 maturity_signals=0
 (( commit_count >= 2 )) && ((maturity_signals += 1))

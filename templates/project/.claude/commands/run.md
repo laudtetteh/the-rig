@@ -149,12 +149,12 @@ For each task in the confirmed queue:
    every ledger row is terminal.
 
 6. **Complete the task.** When all acceptance criteria are met:
-   - Fill in `## Done notes` in the task file
-   - Move the task file from `.rig/tasks/active/` (or `.rig/tasks/backlog/`) to `.rig/tasks/done/`
-   - Add an entry to `.rig/memory/PROGRESS.md` immediately after the `## Format`
-     section, at the fixed top-insertion anchor. Never anchor the insertion to the
-     agent's own prior PROGRESS edit from the same session.
-   - Run the pre-ship checklist (`/ship`) before opening any PR
+   - Keep the task in `.rig/tasks/active/` with its implementation and validation
+     checkpoint until the PR merges. If it is still in backlog, move it to active.
+   - Run the pre-ship checklist (`/ship`) before opening any PR. The task must
+     remain available to `/ship` as an active task.
+   - After the PR merges, `/post-merge` owns the single active-to-done move,
+     final Done notes, and the completion entry in `PROGRESS.md`.
 
 7. **Decide whether to continue.** See chaining rules below.
 
@@ -202,14 +202,14 @@ not the next task.
 
 | Completed task autonomy | Behaviour after completion |
 |---|---|
-| 🌶 Low | Always pause. Ask: "Task done. Start `[next-task]` next?" |
-| 🌶🌶 Medium | Always pause. Ask: "Task done. Start `[next-task]` next?" |
+| 🌶 Low | Always pause. Ask: "Implementation ready for review. Start `[next-task]` next?" |
+| 🌶🌶 Medium | Always pause. Ask: "Implementation ready for review. Start `[next-task]` next?" |
 | 🌶🌶🌶 High | Announce completion and immediately begin next task in queue |
 
 If the queue is exhausted, always surface to the user regardless of autonomy level:
 
-> "Queue complete. All [N] tasks are done. `.rig/tasks/done/` has [list].
-> Anything to add to the backlog, or is the milestone complete?"
+> "Queue implementation complete. [N] tasks remain active until their PRs
+> merge and `/post-merge` moves them to done. Anything to add to the backlog?"
 
 ---
 

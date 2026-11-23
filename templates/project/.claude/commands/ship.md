@@ -242,7 +242,7 @@ leave it and flag it in Step 4 for the user to decide.
 
 **3.8b — Run the linter** (if one is configured for this project):
 ```bash
-# Read test-command from CLAUDE.md, or try common linters:
+# Read lint-command from CLAUDE.md, or try common linters:
 # npm run lint / eslint . / ruff check . / flake8 / shellcheck
 ```
 If the linter fails: fix the issues before continuing. Do not proceed to Step 4
@@ -303,11 +303,23 @@ If they say skip: proceed to Step 4.8.
 This is a blocking gate. A focused test pass is not enough if the change affects
 other Rig or product surfaces.
 
-Build a dependency-impact matrix from the changed paths:
+Fetch the configured base, then include committed PR changes, staged changes,
+unstaged changes, and new files. Stop if the fetch fails; a diff against a stale
+base is not current evidence. Do not use `HEAD~1..HEAD` before the task commit:
 
 ```bash
-git diff --name-only HEAD~1..HEAD 2>/dev/null || git diff --cached --name-only
+# ship-changed-paths:start
+cd "$REPO" || exit 1
+set -o pipefail
+git fetch origin "$BASE" || exit 1
+{ git diff --name-only "origin/$BASE"...HEAD || exit 1;
+  git diff --cached --name-only || exit 1;
+  git diff --name-only || exit 1;
+  git ls-files --others --exclude-standard || exit 1; } | sort -u || exit 1
+# ship-changed-paths:end
 ```
+
+Build a dependency-impact matrix from that complete changed-path list.
 
 Check every applicable surface:
 
@@ -365,7 +377,18 @@ Do not continue until the user resolves this.
 Only run this check if `$DOCS_DIR/features/README.md` exists, with
 `DOCS_DIR="$REPO/docs"` after resolving the project root.
 
-List the files changed in this PR (`git diff --name-only HEAD~1..HEAD 2>/dev/null || git diff --cached --name-only`).
+List the committed, staged, unstaged, and new files with:
+
+```bash
+cd "$REPO" || exit 1
+set -o pipefail
+git fetch origin "$BASE" || exit 1
+{ git diff --name-only "origin/$BASE"...HEAD || exit 1;
+  git diff --cached --name-only || exit 1;
+  git diff --name-only || exit 1;
+  git ls-files --others --exclude-standard || exit 1; } | sort -u || exit 1
+```
+
 Cross-reference against `$DOCS_DIR/features/README.md` — if any changed file's path
 contains a slug listed in the feature doc index, report:
 > "Advisory: changed files overlap with documented feature(s): [list]. Run
@@ -522,25 +545,23 @@ Report the commit hash on success.
 
 In this order:
 
-1. **Verify the task file reflects reality** before moving it:
-   - `## Done notes` must describe what was actually built — not a restatement of the plan
-   - Required fields: **What was built** / **Deviations from plan** / **Actual files touched** / **Follow-ups opened**
-   - If scope or approach changed during execution, capture it in `## Done notes`
-   - `## Approach` stays as the original plan (historical intent); deviations belong in `## Done notes`
-2. Move the task file: `$RIG_DIR/tasks/active/TASK_[name].md` → `$RIG_DIR/tasks/done/`
-3. Update `.rig/memory/PROGRESS.md` — add a full entry at the top (not a stub); if scope changed, the entry reflects the actual outcome
+1. **Checkpoint the active task file** with what was built, validation, commit,
+   deviations, and PR status. Leave `**Status**: active` and the file under
+   `$RIG_DIR/tasks/active/` until the PR merges. Keep `## Approach` as historical
+   intent. `/post-merge` alone writes final Done notes and moves it to done.
+2. Update `.rig/memory/PROGRESS.md` with an implementation and PR checkpoint,
+   not a completed-task entry.
+3. Do not retire this task's active handoff before merge.
 4. Create a unique draft under `$RIG_DIR/memory/` with `mktemp`, write only the
    current shared project header to it, and in the same shell call
    `bin/rig memory write-snapshot --file "$DRAFT" --shared-only --json` with
-   `DRAFT` set to that draft's path. If Step 2 moved a task to done, inspect
-   the existing snapshot for its exact `## Resuming from: <task-slug>` heading
-   and append `--retire-task <task-slug> --done-task-file "$RIG_DIR/tasks/done/<filename>"`
-   for that task. The writer checks the done file and backs up the old view.
+   `DRAFT` set to that draft's path. Do not append `--retire-task` for the
+   still-active task; `/post-merge` retires the handoff after the done move.
    Remove the draft after a successful write. Keep other sessions' active
    handoffs; do not edit `CONTEXT_SNAPSHOT.md` directly.
 5. If anything surprised you, log it in `.rig/memory/ERRORS.md`
 6. If anything about The Rig's workflow was missing or felt wrong, log it in `.rig/memory/RIG_GAPS.md`
-7. **Post a closing comment on the GitHub Issue:** First show the exact issue
+7. **Post a progress comment on the GitHub Issue:** First show the exact issue
    number, target repository, and complete comment body below. **Exact tracker
    write approval:** wait for the user's approval of this one comment
    immediately before posting. A merge or ship approval does not cover it.
@@ -634,6 +655,9 @@ If user chooses **[k]**: skip to Notes. Done.
 # Check both common paths (GitHub accepts both)
 cat .github/pull_request_template.md 2>/dev/null || \
 cat .github/PULL_REQUEST_TEMPLATE.md 2>/dev/null || \
+cat docs/pull_request_template.md 2>/dev/null || \
+cat docs/PULL_REQUEST_TEMPLATE.md 2>/dev/null || \
+cat pull_request_template.md 2>/dev/null || \
 cat PULL_REQUEST_TEMPLATE.md 2>/dev/null || echo ""
 ```
 
@@ -675,6 +699,15 @@ Closes #13
 
 Do not combine issue numbers on one `Closes` line. If one issue is only partially
 delivered, list it under `Notes` or a progress section instead of `Closes`.
+
+Push the committed branch before creating the PR. Stop on push failure; a local
+commit is not a remote PR head:
+
+```bash
+BRANCH=$(git branch --show-current)
+[[ -n "$BRANCH" && "$BRANCH" != "$BASE" ]] || exit 1
+git push -u origin "$BRANCH" || exit 1
+```
 
 Then create the PR. The `--label` flags change external label assignments.
 **Exact tracker write approval:** show the target repository, PR title, and
@@ -802,5 +835,6 @@ See `SHIP_WORKFLOW.md` Post-batch audit for full details.
 - The optional-card commit pause (Step 5) is non-negotiable regardless of autonomy level.
 - The branch check (Step 3.5) is also a gate — never commit directly to main.
 - If the task has multiple commits, summarise all changes in the PR body.
-- The task file is moved to `$RIG_DIR/tasks/done/` only after a successful commit (Step 8).
+- The task file remains in `$RIG_DIR/tasks/active/` until `/post-merge` moves it
+  to done after a successful merge.
 - The PR body (Step 9) must reflect what was actually built — not the original plan.

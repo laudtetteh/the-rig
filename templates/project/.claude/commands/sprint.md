@@ -24,7 +24,8 @@ do not fabricate parity or inspect provider-private state.
 
 ## Invoke
 
-Call `rig sprint audit|plan|status --json`, render its result, and obtain every
+Resolve `REPO=$(git rev-parse --show-toplevel)` and stop if it fails. Call
+`"$REPO/bin/rig" sprint audit|plan|status --json`, render its result, and obtain every
 approval required by `SPRINT_WORKFLOW.md`. Pass the exact #409 root context
 already established by hooks. Do not resolve sprint identity from conversation,
 branch, PID, title, transcript, or singleton state.

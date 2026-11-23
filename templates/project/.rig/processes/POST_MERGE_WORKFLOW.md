@@ -198,7 +198,8 @@ Apply the branch policy below only when there are files to commit.
 For batch post-merge work, one housekeeping commit may cover several merged PRs
 only after every PR has been verified at HEAD or in merge history and every
 affected task row has exact merge evidence. The commit message must name the PR
-range or list, for example `chore: post-merge housekeeping for PRs #10, #11`.
+range or list using the configured tracker reference syntax, for example
+`chore: post-merge housekeeping [#10] [#11]`.
 
 **First, read the `## Git workflow convention` field from the project `CLAUDE.md`.**
 It will be one of:
@@ -232,7 +233,7 @@ fi
 ROOT=$(git rev-parse --show-toplevel)
 git -C "$ROOT" add .rig/memory/PROGRESS.md
 touch "$ROOT/.rig/memory/.rig-commit-ok"
-RIG_COMMIT_POLICY=guarded git -C "$ROOT" commit -m "chore: post-merge housekeeping for PR #N"
+RIG_COMMIT_POLICY=guarded git -C "$ROOT" commit -m "chore: post-merge housekeeping [#N]"
 git -C "$ROOT" push origin [BASE_BRANCH]
 ```
 
@@ -245,7 +246,7 @@ ROOT=$(git rev-parse --show-toplevel)
 git -C "$ROOT" checkout -b chore/post-merge-[N]
 git -C "$ROOT" add .rig/memory/PROGRESS.md
 touch "$ROOT/.rig/memory/.rig-commit-ok"
-RIG_COMMIT_POLICY=guarded git -C "$ROOT" commit -m "chore: post-merge housekeeping for PR #N"
+RIG_COMMIT_POLICY=guarded git -C "$ROOT" commit -m "chore: post-merge housekeeping [#N]"
 git -C "$ROOT" push -u origin chore/post-merge-[N]
 ```
 

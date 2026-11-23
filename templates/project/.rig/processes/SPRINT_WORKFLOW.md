@@ -40,7 +40,8 @@ versioned `sprint-tracker-evidence/v1` shape. If access is unavailable, record
 that limitation; never infer tracker parity from local cards. Run:
 
 ```bash
-rig sprint audit --all --tracker-evidence "$EVIDENCE" --json
+REPO=$(git rev-parse --show-toplevel) || exit 1
+"$REPO/bin/rig" sprint audit --all --tracker-evidence "$EVIDENCE" --json
 ```
 
 Review task schema, tracker/local parity, dependencies, duplicates, file scope,
@@ -61,7 +62,8 @@ separate approval mandated by `WORK_MODES.md`.
 Generate a no-write preview first:
 
 ```bash
-rig sprint plan --all --mode plan-only --json
+REPO=$(git rev-parse --show-toplevel) || exit 1
+"$REPO/bin/rig" sprint plan --all --mode plan-only --json
 ```
 
 Present waves, typed conflict/dependency edges, and every non-execution lane:
@@ -136,7 +138,8 @@ body and issue comment explain why partial closure is correct.
 Resume only with an explicit sprint ID:
 
 ```bash
-rig sprint status --sprint "$SPRINT_ID" --refresh --json
+REPO=$(git rev-parse --show-toplevel) || exit 1
+"$REPO/bin/rig" sprint status --sprint "$SPRINT_ID" --refresh --json
 ```
 
 Reconcile the current immutable revision with task checkpoints, repository/PR/CI

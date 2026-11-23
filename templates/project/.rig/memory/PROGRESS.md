@@ -29,7 +29,11 @@
 - PR #N merged — branch: type/description
 ```
 
-Read the current session's UUID from `/tmp/.rig-session-${PPID}.uuid`.
+Resolve the current exact session with `bin/rig session resolve --json` from the
+project root. Use its `anchor` for the `sid:` marker only when `ok: true` and
+`confidence: exact`; otherwise stop the session-tagged write and resolve the
+session identity first. Do not infer identity from a parent PID or a temporary
+sentinel.
 
 ---
 
