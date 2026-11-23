@@ -313,33 +313,29 @@ approval before retrying a failed commit.
 
 In this order:
 
-1. **Verify the task file reflects reality** before moving it:
-   - `## Done notes` must describe what was actually built — not a restatement of the plan
-   - If scope or approach changed during execution, it must be captured here
-   - `## Approach` stays as the original plan (historical intent); deviations belong in `## Done notes`
+1. **Checkpoint the active task file** with what was built, validation, commit,
+   deviations, and PR status. Leave `**Status**: active` and the file under
+   `$RIG_DIR/tasks/active/` until the PR merges. Keep `## Approach` as historical
+   intent. `/post-merge` alone writes final Done notes and moves it to done.
 
-2. Move the selected task file from `$RIG_DIR/tasks/active/` to
-   `$RIG_DIR/tasks/done/`. Never move a relative `.rig/tasks/` path when the
-   install points outside the checkout.
+2. Do not move the selected task file to done before the PR merges.
 
-3. Update `$RIG_DIR/memory/PROGRESS.md` — add entry at top with what actually shipped
-   (if scope changed from the plan, the PROGRESS entry reflects the actual outcome)
+3. Update `$RIG_DIR/memory/PROGRESS.md` with an implementation and PR
+   checkpoint, not a completed-task entry.
 
 4. Write a draft containing the shared project state without task sections,
    then run `bin/rig memory write-snapshot --file "$DRAFT" --shared-only --json`.
    Reuse the inventory helper's `$RIG_DIR` and keep the draft under its `memory/`
    directory. Remove the draft after a successful write. Never edit or delete
    `CONTEXT_SNAPSHOT.md` directly; the writer preserves other sessions' task
-   handoffs. For the task moved to done in Step 2, inspect the existing
-   snapshot for its exact handoff slug and append `--retire-task SLUG
-   --done-task-file FILE`. The writer verifies the done file and backs up
-   the prior snapshot.
+   handoffs. Do not append `--retire-task` for the still-active task;
+   `/post-merge` retires its handoff after the done move.
 
 5. If anything surprised you, log it in `$RIG_DIR/memory/ERRORS.md`
 
 6. If anything about The Rig's workflow was missing or felt wrong, log it in `$RIG_DIR/memory/RIG_GAPS.md`
 
-7. **Post a closing comment on the GitHub Issue:** Show the exact issue
+7. **Post a progress comment on the GitHub Issue:** Show the exact issue
    number, target repository, and complete comment body. **Exact tracker
    write approval:** wait for the user's approval of this individual comment
    immediately before the command. A merge or ship approval does not cover
@@ -372,6 +368,9 @@ read the PR description to understand what landed, not what was intended.
 # Check all common PR template paths
 cat .github/pull_request_template.md 2>/dev/null || \
 cat .github/PULL_REQUEST_TEMPLATE.md 2>/dev/null || \
+cat docs/pull_request_template.md 2>/dev/null || \
+cat docs/PULL_REQUEST_TEMPLATE.md 2>/dev/null || \
+cat pull_request_template.md 2>/dev/null || \
 cat PULL_REQUEST_TEMPLATE.md 2>/dev/null
 ```
 
@@ -407,6 +406,15 @@ Closes #M
 Do not write `Closes #N, #M`; GitHub does not reliably auto-close every issue in
 that form across all repository settings and cross-repository references.
 
+Push the committed branch first. Stop if the push fails; a local commit is not
+a remote PR head:
+
+```bash
+BRANCH=$(git branch --show-current)
+[[ -n "$BRANCH" && "$BRANCH" != "$BASE" ]] || exit 1
+git push -u origin "$BRANCH" || exit 1
+```
+
 Then create the PR. The `--label` flags change external label assignments.
 **Exact tracker write approval:** show the target repository, PR title, and
 complete label list, and obtain the user's approval to apply those labels to
@@ -430,9 +438,10 @@ gh pr create --title "..." --body-file /tmp/pr-body.md --base [BASE_BRANCH] \
 
 ## Step 7 — Housekeeping commit (if needed)
 
-If the memory updates and task file move were not included in the implementation
-commit, make a follow-up housekeeping commit on the same branch only when the
-files are stageable in this repository. Obtain fresh user approval for this
+If a pre-merge `PROGRESS.md` checkpoint was not included in the implementation
+commit, make a follow-up housekeeping commit on the same branch only when that
+file is stageable in this repository. Keep the task in `tasks/active/` until
+`/post-merge` moves it to done after merge. Obtain fresh user approval for this
 separate attempt. Create the one-use authorization only after staging succeeds
 and immediately before the commit. For external or locally ignored Rig files,
 skip this whole commit step and leave no approval sentinel behind.
@@ -442,14 +451,11 @@ ROOT=$(cd "$(git rev-parse --show-toplevel)" && pwd -P)
 TASK_INVENTORY_JSON=$("$ROOT/bin/rig" task inventory --json) || exit 1
 RIG_DIR=$(printf '%s' "$TASK_INVENTORY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rig_dir"])')
 if [[ "$RIG_DIR" == "$ROOT/.rig" ]] && ! git -C "$ROOT" check-ignore -q .rig/memory/PROGRESS.md; then
-  git -C "$ROOT" add .rig/memory/PROGRESS.md .rig/tasks/done/TASK_[name].md
-  if git -C "$ROOT" ls-files --error-unmatch -- .rig/tasks/active/TASK_[name].md >/dev/null 2>&1; then
-    git -C "$ROOT" add -u -- .rig/tasks/active/TASK_[name].md
-  fi
+  git -C "$ROOT" add .rig/memory/PROGRESS.md
   touch "$RIG_DIR/memory/.rig-commit-ok"
   RIG_COMMIT_POLICY=guarded git -C "$ROOT" commit -m "chore: post-task housekeeping [REF]"
 else
-  echo "Rig memory and task files are external or locally ignored; no housekeeping commit is needed."
+  echo "Rig memory is external or locally ignored; no housekeeping commit is needed."
 fi
 ```
 

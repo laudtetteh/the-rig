@@ -108,9 +108,10 @@ findings phase with validation marked failed.
 ## Step 4 — Diff analysis
 
 ```bash
-git diff --stat "$BASE"...HEAD
-git diff --name-only "$BASE"...HEAD
-git diff "$BASE"...HEAD
+git fetch origin "$BASE" || exit 1
+git diff --stat "origin/$BASE"...HEAD || exit 1
+git diff --name-only "origin/$BASE"...HEAD || exit 1
+git diff "origin/$BASE"...HEAD || exit 1
 ```
 
 For each changed file, produce a one-line summary of what changed and why (infer from the diff context).

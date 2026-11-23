@@ -60,6 +60,7 @@ which PR merged if it's not clear from context.
 >   exit 1
 > }
 > RIG_DIR=$(printf '%s' "$TASK_INVENTORY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rig_dir"])')
+> DOCS_DIR="$REPO/docs"
 > ```
 >
 > Substitute `$RIG_DIR` for `.rig/` in every step below.
@@ -286,7 +287,8 @@ that are covered by an existing feature doc.
 
 **How:**
 
-1. Resolve `$RIG_DIR` and `$DOCS_DIR` (see RIG_DIR resolution block above).
+1. Resolve `$RIG_DIR` (see RIG_DIR resolution block above), then set
+   `DOCS_DIR="$REPO/docs"` using the already resolved project root.
 2. If `$DOCS_DIR` doesn't exist or has no `.md` files (other than `README.md`): skip this step silently.
 3. Get changed files from each verified merge SHA in
    `POST_MERGE_EXPECTED_SHAS`, using its first parent as the before state.

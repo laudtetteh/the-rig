@@ -107,12 +107,32 @@ run_probe() {
   [[ "$output" == *"signals=1" ]] || return 1
 }
 
+@test "kickoff guard: bracket characters in external Rig path preserve backlog detection" {
+  local external_rig="$BATS_TEST_TMPDIR/Rig [x]"
+  mkdir -p "$external_rig/tasks/backlog"
+  printf '%s\n' "$external_rig" > "$TEST_REPO/.rigpath"
+  touch "$external_rig/tasks/backlog/TASK_a.md"
+  run_probe
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"backlog_nonempty=1"* ]] || return 1
+}
+
+@test "kickoff guard: shipped example and completed tasks do not imply a backlog" {
+  mkdir -p "$TEST_REPO/.rig/tasks/backlog" "$TEST_REPO/.rig/tasks/done"
+  touch "$TEST_REPO/.rig/tasks/backlog/TASK_example.md"
+  touch "$TEST_REPO/.rig/tasks/done/feat-shipped.md"
+  run_probe
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"backlog_nonempty=0"* ]] || return 1
+  [[ "$output" == *"signals=0"* ]] || return 1
+}
+
 @test "kickoff guard: multiple independent signals identify an established repository" {
   commit_file one
   commit_file two
   printf '# Acme project\n' > "$TEST_REPO/CLAUDE.md"
-  mkdir -p "$TEST_REPO/.rig/tasks/done"
-  touch "$TEST_REPO/.rig/tasks/done/feat-shipped.md"
+  mkdir -p "$TEST_REPO/.rig/tasks/active"
+  touch "$TEST_REPO/.rig/tasks/active/feat-current.md"
   run_probe
   [ "$status" -eq 0 ]
   [[ "$output" == *"commits=2"* ]] || return 1

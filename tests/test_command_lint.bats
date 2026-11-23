@@ -215,12 +215,11 @@ PY
   done
 }
 
-@test "task and run use the fixed PROGRESS top-insertion anchor" {
-  for command in task run; do
-    grep -q 'immediately after the `## Format`' "$COMMAND_DIR/$command.md"
-    grep -q "Never anchor the insertion to the" "$COMMAND_DIR/$command.md"
-    grep -q "own prior PROGRESS edit from the same" "$COMMAND_DIR/$command.md"
-  done
+@test "task uses the fixed PROGRESS anchor and run defers completion to post-merge" {
+  grep -q 'immediately after the `## Format`' "$COMMAND_DIR/task.md"
+  grep -q "Never anchor the insertion to the" "$COMMAND_DIR/task.md"
+  grep -q "own prior PROGRESS edit from the same" "$COMMAND_DIR/task.md"
+  grep -Fq '/post-merge` owns the single active-to-done move' "$COMMAND_DIR/run.md"
 }
 
 @test "rig-help baseline deny patterns match shipped settings.json" {
@@ -608,6 +607,30 @@ PY
   grep -Fq '"$REPO/bin/rig" memory append-gap' "$COMMAND_DIR/rig-gaps.md"
 }
 
+@test "sprint and connector adapters invoke the repository-local Rig CLI" {
+  local sprint_skill="$REPO_ROOT/templates/project/.codex/skills/sprint/SKILL.md"
+  for adapter in "$COMMAND_DIR/sprint.md" "$COMMAND_DIR/connector-preflight.md" "$sprint_skill"; do
+    grep -Fq 'REPO=$(git rev-parse --show-toplevel)' "$adapter"
+    grep -Fq '"$REPO/bin/rig"' "$adapter"
+  done
+  grep -Fq '"$REPO/bin/rig" sprint audit|plan|status --json' "$COMMAND_DIR/sprint.md"
+  grep -Fq '"$REPO/bin/rig" sprint audit|plan|status --json' "$sprint_skill"
+  grep -Fq '"$REPO/bin/rig" connector preflight' "$COMMAND_DIR/connector-preflight.md"
+}
+
+@test "project brain points feature docs to the repository in every tracking mode" {
+  local brain="$REPO_ROOT/templates/project/CLAUDE.md"
+  grep -Fq 'including stealth and external installs' "$brain"
+  grep -Fq 'project repository' "$brain"
+  grep -Fq '`docs/features/`' "$brain"
+  grep -Fq '/feature-context' "$brain"
+  if grep -Fq '/feature-doc`' "$brain"; then return 1; fi
+  if grep -Fq '$RIG_DIR/docs/features/' "$brain"; then return 1; fi
+  grep -Fq 'currently skips automatic transcript pruning' "$brain"
+  grep -Fq 'project ownership check' "$brain"
+  grep -Fq 'automatic transcript scanning and permission promotion are disabled' "$COMMAND_DIR/wrap.md"
+}
+
 @test "PR template captures dependency impact evidence" {
   local template="$REPO_ROOT/templates/project/.github/PULL_REQUEST_TEMPLATE.md"
   grep -Fq "## Dependency impact" "$template"
@@ -622,11 +645,139 @@ PY
   grep -Fq "coverage, dependency impact, style" "$COMMAND_DIR/rig-help.md"
 }
 
-@test "wrap.md: transcript pruning uses agent-aware documented locations" {
+@test "wrap.md: transcript pruning skips ambiguous provider paths" {
   grep -q "transcript-retention-days" "$COMMAND_DIR/wrap.md"
-  grep -Fq '$HOME/.claude/projects' "$COMMAND_DIR/wrap.md"
-  grep -Fq '${CODEX_HOME:-$HOME/.codex}/sessions' "$COMMAND_DIR/wrap.md"
-  grep -q "transcript-retention-include-archived" "$COMMAND_DIR/wrap.md"
+  ! grep -Fq '$HOME/.claude/projects' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'Codex has no documented project-scoped transcript directory' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'Claude project directory mapping can collide' "$COMMAND_DIR/wrap.md"
+  ! grep -Fq 'find "$TRANSCRIPT_DIR"' "$COMMAND_DIR/wrap.md"
+}
+
+@test "post-merge housekeeping subjects pass the configured GitHub commit guard" {
+  local workflow="$REPO_ROOT/templates/project/.rig/processes/POST_MERGE_WORKFLOW.md"
+  local config="$BATS_TEST_TMPDIR/CLAUDE.md"
+  printf 'issue-tracking: github\n' > "$config"
+  local subjects
+  subjects="$(python3 - "$workflow" <<'PY'
+import pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+subjects = re.findall(r'commit -m "([^"]+)"', text)
+assert len(subjects) == 2, subjects
+print('\n'.join(subject.replace('#N', '#664') for subject in subjects))
+PY
+)"
+  while IFS= read -r subject; do
+    python3 "$REPO_ROOT/templates/project/bin/rig-tracker-config.py" \
+      validate-subject "$config" "$subject" >/dev/null || return 1
+  done <<< "$subjects"
+}
+
+@test "ship dependency diff includes committed, staged, and new task files" {
+  local remote="$BATS_TEST_TMPDIR/remote.git" repo="$BATS_TEST_TMPDIR/project"
+  git init -q --bare "$remote"
+  git init -q "$repo"
+  git -C "$repo" checkout -qb main
+  git -C "$repo" config user.email test@example.com
+  git -C "$repo" config user.name Test
+  git -C "$repo" remote add origin "$remote"
+  printf 'base\n' > "$repo/base.md"
+  git -C "$repo" add base.md
+  git -C "$repo" commit -qm base
+  git -C "$repo" push -q -u origin main
+  git -C "$repo" checkout -qb feature
+  printf 'feature\n' > "$repo/feature.md"
+  git -C "$repo" add feature.md
+  git -C "$repo" commit -qm feature
+  printf 'staged\n' > "$repo/staged.md"
+  git -C "$repo" add staged.md
+  printf 'new\n' > "$repo/new.md"
+  local block
+  block="$(sed -n '/^# ship-changed-paths:start$/,/^# ship-changed-paths:end$/p' "$COMMAND_DIR/ship.md")"
+  run env REPO="$repo" BASE=main bash -c "$block"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"feature.md"* && "$output" == *"staged.md"* && "$output" == *"new.md"* ]] || return 1
+  [[ "$output" != *"base.md"* ]] || return 1
+
+  # A failed first diff must not be hidden by later successful Git commands.
+  local real_git wrapper="$BATS_TEST_TMPDIR/wrapper"
+  real_git="$(command -v git)"
+  mkdir -p "$wrapper"
+  cat > "$wrapper/git" <<'SH'
+#!/usr/bin/env bash
+if [[ "$1" == diff && "$2" == --name-only && "$3" == origin/main...HEAD ]]; then
+  exit 99
+fi
+exec "$REAL_GIT" "$@"
+SH
+  chmod +x "$wrapper/git"
+  run env REAL_GIT="$real_git" PATH="$wrapper:$PATH" REPO="$repo" BASE=main bash -c "$block"
+  [ "$status" -ne 0 ]
+
+  # Both copies of the command must carry the same explicit failure checks.
+  [ "$(grep -Fc 'git diff --name-only "origin/$BASE"...HEAD || exit 1;' "$COMMAND_DIR/ship.md")" -eq 2 ]
+}
+
+@test "wrap orphan scan finds active record under external Rig path with apostrophe" {
+  local rig="$BATS_TEST_TMPDIR/Rig O'Brien"
+  mkdir -p "$rig/memory/sessions/done"
+  printf '{"lifecycle":{"state":"active"},"created_at":"2026-11-20","names":{"tentative":"review"}}\n' \
+    > "$rig/memory/sessions/session-test.json"
+  local block
+  block="$(sed -n '/^# orphan-session-scan:start$/,/^# orphan-session-scan:end$/p' "$COMMAND_DIR/wrap.md")"
+  run env RIG_DIR="$rig" bash -c "$block"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Orphan session (active, unwrapped): review"* ]] || return 1
+  [[ "$output" == *"started 2026-11-20"* ]] || return 1
+  [[ "$output" == *"session-test.json"* ]] || return 1
+
+  # A historical flat record still reports its legacy timestamp.
+  printf '{"status":"active","started_at":"2020-01-01","tentative_name":"legacy"}\n' \
+    > "$rig/memory/sessions/session-legacy.json"
+  run env RIG_DIR="$rig" bash -c "$block"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"legacy (started 2020-01-01"* ]] || return 1
+}
+
+@test "ship workflows push the branch before PR creation and find docs templates" {
+  python3 - "$COMMAND_DIR/ship.md" "$REPO_ROOT/templates/project/.rig/processes/SHIP_WORKFLOW.md" <<'PY'
+import pathlib, sys
+for file in sys.argv[1:]:
+    text = pathlib.Path(file).read_text()
+    assert text.index('git push -u origin "$BRANCH"') < text.index('gh pr create')
+    assert 'docs/pull_request_template.md' in text
+    assert 'docs/PULL_REQUEST_TEMPLATE.md' in text
+PY
+}
+
+@test "task completion has one post-merge owner across run and ship" {
+  python3 - "$COMMAND_DIR/run.md" "$COMMAND_DIR/ship.md" \
+    "$REPO_ROOT/templates/project/.rig/processes/NEW_TASK_WORKFLOW.md" \
+    "$REPO_ROOT/templates/project/.rig/processes/SHIP_WORKFLOW.md" \
+    "$COMMAND_DIR/post-merge.md" <<'PY'
+import pathlib, sys
+run, ship, task, workflow, post = [pathlib.Path(p).read_text() for p in sys.argv[1:]]
+assert '/post-merge` owns the single active-to-done move' in run
+for text in (ship, task, workflow):
+    assert 'tasks/active/' in text and '/post-merge' in text
+    assert 'until the PR merges' in text or 'after merge' in text
+assert 'moves the task file from `$RIG_DIR/tasks/active/`' in post
+assert '--retire-task' in post
+PY
+}
+
+@test "review and workflow docs use remote base, resolved directories, and project CLI" {
+  local process="$REPO_ROOT/templates/project/.rig/processes"
+  grep -Fq 'git fetch origin "$BASE" || exit 1' "$COMMAND_DIR/code-review.md"
+  grep -Fq 'git diff --stat "origin/$BASE"...HEAD || exit 1' "$COMMAND_DIR/code-review.md"
+  grep -Fq 'git diff --name-only "origin/$BASE"...HEAD || exit 1' "$COMMAND_DIR/code-review.md"
+  grep -Fq 'git diff "origin/$BASE"...HEAD || exit 1' "$COMMAND_DIR/code-review.md"
+  grep -Fq 'DOCS_DIR="$REPO/docs"' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'DOCS_DIR="$REPO/docs"' "$COMMAND_DIR/post-merge.md"
+  grep -Fq 'bin/rig session resolve --json' "$REPO_ROOT/templates/project/.rig/memory/PROGRESS.md"
+  grep -Fq '`confidence: exact`' "$REPO_ROOT/templates/project/.rig/memory/PROGRESS.md"
+  grep -Fq '"$REPO/bin/rig" sprint audit' "$process/SPRINT_WORKFLOW.md"
+  grep -Fq '"$REPO/bin/rig" connector preflight' "$process/CONNECTOR_PREFLIGHT.md"
+  grep -Fq 'lint-command from CLAUDE.md' "$COMMAND_DIR/ship.md"
 }
 
 @test "wrap.md: contains Permission scan opt-in section" {
@@ -637,10 +788,15 @@ PY
   grep -q ".fewer-prompts-enabled" "$COMMAND_DIR/wrap.md"
 }
 
-@test "wrap.md: permission scan reports Auto-approved format" {
-  grep -q "Auto-approved" "$COMMAND_DIR/wrap.md"
+@test "wrap.md: legacy permission sentinel reports disabled automatic promotion" {
+  grep -Fq 'Permission scan skipped: Claude transcript directory mapping can collide' "$COMMAND_DIR/wrap.md"
+  grep -Fq 'automatic transcript scanning and permission promotion are disabled' "$COMMAND_DIR/wrap.md"
 }
 
-@test "wrap.md: permission scan contains PYEOF heredoc delimiter" {
-  grep -q "<<'PYEOF'" "$COMMAND_DIR/wrap.md"
+@test "wrap.md: permission scan block reads no transcript or settings file" {
+  local block
+  block="$(sed -n '/^# permission-scan:start$/,/^# permission-scan:end$/p' "$COMMAND_DIR/wrap.md")"
+  [[ "$block" != *"jsonl"* ]] || return 1
+  [[ "$block" != *"settings.json"* ]] || return 1
+  [[ "$block" != *"python"* ]] || return 1
 }

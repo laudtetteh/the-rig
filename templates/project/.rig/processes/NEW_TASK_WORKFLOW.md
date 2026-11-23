@@ -205,20 +205,29 @@ In this order:
 1. **Audit plan vs. reality** before touching anything:
    - Compare `## Approach` with what was actually implemented
    - If scope changed, approach deviated, or unexpected files were touched — note it
-   - Do NOT rewrite `## Approach` (it's the historical plan); add deviations to `## Done notes`
+   - Do NOT rewrite `## Approach` (it's the historical plan); record deviations
+     in the active task's pre-merge checkpoint for `/post-merge` to carry into
+     final `## Done notes` after the PR merges
 
-2. **Update the task file:**
-   - Change `**Status**` to `done`
-   - Fill in `## Done notes` with substance — not a restatement of the plan:
+2. **Update the active task file** with a pre-merge checkpoint. Leave its status
+   `active` and its location under `tasks/active/` until the PR merges. Record:
+   - What was built and validated, with exact commit and PR references
+   - Any deviations from the plan and why
+   - Actual files touched and follow-ups opened
+
+   After the PR merges, `/post-merge` owns the final `**Status**: done`, the
+   active-to-done move, and substantive `## Done notes`, including:
      - **What was built:** actual implementation, specific files and behaviours
      - **Deviations from plan:** where scope or approach changed and why
      - **Actual files touched:** anything not in `## Files likely affected`
      - **Follow-ups opened:** any new task files or issues created
-   - Update `**Updated**` date
+     - **Updated date:** set `**Updated**` to the merge closeout date
 
-3. Move the task file from `.rig/tasks/active/` → `.rig/tasks/done/`
+3. Keep the task in `.rig/tasks/active/` while `/ship` opens the PR. Do not
+   move it to done before merge; `/post-merge` performs that move once.
 
-4. Update `.rig/memory/PROGRESS.md` with a one-line summary of what was built
+4. Record an implementation checkpoint in `.rig/memory/PROGRESS.md`; the
+   completion entry is recorded by `/post-merge` after merge.
 
 5. Log any new pitfalls or surprises in `.rig/memory/ERRORS.md`
 
@@ -234,6 +243,6 @@ In this order:
 
 9. Follow `SHIP_WORKFLOW.md` to open the PR
 
-> **Staging note:** Stage the task file **only after** it has been moved to `.rig/tasks/done/`.
-> Never commit a task file from `.rig/tasks/active/` — it creates a confusing history where
-> the "in-progress" and "completed" states both appear in the same PR.
+> **Staging note:** Keep the active task file uncommitted while the PR is open.
+> `/post-merge` stages the final done path only after the merge, when it is
+> stageable in this repository.

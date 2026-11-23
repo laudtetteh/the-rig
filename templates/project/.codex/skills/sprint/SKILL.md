@@ -9,7 +9,8 @@ Read `.rig/processes/SPRINT_WORKFLOW.md` completely and follow it as the canonic
 contract. This skill is a thin Codex adapter. Collect task slugs, issue refs,
 or `--all`; choose `audit-only`, `plan-only`, `repair-and-plan`, or `resume`,
 with an explicit sprint ID for resume. Collect documented public tracker
-evidence, invoke `rig sprint audit|plan|status --json`, render the result, and
+evidence, resolve `REPO=$(git rev-parse --show-toplevel)` and stop if it fails,
+then invoke `"$REPO/bin/rig" sprint audit|plan|status --json`, render the result, and
 obtain the approvals required by the canonical process. Use the exact #409
 root session context; never add a sprint resolver or inspect private provider
 databases, indexes, rollout/transcript formats, or prompts.
