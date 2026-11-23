@@ -33,11 +33,7 @@ SESSION_LOG="${RIG_SESSION_LOG:-/tmp/the-rig-session-$(basename "$REPO").log}"
 echo "[$(date +%H:%M:%S)] POST $TOOL" >> "$SESSION_LOG"
 
 if [[ "$TOOL" == "Bash" ]]; then
-  if [[ -f "$HOOK_ROOT/.rigpath" ]]; then
-    IFS= read -r RIG_DIR < "$HOOK_ROOT/.rigpath"
-  else
-    RIG_DIR="$HOOK_ROOT/.rig"
-  fi
+  RIG_DIR=$(python3 "$HOOK_ROOT/bin/rig-path.py" "$HOOK_ROOT") || exit 2
   FALLBACK_ID=$(printf '%s' "$RESULT" | python3 -c '
 import hashlib, json, sys
 try:
@@ -60,11 +56,7 @@ except (ValueError, TypeError, AttributeError):
         if [[ -n "$COMMIT_HASH" && "$COMMIT_HASH" != "$PREVIOUS_HEAD" && -n "$SHORT_HASH" ]] && \
            printf '%s' "$RESULT" | grep -qE '\[[^]]+[[:space:]][a-f0-9]{7,}\]' && \
            printf '%s' "$RESULT" | grep -Fq "$SHORT_HASH"; then
-          if [[ -f "$TARGET_REPO/.rigpath" ]]; then
-            IFS= read -r TARGET_RIG_DIR < "$TARGET_REPO/.rigpath"
-          else
-            TARGET_RIG_DIR="$TARGET_REPO/.rig"
-          fi
+          TARGET_RIG_DIR=$(python3 "$HOOK_ROOT/bin/rig-path.py" "$TARGET_REPO") || exit 2
           PROGRESS_FILE="$TARGET_RIG_DIR/memory/PROGRESS.md"
           if [[ -f "$PROGRESS_FILE" ]]; then
             COMMIT_MSG=$(git -C "$TARGET_REPO" log -1 --format=%s 2>/dev/null || true)

@@ -227,7 +227,9 @@ Leave blank (or omit the line) if you don't have The Rig repo on this machine.
 
 ```bash
 # Enable once to allow /rig-gaps --submit to post public GitHub issues:
-touch .rig/memory/.rig-contribute-enabled
+REPO=$(git rev-parse --show-toplevel)
+RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 1
+touch "$RIG_DIR/memory/.rig-contribute-enabled"
 ```
 
 When this sentinel file exists, `/rig-gaps --submit` can create issues in

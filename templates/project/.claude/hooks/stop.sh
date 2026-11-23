@@ -32,11 +32,7 @@ REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 [[ -z "$REPO" ]] && exit 0
 
 # ── Resolve RIG_DIR ───────────────────────────────────────────────────────────
-if [[ -f "$REPO/.rigpath" ]]; then
-  RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
-else
-  RIG_DIR="$REPO/.rig"
-fi
+RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 2
 
 INPUT=$(cat)
 
@@ -139,8 +135,11 @@ PY
       commit=$(git -C "$REPO" log -1 --format="%h %s" 2>/dev/null || echo "none")
       active_task=""
       if [[ -d "$RIG_DIR/tasks/active" ]]; then
-        active_task=$(ls "$RIG_DIR/tasks/active"/*.md 2>/dev/null \
-          | head -1 | xargs basename 2>/dev/null || true)
+        for active_file in "$RIG_DIR/tasks/active"/*.md; do
+          [[ -f "$active_file" ]] || continue
+          active_task="${active_file##*/}"
+          break
+        done
       fi
       session_anchor="${RIG_SESSION_ANCHOR:-$(cat "/tmp/.rig-session-${SESSION_PID}.uuid" 2>/dev/null || true)}"
       draft=$(mktemp "${TMPDIR:-/tmp}/rig-snapshot-stop.XXXXXX") || return

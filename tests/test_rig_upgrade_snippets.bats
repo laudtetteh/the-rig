@@ -25,6 +25,8 @@ setup() {
   PROJECT="$TEST_TMP/project"
   mkdir -p "$PROJECT"
   git -C "$PROJECT" init -q
+  mkdir -p "$PROJECT/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$PROJECT/bin/rig-path.py"
 }
 
 teardown() {

@@ -101,7 +101,7 @@ sha256_file() {
 is_rig_owned() {
   local rel="$1"
   case "$rel" in
-    bin/rig|bin/rig-connector-preflight|bin/rig-sprint|bin/rig-tab-title-watch|bin/rig-session-resolve.py|bin/rig-session-index.py|bin/rig-session-archive.py|bin/rig_project_roots.py|bin/rig-snapshot.py|bin/rig-tracker-config.py|\
+    bin/rig|bin/rig-path.py|bin/rig-connector-preflight|bin/rig-sprint|bin/rig-tab-title-watch|bin/rig-session-resolve.py|bin/rig-session-index.py|bin/rig-session-archive.py|bin/rig_project_roots.py|bin/rig-snapshot.py|bin/rig-tracker-config.py|\
     .claude/hooks/*|\
     .claude/commands/*|\
     .claude/agents/*|\
@@ -153,11 +153,17 @@ rendered_project_template_hash() {
   target_abs="$(cd "$TARGET" && pwd)"
   rendered_tmp="$(mktemp /tmp/rig-rendered-template-XXXXXX)"
   python3 - "$src" "$rendered_tmp" "$target_abs" "$BASE_BRANCH" "$PROJECT_NAME" <<'PYEOF'
+import json
+import shlex
 import sys
 
 source, target, repo_root, base_branch, project_name = sys.argv[1:]
 with open(source, "r", encoding="utf-8") as fh:
     content = fh.read()
+if source.endswith("/.claude/settings.json"):
+    # The placeholder is inside a JSON command string. Escape once for the
+    # shell and once for JSON while retaining the template's exact formatting.
+    repo_root = json.dumps(shlex.quote(repo_root), ensure_ascii=False)[1:-1]
 content = content.replace("[REPO_ROOT]", repo_root)
 content = content.replace("[BASE_BRANCH]", base_branch)
 content = content.replace("[Project Name]", project_name)
@@ -167,6 +173,21 @@ PYEOF
   rendered_hash="$(sha256_file "$rendered_tmp")"
   rm -f "$rendered_tmp"
   printf '%s\n' "$rendered_hash"
+}
+
+render_repo_root_settings() {
+  local source="$1" destination="$2" repo_root="$3"
+  python3 - "$source" "$destination" "$repo_root" <<'PYEOF'
+import json
+import pathlib
+import shlex
+import sys
+
+source, destination, root = sys.argv[1:]
+content = pathlib.Path(source).read_text(encoding="utf-8")
+escaped = json.dumps(shlex.quote(root), ensure_ascii=False)[1:-1]
+pathlib.Path(destination).write_text(content.replace("[REPO_ROOT]", escaped), encoding="utf-8")
+PYEOF
 }
 
 # ── Manifest helpers ──────────────────────────────────────────────────────────
@@ -1719,7 +1740,9 @@ fi
   _repo_state="$_preflight_target/.rig/install-targets.json"
   _stealth_state="$HOME/.rig/projects/${_FLAG_PROJECT_NAME:-$(basename "$_preflight_target")}/install-targets.json"
   _pointer_state=""
-  [[ -f "$_preflight_target/.rigpath" ]] && _pointer_state="$(sed -n '1p' "$_preflight_target/.rigpath")/install-targets.json"
+  if [[ -e "$_preflight_target/.rigpath" || -L "$_preflight_target/.rigpath" ]]; then
+    _pointer_state="$(python3 "$PROJECT_TEMPLATES/bin/rig-path.py" "$_preflight_target")/install-targets.json"
+  fi
   _preflight_project_state="$_repo_state"
   _state_discovery_error=""
   if [[ "${_FLAG_TRACKING:-}" == repo || "${_FLAG_TRACKING:-}" == local ]]; then
@@ -1849,7 +1872,7 @@ project_prior_manifest_exists() {
   [[ -f "$TARGET/.rig/memory/.rig-manifest" ]] && return 0
   if [[ -f "$TARGET/.rigpath" && ! -L "$TARGET/.rigpath" ]]; then
     local _prior_rig_dir
-    _prior_rig_dir="$(tr -d '[:space:]' < "$TARGET/.rigpath" 2>/dev/null || true)"
+    _prior_rig_dir="$(python3 "$PROJECT_TEMPLATES/bin/rig-path.py" "$TARGET" 2>/dev/null || true)"
     [[ -n "$_prior_rig_dir" && -f "$_prior_rig_dir/memory/.rig-manifest" ]] && return 0
   fi
   return 1
@@ -2537,7 +2560,7 @@ preflight_snapshot_project() {
   local -a rel_paths=(
     "CLAUDE.md" "PROJECT_BRIEF.md" ".claude" ".agents" ".codex" ".mcp.json"
     ".playwright-mcp" ".github" ".gitleaks.toml" "docs/INDEX.md" "docs/features/README.md"
-    ".husky" ".rigpath" "bin/rig" "bin/rig-session-resolve.py" "bin/rig-session-index.py" "bin/rig-session-archive.py" "bin/rig_project_roots.py" "bin/rig-snapshot.py" "bin/rig-tracker-config.py" ".git/hooks"
+    ".husky" ".rigpath" "bin/rig" "bin/rig-path.py" "bin/rig-session-resolve.py" "bin/rig-session-index.py" "bin/rig-session-archive.py" "bin/rig_project_roots.py" "bin/rig-snapshot.py" "bin/rig-tracker-config.py" ".git/hooks"
   )
   # Tracked .rig/ lives at $base/.rig for repo/exclude tracking, so it's just
   # another base-relative path. external/stealth tracking is handled below —
@@ -2648,16 +2671,17 @@ merge_settings_json() {
   local existing="$1"   # path to the existing settings.json
   local incoming="$2"   # path to The Rig's settings.json (with [REPO_ROOT] already substituted)
   local output="$3"     # where to write the merged result
+  local project_root="$4"  # same lexical absolute root used to render incoming
 
   if ! command -v python3 >/dev/null 2>&1; then
     warn "python3 not found — cannot merge settings.json. Skipping."
     return 1
   fi
 
-  python3 - "$existing" "$incoming" "$output" << 'PYEOF'
-import json, sys
+  python3 - "$existing" "$incoming" "$output" "$project_root" << 'PYEOF'
+import json, pathlib, shlex, sys
 
-existing_path, incoming_path, output_path = sys.argv[1], sys.argv[2], sys.argv[3]
+existing_path, incoming_path, output_path, project_root = sys.argv[1:]
 
 with open(existing_path) as f:
     existing = json.load(f)
@@ -2665,6 +2689,44 @@ with open(incoming_path) as f:
     incoming = json.load(f)
 
 existing.setdefault("hooks", {})
+
+# Earlier installers wrote unquoted project paths into Rig-owned hook commands.
+# A project path containing '&' also left a literal [REPO_ROOT] fragment after
+# sed replacement. Remove only those stale Rig command registrations; retain
+# unrelated user hooks and let the merge add the canonical quoted command.
+for event, incoming_entries in incoming.get("hooks", {}).items():
+    canonical = {
+        h.get("command", "")
+        for entry in incoming_entries for h in entry.get("hooks", [])
+    }
+    legacy = set()
+    for command in canonical:
+        try:
+            argv = shlex.split(command)
+        except ValueError:
+            continue
+        if len(argv) != 2 or argv[0] != "bash":
+            continue
+        hook_path = pathlib.Path(argv[1])
+        if hook_path.parent != pathlib.Path(project_root) / ".claude" / "hooks":
+            continue
+        suffix = "/.claude/hooks/" + hook_path.name
+        raw = "bash " + project_root + suffix
+        corrupted = "bash " + project_root.replace("&", "[REPO_ROOT]") + suffix
+        legacy.update((raw, corrupted, corrupted.replace("[REPO_ROOT]", shlex.quote(project_root))))
+    kept_entries = []
+    for entry in existing.get("hooks", {}).get(event, []):
+        kept = []
+        for hook in entry.get("hooks", []):
+            command = hook.get("command", "")
+            if command in legacy and command not in canonical:
+                continue
+            kept.append(hook)
+        if kept:
+            entry["hooks"] = kept
+            kept_entries.append(entry)
+    if event in existing["hooks"]:
+        existing["hooks"][event] = kept_entries
 
 # Remove hook entries for scripts that have been removed from the template.
 # When a script is merged into another (e.g. session-end.sh → stop.sh), any
@@ -2868,16 +2930,15 @@ copy_file() {
     merge)
       # settings.json gets special treatment; everything else is skipped
       if [[ "$(basename "$dest")" == "settings.json" && "$dest" == *".claude/settings.json" ]]; then
-        local tmp_merged tmp_src_subst abs_target escaped_target
+        local tmp_merged tmp_src_subst abs_target
         tmp_merged="$(mktemp /tmp/rig-settings-merged-XXXXXX.json)"
         # Substitute [REPO_ROOT] in a temp copy of the incoming template before
         # merging, so dedup can compare identical command strings (not template
         # placeholders vs real paths).
         tmp_src_subst="$(mktemp /tmp/rig-settings-src-XXXXXX.json)"
         abs_target="$(cd "$TARGET" && pwd)"
-        escaped_target="${abs_target//\//\\/}"
-        sed "s/\\[REPO_ROOT\\]/${escaped_target}/g" "$src" > "$tmp_src_subst"
-        if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged"; then
+        render_repo_root_settings "$src" "$tmp_src_subst" "$abs_target"
+        if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged" "$abs_target"; then
           _upgrade_write "$tmp_merged" "$dest" "$base"
           success "Merged .claude/settings.json"
         else
@@ -3130,15 +3191,14 @@ _copy_upgrade_existing() {
 
   # ── settings.json: always smart-merge ──────────────────────────────────────
   if [[ "$settings_mode" == "smart-merge" && "$(basename "$dest")" == "settings.json" && "$dest" == *".claude/settings.json" ]]; then
-    local tmp_merged tmp_src_subst abs_target escaped_target
+    local tmp_merged tmp_src_subst abs_target
     tmp_merged="$(mktemp /tmp/rig-settings-merged-XXXXXX.json)"
     # Substitute [REPO_ROOT] before merging so dedup compares real paths,
     # not template placeholders vs already-substituted existing commands.
     tmp_src_subst="$(mktemp /tmp/rig-settings-src-XXXXXX.json)"
     abs_target="$(cd "$TARGET" && pwd)"
-    escaped_target="${abs_target//\//\\/}"
-    sed "s/\\[REPO_ROOT\\]/${escaped_target}/g" "$src" > "$tmp_src_subst"
-    if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged"; then
+    render_repo_root_settings "$src" "$tmp_src_subst" "$abs_target"
+    if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged" "$abs_target"; then
       if cmp -s "$tmp_merged" "$dest"; then
         info "Up to date: ${rel}"
         record_upgrade_result up-to-date "$rel"
@@ -3936,10 +3996,11 @@ if [[ "$DO_PROJECT" == true ]]; then
     fi
   fi
 
-  # Sanitize project name for safe sed substitution.
-  # Strip characters that are sed metacharacters or shell-special in this context.
-  # Allow: letters, digits, spaces, hyphens, underscores, periods.
-  PROJECT_NAME="$(echo "$PROJECT_NAME" | tr -dc 'A-Za-z0-9 ._-')"
+  # Keep ordinary project-name punctuation, including characters that were
+  # previously lost from stealth directory names. Template replacement below
+  # uses literal Python strings, so &, | and apostrophes need no sed escaping.
+  # Slashes and control characters remain excluded from directory names.
+  PROJECT_NAME="$(printf '%s' "$PROJECT_NAME" | tr -dc "A-Za-z0-9 ._&|'-")"
   if [[ -z "$PROJECT_NAME" ]]; then
     PROJECT_NAME="$(basename "$TARGET")"
     warn "Project name contained only invalid characters — using directory name: $PROJECT_NAME"
@@ -4068,10 +4129,10 @@ if [[ "$DO_PROJECT" == true ]]; then
   elif [[ -n "$EXTERNAL_RIG_DIR" ]]; then
     # --rig-dir was provided (without --tracking): backward-compatible external mode.
     RIG_TRACKING="external"
-  elif [[ -f "$TARGET/.rigpath" ]]; then
+  elif [[ -e "$TARGET/.rigpath" || -L "$TARGET/.rigpath" ]]; then
     # Existing .rigpath detected — auto-detect tracking mode without prompting.
     # Avoids writing .rig/ files to the wrong location when --tracking is omitted.
-    EXTERNAL_RIG_DIR=$(tr -d '[:space:]' < "$TARGET/.rigpath")
+    EXTERNAL_RIG_DIR=$(python3 "$PROJECT_TEMPLATES/bin/rig-path.py" "$TARGET")
     if [[ "$EXTERNAL_RIG_DIR" == "${HOME}/.rig/projects/"* ]]; then
       RIG_TRACKING="stealth"
     else
@@ -4547,7 +4608,13 @@ if [[ "$DO_PROJECT" == true ]]; then
      guard_destination_before_write "$TARGET" "$TARGET_CLAUDE" "CLAUDE.md"; then
     # agent-plan: classification only, never substitute placeholders.
     if [[ "$AGENT_DRY_RUN" != true ]]; then
-      sed_inplace "s/\\[Project Name\\]/${PROJECT_NAME}/g" "$TARGET_CLAUDE"
+      python3 - "$TARGET_CLAUDE" "$PROJECT_NAME" <<'PYEOF'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+path.write_text(path.read_text(encoding="utf-8").replace("[Project Name]", sys.argv[2]), encoding="utf-8")
+PYEOF
       success "Substituted [Project Name] in CLAUDE.md"
     fi
   fi
@@ -4603,8 +4670,10 @@ PYEOF
      guard_destination_before_write "$TARGET" "$TARGET_SETTINGS" ".claude/settings.json"; then
     # agent-plan: classification only, never substitute placeholders.
     if [[ "$AGENT_DRY_RUN" != true ]]; then
-      ESCAPED_PATH="${TARGET_ABS//\//\\/}"
-      sed_inplace "s/\\[REPO_ROOT\\]/${ESCAPED_PATH}/g" "$TARGET_SETTINGS"
+      _settings_rendered="$(mktemp /tmp/rig-settings-rendered-XXXXXX.json)"
+      render_repo_root_settings "$TARGET_SETTINGS" "$_settings_rendered" "$TARGET_ABS"
+      cat "$_settings_rendered" > "$TARGET_SETTINGS"
+      rm -f "$_settings_rendered"
       success "Substituted [REPO_ROOT] in .claude/settings.json → $TARGET_ABS"
       # settings.json is rewritten here after copy_file recorded it, so its
       # recorded after-state is stale for exactly the same reason
@@ -4755,11 +4824,18 @@ PYEOF
     TARGET_CLAUDE="$TARGET/CLAUDE.md"
     if [[ "$PROJECT_CLAUDE_PRESERVED_USER" != true && -f "$TARGET_CLAUDE" ]] && \
        guard_destination_before_write "$TARGET" "$TARGET_CLAUDE" "CLAUDE.md"; then
-      ESCAPED_EXT="${EXTERNAL_RIG_DIR//\//\\/}"
-      sed_inplace "s|@\\.rig/|@${ESCAPED_EXT}/|g" "$TARGET_CLAUDE"
-      # Also update the context-loading paths in the prose
-      sed_inplace "s|\`.rig/memory/|\`${EXTERNAL_RIG_DIR}/memory/|g" "$TARGET_CLAUDE"
-      sed_inplace "s|\`.rig/tasks/|\`${EXTERNAL_RIG_DIR}/tasks/|g" "$TARGET_CLAUDE"
+      python3 - "$TARGET_CLAUDE" "$EXTERNAL_RIG_DIR" <<'PYEOF'
+import pathlib
+import sys
+
+target, rig_dir = sys.argv[1:]
+path = pathlib.Path(target)
+content = path.read_text(encoding="utf-8")
+content = content.replace("@.rig/", "@" + rig_dir + "/")
+content = content.replace("`.rig/memory/", "`" + rig_dir + "/memory/")
+content = content.replace("`.rig/tasks/", "`" + rig_dir + "/tasks/")
+path.write_text(content, encoding="utf-8")
+PYEOF
       success "Updated CLAUDE.md to reference external .rig/ path"
       # Refresh the manifest hash for whatever this rewrite just changed --
       # same staleness bug #498 fixed for _subst_base_branch()'s touches,

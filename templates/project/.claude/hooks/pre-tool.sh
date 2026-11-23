@@ -109,18 +109,14 @@ same_project_root_for_path() {
 
 rig_dir_for_root() {
   local root="$1"
-  if [[ -f "$root/.rigpath" ]]; then
-    tr -d '[:space:]' < "$root/.rigpath"
-  else
-    printf '%s\n' "$root/.rig"
-  fi
+  python3 "$REPO/bin/rig-path.py" "$root"
 }
 
 # ── Resolve RIG_DIR ───────────────────────────────────────────────────────────
 # Supports external .rig/ installations (see install.sh --rig-dir).
 # If .rigpath exists in the repo root, it contains the absolute path to the
 # .rig/ directory (which may be outside the repo). Otherwise default to $REPO/.rig.
-RIG_DIR=$(rig_dir_for_root "$REPO")
+RIG_DIR=$(rig_dir_for_root "$REPO") || fail_closed "project .rigpath is invalid."
 
 # Only the hookless fallback consumes approval here. Active Rig Git hooks
 # validate expiry and claim approval at commit time instead.
@@ -401,7 +397,7 @@ print(os.path.abspath(cwd or sys.argv[1]) + "\t")
       [[ -n "$COMMIT_TARGET" ]] || continue
       COMMIT_REPO=$(same_project_root_for_path "$COMMIT_TARGET/.") || \
         fail_closed "commit target is outside the installed project or cannot be verified."
-      COMMIT_RIG_DIR=$(rig_dir_for_root "$COMMIT_REPO")
+      COMMIT_RIG_DIR=$(rig_dir_for_root "$COMMIT_REPO") || fail_closed "commit target .rigpath is invalid."
       COMMIT_OK="$COMMIT_RIG_DIR/memory/.rig-commit-ok"
       [[ -f "$COMMIT_OK" ]] || fail_closed "Commit blocked by The Rig. Approval is missing: $COMMIT_OK"
 
@@ -513,7 +509,7 @@ print(match.group(1) + (match.group(2) or "/"), end="")
   fi
   PATH_CANONICAL=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$PATH_ARG") || fail_closed "write path could not be resolved."
   TARGET_REPO=$(same_project_root_for_path "$PATH_ARG") || TARGET_REPO="$REPO"
-  TARGET_RIG_DIR=$(rig_dir_for_root "$TARGET_REPO")
+  TARGET_RIG_DIR=$(rig_dir_for_root "$TARGET_REPO") || fail_closed "write target .rigpath is invalid."
 
   # ── THE RIG'S OWN GOVERNANCE FILES (self-protection) ─────────────────────
   # The agent must not rewrite the rules it is supposed to follow.

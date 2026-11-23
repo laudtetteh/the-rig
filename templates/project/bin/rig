@@ -6,7 +6,7 @@ readonly RIG_EXIT_UNAVAILABLE=69
 # Keep bootstrap and doctor's completeness check on the same source paths.
 # These fixed relative names contain no whitespace; Python splits on spaces.
 readonly RIG_WORKTREE_BOOTSTRAP_PATHS=".rigpath CLAUDE.md PROJECT_BRIEF.md .gitleaks.toml \
-  bin/rig bin/rig-sprint bin/rig-session-resolve.py bin/rig-session-index.py bin/rig-session-archive.py bin/rig_project_roots.py bin/rig-snapshot.py bin/rig-tracker-config.py .claude .agents .codex \
+  bin/rig bin/rig-path.py bin/rig-sprint bin/rig-session-resolve.py bin/rig-session-index.py bin/rig-session-archive.py bin/rig_project_roots.py bin/rig-snapshot.py bin/rig-tracker-config.py .claude .agents .codex \
   .mcp.json .playwright-mcp .github docs/INDEX.md docs/features/README.md"
 
 usage() { cat <<'EOF'
@@ -60,12 +60,8 @@ rig_root() {
   printf '%s\n' "$script_root"
 }
 rig_dir() {
-  local root path; root="$(rig_root)"
-  if [[ -f "$root/.rigpath" ]]; then
-    IFS= read -r path < "$root/.rigpath" || true
-    if [[ -n "$path" ]]; then case "$path" in /*) printf '%s\n' "$path";; *) printf '%s\n' "$root/$path";; esac; return; fi
-  fi
-  printf '%s\n' "$root/.rig"
+  local root; root="$(rig_root)"
+  python3 "$(dirname "${BASH_SOURCE[0]}")/rig-path.py" "$root"
 }
 version() {
   local value=unknown file; file="$(rig_dir)/VERSION"
@@ -4471,6 +4467,14 @@ help_requested() {
 
 main() {
   local command="${1:-}" subcommand
+  # Every non-help command must stop before resolving paths if .rigpath is
+  # malformed. Doctor and version also resolve Rig storage; several callers
+  # use rig_dir() inside command substitutions that can lose its exit status.
+  if [[ -n "$command" && "$command" != -h && "$command" != --help ]]; then
+    local project_root
+    project_root="$(rig_root)" || return 3
+    python3 "$(dirname "${BASH_SOURCE[0]}")/rig-path.py" "$project_root" >/dev/null || return 3
+  fi
   case "$command" in
     ""|-h|--help) usage;;
     -v|--version|version) [[ "$command" == version ]] && shift; version "$@";;

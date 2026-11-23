@@ -17,11 +17,7 @@
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 [[ -z "$REPO" ]] && exit 0
 
-if [[ -f "$REPO/.rigpath" ]]; then
-  RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
-else
-  RIG_DIR="$REPO/.rig"
-fi
+RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 2
 
 PROJECT_NAME=$(basename "$REPO")
 BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -46,13 +42,13 @@ if [[ -f "$CLAUDE_MD" ]]; then
     CONVENTIONS=$(python3 -c "
 import re, sys
 try:
-    text = open('$CLAUDE_MD').read()
+    text = open(sys.argv[1]).read()
     m = re.search(r'## Key conventions\n(.*?)(?=\n## |\Z)', text, re.DOTALL)
     if m:
         print(m.group(1).strip())
 except Exception:
     pass
-" 2>/dev/null || true)
+" "$CLAUDE_MD" 2>/dev/null || true)
   fi
 fi
 
@@ -63,13 +59,13 @@ if [[ -f "$CLAUDE_MD" ]] && command -v python3 >/dev/null 2>&1; then
   OFF_LIMITS=$(python3 -c "
 import re, sys
 try:
-    text = open('$CLAUDE_MD').read()
+    text = open(sys.argv[1]).read()
     m = re.search(r'## Off-limits.*?\n(.*?)(?=\n## |\Z)', text, re.DOTALL)
     if m:
         print(m.group(1).strip())
 except Exception:
     pass
-" 2>/dev/null || true)
+" "$CLAUDE_MD" 2>/dev/null || true)
 fi
 
 # ── Build context block ───────────────────────────────────────────────────────

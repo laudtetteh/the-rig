@@ -40,11 +40,7 @@ if [[ -n "${_RIG_TEST_RIG_DIR:-}" ]]; then
   RIG_DIR="$_RIG_TEST_RIG_DIR"
 else
   REPO=$(git rev-parse --show-toplevel 2>/dev/null || true)
-  if [[ -n "$REPO" && -f "$REPO/.rigpath" ]]; then
-    RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
-  else
-    RIG_DIR="${REPO}/.rig"
-  fi
+  RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 2
 fi
 
 DECISION=$(printf '%s' "$INPUT" | RIG_DIR="$RIG_DIR" python3 -c "

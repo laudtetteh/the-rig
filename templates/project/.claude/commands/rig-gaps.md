@@ -7,8 +7,8 @@ The Rig itself — for review and optional submission.
 
 ## What this does
 
-1. Reads `.rig/memory/RIG_GAPS.md` and lists all gap entries
-2. Scans `.rig/memory/ERRORS.md` for any Rig-related issues not yet captured in `RIG_GAPS.md`
+1. Reads `$RIG_DIR/memory/RIG_GAPS.md` and lists all gap entries
+2. Scans `$RIG_DIR/memory/ERRORS.md` for any Rig-related issues not yet captured in `RIG_GAPS.md`
 3. Formats a consolidated report with copy-paste instructions
 4. Offers to mark entries as submitted (adds `[submitted]` tag to entry headers)
 5. With `--collect`, scans every Rig project and produces a deduplicated triage report
@@ -72,8 +72,8 @@ run this flow instead of collection, push, submit, or report mode.
 1. Resolve `$REPO` and `$RIG_DIR` using the standard stealth-mode pattern:
    ```bash
    REPO=$(git rev-parse --show-toplevel)
-   if [[ -f "$REPO/.rigpath" ]]; then
-     RIG_DIR=$(tr -d '[:space:]' < "$REPO/.rigpath")
+   if [[ -e "$REPO/.rigpath" || -L "$REPO/.rigpath" ]]; then
+     RIG_DIR=$(python3 "$REPO/bin/rig-path.py" "$REPO") || exit 1
    else
      RIG_DIR="$REPO/.rig"
    fi
@@ -303,17 +303,17 @@ the user gives a separate explicit mutation approval after reading the report.
 
 ## Step 1 — Read RIG_GAPS.md
 
-Read `.rig/memory/RIG_GAPS.md`. Collect all entries that do **not** have `[submitted]` in their header.
+Read `$RIG_DIR/memory/RIG_GAPS.md`. Collect all entries that do **not** have `[submitted]` in their header.
 
 If there are no unsubmitted entries, say:
-> "No unsubmitted gaps in `.rig/memory/RIG_GAPS.md`.
+> "No unsubmitted gaps in `$RIG_DIR/memory/RIG_GAPS.md`.
 > Run tasks for a while and then come back — gaps are logged automatically during `/wrap`."
 
 ---
 
 ## Step 2 — Cross-check ERRORS.md
 
-Read `.rig/memory/ERRORS.md`. Look for entries that describe friction with The Rig's own
+Read `$RIG_DIR/memory/ERRORS.md`. Look for entries that describe friction with The Rig's own
 workflow rather than project-specific bugs. Examples of Rig-related errors:
 - "pre-tool.sh blocked an operation that should have been allowed"
 - "A process step was missing or wrong"
