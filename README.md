@@ -206,6 +206,9 @@ cd ~/code/my-project
 
 `--project-only` is a scope flag (skip the global layer). It does not imply non-interactive
 mode on its own — provide `--strategy` and `--tracking` to skip all prompts.
+The scope flag also applies when you choose **First install** or **Upgrade** in
+the menu. Global Claude skills, when selected, live at
+`~/.claude/skills/<name>/SKILL.md`.
 
 Use the agent upgrade path when you want semantic convergence of customized
 Rig-owned files. Plain `--strategy upgrade` is the conservative installer

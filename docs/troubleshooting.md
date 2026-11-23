@@ -122,8 +122,7 @@ tracking, or the directory named in `.rigpath` for stealth or external tracking.
 
 ```bash
 # Resolve the effective Rig directory
-RIG_DIR=.rig
-[ -f .rigpath ] && RIG_DIR=$(head -1 .rigpath)
+RIG_DIR="$(python3 bin/rig-path.py "$PWD")" || exit 1
 
 # Check if it exists
 ls "$RIG_DIR/memory/.rig-commit-ok"
@@ -163,8 +162,7 @@ workflow skills generated under `.agents/skills/`. Check the persisted project
 target and run the provider-neutral doctor before inspecting individual files:
 
 ```bash
-RIG_DIR=.rig
-[ -f .rigpath ] && RIG_DIR=$(head -1 .rigpath)
+RIG_DIR="$(python3 bin/rig-path.py "$PWD")" || exit 1
 bin/rig doctor --json
 cat "$RIG_DIR/install-targets.json" 2>/dev/null || true
 test -x .codex/hooks/rig-adapter.sh
@@ -210,11 +208,10 @@ is likely a missing or stale snapshot — see "CONTEXT_SNAPSHOT.md is missing" a
 
 To manually trim if `/wrap` hasn't been run recently:
 ```bash
-RIG_DIR=.rig
-[ -f .rigpath ] && RIG_DIR=$(head -1 .rigpath)
+RIG_DIR="$(python3 bin/rig-path.py "$PWD")" || exit 1
 # Count entries
 grep -c "^## " "$RIG_DIR/memory/PROGRESS.md"
-# Then run /wrap and confirm the trim when prompted
+# Then run /wrap; it archives entries beyond 20 automatically
 ```
 
 ---

@@ -46,8 +46,7 @@ Leave blank (or omit the line) if The Rig repo isn't on this machine.
 `/rig-gaps --submit` creates public GitHub issues in `laudtetteh/the-rig` directly via the `gh` CLI. It requires explicit opt-in:
 
 ```bash
-RIG_DIR=.rig
-[ -f .rigpath ] && RIG_DIR=$(head -1 .rigpath)
+RIG_DIR="$(python3 bin/rig-path.py "$PWD")" || exit 1
 touch "$RIG_DIR/memory/.rig-contribute-enabled"
 ```
 
@@ -313,6 +312,27 @@ to the machine. When you clone the project on a new machine, re-run the installe
 with option 4 to restore them. The `.git/info/exclude` entries and `.git/hooks/`
 scripts are per-clone and must be set up on each machine.
 
+Older external and stealth installs may have a `.rigpath` and manifest but no
+`install-targets.json` owner record. The installer refuses to reuse that occupied
+Rig directory until you explicitly adopt it for its original checkout. Run an
+upgrade with the exact target and data paths, for example:
+
+```bash
+~/tools/the-rig/install.sh --project-only --target ~/code/my-project \
+  --tracking stealth --rig-dir ~/.rig/projects/my-project \
+  --strategy upgrade --adopt-legacy-rig-dir
+```
+
+For an external install, use `--tracking external`. Adoption requires a regular
+`.rigpath` pointing to the selected directory, a legacy manifest with at least
+one matching project artifact and one matching Rig artifact, no existing owner
+record, and a safe backup location. If every manifest-listed artifact was
+customized or removed, restore an unchanged file from the original install or
+use a separate data directory; adoption will refuse an unproven owner.
+It records the checkout as owner only after taking the pre-upgrade snapshot.
+`--strategy agent-plan` with the same flags checks eligibility without writing.
+Choose a distinct `--rig-dir` for another checkout with the same project name.
+
 ---
 
 ## Scaling to a team
@@ -473,7 +493,10 @@ cd ~/code/my-project
 ```
 
 Choose **Upgrade (option 3)** from the intent menu. This is the recommended
-path for all upgrades. It:
+path for all upgrades. `--project-only` keeps this menu choice scoped to the
+project. A combined upgrade also refreshes global Claude skills at
+`~/.claude/skills/<name>/SKILL.md`; clean legacy flat skill files are migrated,
+while customized flat files remain for review. The upgrade:
 
 - **Auto-updates** Rig-owned files (hooks, commands, process workflows, husky hooks)
   that you haven't modified since install — no prompts, no friction

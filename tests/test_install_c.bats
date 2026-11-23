@@ -562,24 +562,24 @@ _make_failing_sha_tools() {
     --global-agent claude --strategy upgrade
   [ "$status" -eq 0 ]
 
-  local skill="$fake_home/.claude/skills/code-review.md"
+  local skill="$fake_home/.claude/skills/code-review/SKILL.md"
   [ -f "$skill" ]
   printf '# old global skill\n' > "$skill"
   local old_hash
   old_hash="$(_sha256 "$skill")"
   awk -v hash="$old_hash" '
-    $2 == "skills/code-review.md" { print hash "  skills/code-review.md"; next }
+    $2 == "skills/code-review/SKILL.md" { print hash "  skills/code-review/SKILL.md"; next }
     { print }
   ' "$fake_home/.claude/.rig-global-manifest" > "$TEMP_DIR/global-manifest"
   mv "$TEMP_DIR/global-manifest" "$fake_home/.claude/.rig-global-manifest"
-  jq --arg hash "$old_hash" '.entries["skills/code-review.md"].sha256 = $hash | .entries["skills/code-review.md"].owner = "user"' \
+  jq --arg hash "$old_hash" '.entries["skills/code-review/SKILL.md"].sha256 = $hash | .entries["skills/code-review/SKILL.md"].owner = "user"' \
     "$fake_home/.claude/.rig-global-manifest.json" > "$TEMP_DIR/global-manifest.json"
   mv "$TEMP_DIR/global-manifest.json" "$fake_home/.claude/.rig-global-manifest.json"
 
   run env HOME="$fake_home" bash "$INSTALLER" --global-only \
     --global-agent claude --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Updated: skills/code-review.md"* ]] || return 1
+  [[ "$output" == *"Updated: skills/code-review/SKILL.md"* ]] || return 1
   run grep -q '# old global skill' "$skill"
   [ "$status" -ne 0 ]
 }
