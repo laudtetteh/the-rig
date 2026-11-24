@@ -92,7 +92,7 @@ for src in \
   ".claude/hooks/pre-tool.sh" \
   ".claude/hooks/post-tool.sh" \
   ".claude/hooks/stop.sh" \
-  ".claude/commands/ship.md" \
+  ".claude/commands/rig-ship.md" \
   ".claude/commands/wrap.md" \
   ".claude/commands/task.md" \
   ".claude/commands/post-merge.md" \
@@ -755,10 +755,10 @@ document is still exactly one machine-readable JSON object.
 ### Example: a refused result (`status: "refused"`, exit 3)
 
 ```json
-{"schema_version":1,"mode":"apply","status":"refused","summary":{"updated":1,"merged":1,"removed_obsolete":0,"skipped_customized":1,"skipped_conflict":0,"skipped_untracked":0,"stale":0},"artifacts":[{"path":".claude/commands/status.md","classification":"unmodified-since-install","action":"update","reason":"template file updated to the incoming Rig version"},{"path":".claude/settings.json","classification":"settings-mergeable","action":"merge","reason":"settings.json merged (smart-merge) with the incoming Rig version"},{"path":"CLAUDE.md","classification":"customized","action":"skip","reason":"local content differs from the recorded Rig baseline (customized)"}],"conflicts":[{"path":"CLAUDE.md","reason":"local content differs from the recorded Rig baseline (customized)","repair_guidance":"Resolve manually and re-run, or restore the file from .rig-backup/ and accept the incoming template on the next upgrade."}]}
+{"schema_version":1,"mode":"apply","status":"refused","summary":{"updated":1,"merged":1,"removed_obsolete":0,"skipped_customized":1,"skipped_conflict":0,"skipped_untracked":0,"stale":0},"artifacts":[{"path":".claude/commands/rig-status.md","classification":"unmodified-since-install","action":"update","reason":"template file updated to the incoming Rig version"},{"path":".claude/settings.json","classification":"settings-mergeable","action":"merge","reason":"settings.json merged (smart-merge) with the incoming Rig version"},{"path":"CLAUDE.md","classification":"customized","action":"skip","reason":"local content differs from the recorded Rig baseline (customized)"}],"conflicts":[{"path":"CLAUDE.md","reason":"local content differs from the recorded Rig baseline (customized)","repair_guidance":"Resolve manually and re-run, or restore the file from .rig-backup/ and accept the incoming template on the next upgrade."}]}
 ```
 
-In this example, `agent-upgrade` still updated `.claude/commands/status.md`
+In this example, `agent-upgrade` still updated `.claude/commands/rig-status.md`
 and merged `.claude/settings.json` — the safe/convergeable actions — while
 leaving `CLAUDE.md` completely untouched and reporting it in `conflicts`
 with concrete repair guidance. The overall run still exits `3` because at

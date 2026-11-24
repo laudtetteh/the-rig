@@ -77,14 +77,14 @@ assert_customizations_survive_repeat_upgrades() {
   git -C "$TEST_PROJECT" add -A
   git -C "$TEST_PROJECT" -c core.hooksPath=/dev/null commit -q -m "install rig"
   assert_customizations_survive_repeat_upgrades repo "$TEST_PROJECT/.rig/memory" \
-    .claude/hooks/pre-tool.sh .husky/commit-msg bin/rig .claude/commands/ship.md
+    .claude/hooks/pre-tool.sh .husky/commit-msg bin/rig .claude/commands/rig-ship.md
 }
 
 @test "stealth upgrade never adopts a skipped customized hook or dispatcher" {
   install_rig stealth merge
   [ "$status" -eq 0 ]
   assert_customizations_survive_repeat_upgrades stealth "$EXTERNAL_RIG/memory" \
-    .claude/hooks/pre-tool.sh bin/rig .claude/commands/ship.md
+    .claude/hooks/pre-tool.sh bin/rig .claude/commands/rig-ship.md
 }
 
 @test "a skipped customized hook keeps the mode its user left" {
@@ -129,13 +129,13 @@ PY
 @test "a file rewritten during a manifest conflict still gets its base branch substituted" {
   install_rig repo merge
   [ "$status" -eq 0 ]
-  rm "$TEST_PROJECT/.claude/commands/ship.md"
+  rm "$TEST_PROJECT/.claude/commands/rig-ship.md"
   mv "$TEST_PROJECT/.rig/memory/.rig-manifest.json" "$TEST_PROJECT/.rig/memory/real.json"
   ln -s real.json "$TEST_PROJECT/.rig/memory/.rig-manifest.json"
   install_rig repo upgrade
   [ "$status" -eq 0 ]
-  [ -f "$TEST_PROJECT/.claude/commands/ship.md" ]
-  run grep -c '\[BASE_BRANCH\]' "$TEST_PROJECT/.claude/commands/ship.md"
+  [ -f "$TEST_PROJECT/.claude/commands/rig-ship.md" ]
+  run grep -c '\[BASE_BRANCH\]' "$TEST_PROJECT/.claude/commands/rig-ship.md"
   [ "$output" = 0 ]
 }
 

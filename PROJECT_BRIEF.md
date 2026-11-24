@@ -125,7 +125,7 @@ The Rig is actively developed; the current release is recorded in [`VERSION`](VE
 - Upgrade path never breaks an existing install
 - The complete Bats suite passes on every commit through hosted CI, the authoritative
   complete-suite gate
-- A new user can install The Rig and complete a first Claude `/task` → `/ship` or Codex `$task` → `$ship` cycle without reading docs
+- A new user can install The Rig and complete a first Claude `/task` → `/rig-ship` or Codex `$task` → `$rig-ship` cycle without reading docs
 - Memory survives context compaction — next session picks up exactly where the last one left off
 
 ---

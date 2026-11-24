@@ -73,7 +73,7 @@ PY
   git -C "$project" init -q
   cp "$REPO_ROOT/templates/project/bin/rig-tracker-config.py" "$project/bin/rig-tracker-config.py"
   printf "issue-tracking: 'GitHub' # comment\n" > "$project/CLAUDE.md"
-  python3 - "$COMMANDS/ship.md" "$script" <<'PY'
+  python3 - "$COMMANDS/rig-ship.md" "$script" <<'PY'
 from pathlib import Path
 import sys
 text = Path(sys.argv[1]).read_text()

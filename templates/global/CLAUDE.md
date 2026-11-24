@@ -194,11 +194,11 @@ the user's explicit confirmation.
 
 | If the user implies… | Route to | Trigger signals |
 |---|---|---|
-| Something is broken or misbehaving | `/debug` | "why is X broken", "this isn't working", "something's wrong with", "I'm getting an error" |
+| Something is broken or misbehaving | `/rig-debug` | "why is X broken", "this isn't working", "something's wrong with", "I'm getting an error" |
 | Understanding how existing code works | `/recon` | "how does X work", "walk me through", "explain the flow", "show me how this is wired" |
 | Frustration with The Rig's own workflow | `/rig-gaps` | "this keeps happening", "rig is blocking me", "that's annoying", friction with a hook or command |
 | Building, fixing, or refactoring (multi-file) | `/task` | "implement", "add", "build", "fix", "refactor", "clean up" — scope > 2–3 files |
-| Resuming in-flight work | `/run` | "continue", "pick up", "resume", "where were we", "what's next on [task]" |
+| Resuming in-flight work | `/rig-run` | "continue", "pick up", "resume", "where were we", "what's next on [task]" |
 | Post-merge housekeeping | `/post-merge` | "we just merged", "PR landed", "merge is in", "let's do housekeeping" |
 | Sprint or work planning | `/sprint` | "plan the sprint", "what should we tackle", "what's the priority", "let's scope the work" |
 | Wrapping up the session | `/wrap` | "that's it for today", "wrapping up", "save progress", "end of session" |
@@ -278,8 +278,8 @@ Install them at `~/.claude/skills/`.
 |---|---|---|
 | Refactor | "refactor this to…" | `~/.claude/skills/refactor/SKILL.md` |
 | Write tests | "write tests for…" | `~/.claude/skills/write-tests/SKILL.md` |
-| Code review | "review this" | `~/.claude/skills/code-review/SKILL.md` |
-| Debug | "why is this broken" | `~/.claude/skills/debug/SKILL.md` |
+| Code review | "review this" | `~/.claude/skills/rig-review-basics/SKILL.md` |
+| Debug | "why is this broken" | `~/.claude/skills/rig-debug-basics/SKILL.md` |
 | Explain | "explain this to me" | `~/.claude/skills/explain/SKILL.md` |
 
 ---

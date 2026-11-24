@@ -37,14 +37,14 @@ parity_state() {
 
 @test "parity repair: preview lists only drifted files and writes nothing" {
   printf '\nlocal edit\n' >> "$PROJECT/.agents/skills/wrap/references/command.md"
-  rm "$PROJECT/.agents/skills/ship/SKILL.md"
+  rm "$PROJECT/.agents/skills/rig-ship/SKILL.md"
   local before
   before="$(cd "$PROJECT" && find .agents -type f -exec shasum {} + | sort)"
   fix
   [ "$status" -eq 0 ]
   [[ "$output" == *"Doctor fix preview: 2 file(s) would be written"* ]] || return 1
   [[ "$output" == *"replace: .agents/skills/wrap/references/command.md"* ]] || return 1
-  [[ "$output" == *"create: .agents/skills/ship/SKILL.md"* ]] || return 1
+  [[ "$output" == *"create: .agents/skills/rig-ship/SKILL.md"* ]] || return 1
   [[ "$output" != *"ship/references/command.md"* ]] || return 1
   [ "$before" = "$(cd "$PROJECT" && find .agents -type f -exec shasum {} + | sort)" ]
   [ ! -e "$PROJECT/.rig/backups/doctor-fix" ]
@@ -52,14 +52,14 @@ parity_state() {
 
 @test "parity repair: confirm restores installer-identical files and backs up what it replaced" {
   printf '\nlocal edit\n' >> "$PROJECT/.agents/skills/wrap/references/command.md"
-  rm "$PROJECT/.agents/skills/ship/SKILL.md"
+  rm "$PROJECT/.agents/skills/rig-ship/SKILL.md"
   local edited
   edited="$(shasum < "$PROJECT/.agents/skills/wrap/references/command.md")"
   fix --confirm --json
   [ "$status" -eq 0 ]
   [[ "$output" == *'"status":"applied"'* && "$output" == *'"check_after":"pass"'* ]] || return 1
   cmp -s "$PRISTINE/.agents/skills/wrap/references/command.md" "$PROJECT/.agents/skills/wrap/references/command.md"
-  cmp -s "$PRISTINE/.agents/skills/ship/SKILL.md" "$PROJECT/.agents/skills/ship/SKILL.md"
+  cmp -s "$PRISTINE/.agents/skills/rig-ship/SKILL.md" "$PROJECT/.agents/skills/rig-ship/SKILL.md"
   local backup
   backup="$(find "$PROJECT/.rig/backups/doctor-fix" -name command.md -path '*wrap*')"
   [ "$(shasum < "$backup")" = "$edited" ]
@@ -67,9 +67,9 @@ parity_state() {
 import json, pathlib, sys
 manifest = json.loads(next(pathlib.Path(sys.argv[1]).glob("*/manifest.json")).read_text())
 paths = {entry["path"]: entry for entry in manifest["files"]}
-assert set(paths) == {".agents/skills/wrap/references/command.md", ".agents/skills/ship/SKILL.md"}, paths
+assert set(paths) == {".agents/skills/wrap/references/command.md", ".agents/skills/rig-ship/SKILL.md"}, paths
 assert "backup" in paths[".agents/skills/wrap/references/command.md"]
-assert paths[".agents/skills/ship/SKILL.md"]["action"] == "create"
+assert paths[".agents/skills/rig-ship/SKILL.md"]["action"] == "create"
 PY
   [ "$(parity_state)" = pass ]
 }
@@ -238,12 +238,12 @@ PY
 @test "parity repair: works from a subdirectory and refuses a non-file target without leftovers" {
   mkdir -p "$PROJECT/sub"
   printf '\nlocal edit\n' >> "$PROJECT/.agents/skills/wrap/references/command.md"
-  rm "$PROJECT/.agents/skills/ship/SKILL.md"
-  mkdir "$PROJECT/.agents/skills/ship/SKILL.md"
+  rm "$PROJECT/.agents/skills/rig-ship/SKILL.md"
+  mkdir "$PROJECT/.agents/skills/rig-ship/SKILL.md"
   run bash -c 'cd "$1/sub" && ../bin/rig doctor fix --check codex_skill_parity --confirm' _ "$PROJECT"
   [ "$status" -eq 3 ]
   [[ "$output" == *"replace: .agents/skills/wrap/references/command.md"* ]] || return 1
-  [[ "$output" == *"refused: .agents/skills/ship/SKILL.md (target exists but is not a regular file"* ]] || return 1
+  [[ "$output" == *"refused: .agents/skills/rig-ship/SKILL.md (target exists but is not a regular file"* ]] || return 1
   [[ "$output" == *"codex_skill_parity is fail"* ]] || return 1
   cmp -s "$PRISTINE/.agents/skills/wrap/references/command.md" "$PROJECT/.agents/skills/wrap/references/command.md"
   [ -z "$(find "$PROJECT/.agents" -name '*.rig-fix-*')" ]

@@ -228,7 +228,7 @@ def renderings(raw, repo_root, base_branch, project_name):
 
     The installer does not substitute uniformly. [BASE_BRANCH] is rewritten
     only in an allowlist of files (_subst_base_branch() in install.sh covers
-    CLAUDE.md, ship.md, post-merge.md, and POST_MERGE_WORKFLOW.md),
+    CLAUDE.md, rig-ship.md, post-merge.md, and POST_MERGE_WORKFLOW.md),
     [REPO_ROOT] only in settings.json, and [Project Name] only in CLAUDE.md --
     while rendered_project_template_hash() renders any file containing a
     placeholder for *comparison*. Which set applied also varied across the

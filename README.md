@@ -283,8 +283,8 @@ files). The hooks also need their executable bits set. Step 5 restores all of th
 > `docs/customizing.md` → "Keeping .rig/ invisible to teammates" for the full
 > external directory setup.
 
-Run Claude `/rig-status` or Codex `$rig-status` any time to verify hooks, memory
-files, provider wiring, and pending flags in one pass. See
+Run Claude `/rig-status --health` or Codex `$rig-status --health` any time to verify
+hooks, memory files, provider wiring, and pending flags in one pass. See
 `docs/troubleshooting.md` for common issues after a re-clone.
 
 ---
@@ -340,18 +340,18 @@ for a full snapshot — hooks are a safety net, not a replacement.
 **Daily work**
 ```
 /task              →  intake wizard: goal + autonomy/check-ins/risk/testing configuration
-/run               →  execute active task; surfaces operating mode wizard if absent; chains at High autonomy
-/run [slug]        →  run a single specific task
+/rig-run               →  execute active task; surfaces operating mode wizard if absent; chains at High autonomy
+/rig-run [slug]        →  run a single specific task
 /sprint            →  current conflict-aware wave planner for already-qualified task files
 /sprint [slug …]   →  sprint over a specific set of tasks only
 ```
 
 **Ship and debug**
 ```
-/code-review   →  review current diff for bugs, regressions, risk, and missing tests
+/rig-review   →  review current diff for bugs, regressions, risk, and missing tests
 /connector-preflight → verify connector readiness before MCP/app-dependent work
-/ship         →  pre-commit cleanup + checklist + commit + PR; review metadata and verify merge when authorized
-/debug        →  hypothesis-first diagnosis, mandatory ERRORS.md entry
+/rig-ship         →  pre-commit cleanup + checklist + commit + PR; review metadata and verify merge when authorized
+/rig-debug        →  hypothesis-first diagnosis, mandatory ERRORS.md entry
 /handoff-checklist → prepare a durable handoff when work transfers sessions or agents
 ```
 
@@ -373,10 +373,10 @@ for a full snapshot — hooks are a safety net, not a replacement.
 **Orientation and docs**
 ```
 bin/rig session index [--json] → read-only, bounded search of Rig session records across installed projects
-/status       →  project dashboard: branch, active tasks, backlog count, recent progress, pending flags
+/rig-status   →  project dashboard (branch, active tasks, backlog, recent progress, flags) + one-line health verdict
 /doc-list     →  show docs/INDEX.md without loading full doc files
 /rig-help     →  print all Rig commands with descriptions and key flags
-/rig-status   →  provider-neutral health dashboard for hooks, memory, adapters, and flags
+/rig-status --health  →  full provider-neutral health check for hooks, memory, adapters, and flags
 ```
 
 **Governance and housekeeping**

@@ -13,7 +13,7 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig-path.py" "$REPO/bin/rig-path.py"
   cp "$BATS_TEST_DIRNAME/../templates/project/.rig/contextual-tips.sh" \
     "$RIG_DIR/contextual-tips.sh"
-  for command in debug rig-gaps code-review sprint task session-name; do
+  for command in rig-debug rig-gaps rig-review sprint task session-name; do
     : > "$REPO/.claude/commands/$command.md"
   done
   cat > "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md" <<'EOF'
@@ -56,7 +56,7 @@ EOF
   run_start
 
   [ "$(tip_count)" -eq 1 ]
-  context | grep -Fq '/debug'
+  context | grep -Fq '/rig-debug'
   [ -f "$RIG_DIR/memory/tips/.tip-debug-errors-shown" ]
   [ ! -e "$RIG_DIR/memory/tips/.tip-rig-gaps-shown" ]
   [ ! -e "$RIG_DIR/memory/tips/.tip-sprint-shown" ]
@@ -70,7 +70,7 @@ EOF
 ## [2026-07-31] — observed workflow gap
 EOF
   run_start
-  context | grep -Fq '/debug'
+  context | grep -Fq '/rig-debug'
 
   run_start
 
@@ -97,12 +97,12 @@ EOF
   cat > "$RIG_DIR/memory/RIG_GAPS.md" <<'EOF'
 ## [2026-07-31] — observed workflow gap
 EOF
-  rm "$REPO/.claude/commands/debug.md"
+  rm "$REPO/.claude/commands/rig-debug.md"
   printf 'Previously ran /rig-gaps for this project.\n' > "$RIG_DIR/memory/PROGRESS.md"
 
   run_start
 
-  if context | grep -Eq '/debug|/rig-gaps'; then return 1; fi
+  if context | grep -Eq '/rig-debug|/rig-gaps'; then return 1; fi
   [ ! -e "$RIG_DIR/memory/tips/.tip-debug-errors-shown" ]
   [ ! -e "$RIG_DIR/memory/tips/.tip-rig-gaps-shown" ]
 }
@@ -113,7 +113,7 @@ EOF
 EOF
   run_start
   context | grep -Fq 'ERRORS.md contains a recorded failure'
-  context | grep -Fq 'Run /debug'
+  context | grep -Fq 'Run /rig-debug'
 }
 
 @test "relay instruction tells the agent to say the Rig tip exactly" {
@@ -141,7 +141,7 @@ EOF
   run_start
 
   context | grep -Fq 'at least two commits ahead'
-  context | grep -Fq 'Run /code-review'
+  context | grep -Fq 'Run /rig-review'
 }
 
 @test "new context: reviewable-branch tip measures against the configured base branch" {
@@ -154,18 +154,18 @@ EOF
   # commits ahead of main.
   run_start
   run context
-  [[ "$output" != *'Run /code-review'* ]] || return 1
+  [[ "$output" != *'Run /rig-review'* ]] || return 1
 
   # One commit ahead of develop (three ahead of main): still not reviewable.
   git -C "$REPO" checkout -q -b feature/on-develop
   git -C "$REPO" -c user.name=Test -c user.email=test@example.com commit --allow-empty -m f1 -q
   run_start
   run context
-  [[ "$output" != *'Run /code-review'* ]] || return 1
+  [[ "$output" != *'Run /rig-review'* ]] || return 1
 
   git -C "$REPO" -c user.name=Test -c user.email=test@example.com commit --allow-empty -m f2 -q
   run_start
-  context | grep -Fq 'Run /code-review'
+  context | grep -Fq 'Run /rig-review'
 }
 
 @test "new context: reviewable-branch tip falls back to origin/<base> and accepts a quoted base" {
@@ -178,11 +178,11 @@ EOF
   git -C "$REPO" -c user.name=Test -c user.email=test@example.com commit --allow-empty -m f1 -q
   run_start
   run context
-  [[ "$output" != *'Run /code-review'* ]] || return 1
+  [[ "$output" != *'Run /rig-review'* ]] || return 1
 
   git -C "$REPO" -c user.name=Test -c user.email=test@example.com commit --allow-empty -m f2 -q
   run_start
-  context | grep -Fq 'Run /code-review'
+  context | grep -Fq 'Run /rig-review'
 }
 
 @test "project category: docs without an index emits a project-specific tip" {
@@ -250,6 +250,6 @@ EOF
 
   [ ! -e "$marker" ]
   [ "$(tip_count)" -eq 1 ]
-  context | grep -Fq '/debug'
+  context | grep -Fq '/rig-debug'
   if context | grep -Fq 'touch'; then return 1; fi
 }

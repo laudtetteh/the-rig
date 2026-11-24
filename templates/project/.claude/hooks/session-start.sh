@@ -9,7 +9,7 @@
 #   startup / resume  — inject CONTEXT_SNAPSHOT.md + housekeeping flag warnings
 #   compact           — inject .compact-checkpoint.md (PreCompact output);
 #                       falls back to CONTEXT_SNAPSHOT.md if checkpoint absent
-#   clear             — inject minimal orientation (project name + run /status)
+#   clear             — inject minimal orientation (project name + run /rig-status)
 #
 # Session identity: creates $RIG_DIR/memory/sessions/session-{PPID}.json and
 # /tmp/.rig-session-{PPID}.uuid on startup/resume/compact/clear. These anchor

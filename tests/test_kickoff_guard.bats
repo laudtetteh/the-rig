@@ -433,11 +433,11 @@ assert 'never rely on the current working directory' in block
 PY
 }
 
-@test "kickoff hand-off requires tracker references before /run when any task is TBD" {
+@test "kickoff hand-off requires tracker references before /rig-run when any task is TBD" {
   local handoff
   handoff="$(kickoff_section '^### Step 6' '^## Notes')"
   [[ "$handoff" == *'If any task file is at `TBD`'* ]] || return 1
-  [[ "$handoff" == *'Before `/run`, every task file at `TBD` needs a'* ]] || return 1
+  [[ "$handoff" == *'Before `/rig-run`, every task file at `TBD` needs a'* ]] || return 1
   [[ "$handoff" == *'NEW_TASK_WORKFLOW.md` stops on `TBD`'* ]] || return 1
   [[ "$handoff" == *'run `/task` for it'* ]] || return 1
   [[ "$handoff" == *'If no task file is at `TBD`'* ]] || return 1

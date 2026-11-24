@@ -1,4 +1,4 @@
-# Command: /ship
+# Command: /rig-ship
 
 Trigger this command when you are ready to commit and close out a task.
 
@@ -830,7 +830,7 @@ See `SHIP_WORKFLOW.md` Post-batch audit for full details.
 ## Notes
 
 - Steps 1–6 are **gates** — any failure stops the sequence entirely.
-- The GitHub issue (Step 2) must exist before `/ship` is run, not after.
+- The GitHub issue (Step 2) must exist before `/rig-ship` is run, not after.
 - Labels (Step 3) must be verified against the actual repo — never assumed.
 - The optional-card commit pause (Step 5) is non-negotiable regardless of autonomy level.
 - The branch check (Step 3.5) is also a gate — never commit directly to main.

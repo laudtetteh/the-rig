@@ -209,9 +209,9 @@ _sha256() {
   [ -f "$metadata" ]
 
   # generated-codex artifact: mirrored by installer/generate-codex-skills.py.
-  jq -e '.entries[".agents/skills/debug/SKILL.md"].generator == "codex-mirror"
-    and .entries[".agents/skills/debug/SKILL.md"].provider == "codex"
-    and (.entries[".agents/skills/debug/SKILL.md"].base_revision | type == "string")' "$metadata" >/dev/null
+  jq -e '.entries[".agents/skills/rig-debug/SKILL.md"].generator == "codex-mirror"
+    and .entries[".agents/skills/rig-debug/SKILL.md"].provider == "codex"
+    and (.entries[".agents/skills/rig-debug/SKILL.md"].base_revision | type == "string")' "$metadata" >/dev/null
 
   # hand-authored template, Claude-specific: unambiguous provider regardless
   # of the project agent selection that drove this run.
@@ -392,8 +392,8 @@ _sha256() {
 
   # Spot-check the generated Codex artifact path agrees with the
   # validator's vocabulary too.
-  jq -e '.entries[".agents/skills/debug/SKILL.md"].generator == "codex-mirror"
-    and .entries[".agents/skills/debug/SKILL.md"].provider == "codex"' "$metadata" >/dev/null
+  jq -e '.entries[".agents/skills/rig-debug/SKILL.md"].generator == "codex-mirror"
+    and .entries[".agents/skills/rig-debug/SKILL.md"].provider == "codex"' "$metadata" >/dev/null
 
   # And a shared/project-user artifact, which takes on the active project
   # agent selection rather than an unambiguous provider-specific one.
@@ -583,7 +583,7 @@ _sha256() {
   run_installer --strategy skip
   [ "$status" -eq 0 ]
 
-  local command="$TEST_PROJECT/.claude/commands/status.md"
+  local command="$TEST_PROJECT/.claude/commands/rig-status.md"
   rm "$command"
   ln -s "$TEMP_DIR/missing-command.md" "$command"
 
@@ -591,7 +591,7 @@ _sha256() {
   [ "$status" -eq 0 ]
   [ -L "$command" ]
   [ ! -e "$command" ]
-  [[ "$output" == *"Customized symlink detected: .claude/commands/status.md"* ]] || return 1
+  [[ "$output" == *"Customized symlink detected: .claude/commands/rig-status.md"* ]] || return 1
   [[ "$output" == *"Skipped conflicts:"* ]] || return 1
 }
 
@@ -973,13 +973,13 @@ matrix_upgrade_case() {
   [ -e "$rig_dir/memory/.wrap-needed" ]
 }
 
-# ── Command behavior: /ship commit sentinel ───────────────────────────────────
-# /ship Step 7 creates .rig-commit-ok before running git commit.
+# ── Command behavior: /rig-ship commit sentinel ───────────────────────────────────
+# /rig-ship Step 7 creates .rig-commit-ok before running git commit.
 # pre-tool.sh checks for this sentinel (tested in the sentinel section above).
-# Here we test the sentinel creation path used by /ship.
+# Here we test the sentinel creation path used by /rig-ship.
 
 _ship_create_commit_sentinel() {
-  # Mirrors Step 7 sentinel creation in /ship.
+  # Mirrors Step 7 sentinel creation in /rig-ship.
   # Creates .rig-commit-ok in $rig_dir/memory/.
   local rig_dir="$1"
   touch "$rig_dir/memory/.rig-commit-ok"
@@ -993,14 +993,14 @@ _ship_create_commit_sentinel() {
   [[ -f "$rig_dir/memory/.rig-commit-ok" ]] || return 1
 }
 
-@test "ship sentinel: .rig-commit-ok absent before /ship creates it" {
+@test "ship sentinel: .rig-commit-ok absent before /rig-ship creates it" {
   local rig_dir="$TEMP_DIR/rig"
   mkdir -p "$rig_dir/memory"
 
   [[ ! -f "$rig_dir/memory/.rig-commit-ok" ]] || return 1
 }
 
-@test "ship sentinel: pre-tool sentinel check passes once sentinel is created by /ship" {
+@test "ship sentinel: pre-tool sentinel check passes once sentinel is created by /rig-ship" {
   local rig_dir="$TEMP_DIR/rig"
   mkdir -p "$rig_dir/memory"
 
@@ -1008,7 +1008,7 @@ _ship_create_commit_sentinel() {
   run _sentinel_check "Bash" "$rig_dir" "git commit -m 'test'"
   [ "$status" -ne 0 ]
 
-  # /ship creates the sentinel
+  # /rig-ship creates the sentinel
   _ship_create_commit_sentinel "$rig_dir"
 
   # Sentinel present → commit gate allows

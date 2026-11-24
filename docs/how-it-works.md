@@ -66,8 +66,8 @@ Three locations work together. The installer repo produces the other two:
 │       skill trigger table│  │  .rig/tasks/     ← backlog/active/│
 │                          │  │                    done            │
 │  ~/.claude/skills/       │  │  .claude/        ← hooks +        │
-│    ├─ debug.md           │  │                    commands        │
-│    ├─ code-review.md     │  │  .husky/         ← git hooks      │
+│    ├─ rig-debug-basics/  │  │                    commands        │
+│    ├─ rig-review-basics/ │  │  .husky/         ← git hooks      │
 │    ├─ refactor.md        │  │  .github/        ← PR + issue     │
 │    ├─ write-tests.md     │  │                    templates       │
 │    └─ explain.md         │  └───────────────────────────────────┘
@@ -711,13 +711,13 @@ It also errors when an installed task component has a missing task directory.
 The wrap, ship, and post-merge workflows resolve `$RIG_DIR` through `.rigpath`
 for external and stealth installs before reading or moving task files. With tasks
 omitted and shared memory installed, `/wrap` and `/post-merge` still update
-shared memory; `/ship` reports that
+shared memory; `/rig-ship` reports that
 task lifecycle is unavailable.
 
 ```
 $RIG_DIR/tasks/backlog/TASK_name.md    ← created by /task or /kickoff
         │
-        │  (user starts work via /run or /task)
+        │  (user starts work via /rig-run or /task)
         ▼
 $RIG_DIR/tasks/active/TASK_name.md     ← Status: active
         │                             ## Operating mode set (autonomy/check-ins/risk)
@@ -763,9 +763,9 @@ These are read only when a command is invoked or a workflow is followed:
 
 | File | Size | When |
 |---|---|---|
-| `ship.md` | ~10 KB | `/ship` command |
+| `rig-ship.md` | ~10 KB | `/rig-ship` command |
 | `wrap.md` | ~11 KB | `/wrap` command |
-| `SHIP_WORKFLOW.md` | ~10 KB | When `/ship` directs agent to follow it |
+| `SHIP_WORKFLOW.md` | ~10 KB | When `/rig-ship` directs agent to follow it |
 | `NEW_TASK_WORKFLOW.md` | ~6 KB | When starting a new task |
 | Active task file | ~1–3 KB | One per active task |
 | `PROGRESS.md` | variable | Only if CONTEXT_SNAPSHOT is absent or stale |
@@ -824,20 +824,20 @@ skills covering the full development lifecycle:
 | Command | Triggers | Key behaviour |
 |---|---|---|
 | `/task` | `NEW_TASK_WORKFLOW` | Three-part intake wizard: goal → autonomy/check-ins/risk/testing configuration → confirmation. Persists operating mode and test requirement in task file. |
-| `/run` | Task execution loop | Executes the active task respecting its stored operating mode. If `## Operating mode` is absent from the task file, surfaces an inline wizard to configure it before proceeding. Chains automatically at High autonomy. |
+| `/rig-run` | Task execution loop | Executes the active task respecting its stored operating mode. If `## Operating mode` is absent from the task file, surfaces an inline wizard to configure it before proceeding. Chains automatically at High autonomy. |
 | `/sprint` | Conflict-aware planner | Audits tracker evidence when available, previews conflict/dependency waves through `rig sprint ... --json`, requires a Dependency Surface Audit before launch, and resumes only from an explicit sprint ID. |
 
 ### Ship and debug
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/ship` | `SHIP_WORKFLOW` | Sequential hard gate: task confirm → issue → labels → branch/stale-main check → pre-commit cleanup (removes debug statements, runs linter, runs tests if required) → checklist → task-specific live validation and evidence → optional manual validation card → commit approval → commit → housekeeping → open or update PR → read-only final merge-boundary metadata review (`bin/rig pr review-metadata`; approved edits via REST) → merge of the reviewed head and verification |
-| `/debug` | `DEBUG_WORKFLOW` | Hypothesis before code, mandatory ERRORS.md entry |
+| `/rig-ship` | `SHIP_WORKFLOW` | Sequential hard gate: task confirm → issue → labels → branch/stale-main check → pre-commit cleanup (removes debug statements, runs linter, runs tests if required) → checklist → task-specific live validation and evidence → optional manual validation card → commit approval → commit → housekeeping → open or update PR → read-only final merge-boundary metadata review (`bin/rig pr review-metadata`; approved edits via REST) → merge of the reviewed head and verification |
+| `/rig-debug` | `DEBUG_WORKFLOW` | Hypothesis before code, mandatory ERRORS.md entry |
 
 ### Release
 | Command | Triggers | Key behaviour |
 |---|---|---|
 | `/pre-release-review` | Full review sweep | Covers regressions, test coverage, security, docs accuracy, maintainability, edge cases, and version bump readiness. Outputs a scored Markdown report with a SHIP / HOLD / SHIP WITH FIXES recommendation. |
-| `/code-review` | Rig review workflow | Reviews the current diff for bugs, regressions, risks, and missing tests before summary. |
+| `/rig-review` | Rig review workflow | Reviews the current diff for bugs, regressions, risks, and missing tests before summary. |
 | `/connector-preflight` | Connector verification | Checks MCP/app connector readiness before workflows rely on external tool access. |
 | `/handoff-checklist` | Handoff gate | Produces a durable handoff checklist when work must transfer between sessions or agents. |
 
@@ -852,10 +852,10 @@ skills covering the full development lifecycle:
 ### Orientation and docs
 | Command | Triggers | Key behaviour |
 |---|---|---|
-| `/status` | State dashboard | Shows current branch, active tasks (with goals), backlog count, recent PROGRESS entries, and any pending housekeeping flags. Fast alternative to loading full context files. |
+| `/rig-status` | State dashboard + health | Default: current branch, active tasks (with goals), backlog count, recent PROGRESS entries, pending housekeeping flags, and a one-line health verdict from `bin/rig doctor`. Fast alternative to loading full context files. `--health` runs the full check below. Replaces `/status`, which shadowed Claude Code's built-in `/status` panel (#714). |
 | `/doc-list` | Docs index | Reads `docs/INDEX.md` and displays the table. Use before loading a full doc file to identify which one covers what you need. |
 | `/rig-help` | Command reference | Prints all Rig commands with one-liner descriptions and key flags. Self-contained — no individual command files are loaded. |
-| `/rig-status` | Rig health dashboard | Runs provider-neutral status checks for hooks, memory, adapter wiring, and pending flags. |
+| `/rig-status --health` | Rig health check | Runs provider-neutral status checks for hooks, memory, adapter wiring, and pending flags. |
 
 ### Governance and housekeeping
 | Command | Triggers | Key behaviour |
@@ -871,7 +871,7 @@ skills covering the full development lifecycle:
 
 ## The autonomy system
 
-`/task` and `/run` support per-task operating mode configuration:
+`/task` and `/rig-run` support per-task operating mode configuration:
 
 | Setting | Options |
 |---|---|
@@ -880,7 +880,7 @@ skills covering the full development lifecycle:
 | **Risk tolerance** | Conservative · Balanced · Aggressive |
 
 The configuration is written to `## Operating mode` in the task file and persists
-across sessions. `/run` reads the stored mode and executes accordingly — chaining
+across sessions. `/rig-run` reads the stored mode and executes accordingly — chaining
 tasks without interruption at High autonomy, pausing between tasks at Medium and Low.
 
 Governance (protected paths, `/rig-propose` gate, pre-ship checklist) applies at all

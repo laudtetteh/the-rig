@@ -8,13 +8,13 @@ Common problems and how to fix them.
 
 ## 0. First: run the status adapter
 
-Before digging into a specific problem, run Claude `/rig-status` or Codex
-`$rig-status`. It checks hook files, memory files, provider wiring, and pending flags in one
+Before digging into a specific problem, run Claude `/rig-status --health` or Codex
+`$rig-status --health`. It checks hook files, memory files, provider wiring, and pending flags in one
 pass — and prints a ✓/✗ report with fix hints for anything broken.
 
 ```
-/rig-status   # Claude Code
-$rig-status   # Codex
+/rig-status --health   # Claude Code
+$rig-status --health   # Codex
 ```
 
 If the output is clean (0 issues), the problem is likely in how the agent
@@ -394,7 +394,7 @@ direct commit, set `housekeeping: pr-required` instead.
 **Cause:** On a case-insensitive filesystem, a direct `git branch -m` can resolve
 the old and new spellings to the same ref path.
 
-**Fix:** Use `/task` or `/ship`'s branch rename helper. It moves the branch through
+**Fix:** Use `/task` or `/rig-ship`'s branch rename helper. It moves the branch through
 a collision-checked `tmp/<slug>-rename` ref and then to the desired spelling. If the
 second move fails, it attempts to restore the original name and reports any retained
 temporary ref. A rename to a genuinely different existing branch remains an error.

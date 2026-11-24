@@ -69,7 +69,7 @@ kill_after() {
   [ "$status" -eq 0 ]
   local baseline; baseline="$(snapshot_tree)"
 
-  rm -f "$TEST_PROJECT/.claude/commands/status.md"
+  rm -f "$TEST_PROJECT/.claude/commands/rig-status.md"
   kill_after 0.5 bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking stealth --rig-dir "$TEST_RIGDIR" \
     --project-agent claude --strategy upgrade
@@ -94,7 +94,7 @@ kill_after() {
   # tests/test_upgrade_agent_contract.bats and tests/test_convergence_engine.bats.
   local manifest="$TEST_RIGDIR/memory/.rig-manifest"
   local rel f hash
-  for rel in CLAUDE.md .claude/commands/ship.md .claude/commands/post-merge.md; do
+  for rel in CLAUDE.md .claude/commands/rig-ship.md .claude/commands/post-merge.md; do
     f="$TEST_PROJECT/$rel"
     [ -f "$f" ] || continue
     hash="$(sha256sum "$f" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$f" | awk '{print $1}')"

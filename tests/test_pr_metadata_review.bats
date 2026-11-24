@@ -178,7 +178,7 @@ assert "Closes #12, #13" not in body
 }
 
 @test "ship command runs the read-only metadata review before merging the reviewed head" {
-  local ship="$BATS_TEST_DIRNAME/../templates/project/.claude/commands/ship.md"
+  local ship="$BATS_TEST_DIRNAME/../templates/project/.claude/commands/rig-ship.md"
   python3 - "$ship" <<'PY'
 import sys
 text = open(sys.argv[1]).read()

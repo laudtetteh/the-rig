@@ -1,16 +1,16 @@
-# Command: /code-review
+# Command: /rig-review
 
 Diff-focused review of the current branch: runs local validation first, then analyses the diff by category and produces a structured pass/fail report.
 
 ## Usage
 
 ```
-/code-review
-/code-review --fix    # apply suggested fixes after review
+/rig-review
+/rig-review --fix    # apply suggested fixes after review
 ```
 
 Lighter than `/pre-release-review` — scoped to the branch diff, not the full codebase.
-Use `/pre-release-review` before cutting a release; use `/code-review` during development.
+Use `/pre-release-review` before cutting a release; use `/rig-review` during development.
 
 ---
 
@@ -174,7 +174,7 @@ updated or validated.
 Output in this format:
 
 ```
-## /code-review report
+## /rig-review report
 
 **Branch:** <current>  **Base:** <BASE>  **Files changed:** N
 **Staging:** <staging-url or — N/A>  **Prod:** <prod-url or — N/A>
@@ -234,4 +234,4 @@ If `--fix` was passed: for each blocking finding in the report, propose a concre
 - Security findings are always blocking
 - Logic error findings are always blocking
 - Test coverage and style findings: surface them but mark the Verdict as HOLD only if the project's coding standards treat them as required
-- `/code-review` does not commit or push — it reviews and optionally fixes; use `/ship` to commit
+- `/rig-review` does not commit or push — it reviews and optionally fixes; use `/rig-ship` to commit

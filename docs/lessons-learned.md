@@ -302,3 +302,31 @@ rollback, or installer mutation paths still needs the policy-class fixture set
 and a live/adversarial pilot. The current reference measurement remains a
 ceiling, not an unblock: 5 of 16 files converge and 11 refuse as true
 overlapping edits.
+
+## 24. Rig command names silently replaced Claude Code built-ins, and `/ship` never loaded
+
+**Symptom**: Typing `/status` in a Rig project ran The Rig's dashboard prompt
+instead of Claude Code's built-in status panel. The request went to the model
+and failed on a billing error that the built-in panel would have diagnosed.
+`/code-review`, `/debug` and `/run` were replaced the same way. The Rig's
+`/ship` was never loaded at all: Claude Code's skill list showed only its own
+bundled `ship` skill, so `/ship` committed and pushed without the Rig's gates.
+
+**Root cause**: Claude Code lets a project or personal command/skill with the
+same name replace a built-in (its aliases still reach the built-in), and it
+refuses custom skills named `ship`, `ship-local` or `steward`. #121 fixed the
+same collision for `/rename` by renaming one file, but added no guard, so the
+class recurred as new commands were added (#192) and as Claude Code shipped
+new built-ins. A second gap made renames incomplete: the installer had no
+general way to retire a renamed file, so the v1.13.0 `/propose` rename still
+left `propose.md` installed downstream.
+
+**Fix**: #714 renamed the colliding commands and skills under a `rig-` prefix,
+added `installer/reserved-command-names.txt` (Claude Code docs plus Codex's
+`slash_command.rs`) with a Bats guard, retired unchanged old files on upgrade
+with backup and rollback, preserved customized copies with a warning, and
+added a `bin/rig doctor` check for leftovers.
+
+**Watch for**: Any new shipped command or skill name, and every upstream
+release audit: refresh the reserved list and let the guard fail first. A
+rename is not finished until upgrade retires the old file.

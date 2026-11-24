@@ -79,7 +79,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
   [[ "$output" == \{* ]] || return 1
   # Substring checks for drift-check narration (e.g. *"Options:"*) are NOT
   # safe here and were removed: this repo's own real command files
-  # (ship.md, rig-upgrade.md, rig-gaps.md) legitimately contain that exact
+  # (rig-ship.md, rig-upgrade.md, rig-gaps.md) legitimately contain that exact
   # text, and a classified-file diff can embed their content directly in
   # the JSON's "current"/"incoming" fields -- a real, valid single-line
   # JSON document can coincidentally contain any of these substrings

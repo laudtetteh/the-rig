@@ -1,7 +1,7 @@
-# Skill: debug
+# Skill: rig-debug-basics
 
 > Triggered by: "why is this broken"
-> Installed at: `~/.claude/skills/debug.md`
+> Installed at: `~/.claude/skills/rig-debug-basics.md`
 
 When asked why something is broken, follow this process exactly.
 Do not skip steps. Do not fix before understanding.

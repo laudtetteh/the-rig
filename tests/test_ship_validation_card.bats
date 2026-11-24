@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
-SHIP_COMMAND="$REPO_ROOT/templates/project/.claude/commands/ship.md"
+SHIP_COMMAND="$REPO_ROOT/templates/project/.claude/commands/rig-ship.md"
 SHIP_WORKFLOW="$REPO_ROOT/templates/project/.rig/processes/SHIP_WORKFLOW.md"
 
 @test "ship command derives bounded live steps with complete card fields" {

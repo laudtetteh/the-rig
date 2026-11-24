@@ -14,8 +14,8 @@ setup() {
   printf '{"hooks":{}}\n' > "$CASE_DIR/.claude/settings.json"
   printf 'issue-tracking: none\n' > "$CASE_DIR/CLAUDE.md"
   printf 'issue-tracking: github\nissue-tracking: linear\nissue-tracking: trello\nissue-tracking: gus\nissue-tracking: none\n' > "$CASE_DIR/.claude/commands/task.md"
-  cp "$CASE_DIR/.claude/commands/task.md" "$CASE_DIR/.claude/commands/ship.md"
-  printf 'hash .claude/commands/task.md\nhash .claude/commands/ship.md\n' > "$CASE_DIR/.rig/memory/.rig-manifest"
+  cp "$CASE_DIR/.claude/commands/task.md" "$CASE_DIR/.claude/commands/rig-ship.md"
+  printf 'hash .claude/commands/task.md\nhash .claude/commands/rig-ship.md\n' > "$CASE_DIR/.rig/memory/.rig-manifest"
   local launcher
   for launcher in "$CASE_DIR"/bin/*; do
     printf 'hash bin/%s\n' "${launcher##*/}" >> "$CASE_DIR/.rig/memory/.rig-manifest"
@@ -69,7 +69,7 @@ PY
 
 @test "doctor refuses named pipes in every content-reading skill surface" {
   make_generated_skill task
-  make_generated_skill ship
+  make_generated_skill rig-ship
   mkdir -p "$CASE_DIR/.claude/skills/copied" "$CASE_DIR/.agents/skills/copied"
   printf 'source\n' > "$CASE_DIR/.claude/skills/copied/SKILL.md"
   printf 'mirror\n' > "$CASE_DIR/.agents/skills/copied/SKILL.md"
@@ -91,7 +91,7 @@ PY
 
 @test "doctor parity repair returns a refusal instead of blocking on a named pipe" {
   make_generated_skill task
-  make_generated_skill ship
+  make_generated_skill rig-ship
   mv "$CASE_DIR/.agents/skills/task/SKILL.md" "$BATS_TEST_TMPDIR/original-wrapper"
   mkfifo "$CASE_DIR/.agents/skills/task/SKILL.md"
   run python3 - "$CASE_DIR" <<'PY'
@@ -118,7 +118,7 @@ PY
 
 @test "doctor refuses symlinked copied skill directories before reading outside content" {
   make_generated_skill task
-  make_generated_skill ship
+  make_generated_skill rig-ship
   mkdir -p "$BATS_TEST_TMPDIR/outside" "$CASE_DIR/.claude/skills" "$CASE_DIR/.agents/skills/copied"
   printf 'outside content\n' > "$BATS_TEST_TMPDIR/outside/SKILL.md"
   printf 'mirror content\n' > "$CASE_DIR/.agents/skills/copied/SKILL.md"
@@ -149,7 +149,7 @@ PY
 }
 
 @test "doctor skips dependent tracker guidance when command sources are missing" {
-  rm "$CASE_DIR/.claude/commands/task.md" "$CASE_DIR/.claude/commands/ship.md"
+  rm "$CASE_DIR/.claude/commands/task.md" "$CASE_DIR/.claude/commands/rig-ship.md"
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["claude_commands"]["state"]=="fail"; assert c["tracker_command_guidance"]["state"]=="skipped" and "task.md" in c["tracker_command_guidance"]["detail"]'
@@ -165,7 +165,7 @@ PY
 @test "doctor accepts a custom tracker and checks its commit references" {
   printf "issue-tracking: Jira # team\nissue-ref-pattern: '[A-Z]+-[0-9]+'\n" > "$CASE_DIR/CLAUDE.md"
   printf 'issue-ref-pattern:\n' >> "$CASE_DIR/.claude/commands/task.md"
-  printf 'issue-ref-pattern:\n' >> "$CASE_DIR/.claude/commands/ship.md"
+  printf 'issue-ref-pattern:\n' >> "$CASE_DIR/.claude/commands/rig-ship.md"
   git -C "$CASE_DIR" -c user.name=Test -c user.email=test@example.test -c core.hooksPath=/dev/null commit --allow-empty -qm 'feat: valid [APP-123]'
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
@@ -186,7 +186,7 @@ PY
 
 @test "legacy manifest requires Claude settings when target metadata is absent or malformed" {
   rm "$CASE_DIR/.claude/settings.json"
-  printf 'hash .claude/settings.json\nhash .claude/commands/task.md\nhash .claude/commands/ship.md\n' > "$CASE_DIR/.rig/memory/.rig-manifest"
+  printf 'hash .claude/settings.json\nhash .claude/commands/task.md\nhash .claude/commands/rig-ship.md\n' > "$CASE_DIR/.rig/memory/.rig-manifest"
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["settings_json"]["state"]=="fail" and ".claude/settings.json" in c["settings_json"]["detail"]; assert c["claude_commands"]["state"]=="pass"'
@@ -211,7 +211,7 @@ PY
   printf '{"schema_version":1,"agents":["codex"]}\n' > "$CASE_DIR/.rig/install-targets.json"
   rm "$CASE_DIR/.rig/memory/.rig-manifest"
   make_generated_skill task
-  make_generated_skill ship
+  make_generated_skill rig-ship
   mkdir -p "$CASE_DIR/.codex"
   printf 'project_doc_fallback_filenames = ["CLAUDE.md"]\n' > "$CASE_DIR/.codex/config.toml"
   mkdir -p "$CASE_DIR/.agents/skills/extra"
@@ -228,11 +228,11 @@ PY
 
 @test "absent target metadata and manifests leave extra Codex inventory unverified" {
   make_generated_skill task
-  make_generated_skill ship
+  make_generated_skill rig-ship
   rm "$CASE_DIR/.rig/memory/.rig-manifest"
-  mkdir -p "$CASE_DIR/.agents/skills/status/references"
-  printf '%s\n' '---' 'name: status' '---' > "$CASE_DIR/.agents/skills/status/SKILL.md"
-  printf 'status\n' > "$CASE_DIR/.agents/skills/status/references/command.md"
+  mkdir -p "$CASE_DIR/.agents/skills/rig-status/references"
+  printf '%s\n' '---' 'name: rig-status' '---' > "$CASE_DIR/.agents/skills/rig-status/SKILL.md"
+  printf 'status\n' > "$CASE_DIR/.agents/skills/rig-status/references/command.md"
 
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
@@ -264,7 +264,7 @@ PY
 
 @test "invalid settings and missing manifest command fail diagnostically" {
   printf '{bad\n' > "$CASE_DIR/.claude/settings.json"
-  rm "$CASE_DIR/.claude/commands/ship.md"
+  rm "$CASE_DIR/.claude/commands/rig-ship.md"
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); failed={x["name"] for x in d["checks"] if not x["ok"]}; assert {"settings_json","claude_commands"} <= failed'
@@ -273,12 +273,12 @@ PY
 
 @test "stealth path validates exclusions and future Codex paths only when detected" {
   local external="$BATS_TEST_TMPDIR/external-rig"
-  mkdir -p "$external/memory" "$CASE_DIR/.agents/skills/task" "$CASE_DIR/.agents/skills/ship"
+  mkdir -p "$external/memory" "$CASE_DIR/.agents/skills/task" "$CASE_DIR/.agents/skills/rig-ship"
   cp "$CASE_DIR/.rig/memory/.rig-manifest" "$external/memory/.rig-manifest"
   printf '%s\n' "$external" > "$CASE_DIR/.rigpath"
   printf 'CLAUDE.md\nPROJECT_BRIEF.md\n.claude/\n.rigpath\n' > "$CASE_DIR/.git/info/exclude"
   make_generated_skill task
-  make_generated_skill ship
+  make_generated_skill rig-ship
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert not c["stealth_exclusions"]["ok"] and ".agents" in c["stealth_exclusions"]["detail"]; assert c["codex_skill_parity"]["ok"]'
@@ -493,11 +493,11 @@ PY
 @test "Codex skill parity compares generated content with provider invocation and base-branch transforms" {
   printf 'base-branch: main\nissue-tracking: none\n' > "$CASE_DIR/CLAUDE.md"
   printf '# /task on [BASE_BRANCH]; use /rig-gaps; keep /not-a-rig-command\nissue-tracking: none\n' > "$CASE_DIR/.claude/commands/task.md"
-  printf '# /ship on [BASE_BRANCH]\nissue-tracking: none\n' > "$CASE_DIR/.claude/commands/ship.md"
+  printf '# /rig-ship on [BASE_BRANCH]\nissue-tracking: none\n' > "$CASE_DIR/.claude/commands/rig-ship.md"
   make_generated_skill task
-  make_generated_skill ship
+  make_generated_skill rig-ship
   printf '# $task on main; use $rig-gaps; keep /not-a-rig-command\nissue-tracking: none\n' > "$CASE_DIR/.agents/skills/task/references/command.md"
-  printf '# $ship on main\nissue-tracking: none\n' > "$CASE_DIR/.agents/skills/ship/references/command.md"
+  printf '# $rig-ship on main\nissue-tracking: none\n' > "$CASE_DIR/.agents/skills/rig-ship/references/command.md"
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="pass"'
@@ -508,13 +508,13 @@ PY
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="fail" and "task" in c["detail"]'
   printf '# $task on main; use $rig-gaps; keep /not-a-rig-command\nissue-tracking: none\n' > "$CASE_DIR/.agents/skills/task/references/command.md"
 
-  printf '\nPARITY-DRIFT-CANARY\n' >> "$CASE_DIR/.claude/commands/ship.md"
+  printf '\nPARITY-DRIFT-CANARY\n' >> "$CASE_DIR/.claude/commands/rig-ship.md"
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="fail" and "ship" in c["detail"]'
 
-  printf '# /ship on [BASE_BRANCH]\nissue-tracking: none\n' > "$CASE_DIR/.claude/commands/ship.md"
-  printf '\nPARITY-DRIFT-CANARY\n' >> "$CASE_DIR/.agents/skills/ship/SKILL.md"
+  printf '# /rig-ship on [BASE_BRANCH]\nissue-tracking: none\n' > "$CASE_DIR/.claude/commands/rig-ship.md"
+  printf '\nPARITY-DRIFT-CANARY\n' >> "$CASE_DIR/.agents/skills/rig-ship/SKILL.md"
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="fail" and "ship" in c["detail"] and "wrapper" in c["detail"]'
@@ -522,7 +522,7 @@ PY
 
 @test "Codex parity accepts a copied Claude skill as an intentional extra" {
   make_generated_skill task
-  make_generated_skill ship
+  make_generated_skill rig-ship
   mkdir -p "$CASE_DIR/.claude/skills/custom" "$CASE_DIR/.agents/skills/custom" \
     "$CASE_DIR/.claude/skills/assets" "$CASE_DIR/.agents/skills/assets"
   printf '%s\n' '---' 'name: custom' '---' > "$CASE_DIR/.claude/skills/custom/SKILL.md"
@@ -541,7 +541,7 @@ PY
 
 @test "copied Claude skill names are not allowed slash-command rewrites" {
   make_generated_skill task
-  make_generated_skill ship
+  make_generated_skill rig-ship
   mkdir -p "$CASE_DIR/.claude/skills/foo" "$CASE_DIR/.agents/skills/foo"
   printf 'copied skill\n' > "$CASE_DIR/.claude/skills/foo/SKILL.md"
   cp "$CASE_DIR/.claude/skills/foo/SKILL.md" "$CASE_DIR/.agents/skills/foo/SKILL.md"
@@ -556,7 +556,7 @@ PY
 @test "Codex parity is advisory when a generator base branch is unknowable" {
   printf '/task on [BASE_BRANCH]\nissue-tracking: none\n' > "$CASE_DIR/.claude/commands/task.md"
   make_generated_skill task
-  make_generated_skill ship
+  make_generated_skill rig-ship
   printf '$task on main\nissue-tracking: none\n' > "$CASE_DIR/.agents/skills/task/references/command.md"
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
@@ -570,16 +570,16 @@ PY
   printf '%s\n' "$external" > "$CASE_DIR/.rigpath"
   printf 'CLAUDE.md\nPROJECT_BRIEF.md\n.claude/\n.agents/\n.rigpath\n' > "$CASE_DIR/.git/info/exclude"
   make_generated_skill task
-  make_generated_skill ship
-  printf '\nPARITY-DRIFT-CANARY\n' >> "$CASE_DIR/.agents/skills/ship/references/command.md"
+  make_generated_skill rig-ship
+  printf '\nPARITY-DRIFT-CANARY\n' >> "$CASE_DIR/.agents/skills/rig-ship/references/command.md"
   local before_source before_reference
-  before_source="$(cksum "$CASE_DIR/.claude/commands/ship.md")"
-  before_reference="$(cksum "$CASE_DIR/.agents/skills/ship/references/command.md")"
+  before_source="$(cksum "$CASE_DIR/.claude/commands/rig-ship.md")"
+  before_reference="$(cksum "$CASE_DIR/.agents/skills/rig-ship/references/command.md")"
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="codex_skill_parity"); assert c["state"]=="fail" and "ship" in c["detail"]'
-  [ "$before_source" = "$(cksum "$CASE_DIR/.claude/commands/ship.md")" ]
-  [ "$before_reference" = "$(cksum "$CASE_DIR/.agents/skills/ship/references/command.md")" ]
+  [ "$before_source" = "$(cksum "$CASE_DIR/.claude/commands/rig-ship.md")" ]
+  [ "$before_reference" = "$(cksum "$CASE_DIR/.agents/skills/rig-ship/references/command.md")" ]
 }
 
 @test "Codex target requires an effective project instruction source" {
@@ -626,13 +626,13 @@ PY
 
 @test "Codex runtime doctor passes after target infrastructure and current-thread binding exist" {
   printf '{"schema_version":1,"agents":["claude","codex"]}\n' > "$CASE_DIR/.rig/install-targets.json"
-  mkdir -p "$CASE_DIR/.codex/hooks" "$CASE_DIR/.agents/skills/task" "$CASE_DIR/.agents/skills/ship"
+  mkdir -p "$CASE_DIR/.codex/hooks" "$CASE_DIR/.agents/skills/task" "$CASE_DIR/.agents/skills/rig-ship"
   printf '{"hooks":{}}\n' > "$CASE_DIR/.codex/hooks.json"
   printf 'project_doc_fallback_filenames = ["CLAUDE.md"]\n' > "$CASE_DIR/.codex/config.toml"
   printf '#!/usr/bin/env bash\n' > "$CASE_DIR/.codex/hooks/rig-adapter.sh"
   chmod +x "$CASE_DIR/.codex/hooks/rig-adapter.sh"
   make_generated_skill task
-  make_generated_skill ship
+  make_generated_skill rig-ship
 
   run env CODEX_THREAD_ID=doctor-thread "$CASE_DIR/bin/rig" session retrofit --agent codex --from-env --source resume --json
   [ "$status" -eq 0 ]
@@ -856,21 +856,21 @@ EOF
 }
 
 @test "manifest mode/hash drift is detected for rig-owned entries only" {
-  printf 'edited\n' > "$CASE_DIR/.claude/commands/ship.md"
+  printf 'edited\n' > "$CASE_DIR/.claude/commands/rig-ship.md"
   local good_hash; good_hash="$(python3 -c "import hashlib; print(hashlib.sha256(open('$CASE_DIR/.claude/commands/task.md','rb').read()).hexdigest())")"
   cat > "$CASE_DIR/.rig/memory/.rig-manifest.json" <<EOF
 {
   "schema_version": 1,
   "entries": {
     ".claude/commands/task.md": {"sha256": "$good_hash", "owner": "rig", "mode": "644"},
-    ".claude/commands/ship.md": {"sha256": "0000000000000000000000000000000000000000000000000000000000000000", "owner": "rig", "mode": "644"},
+    ".claude/commands/rig-ship.md": {"sha256": "0000000000000000000000000000000000000000000000000000000000000000", "owner": "rig", "mode": "644"},
     "CLAUDE.md": {"sha256": "irrelevant-because-user-owned", "owner": "user", "mode": "644"}
   }
 }
 EOF
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 1 ]
-  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="manifest_mode_hash"); assert not c["ok"] and "ship.md" in c["detail"] and "hash mismatch" in c["detail"] and "CLAUDE.md" not in c["detail"]'
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c=next(x for x in d["checks"] if x["name"]=="manifest_mode_hash"); assert not c["ok"] and "rig-ship.md" in c["detail"] and "hash mismatch" in c["detail"] and "CLAUDE.md" not in c["detail"]'
 }
 
 @test "manifest mode/hash gate fails instead of vacuously passing when entries exist but none are Rig-owned (retro-audit finding, PR #450)" {

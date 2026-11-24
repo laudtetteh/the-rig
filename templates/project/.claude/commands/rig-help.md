@@ -17,9 +17,9 @@ No arguments. Output the table below directly — do not read individual command
 | Command | What it does |
 |---|---|
 | `/task` | Start a new unit of work. Runs the intake wizard: goal, area, constraints, issue number, operating mode (autonomy / check-ins / risk). Creates a task file in `.rig/tasks/`. |
-| `/run` | Work through the task backlog. Surveys ready tasks, proposes an execution order, and drives them to completion in the configured autonomy mode. Accepts an optional `[task-slug]` to run one specific task. Surfaces the operating mode wizard if `## Operating mode` is absent from the task file. |
-| `/ship` | Commit and close a task. Sequential hard gate: task ID → issue → labels → branch → pre-commit cleanup → checklist → dependency impact → testing pause → commit message → commit → post-housekeeping → PR → final merge-boundary metadata review → merge verification when authorized. |
-| `/sprint` | Audit, plan, resume, and coordinate a batch of tasks. Select task slugs, issue refs, or `--all`, and choose `audit-only`, `plan-only`, `repair-and-plan`, or `resume` mode. Use `/run` to execute an individual task. |
+| `/rig-run` | Work through the task backlog. Surveys ready tasks, proposes an execution order, and drives them to completion in the configured autonomy mode. Accepts an optional `[task-slug]` to run one specific task. Surfaces the operating mode wizard if `## Operating mode` is absent from the task file. |
+| `/rig-ship` | Commit and close a task. Sequential hard gate: task ID → issue → labels → branch → pre-commit cleanup → checklist → dependency impact → testing pause → commit message → commit → post-housekeeping → PR → final merge-boundary metadata review → merge verification when authorized. |
+| `/sprint` | Audit, plan, resume, and coordinate a batch of tasks. Select task slugs, issue refs, or `--all`, and choose `audit-only`, `plan-only`, `repair-and-plan`, or `resume` mode. Use `/rig-run` to execute an individual task. |
 
 ## Session management
 
@@ -28,8 +28,7 @@ No arguments. Output the table below directly — do not read individual command
 | `/wrap` | End a session. Writes `CONTEXT_SNAPSHOT.md`, expands `PROGRESS.md` stubs, captures in-flight task state, names the session. Use `/wrap --checkpoint` to save memory and handoffs while the exact session remains active; a later ordinary wrap still finalizes. |
 | `/handoff-checklist` | Consent-gated wrap-and-handoff routine for large or costly sessions. Asks before doing any checklist work. |
 | `/post-merge` | Post-merge housekeeping. Fetches the base branch and verifies each exact merge SHA before logging the PR to `PROGRESS.md`, moving the task file to done, refreshing `CONTEXT_SNAPSHOT.md`, checking feature doc freshness, and surfacing what's next. A clean base checkout is fast-forwarded only when tracked housekeeping needs it. |
-| `/status` | Project state dashboard. Shows current branch, active tasks, backlog count, and recent `PROGRESS.md` entries. |
-| `/rig-status` | Check Rig installation health, versions, and local state without changing the project. |
+| `/rig-status` | Project state dashboard: current branch, active tasks, backlog count, recent `PROGRESS.md` entries, pending flags, and a one-line health verdict. Add `--health` for the full installation health check (hooks, memory, settings, flags). Read-only. Use Claude Code's built-in `/status` for version, model and account details. |
 | `/session-name` | Derive and set a session name from work completed so far. Uses the same tiered format as `/wrap` and `/post-merge` but callable at any time without triggering a full cycle. |
 | `bin/rig session index` | Search Rig session records across the current project, immediate configured project-root projects (legacy `~/code/` fallback), and external `~/.rig/projects/` directories. Use `--root PROJECT` for another location. The index is read-only, reports coverage and ambiguity, and never scans provider transcripts. |
 | `bin/rig session archive` | Preview stale v1 records by exact anchor, confirm a content-bound token to archive, or preview and confirm byte-exact restore. `session index --stale` reports evidence. Active records require explicit acknowledgement; archives stay in the current project's Rig memory. |
@@ -59,8 +58,8 @@ Check the installed CLI's help if a native control is unavailable. See the [Clau
 
 | Command | What it does |
 |---|---|
-| `/debug` | Structured diagnosis. Hypothesis → reproduce → isolate → fix → log in `ERRORS.md`. No code touched until the bug is reproduced. |
-| `/code-review` | Diff-focused review of the current branch. Runs tests + lint (from `test-command:`/`lint-command:` in CLAUDE.md), analyses the diff by category (logic, security, coverage, dependency impact, style), and produces a structured LGTM/HOLD report. Playwright opt-in via `testing: playwright`. |
+| `/rig-debug` | Structured diagnosis. Hypothesis → reproduce → isolate → fix → log in `ERRORS.md`. No code touched until the bug is reproduced. |
+| `/rig-review` | Diff-focused review of the current branch. Runs tests + lint (from `test-command:`/`lint-command:` in CLAUDE.md), analyses the diff by category (logic, security, coverage, dependency impact, style), and produces a structured LGTM/HOLD report. Playwright opt-in via `testing: playwright`. |
 
 ## Release
 

@@ -1,4 +1,4 @@
-# Command: /debug
+# Command: /rig-debug
 
 Trigger this command when something is broken and you need structured diagnosis.
 
@@ -15,7 +15,7 @@ Follows `.rig/processes/DEBUG_WORKFLOW.md`:
 ## Usage
 
 ```
-/debug
+/rig-debug
 ```
 
 > **RIG_DIR resolution (stealth mode):** Before writing to `.rig/memory/ERRORS.md`
@@ -43,4 +43,4 @@ Then it follows DEBUG_WORKFLOW systematically — hypothesis first, smallest fix
 
 - No code is touched until the bug can be reproduced (Step 1 of DEBUG_WORKFLOW)
 - If the fix requires a larger refactor, a minimal patch is applied first and a separate task is opened for the refactor
-- Every `/debug` session ends with a `.rig/memory/ERRORS.md` entry — even if the bug turns out to be trivial
+- Every `/rig-debug` session ends with a `.rig/memory/ERRORS.md` entry — even if the bug turns out to be trivial

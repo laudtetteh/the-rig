@@ -2219,7 +2219,12 @@ else:
 # Command guidance is checked separately from repository history: command files
 # must describe the selected tracker, while commits use the generic reference
 # syntax. PR titles are not required to carry commit-only [#N] suffixes.
-guidance_paths = [command_dir / "task.md", command_dir / "ship.md"]
+# rig-ship.md replaced ship.md in #714; fall back to the old file only when a
+# preserved customized copy is the only ship guidance present.
+ship_guidance = command_dir / "rig-ship.md"
+if not ship_guidance.is_file() and (command_dir / "ship.md").is_file():
+    ship_guidance = command_dir / "ship.md"
+guidance_paths = [command_dir / "task.md", ship_guidance]
 tokens = {"github": "issue-tracking: github", "linear": "issue-tracking: linear",
           "trello": "issue-tracking: trello", "gus": "issue-tracking: gus", "none": "issue-tracking: none"}
 if not tracker_valid:
@@ -2232,7 +2237,64 @@ else:
     guidance_token = tokens.get(tracker, "issue-ref-pattern:")
     check("tracker_command_guidance", guidance_token in guidance,
           f"command guidance covers {tracker}" if guidance_token in guidance else f"command guidance missing {tracker}",
-          fix="grep -En 'issue-ref-pattern:|issue-tracking:' .claude/commands/task.md .claude/commands/ship.md")
+          fix="grep -En 'issue-ref-pattern:|issue-tracking:' .claude/commands/task.md .claude/commands/rig-ship.md")
+
+# Rig commands renamed in #714 because Claude Code built-ins replace or refuse
+# them. A leftover copy (customized and preserved by upgrade, reinstalled by a
+# non-upgrade strategy, or user-made) keeps shadowing the built-in in Claude;
+# in Codex it is only a stale duplicate, so Codex leftovers are advisory.
+retired_rig_names = {"status": "/rig-status", "code-review": "/rig-review", "debug": "/rig-debug",
+                     "run": "/rig-run", "ship": "/rig-ship"}
+home = pathlib.Path(os.path.expanduser("~"))
+claude_leftovers, codex_leftovers = [], []
+for name in sorted(retired_rig_names):
+    for candidate in (command_dir / f"{name}.md", root / ".claude" / "skills" / name / "SKILL.md",
+                      home / ".claude" / "commands" / f"{name}.md", home / ".claude" / "skills" / name / "SKILL.md"):
+        if candidate.is_file():
+            claude_leftovers.append((name, candidate))
+    for candidate in (root / ".agents" / "skills" / name / "SKILL.md", home / ".agents" / "skills" / name / "SKILL.md"):
+        if candidate.is_file():
+            codex_leftovers.append((name, candidate))
+def global_manifest_paths(path):
+    paths = set()
+    for line in read(path).splitlines() if path.is_file() else []:
+        fields = line.split(None, 1)
+        if len(fields) == 2:
+            paths.add(fields[1])
+    return paths
+claude_global_manifest = global_manifest_paths(home / ".claude" / ".rig-global-manifest")
+def rig_installed_leftover(path):
+    """True when a Rig manifest records this path, i.e. Rig put it there."""
+    try:
+        return str(path.relative_to(root)) in manifest_paths
+    except ValueError:
+        try:
+            return str(path.relative_to(home / ".claude")) in claude_global_manifest
+        except ValueError:
+            return False
+# Only Rig-installed leftovers fail: a file the user wrote to override a
+# built-in on purpose is reported, but never blocks doctor.
+user_leftovers = [(n, p) for n, p in claude_leftovers if not rig_installed_leftover(p)]
+claude_leftovers = [(n, p) for n, p in claude_leftovers if rig_installed_leftover(p)]
+codex_leftovers = user_leftovers + codex_leftovers
+def describe_leftover(name, path):
+    try:
+        shown = str(path.relative_to(root))
+    except ValueError:
+        shown = "~/" + str(path.relative_to(home))
+    return f"{shown} (use {retired_rig_names[name]})"
+if claude_leftovers:
+    check("retired_command_names", False,
+          "Claude Code built-ins are shadowed or refused by: " + ", ".join(describe_leftover(n, p) for n, p in claude_leftovers),
+          fix="move any customizations into the rig- named file, then delete the listed files")
+elif codex_leftovers:
+    check("retired_command_names", True,
+          "old command names not installed by Rig (a user-owned Claude file still replaces the built-in; "
+          "delete it unless intended) or stale Codex skills: "
+          + ", ".join(describe_leftover(n, p) for n, p in codex_leftovers),
+          state=ADVISORY)
+else:
+    check("retired_command_names", True, "no retired command names installed")
 
 if not tracker_valid:
     check("recent_commit_references", True, "requires a valid issue-tracking setting", state=SKIPPED)
@@ -3916,6 +3978,10 @@ def load_allowed_change_paths():
 ALLOWED_PROJECT_PATHS, ALLOWED_RIG_PATHS = load_allowed_change_paths()
 LEGACY_DELETED_RIG_PATHS = {
     ".claude/hooks/session-end.sh",
+    # Commands renamed in #714; install.sh RENAMED_RIG_ARTIFACTS retires them.
+    *(f".claude/commands/{name}.md" for name in ("status", "code-review", "debug", "run", "ship")),
+    *(f".agents/skills/{name}/{leaf}" for name in ("status", "code-review", "debug", "run", "ship")
+      for leaf in ("SKILL.md", "references/command.md")),
 }
 
 

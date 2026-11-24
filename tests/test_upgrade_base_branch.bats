@@ -6,7 +6,7 @@
 # already configured in CLAUDE.md (`base-branch:`), not whatever origin/HEAD
 # happens to point at. Before #659 the installer derived the value only from
 # --base-branch, then origin/HEAD, then `main`, so a project configured for
-# `develop` whose origin/HEAD pointed at `main` had post-merge.md, ship.md,
+# `develop` whose origin/HEAD pointed at `main` had post-merge.md, rig-ship.md,
 # POST_MERGE_WORKFLOW.md, SHIP_WORKFLOW.md and the generated Codex skills
 # rewritten to `main` by both agent-upgrade and the classic upgrade. Branch
 # names were also sanitized with `tr -dc`, silently turning `release/v2`
@@ -59,19 +59,19 @@ assert_base_branch_kept() {
   local base="$1" rig f
   rig="$(rig_dir)"
   for f in "$TEST_PROJECT/.claude/commands/post-merge.md" \
-           "$TEST_PROJECT/.claude/commands/ship.md" \
+           "$TEST_PROJECT/.claude/commands/rig-ship.md" \
            "$rig/processes/POST_MERGE_WORKFLOW.md" \
            "$rig/processes/SHIP_WORKFLOW.md" \
-           "$TEST_PROJECT/.agents/skills/ship/references/command.md" \
+           "$TEST_PROJECT/.agents/skills/rig-ship/references/command.md" \
            "$TEST_PROJECT/.agents/skills/post-merge/references/command.md"; do
     [ -f "$f" ] || { echo "missing: $f"; return 1; }
     grep -Fq -- "$base" "$f" || { echo "lost base '$base': $f"; return 1; }
     if grep -Fq -- '[BASE_BRANCH]' "$f"; then echo "unsubstituted: $f"; return 1; fi
   done
-  grep -Fq -- "--base $base" "$TEST_PROJECT/.claude/commands/ship.md"
+  grep -Fq -- "--base $base" "$TEST_PROJECT/.claude/commands/rig-ship.md"
   grep -Fq -- "--base $base" "$rig/processes/SHIP_WORKFLOW.md"
-  if grep -Fq -- '--base main' "$TEST_PROJECT/.claude/commands/ship.md"; then
-    echo "ship.md was rewritten to --base main"; return 1
+  if grep -Fq -- '--base main' "$TEST_PROJECT/.claude/commands/rig-ship.md"; then
+    echo "rig-ship.md was rewritten to --base main"; return 1
   fi
 }
 
@@ -129,7 +129,7 @@ assert not doc.get("conflicts"), doc.get("conflicts")
   [[ "$output" == *"Update base-branch: in $TEST_PROJECT/CLAUDE.md to trunk"* ]] || return 1
   # CLAUDE.md is user-owned: warned about, never rewritten.
   grep -q '^base-branch: develop$' "$TEST_PROJECT/CLAUDE.md"
-  grep -Fq -- '--base trunk' "$TEST_PROJECT/.claude/commands/ship.md"
+  grep -Fq -- '--base trunk' "$TEST_PROJECT/.claude/commands/rig-ship.md"
 }
 
 @test "agent plan and upgrade report a configured base branch split as JSON" {
@@ -156,12 +156,12 @@ assert doc["warnings"] == [{
     [ "$status" -eq 0 ] || { printf '%s\n' "$output"; return 1; }
   done
   grep -q '^base-branch: develop$' "$TEST_PROJECT/CLAUDE.md"
-  grep -Fq -- '--base trunk' "$TEST_PROJECT/.claude/commands/ship.md"
+  grep -Fq -- '--base trunk' "$TEST_PROJECT/.claude/commands/rig-ship.md"
 }
 
 @test "upgrade refuses a CLAUDE.md that sets base-branch more than once" {
   install_project repo develop
-  cp "$TEST_PROJECT/.claude/commands/ship.md" "$TEMP_DIR/ship.before"
+  cp "$TEST_PROJECT/.claude/commands/rig-ship.md" "$TEMP_DIR/ship.before"
   local lines
   for lines in $'base-branch: develop\nbase-branch: main\n' \
                $'base-branch: develop\nbase-branch:\n' \
@@ -170,7 +170,7 @@ assert doc["warnings"] == [{
     upgrade_project upgrade
     [ "$status" -ne 0 ]
     [[ "$output" == *"sets base-branch: more than once"* ]] || return 1
-    cmp -s "$TEMP_DIR/ship.before" "$TEST_PROJECT/.claude/commands/ship.md"
+    cmp -s "$TEMP_DIR/ship.before" "$TEST_PROJECT/.claude/commands/rig-ship.md"
   done
 }
 
@@ -194,7 +194,7 @@ assert doc["warnings"] == [{
       --project-name Test --base-branch "$bad" --tracking repo --strategy merge </dev/null
     [ "$status" -ne 0 ] || { echo "accepted: $bad"; return 1; }
     [[ "$output" == *"Unsupported base branch name"* ]] || { echo "no error for: $bad"; return 1; }
-    [ ! -f "$TEST_PROJECT/.claude/commands/ship.md" ] || { echo "installed for: $bad"; return 1; }
+    [ ! -f "$TEST_PROJECT/.claude/commands/rig-ship.md" ] || { echo "installed for: $bad"; return 1; }
   done
 }
 

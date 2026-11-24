@@ -33,7 +33,7 @@ evidence_errors_logged() {
   [[ -f "$RIG_DIR/memory/ERRORS.md" ]] &&
     grep -Eq '^## \[[0-9]{4}-[0-9]{2}-[0-9]{2}\] — ' "$RIG_DIR/memory/ERRORS.md" 2>/dev/null
 }
-suppress_debug() { ! tip_command_available debug || tip_command_already_used debug; }
+suppress_debug() { ! tip_command_available rig-debug || tip_command_already_used rig-debug; }
 
 evidence_gaps_logged() {
   [[ -f "$RIG_DIR/memory/RIG_GAPS.md" ]] &&
@@ -76,7 +76,7 @@ evidence_reviewable_branch() {
   ahead=$(git -C "$REPO" rev-list --count "$base..HEAD" 2>/dev/null || printf '0')
   [[ "$ahead" =~ ^[0-9]+$ ]] && [[ "$ahead" -ge 2 ]]
 }
-suppress_code_review() { ! tip_command_available code-review || tip_command_already_used code-review; }
+suppress_code_review() { ! tip_command_available rig-review || tip_command_already_used rig-review; }
 
 evidence_sprint() {
   [[ -f "$RIG_DIR/memory/PROGRESS.md" ]] || return 1
@@ -111,9 +111,9 @@ suppress_project_docs_without_index() { [[ -f "$REPO/docs/INDEX.md" ]]; }
 
 tip_catalog() {
   cat <<'CATALOG'
-100|debug-errors|evidence_errors_logged|suppress_debug|Rig tip (workflow): ERRORS.md contains a recorded failure. Run /debug to investigate the observed error with a saved hypothesis trail.
+100|debug-errors|evidence_errors_logged|suppress_debug|Rig tip (workflow): ERRORS.md contains a recorded failure. Run /rig-debug to investigate the observed error with a saved hypothesis trail.
 90|rig-gaps|evidence_gaps_logged|suppress_rig_gaps|Rig tip (workflow): RIG_GAPS.md contains workflow friction. Run /rig-gaps to review and format the observed gaps for action.
-80|code-review|evidence_reviewable_branch|suppress_code_review|Rig tip (workflow): this feature branch is at least two commits ahead of its base. Run /code-review for a focused review before shipping.
+80|code-review|evidence_reviewable_branch|suppress_code_review|Rig tip (workflow): this feature branch is at least two commits ahead of its base. Run /rig-review for a focused review before shipping.
 70|sprint|evidence_sprint|suppress_sprint|Rig tip (workflow): PROGRESS.md references at least three distinct issues. Run /sprint to plan and batch that multi-issue work.
 60|task-tracking|evidence_task_tracking|suppress_task_tracking|Rig tip (workflow): multiple sessions exist with no active task. Run /task to give multi-file work a recovery anchor.
 50|session-name|evidence_session_name|suppress_session_name|Rig tip (workflow): this repository has committed work. Run /session-name to anchor this session with a name that survives compaction.
