@@ -3786,8 +3786,13 @@ rig_artifact_unchanged() {
     rm -f "$proven"
     return 0
   fi
+  # Only the resolver's "proof unavailable" refusals are surfaced; a plain
+  # content mismatch stays a customization. Match its known message prefixes.
   case "$proven" in
-    *tag*|*history*|*git*|*resolver*|*python3*) printf '%s' "$proven" ;;
+    "installer source exposes no release tags"*|"no release tags"*|\
+    "could not list tags"*|"installer source is not a git work tree"*|\
+    "installer source is not a directory"*|"historical-base resolver not installed"*|\
+    "python3 unavailable"*) printf '%s' "$proven" ;;
   esac
   return 1
 }
@@ -3854,7 +3859,7 @@ remove_empty_retired_dirs() {
 # with a warning, so no customization is lost. agent-plan only reports.
 retire_renamed_artifact() {
   local layer="$1" old_rel="$2" new_rel="$3" builtin="$4"
-  local root base manifest_file old_path why blocker sibling sib_old sib_new
+  local root base manifest_file old_path why blocker sibling sib_old sib_new sib_kind detail
   local _rm_hash="" _rm_mode="" _rm_backup=""
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
   root="$(retire_layer_root "$layer")"
@@ -3875,9 +3880,9 @@ retire_renamed_artifact() {
   sibling="$(retire_skill_sibling "$old_rel" "$new_rel")"
   if [[ -z "$blocker" && -n "$sibling" ]]; then
     sib_old="${sibling%%|*}"; sib_new="${sibling#*|}"
-    if [[ -e "$base/$sib_old" || -L "$base/$sib_old" ]] &&
-       [[ -n "$(retire_blocker "$layer" "$sib_old" "$sib_new")" ]]; then
-      blocker="pair|$sib_old"
+    if [[ -e "$base/$sib_old" || -L "$base/$sib_old" ]]; then
+      sib_kind="$(retire_blocker "$layer" "$sib_old" "$sib_new")"
+      [[ -z "$sib_kind" ]] || blocker="pair|$sib_old|${sib_kind%%|*}"
     fi
   fi
   case "${blocker%%|*}" in
@@ -3898,8 +3903,13 @@ retire_renamed_artifact() {
       record_upgrade_result skipped-customized "$old_rel"
       return 0 ;;
     pair)
-      warn "Preserved renamed Rig artifact with its skill: $old_rel (${blocker#*|} must stay, so the whole skill stays)"
-      record_upgrade_result skipped-customized "$old_rel"
+      detail="${blocker#pair|}"
+      warn "Preserved renamed Rig artifact with its skill: $old_rel (${detail%%|*} must stay, so the whole skill stays)"
+      if [[ "${detail##*|}" == customized ]]; then
+        record_upgrade_result skipped-customized "$old_rel"
+      else
+        record_upgrade_result skipped-conflict "$old_rel"
+      fi
       return 0 ;;
   esac
   if ! upgrade_manifest_mutation_allowed "$manifest_file" "$old_rel"; then

@@ -337,6 +337,19 @@ assert doc["summary"]["removed_obsolete"] >= 5, doc["summary"]
   [ ! -e "$TEST_PROJECT/.agents/skills/ship" ]
 }
 
+@test "upgrade: a customized Codex SKILL.md keeps its unchanged reference" {
+  install_release "$PRIOR_RELEASE" --project-only --target "$TEST_PROJECT" --project-name Fixture \
+    --tracking repo --strategy merge --project-agent both
+  [ "$status" -eq 0 ]
+  printf '\nlocal skill note\n' >> "$TEST_PROJECT/.agents/skills/debug/SKILL.md"
+  install_current --project-only --target "$TEST_PROJECT" --project-name Fixture \
+    --tracking repo --strategy upgrade --project-agent both
+  [ "$status" -eq 0 ]
+  grep -Fq 'local skill note' "$TEST_PROJECT/.agents/skills/debug/SKILL.md"
+  [ -f "$TEST_PROJECT/.agents/skills/debug/references/command.md" ]
+  [[ "$output" == *"Preserved renamed Rig artifact with its skill: .agents/skills/debug/references/command.md (.agents/skills/debug/SKILL.md must stay"* ]] || return 1
+}
+
 @test "upgrade: switching from both providers to Claude leaves Codex leftovers alone and agrees with agent-plan" {
   install_release "$PRIOR_RELEASE" --project-only --target "$TEST_PROJECT" --project-name Fixture \
     --tracking repo --strategy merge --project-agent both
