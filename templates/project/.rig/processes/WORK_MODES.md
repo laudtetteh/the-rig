@@ -46,7 +46,7 @@ backlog creation as authorization to execute every task.
 - **Inputs:** one task request or existing task card.
 - **Outputs:** one task card conforming to the shared schema, implementation and
   validation evidence, and a terminal or resumable status.
-- **Adapters:** `/task` creates/configures; `/run [slug]` executes.
+- **Adapters:** `/task` creates/configures; `/rig-run [slug]` executes.
 
 The task card is the source of truth for scope, approvals, operating mode, and
 resume state. A task may run alone or be embedded unchanged in a sprint.
@@ -71,7 +71,7 @@ gate.
 | project | sprint | Select backlog cards, approve the sprint plan, then launch. |
 | task | sprint | Checkpoint the task first; include its card without copying state. |
 | sprint | task | Checkpoint sprint results; isolate one incomplete card explicitly. |
-| task | embedded task | `/run` and `/sprint` use the same card and lifecycle. |
+| task | embedded task | `/rig-run` and `/sprint` use the same card and lifecycle. |
 
 No transition implies execution approval. The receiving mode must reach its
 own `approve` phase.

@@ -1,25 +1,39 @@
 # Command: /rig-status
 
-Run a lightweight health check on The Rig's installation in this project.
+Show where the project stands, with a one-line Rig health verdict. Add
+`--health` for the full installation health check.
 Pure diagnostic — no writes, no side effects.
 
 ## What this does
 
-Collects installation state and prints a structured report. Items that are
-missing or broken are flagged with ✗ and a one-line fix hint. Items that
-are healthy are shown with ✓.
+- **Default (`/rig-status`):** a project dashboard — branch, active tasks,
+  backlog count, recent progress, pending flags — followed by one health line
+  from `bin/rig doctor --json`.
+- **`/rig-status --health`:** the full six-section installation check below.
+  Items that are missing or broken are flagged with ✗ and a one-line fix hint.
+  Items that are healthy are shown with ✓.
+
+This command replaces the former `/rig-status`, which shadowed Claude Code's
+built-in `/status` panel (version, model, account, API connectivity). Use the
+built-in `/status` for those.
 
 ## Usage
 
 ```
-/rig-status
+/rig-status            # project dashboard + one-line health verdict
+/rig-status --health   # full installation health check
 ```
 
-Run this:
+Run the default:
+- At the start of a session as a faster alternative to reading full context files
+- After a long task to orient before deciding what's next
+- When the user asks "where are we?", "what's active?", or "what's in the backlog?"
+
+Run `--health`:
 - After a fresh install to verify everything wired correctly
 - When a hook is not firing and you want to diagnose why
 - After an upgrade to confirm files updated as expected
-- Any time you need a quick "is The Rig healthy?" answer
+- Any time you need a full "is The Rig healthy?" answer
 
 ---
 
@@ -37,11 +51,98 @@ Run this:
 > fi
 > ```
 >
-> Substitute `$RIG_DIR` for `.rig/` in every check below.
+> Substitute `$RIG_DIR` for `.rig/` in every check below. `$RIG_DIR` is the
+> resolved Rig directory, not the repository; `$REPO` is the repository root.
 
 ---
 
-## Report format
+## Default mode — project dashboard
+
+Use this mode unless the arguments contain `--health`. Output a clean,
+scannable dashboard — not walls of text.
+
+### 1. Branch
+
+```bash
+git branch --show-current
+```
+
+Show: `**Branch:** [name]`
+
+### 2. Active tasks
+
+```bash
+ls "$RIG_DIR/tasks/active/" 2>/dev/null
+```
+
+Ignore dotfiles such as `.gitkeep`. For each task file: read the `## Goal`
+section (first sentence only) and the `**Status**` field. Format as a bullet
+list:
+
+```
+**Active tasks (N):**
+- TASK_foo.md — [one-sentence goal]
+```
+
+If none: `**Active tasks:** none`
+
+### 3. Backlog
+
+Count task files in `$RIG_DIR/tasks/backlog/`, excluding dotfiles and
+`TASK_example.md*`. Show: `**Backlog:** N task(s)` — count only, no details.
+
+### 4. Recent progress
+
+Read `$RIG_DIR/memory/PROGRESS.md`. New entries are inserted at the top
+(after the `## Format` section when it exists), so the most recent entries are
+the first entry headings in the file — not the last ones. Skip the `## Format`
+heading and any `##` line inside a fenced code block (the format example).
+Show the five most recent entry headings and the first body line under each:
+
+```
+**Recent progress:**
+- [section heading] — [first body line]
+```
+
+If the file is absent: skip this section.
+
+### 5. Pending flags
+
+```bash
+[[ -f "$RIG_DIR/memory/.wrap-needed" ]] && echo "wrap-needed"
+[[ -f "$RIG_DIR/memory/.post-merge-pending" ]] && echo "post-merge-pending"
+```
+
+If `.wrap-needed` exists: `⚠️ /wrap needed — last session didn't wrap`
+If `.post-merge-pending` exists: `⚠️ /post-merge pending — a merge landed since last run`
+
+If no flags: omit this section.
+
+### 6. Health verdict
+
+```bash
+python3 - "$REPO" <<'PY'
+import json, subprocess, sys
+repo = sys.argv[1]
+try:
+    out = subprocess.run([f"{repo}/bin/rig", "doctor", "--json"], capture_output=True,
+                         text=True, timeout=60).stdout
+    summary = json.loads(out)["summary"]
+    print(f"pass={summary.get('pass', 0)} fail={summary.get('fail', 0)}")
+except Exception as exc:
+    print(f"unavailable ({type(exc).__name__})")
+PY
+```
+
+- `fail=0`: `**Rig health:** ✓ healthy`
+- `fail>0`: `**Rig health:** ✗ [N] check(s) failing — run /rig-status --health or bin/rig doctor`
+- `unavailable`: `**Rig health:** not checked (bin/rig doctor unavailable) — run /rig-status --health`
+
+Stop here in default mode.
+
+---
+
+## Health mode (`--health`) — report format
 
 Print the header line, then work through each section. Keep it scannable:
 ✓ lines are one-liners. ✗ lines include a concrete fix hint.
@@ -241,9 +342,9 @@ Do not list the issues again — the user has already read them in context.
 
 ## Notes
 
-- `/rig-status` is read-only. It never modifies any file.
+- `/rig-status` is read-only in both modes. It never modifies any file.
 - For manifest/stealth diagnostics (provenance, mode/hash drift, stale entries), run
-  `bin/rig doctor` (or `bin/rig doctor --json`). Reserve `/debug` for genuine
+  `bin/rig doctor` (or `bin/rig doctor --json`). Reserve `/rig-debug` for genuine
   hypothesis-driven bug investigation, not manifest inspection.
 - If the report shows hooks as present but they still aren't firing, the likely cause
   is that `settings.json` does not register them — check Section 5 output.

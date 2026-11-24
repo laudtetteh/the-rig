@@ -1,7 +1,7 @@
-# Skill: code-review
+# Skill: rig-review-basics
 
 > Triggered by: "review this"
-> Installed at: `~/.claude/skills/code-review.md`
+> Installed at: `~/.claude/skills/rig-review-basics.md`
 
 When asked to review code, follow this process.
 

@@ -62,7 +62,7 @@ _sha256_stdin() {
 stabilize_substitution_baseline() {
   local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
   local rel f
-  for rel in CLAUDE.md .claude/commands/ship.md .claude/commands/post-merge.md \
+  for rel in CLAUDE.md .claude/commands/rig-ship.md .claude/commands/post-merge.md \
              .rig/processes/POST_MERGE_WORKFLOW.md .rig/processes/SHIP_WORKFLOW.md; do
     f="$TEST_PROJECT/$rel"
     [[ -f "$f" ]] || continue

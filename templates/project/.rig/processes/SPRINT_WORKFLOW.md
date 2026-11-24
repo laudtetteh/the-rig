@@ -73,7 +73,7 @@ Planning approval authorizes no task implementation, commit, push, PR, merge,
 release, destructive action, or tracker write.
 
 Before launch, write a **Dependency Surface Audit (DSA)** for every planned
-ticket or lane. Use the same dependency-impact terms as `/ship` so planning and
+ticket or lane. Use the same dependency-impact terms as `/rig-ship` so planning and
 pre-ship evidence line up. The DSA must list:
 
 - **Upstream inputs:** commands, hooks, scripts, schemas, external CLIs, memory
@@ -107,7 +107,7 @@ ownership/order creates a superseding plan revision and requires approval.
 Launch only from an exact #409 root session; subagents and side conversations
 cannot approve, launch, or close. Do not introduce another resolver.
 
-Delegate each approved item to its unchanged task card and `/run` lifecycle.
+Delegate each approved item to its unchanged task card and `/rig-run` lifecycle.
 Respect exclusive shared-file lanes and worktrees. Checkpoint task and sprint
 state on pause, blocker, deviation, or mode transition.
 

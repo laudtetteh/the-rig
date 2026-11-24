@@ -57,12 +57,12 @@ assert_codex_retrofit_reports_divergence() {
   local -a extra=("$@")
   install_rig "$tracking" merge --project-agent claude "${extra[@]}"
   [ "$status" -eq 0 ]
-  printf '\n<!-- local ship tweak -->\n' >> "$TEST_PROJECT/.claude/commands/ship.md"
+  printf '\n<!-- local ship tweak -->\n' >> "$TEST_PROJECT/.claude/commands/rig-ship.md"
   install_rig "$tracking" upgrade --project-agent both "${extra[@]}"
   [ "$status" -eq 0 ]
-  [ -f "$TEST_PROJECT/.agents/skills/ship/SKILL.md" ]
-  grep -Fq 'local ship tweak' "$TEST_PROJECT/.claude/commands/ship.md"
-  [[ "$output" == *'- .claude/commands/ship.md — Claude /ship keeps your customized copy, but the Codex $ship skill was generated from current Rig source'* ]] || return 1
+  [ -f "$TEST_PROJECT/.agents/skills/rig-ship/SKILL.md" ]
+  grep -Fq 'local ship tweak' "$TEST_PROJECT/.claude/commands/rig-ship.md"
+  [[ "$output" == *'- .claude/commands/rig-ship.md — Claude /rig-ship keeps your customized copy, but the Codex $rig-ship skill was generated from current Rig source'* ]] || return 1
   [[ "$DEGRADED" == *"Claude/Codex workflow parity (1 customized command(s))"* ]] || return 1
   [[ "$output" == *"not fully converged"* && "$output" == *"--strategy agent-plan"* ]] || return 1
 }
@@ -74,7 +74,7 @@ assert_codex_retrofit_reports_divergence() {
 @test "printed convergence route preserves the selected project agent after metadata conflict" {
   install_rig repo merge --project-agent claude
   [ "$status" -eq 0 ]
-  printf '\n<!-- local ship tweak -->\n' >> "$TEST_PROJECT/.claude/commands/ship.md"
+  printf '\n<!-- local ship tweak -->\n' >> "$TEST_PROJECT/.claude/commands/rig-ship.md"
   mv "$TEST_PROJECT/.rig/install-targets.json" "$TEST_PROJECT/.rig/install-targets.real.json"
   ln -s install-targets.real.json "$TEST_PROJECT/.rig/install-targets.json"
   install_rig repo upgrade --project-agent both
@@ -112,11 +112,11 @@ assert_codex_retrofit_reports_divergence() {
 @test "a Claude-only customized command is listed without a provider divergence claim" {
   install_rig repo merge --project-agent claude
   [ "$status" -eq 0 ]
-  printf '\n<!-- local ship tweak -->\n' >> "$TEST_PROJECT/.claude/commands/ship.md"
+  printf '\n<!-- local ship tweak -->\n' >> "$TEST_PROJECT/.claude/commands/rig-ship.md"
   install_rig repo upgrade --project-agent claude
   [ "$status" -eq 0 ]
-  [[ "$output" == *"- .claude/commands/ship.md — Claude /ship keeps your customized older copy"* ]] || return 1
-  [[ "$output" != *'Codex $ship'* ]] || return 1
+  [[ "$output" == *"- .claude/commands/rig-ship.md — Claude /rig-ship keeps your customized older copy"* ]] || return 1
+  [[ "$output" != *'Codex $rig-ship'* ]] || return 1
   [ -n "$DEGRADED" ]
   [[ "$DEGRADED" != *"parity"* && "$DEGRADED" != *"enforcement"* ]] || return 1
 }

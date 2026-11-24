@@ -59,7 +59,7 @@ _sha256() {
 stabilize_substitution_baseline() {
   local manifest="$TEST_PROJECT/.rig/memory/.rig-manifest"
   local rel f
-  for rel in CLAUDE.md .claude/commands/ship.md .claude/commands/post-merge.md \
+  for rel in CLAUDE.md .claude/commands/rig-ship.md .claude/commands/post-merge.md \
              .rig/processes/POST_MERGE_WORKFLOW.md .rig/processes/SHIP_WORKFLOW.md; do
     f="$TEST_PROJECT/$rel"
     [[ -f "$f" ]] || continue
@@ -541,14 +541,14 @@ PY
 
   # A missing tracked artifact is always safe to (re)create — the simplest
   # reliable way to force a real "updated" action in agent-upgrade.
-  rm -f "$TEST_PROJECT/.claude/commands/status.md"
+  rm -f "$TEST_PROJECT/.claude/commands/rig-status.md"
 
   run_installer --strategy agent-upgrade
   [ "$status" -eq 0 ]
 
   [ "$(json_field "d['status']")" = "success" ]
   [ "$(json_field "d['summary']['updated']")" != "0" ]
-  [ -f "$TEST_PROJECT/.claude/commands/status.md" ]
+  [ -f "$TEST_PROJECT/.claude/commands/rig-status.md" ]
 }
 
 @test "agent-upgrade on a target with a customized file applies safe updates but exits 3 refused and leaves it untouched" {
@@ -604,7 +604,7 @@ for line in open(manifest):
 open(manifest, "w").writelines(out)
 PYEOF
 
-  rm -f "$TEST_PROJECT/.claude/commands/status.md"
+  rm -f "$TEST_PROJECT/.claude/commands/rig-status.md"
 
   run_installer --strategy agent-upgrade
   [ "$status" -eq 3 ]
@@ -614,7 +614,7 @@ PYEOF
   [ "$(json_field "d['summary']['skipped_customized']")" != "0" ]
 
   # Safe/convergeable action was actually applied...
-  [ -f "$TEST_PROJECT/.claude/commands/status.md" ]
+  [ -f "$TEST_PROJECT/.claude/commands/rig-status.md" ]
   # ...but the customized file was never silently overwritten.
   grep -q "locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
 }
@@ -685,7 +685,7 @@ PYEOF
   stabilize_substitution_baseline
 
   echo "# locally customized by the user" >> "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
-  rm -f "$TEST_PROJECT/.claude/commands/status.md"
+  rm -f "$TEST_PROJECT/.claude/commands/rig-status.md"
 
   run_installer --strategy upgrade
   [ "$status" -eq 0 ]
@@ -695,7 +695,7 @@ PYEOF
   # RIG_UPGRADE_REVIEW_REQUIRED marker instead of JSON.
   [[ "$output" == *"RIG_UPGRADE_REVIEW_REQUIRED=1"* ]] || return 1
   [[ "$output" != *'"schema_version"'* ]] || return 1
-  [ -f "$TEST_PROJECT/.claude/commands/status.md" ]
+  [ -f "$TEST_PROJECT/.claude/commands/rig-status.md" ]
   grep -q "locally customized by the user" "$TEST_PROJECT/.claude/hooks/pre-tool.sh"
 }
 

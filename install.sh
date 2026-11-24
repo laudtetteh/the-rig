@@ -3484,7 +3484,7 @@ PYEOF
           # (bin/rig mentions [Project Name]) and are copied verbatim.
           local _converged_baseline
           case "$rel" in
-            .claude/commands/ship.md|.claude/commands/post-merge.md|.rig/processes/SHIP_WORKFLOW.md|.rig/processes/POST_MERGE_WORKFLOW.md)
+            .claude/commands/rig-ship.md|.claude/commands/post-merge.md|.rig/processes/SHIP_WORKFLOW.md|.rig/processes/POST_MERGE_WORKFLOW.md)
               _converged_baseline="$(rendered_project_template_hash "$src" "${base:-}" "$rel")"
               [[ -n "$_converged_baseline" ]] || _converged_baseline="$new_hash"
               ;;
@@ -3713,6 +3713,254 @@ retire_legacy_session_end() {
   fi
   success "Removed obsolete legacy hook: $rel"
   record_upgrade_result removed "$rel"
+}
+
+# ── RENAMED RIG ARTIFACTS (issue #714) ───────────────────────────────────────
+# Rig commands and skills whose old names shadowed (or, for `ship`, were never
+# loaded because of) a Claude Code built-in. Each entry is
+# "layer|old_rel|new_rel|builtin". Plain indexed array: bash 3.2 has no
+# associative arrays. #612/#715 can extend this table.
+RENAMED_RIG_ARTIFACTS=(
+  "project|.claude/commands/status.md|.claude/commands/rig-status.md|/status"
+  "project|.claude/commands/code-review.md|.claude/commands/rig-review.md|/code-review"
+  "project|.claude/commands/debug.md|.claude/commands/rig-debug.md|/debug"
+  "project|.claude/commands/run.md|.claude/commands/rig-run.md|/run"
+  "project|.claude/commands/ship.md|.claude/commands/rig-ship.md|/ship"
+  "project|.agents/skills/status/SKILL.md|.agents/skills/rig-status/SKILL.md|"
+  "project|.agents/skills/status/references/command.md|.agents/skills/rig-status/references/command.md|"
+  "project|.agents/skills/code-review/SKILL.md|.agents/skills/rig-review/SKILL.md|"
+  "project|.agents/skills/code-review/references/command.md|.agents/skills/rig-review/references/command.md|"
+  "project|.agents/skills/debug/SKILL.md|.agents/skills/rig-debug/SKILL.md|"
+  "project|.agents/skills/debug/references/command.md|.agents/skills/rig-debug/references/command.md|"
+  "project|.agents/skills/run/SKILL.md|.agents/skills/rig-run/SKILL.md|"
+  "project|.agents/skills/run/references/command.md|.agents/skills/rig-run/references/command.md|"
+  "project|.agents/skills/ship/SKILL.md|.agents/skills/rig-ship/SKILL.md|"
+  "project|.agents/skills/ship/references/command.md|.agents/skills/rig-ship/references/command.md|"
+  "claude-global|skills/code-review/SKILL.md|skills/rig-review-basics/SKILL.md|/code-review"
+  "claude-global|skills/code-review.md|skills/rig-review-basics/SKILL.md|/code-review"
+  "claude-global|skills/debug/SKILL.md|skills/rig-debug-basics/SKILL.md|/debug"
+  "claude-global|skills/debug.md|skills/rig-debug-basics/SKILL.md|/debug"
+  "codex-global|.agents/skills/code-review/SKILL.md|.agents/skills/rig-review-basics/SKILL.md|"
+  "codex-global|.agents/skills/debug/SKILL.md|.agents/skills/rig-debug-basics/SKILL.md|"
+)
+
+# True when `rel` (relative to `base`) is a regular, non-symlinked file whose
+# content matches the manifest entry Rig wrote for it. That entry exists only
+# when Rig itself installed the file, so a user-owned file at the same path
+# (no entry, or a different hash) never counts as the replacement.
+rig_installed_intact() {
+  local base="$1" rel="$2" manifest_file="$3" recorded
+  [[ "$(upgrade_destination_state "$base" "$base/$rel")" == regular-file ]] || return 1
+  recorded="$(read_manifest_hash "$rel" "$manifest_file")"
+  [[ -n "$recorded" && "$recorded" == "$(sha256_file "$base/$rel")" ]]
+}
+
+# The replacement gate. A real run requires the replacement installed and
+# intact. agent-plan writes nothing, so it accepts a missing replacement (the
+# run would create it) or one Rig already owns (the run would update it), and
+# still refuses a user-owned file at the new path.
+retire_replacement_ready() {
+  local base="$1" rel="$2" manifest_file="$3"
+  if [[ "$AGENT_DRY_RUN" != true ]]; then
+    rig_installed_intact "$base" "$rel" "$manifest_file"
+    return
+  fi
+  [[ "$(upgrade_destination_state "$base" "$base/$rel")" == missing ]] && return 0
+  [[ -n "$(read_manifest_hash "$rel" "$manifest_file")" ]]
+}
+
+# True when an existing old artifact is provably unchanged Rig content: it has
+# a manifest entry and either matches it, or (project commands only) matches a
+# rendered historical Rig release. The second proof covers installs from before
+# #498, whose manifest recorded the pre-[BASE_BRANCH] hash of ship.md. On
+# failure, prints why the historical proof was unavailable (empty when the file
+# simply differs), so a tagless installer source is not reported as a user edit.
+rig_artifact_unchanged() {
+  local layer="$1" base="$2" rel="$3" manifest_file="$4" recorded current proven
+  recorded="$(read_manifest_hash "$rel" "$manifest_file")"
+  [[ -n "$recorded" ]] || return 1
+  current="$(sha256_file "$base/$rel")"
+  [[ "$current" == "$recorded" ]] && return 0
+  [[ "$layer" == project && "$rel" == .claude/commands/*.md ]] || return 1
+  if proven="$(resolve_historical_base "$rel" "$current")"; then
+    rm -f "$proven"
+    return 0
+  fi
+  # Only the resolver's "proof unavailable" refusals are surfaced; a plain
+  # content mismatch stays a customization. Match its known message prefixes.
+  case "$proven" in
+    "installer source exposes no release tags"*|"no release tags"*|\
+    "could not list tags"*|"installer source is not a git work tree"*|\
+    "installer source is not a directory"*|"historical-base resolver not installed"*|\
+    "python3 unavailable"*) printf '%s' "$proven" ;;
+  esac
+  return 1
+}
+
+# Print "base|manifest" for a retirement layer, or nothing for an unknown one.
+retire_layer_root() {
+  case "$1" in
+    project) printf '%s|%s' "$TARGET" "$MANIFEST_FILE" ;;
+    claude-global) printf '%s|%s' "$CLAUDE_DIR" "$GLOBAL_MANIFEST_FILE" ;;
+    codex-global) printf '%s|%s' "$HOME" "$CODEX_GLOBAL_MANIFEST_FILE" ;;
+  esac
+}
+
+# Print why one existing renamed artifact must be preserved, or nothing when
+# it may be retired. Read-only. Output is "kind|detail" with kind one of
+# replacement, state, customized.
+retire_blocker() {
+  local layer="$1" old_rel="$2" new_rel="$3" root base manifest_file state note
+  root="$(retire_layer_root "$layer")"
+  base="${root%%|*}"; manifest_file="${root#*|}"
+  if ! retire_replacement_ready "$base" "$new_rel" "$manifest_file"; then
+    printf 'replacement|'
+    return 0
+  fi
+  state="$(upgrade_destination_state "$base" "$base/$old_rel")"
+  if [[ "$state" != regular-file ]]; then
+    printf 'state|%s' "$state"
+    return 0
+  fi
+  if ! note="$(rig_artifact_unchanged "$layer" "$base" "$old_rel" "$manifest_file")"; then
+    printf 'customized|%s' "$note"
+  fi
+  return 0
+}
+
+# A generated Codex skill is a pair: SKILL.md only points at
+# references/command.md. Print the other half of a pair entry (old and new
+# rel, "|"-joined), or nothing for a non-skill entry.
+retire_skill_sibling() {
+  local old_rel="$1" new_rel="$2"
+  case "$old_rel" in
+    .agents/skills/*/SKILL.md)
+      printf '%s|%s' "${old_rel%SKILL.md}references/command.md" "${new_rel%SKILL.md}references/command.md" ;;
+    .agents/skills/*/references/command.md)
+      printf '%s|%s' "${old_rel%references/command.md}SKILL.md" "${new_rel%references/command.md}SKILL.md" ;;
+  esac
+}
+
+# Remove now-empty directories left by a retired generated skill, deepest
+# first, never above `stop`.
+remove_empty_retired_dirs() {
+  local dir="$1" stop="$2"
+  while [[ "$dir" != "$stop" && "$dir" == "$stop"/* ]]; do
+    rmdir "$dir" 2>/dev/null || return 0
+    dir="$(dirname "$dir")"
+  done
+}
+
+# Retire one renamed artifact during an upgrade. Removal requires all of:
+# upgrade strategy; the replacement installed by Rig and intact; the old path a
+# regular file under non-symlinked parents; proof that it is unchanged Rig
+# content; and, for a generated Codex skill, the same for the other half of
+# the pair, so a skill is never left half-deleted. Anything else is preserved
+# with a warning, so no customization is lost. agent-plan only reports.
+retire_renamed_artifact() {
+  local layer="$1" old_rel="$2" new_rel="$3" builtin="$4"
+  local root base manifest_file old_path why blocker sibling sib_old sib_new sib_kind detail
+  local _rm_hash="" _rm_mode="" _rm_backup=""
+  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
+  root="$(retire_layer_root "$layer")"
+  [[ -n "$root" ]] || return 0
+  base="${root%%|*}"; manifest_file="${root#*|}"
+  old_path="$base/$old_rel"
+  [[ -e "$old_path" || -L "$old_path" ]] || return 0
+  if [[ -n "$builtin" ]]; then
+    if [[ "$builtin" == /ship ]]; then
+      why="Claude Code never loads a custom command named ship"
+    else
+      why="it shadows Claude Code's built-in $builtin"
+    fi
+  else
+    why="it is the retired Codex name for ${new_rel}"
+  fi
+  blocker="$(retire_blocker "$layer" "$old_rel" "$new_rel")"
+  sibling="$(retire_skill_sibling "$old_rel" "$new_rel")"
+  if [[ -z "$blocker" && -n "$sibling" ]]; then
+    sib_old="${sibling%%|*}"; sib_new="${sibling#*|}"
+    if [[ -e "$base/$sib_old" || -L "$base/$sib_old" ]]; then
+      sib_kind="$(retire_blocker "$layer" "$sib_old" "$sib_new")"
+      [[ -z "$sib_kind" ]] || blocker="pair|$sib_old|${sib_kind%%|*}"
+    fi
+  fi
+  case "${blocker%%|*}" in
+    replacement)
+      warn "Preserved renamed Rig artifact until its replacement is installed: $old_rel ($why)"
+      record_upgrade_result skipped-conflict "$old_rel"
+      return 0 ;;
+    state)
+      warn "Preserved renamed Rig artifact requiring review (${blocker#*|}): $old_rel ($why)"
+      record_upgrade_result skipped-conflict "$old_rel"
+      return 0 ;;
+    customized)
+      if [[ -n "${blocker#*|}" ]]; then
+        warn "Preserved renamed Rig artifact that could not be proven unchanged: $old_rel ($why). ${blocker#*|}"
+      else
+        warn "Preserved customized renamed Rig artifact: $old_rel ($why). Rig now ships $new_rel; move your changes there and delete the old file."
+      fi
+      record_upgrade_result skipped-customized "$old_rel"
+      return 0 ;;
+    pair)
+      detail="${blocker#pair|}"
+      warn "Preserved renamed Rig artifact with its skill: $old_rel (${detail%%|*} must stay, so the whole skill stays)"
+      if [[ "${detail##*|}" == customized ]]; then
+        record_upgrade_result skipped-customized "$old_rel"
+      else
+        record_upgrade_result skipped-conflict "$old_rel"
+      fi
+      return 0 ;;
+  esac
+  if ! upgrade_manifest_mutation_allowed "$manifest_file" "$old_rel"; then
+    return 0
+  fi
+  if [[ "$AGENT_DRY_RUN" == true ]]; then
+    info "Would retire renamed Rig artifact: $old_rel -> $new_rel"
+    record_upgrade_result removed "$old_rel"
+    return 0
+  fi
+  ensure_upgrade_transaction "$base"
+  snapshot_upgrade_metadata
+  if [[ "$layer" == project ]] && upgrade_report_enabled; then
+    _rm_hash="$(sha256_file "$old_path")"
+    _rm_mode="$(manifest_artifact_mode "$old_path")"
+  fi
+  backup_file "$old_path" "$base"
+  [[ -n "$_rm_hash" && -n "$BACKUP_DIR" && -f "$BACKUP_DIR/$old_rel" ]] &&
+    _rm_backup="$BACKUP_DIR/$old_rel"
+  if ! rm -f "$old_path"; then
+    error "Could not retire renamed Rig artifact: $old_rel"
+    return 1
+  fi
+  if [[ -n "$_rm_hash" ]]; then
+    record_report_artifact "deleted" "$base" "$old_rel" \
+      "$_rm_hash" "$_rm_mode" "file" "" "" "absent" "$_rm_backup"
+  fi
+  repair_stale_manifest_entry "${manifest_file}.json" "$manifest_file" "$old_rel"
+  remove_empty_retired_dirs "$(dirname "$old_path")" "$base"
+  success "Retired renamed Rig artifact: $old_rel -> $new_rel"
+  [[ "$layer" == project ]] || info "Backup: ${BACKUP_DIR}/${old_rel} (global changes are not covered by rig upgrade rollback; see #721)"
+  record_upgrade_result removed "$old_rel"
+}
+
+# Retire every renamed artifact of one layer. Project entries for a provider
+# this run does not install are skipped: their replacements will never be
+# installed, and an old Codex skill shadows no Claude Code built-in (doctor
+# reports it as advisory). This keeps agent-plan and agent-upgrade in step.
+retire_renamed_rig_artifacts() {
+  local want="$1" entry layer old_rel new_rel builtin
+  for entry in "${RENAMED_RIG_ARTIFACTS[@]}"; do
+    IFS='|' read -r layer old_rel new_rel builtin <<< "$entry"
+    [[ "$layer" == "$want" ]] || continue
+    if [[ "$layer" == project ]]; then
+      case "$old_rel" in
+        .claude/*) [[ "${INSTALL_COMMANDS:-false}" == true ]] || continue ;;
+        .agents/*) has_agent "${PROJECT_AGENT:-}" codex || continue ;;
+      esac
+    fi
+    retire_renamed_artifact "$layer" "$old_rel" "$new_rel" "$builtin" || return 1
+  done
 }
 
 # Install a single Rig-owned hook script into .git/hooks/ during a stealth
@@ -3988,6 +4236,7 @@ PYEOF
     fi
   done
   rm -rf "$_CLAUDE_SKILL_STAGE"
+  retire_renamed_rig_artifacts claude-global || exit 1
 
   # ── Global commands ───────────────────────────────────────────────────────
   if compgen -G "$GLOBAL_TEMPLATES/commands/*.md" >/dev/null; then
@@ -4030,6 +4279,7 @@ PYEOF
       fi
     done < <(find "$_CODEX_GLOBAL_STAGE" -type f -print0)
     rm -rf "$_CODEX_GLOBAL_STAGE"
+    retire_renamed_rig_artifacts codex-global || exit 1
   fi
 
   # Restore manifest pointer
@@ -4756,6 +5006,18 @@ PYEOF
     fi
   fi
 
+  # User-owned instruction files are never rewritten, so name the retired
+  # commands they still mention (issue #714).
+  if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
+    for _retired_ref_file in CLAUDE.md AGENTS.md; do
+      [[ -f "$TARGET/$_retired_ref_file" && ! -L "$TARGET/$_retired_ref_file" ]] || continue
+      if grep -Eq '(^|[^A-Za-z0-9_./$-])/(status|code-review|debug|run|ship)([^A-Za-z0-9_/-]|$)|(^|[^A-Za-z0-9_./$-])\$(code-review|ship)([^A-Za-z0-9_/-]|$)' \
+        "$TARGET/$_retired_ref_file"; then
+        warn "$_retired_ref_file mentions renamed Rig commands. Update by hand: /status -> /rig-status, /code-review -> /rig-review, /debug -> /rig-debug, /run -> /rig-run, /ship -> /rig-ship (Codex: \$rig-...). Mentions of Claude Code's own built-ins can stay."
+      fi
+    done
+  fi
+
   if [[ "${LEGACY_ADOPTION_PENDING:-false}" == true && "$AGENT_DRY_RUN" != true ]]; then
     [[ -n "$PREFLIGHT_SNAPSHOT_DIR" && -d "$PREFLIGHT_SNAPSHOT_DIR/.rig" ]] || {
       error "Legacy Rig adoption requires a completed pre-flight backup."
@@ -5087,7 +5349,7 @@ PYEOF
     fi
   }
   _subst_base_branch "$TARGET/CLAUDE.md"
-  _subst_base_branch "$TARGET/.claude/commands/ship.md"
+  _subst_base_branch "$TARGET/.claude/commands/rig-ship.md"
   _subst_base_branch "$TARGET/.claude/commands/post-merge.md"
   # .rig/processes/ may be in-repo or external
   _TARGET_RIG_DIR="$TARGET/.rig"
@@ -5097,6 +5359,10 @@ PYEOF
   _subst_base_branch "$_TARGET_RIG_DIR/processes/POST_MERGE_WORKFLOW.md"
   _subst_base_branch "$_TARGET_RIG_DIR/processes/SHIP_WORKFLOW.md"
   success "Substituted [BASE_BRANCH] → $BASE_BRANCH in workflow files"
+
+  # Renamed commands are retired only after the replacements are installed and
+  # [BASE_BRANCH]-substituted, so the manifest proves each replacement intact.
+  retire_renamed_rig_artifacts project || exit 1
 
   # agent-plan: most of the tracking-mode bookkeeping below (.rigpath, git
   # excludes, stale in-repo .rig/ cleanup) never calls record_upgrade_result

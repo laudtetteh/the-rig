@@ -38,11 +38,11 @@ ownership, or shared-file exclusivity, revise the plan and get fresh approval.
 
 ## Execute
 
-After plan approval, delegate task execution through existing `/run` and `/ship`
+After plan approval, delegate task execution through existing `/rig-run` and `/rig-ship`
 gates. Apply #376 validation cards before commits. Never treat sprint approval as
 commit, push, PR, merge, release, tracker-write, or destructive authorization.
 
-For multi-issue PRs, require `/ship` to verify that the PR body closes every
+For multi-issue PRs, require `/rig-ship` to verify that the PR body closes every
 intended issue. For issues split across multiple PRs, keep earlier PRs from
 auto-closing the issue unless that partial closure is explicitly intended.
 

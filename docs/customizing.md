@@ -132,7 +132,7 @@ Then manually update the old base-branch name in the installed workflow files,
 including fetch, ancestry and PR-target examples in:
 - `.rig/processes/POST_MERGE_WORKFLOW.md`
 - `.rig/processes/SHIP_WORKFLOW.md`
-- `.claude/commands/ship.md`
+- `.claude/commands/rig-ship.md`
 - `.claude/commands/post-merge.md`
 
 To auto-detect, the installer reads `git symbolic-ref refs/remotes/origin/HEAD`
@@ -598,7 +598,7 @@ Files in the **Rig-owned** category that you commonly want to customize:
 | File | Customizable section |
 |---|---|
 | `.claude/hooks/pre-tool.sh` | `BLOCKED_PATHS` array (project-specific protected paths) |
-| `.claude/commands/ship.md` | Steps can be extended with project-specific checks |
+| `.claude/commands/rig-ship.md` | Steps can be extended with project-specific checks |
 | `.rig/processes/*.md` | Steps can be extended; core gate logic should be preserved |
 | `.husky/filter-commit-message-inplace.sh` | Add patterns for other AI tools |
 
@@ -735,7 +735,8 @@ runs these current postflight checks:
 | `codex_session_runtime` | A live Codex thread is bound to an active Rig session record | Codex runtime is not detected, or present target metadata is invalid |
 | `issue_tracking` | `CLAUDE.md` has at most one valid `issue-tracking:` value and a valid optional reference pattern | Never; invalid or duplicate tracker configuration is a failure |
 | `github_auth` | GitHub authentication is available when `issue-tracking: github` | A non-GitHub or invalid tracker is configured |
-| `tracker_command_guidance` | `/task` and `/ship` guidance covers the configured tracker | Tracker configuration is invalid, or either command source is absent |
+| `tracker_command_guidance` | `/task` and `/rig-ship` guidance covers the configured tracker (falls back to a preserved customized `ship.md` when it is the only ship guidance) | Tracker configuration is invalid, or either command source is absent |
+| `retired_command_names` | No Rig-installed Claude command or skill still uses a name renamed in #714 (`status`, `code-review`, `debug`, `run`, `ship`), which would replace or be refused by a Claude Code built-in | Never skipped. User-owned Claude files and stale Codex skills with those names are reported as advisory, not failures |
 | `recent_commit_references` | Recent authored commits follow the configured tracker reference convention; multi-parent merge commits are excluded | Tracker configuration is invalid or `none`, or there are no authored commits to inspect |
 | `recent_pr_references` | Recent GitHub PRs contain issue references or close keywords | Invalid or non-GitHub tracker, non-GitHub remote, or unavailable GitHub auth |
 | `connector_declarations` | Optional connector dependency declarations have the expected public envelope | No connector declaration file exists |

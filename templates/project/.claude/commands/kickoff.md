@@ -476,13 +476,13 @@ After scaffolding is complete:
 > - [Tracker line for the tracker mode chosen in Step 4: `github-agent` → "Approved GitHub issues [numbers] are open with approved labels", plus every task still at `TBD` after a declined action or failure; `github-user` → "GitHub issues [numbers] are recorded in task files", plus any still at `TBD`; `github-deferred` → "GitHub issues were not opened ([preflight reason]); every task file is at `TBD` and needs an issue before work starts"; `tracker-user` → "[Configured tracker] items [references] are recorded in task files", plus any still at `TBD`; `none` → "No tracker items — `issue-tracking: none` keeps the backlog in local task files"]
 >
 > [Next-move line. If no task file is at `TBD`: "Suggested first move: run
-> `/run [first-task-slug]` — that's the foundation everything else builds on."
-> If any task file is at `TBD`: "Before `/run`, every task file at `TBD` needs a
+> `/rig-run [first-task-slug]` — that's the foundation everything else builds on."
+> If any task file is at `TBD`: "Before `/rig-run`, every task file at `TBD` needs a
 > tracker reference, because `.rig/processes/NEW_TASK_WORKFLOW.md` stops on `TBD`.
 > First fix the cause ([preflight reason or `gh` error], when there is one). Then,
 > for each `TBD` task file, create the issue or ticket (or run `/task` for it) and
 > record its reference in place of `TBD`, e.g. `**GitHub issue**: #42`. After
-> that, run `/run [first-task-slug]`."]
+> that, run `/rig-run [first-task-slug]`."]
 >
 > This command has no further use. You can delete `.claude/commands/kickoff.md` — it won't be needed again.
 >

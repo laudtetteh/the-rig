@@ -336,7 +336,7 @@ cd /path/to/project && bin/rig doctor --json
 ```
 
 Skip the Git hook checks when the install used `--skip-git-hooks` or declined
-Git hooks. Claude `/rig-status` or Codex `$rig-status` gives the same check as a
+Git hooks. Claude `/rig-status --health` or Codex `$rig-status --health` gives the same check as a
 readable report.
 
 For stealth/external installs, also confirm:

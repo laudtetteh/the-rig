@@ -113,21 +113,21 @@ raise SystemExit(1 if '.rig/rules/RETIRED_RULE.md' in d['entries'] else 0)
     --project-name Test --tracking repo --strategy upgrade
   [ "$status" -eq 0 ]
 
-  rm -f "$TEST_PROJECT/.claude/commands/status.md"
-  mkdir -p "$TEST_PROJECT/.claude/commands/status.md"
+  rm -f "$TEST_PROJECT/.claude/commands/rig-status.md"
+  mkdir -p "$TEST_PROJECT/.claude/commands/rig-status.md"
 
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking repo --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"wrong-type"*".claude/commands/status.md"* ]] || return 1
-  [ -d "$TEST_PROJECT/.claude/commands/status.md" ]
+  [[ "$output" == *"wrong-type"*".claude/commands/rig-status.md"* ]] || return 1
+  [ -d "$TEST_PROJECT/.claude/commands/rig-status.md" ]
 
   # --repair-stale must not touch it either — only "missing" is auto-repaired.
   run bash "$INSTALLER" --project-only --target "$TEST_PROJECT" \
     --project-name Test --tracking repo --repair-stale
   [ "$status" -eq 0 ]
-  [ -d "$TEST_PROJECT/.claude/commands/status.md" ]
-  grep -qF '.claude/commands/status.md' "$TEST_PROJECT/.rig/memory/.rig-manifest"
+  [ -d "$TEST_PROJECT/.claude/commands/rig-status.md" ]
+  grep -qF '.claude/commands/rig-status.md' "$TEST_PROJECT/.rig/memory/.rig-manifest"
 }
 
 @test "a tracked file replaced by a dangling symlink is reported, never silently removed" {

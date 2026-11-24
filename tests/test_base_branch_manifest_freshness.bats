@@ -5,7 +5,7 @@
 # _subst_base_branch() runs near the end of the install flow, well after
 # copy_file()/write_manifest_entry() already recorded each file's manifest
 # hash from its pre-substitution content. Every file it touches (CLAUDE.md,
-# .claude/commands/ship.md, .claude/commands/post-merge.md,
+# .claude/commands/rig-ship.md, .claude/commands/post-merge.md,
 # .rig/processes/SHIP_WORKFLOW.md, .rig/processes/POST_MERGE_WORKFLOW.md)
 # therefore had a stale manifest hash immediately after install -- not just
 # on a later upgrade run, but on the very run that wrote it. Confirmed live
@@ -38,7 +38,7 @@ teardown() { rm -rf "$TEMP_DIR"; }
   [ "$status" -eq 0 ]
 
   local rel actual manifest
-  for rel in CLAUDE.md .claude/commands/ship.md .claude/commands/post-merge.md \
+  for rel in CLAUDE.md .claude/commands/rig-ship.md .claude/commands/post-merge.md \
              .rig/processes/SHIP_WORKFLOW.md .rig/processes/POST_MERGE_WORKFLOW.md; do
     [ -f "$TEST_PROJECT/$rel" ]
     # The file must actually have been substituted (sanity check the fixture

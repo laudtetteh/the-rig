@@ -28,7 +28,7 @@ setup() {
 }
 
 @test "all orchestration commands are adapters to the canonical contract" {
-  for command in kickoff task run sprint; do
+  for command in kickoff task rig-run sprint; do
     grep -Fq '.rig/processes/WORK_MODES.md' "$COMMAND_DIR/$command.md"
     grep -Fq 'Work-mode adapter' "$COMMAND_DIR/$command.md"
   done

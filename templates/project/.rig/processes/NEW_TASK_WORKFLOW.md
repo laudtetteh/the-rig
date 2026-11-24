@@ -223,7 +223,7 @@ In this order:
      - **Follow-ups opened:** any new task files or issues created
      - **Updated date:** set `**Updated**` to the merge closeout date
 
-3. Keep the task in `.rig/tasks/active/` while `/ship` opens the PR. Do not
+3. Keep the task in `.rig/tasks/active/` while `/rig-ship` opens the PR. Do not
    move it to done before merge; `/post-merge` performs that move once.
 
 4. Record an implementation checkpoint in `.rig/memory/PROGRESS.md`; the

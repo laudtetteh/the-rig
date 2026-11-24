@@ -70,7 +70,7 @@ assert any(a["path"] == rel and a["classification"] == "converged" for a in data
 
 exercise_converged_baseline() {
   local tracking="$1" memory rel
-  local -a paths=(.claude/hooks/pre-tool.sh bin/rig .claude/commands/ship.md)
+  local -a paths=(.claude/hooks/pre-tool.sh bin/rig .claude/commands/rig-ship.md)
   local -a baselines=()
   [ "$tracking" = stealth ] && memory="$EXTERNAL_RIG/memory" || memory="$TEST_PROJECT/.rig/memory"
 

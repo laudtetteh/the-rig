@@ -1,17 +1,17 @@
-# Command: /run
+# Command: /rig-run
 
 > **Work-mode adapter:** Follow `.rig/processes/WORK_MODES.md` as the canonical
-> lifecycle and state contract. `/run` selects and executes task mode; it does
+> lifecycle and state contract. `/rig-run` selects and executes task mode; it does
 > not create a parallel task state or bypass launch and mutation approvals.
 
 Trigger this command to start executing the task backlog.
 
-`/run` surveys what's ready to work, proposes an execution order, and drives tasks
+`/rig-run` surveys what's ready to work, proposes an execution order, and drives tasks
 to completion. It reads the `## Operating mode` from each task file and behaves
 accordingly — chaining tasks autonomously or pausing between them depending on the
 configured autonomy level.
 
-**Use `/run` when:** the backlog has tasks ready to execute and you want The Rig to
+**Use `/rig-run` when:** the backlog has tasks ready to execute and you want The Rig to
 start working through them.
 
 **Use `/task` when:** you need to create and configure a new task first.
@@ -23,8 +23,8 @@ start working through them.
 ## Usage
 
 ```
-/run              # work through the full queue in priority order
-/run [task-slug]  # run a specific task only (e.g. /run feat-user-auth)
+/rig-run              # work through the full queue in priority order
+/rig-run [task-slug]  # run a specific task only (e.g. /rig-run feat-user-auth)
 ```
 
 > **RIG_DIR resolution (stealth mode):** Before reading the task backlog or writing
@@ -110,7 +110,7 @@ For each task in the confirmed queue:
    `## Operating mode` block (same format as the task template). Confirm:
    > "Operating mode saved. Starting now."
 
-   The written block persists — future `/run` calls on this task will not re-prompt.
+   The written block persists — future `/rig-run` calls on this task will not re-prompt.
 
 2. **Announce the task.** State:
    > "Starting: `[task-slug]` — [goal sentence] (Autonomy: [level], Check-ins: [level])"
@@ -151,8 +151,8 @@ For each task in the confirmed queue:
 6. **Complete the task.** When all acceptance criteria are met:
    - Keep the task in `.rig/tasks/active/` with its implementation and validation
      checkpoint until the PR merges. If it is still in backlog, move it to active.
-   - Run the pre-ship checklist (`/ship`) before opening any PR. The task must
-     remain available to `/ship` as an active task.
+   - Run the pre-ship checklist (`/rig-ship`) before opening any PR. The task must
+     remain available to `/rig-ship` as an active task.
    - After the PR merges, `/post-merge` owns the single active-to-done move,
      final Done notes, and the completion entry in `PROGRESS.md`.
 
@@ -216,7 +216,7 @@ If the queue is exhausted, always surface to the user regardless of autonomy lev
 ## Running a specific task
 
 ```
-/run feat-user-auth
+/rig-run feat-user-auth
 ```
 
 1. Find `.rig/tasks/backlog/feat-user-auth.md` or `.rig/tasks/active/feat-user-auth.md`.
@@ -232,7 +232,7 @@ Regardless of autonomy level, all of the following always apply:
 
 - Pre-tool hooks run on every file write. Governance files remain protected.
 - Changes to The Rig's own processes, rules, hooks, or CLAUDE.md require `/rig-propose`.
-- The pre-ship checklist (`/ship`) must pass before any PR is opened.
+- The pre-ship checklist (`/rig-ship`) must pass before any PR is opened.
 - Secrets and credentials are never written to files.
 - Irreversible actions always require explicit confirmation — even at High autonomy.
 
@@ -247,7 +247,7 @@ process.
 - If a task has no `## Operating mode` block, surface the wizard inline (see Step 2
   item 1). Never silently default — the wizard fires once, writes the answer to the
   task file, and execution follows immediately.
-- If `.rig/tasks/active/` already has a task in it when `/run` is called, offer to resume
+- If `.rig/tasks/active/` already has a task in it when `/rig-run` is called, offer to resume
   it rather than starting a new one from the backlog.
-- `/run` does not modify the queue mid-execution. If new tasks are added to the backlog
-  while `/run` is active, they'll appear in the next run.
+- `/rig-run` does not modify the queue mid-execution. If new tasks are added to the backlog
+  while `/rig-run` is active, they'll appear in the next run.

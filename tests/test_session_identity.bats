@@ -36,7 +36,7 @@ setup() {
   # tips whose commands are unavailable. Mirror those installed fixtures.
   cp "$(pwd)/templates/project/.rig/contextual-tips.sh" "$RIG_DIR/contextual-tips.sh"
   mkdir -p "$REPO/.claude/commands"
-  for command in debug rig-gaps code-review sprint task session-name; do
+  for command in rig-debug rig-gaps rig-review sprint task session-name; do
     cp "$(pwd)/templates/project/.claude/commands/$command.md" "$REPO/.claude/commands/$command.md"
   done
 

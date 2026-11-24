@@ -7,7 +7,7 @@
 # Enforces four structural invariants across every .md file in
 # templates/project/.claude/commands/:
 #   1. H1 first line matches "# Command: /slug"
-#   2. Slug in H1 matches the filename (debug.md → /debug)
+#   2. Slug in H1 matches the filename (rig-debug.md → /rig-debug)
 #   3. At least one H2 section exists
 #   4. No H2 header is missing a space after "##"
 
@@ -219,7 +219,7 @@ PY
   grep -q 'immediately after the `## Format`' "$COMMAND_DIR/task.md"
   grep -q "Never anchor the insertion to the" "$COMMAND_DIR/task.md"
   grep -q "own prior PROGRESS edit from the same" "$COMMAND_DIR/task.md"
-  grep -Fq '/post-merge` owns the single active-to-done move' "$COMMAND_DIR/run.md"
+  grep -Fq '/post-merge` owns the single active-to-done move' "$COMMAND_DIR/rig-run.md"
 }
 
 @test "rig-help baseline deny patterns match shipped settings.json" {
@@ -348,9 +348,9 @@ PY
   local generated="$BATS_TEST_TMPDIR/tracker-skills"
   run python3 "$REPO_ROOT/installer/generate-codex-skills.py" \
     --output "$generated" --base-branch main \
-    "$COMMAND_DIR/task.md" "$COMMAND_DIR/ship.md" "$COMMAND_DIR/rig-gaps.md"
+    "$COMMAND_DIR/task.md" "$COMMAND_DIR/rig-ship.md" "$COMMAND_DIR/rig-gaps.md"
   [ "$status" -eq 0 ]
-  for command in task ship rig-gaps; do
+  for command in task rig-ship rig-gaps; do
     [ -f "$generated/$command/references/command.md" ]
     grep -Fq 'Exact tracker write approval' "$generated/$command/references/command.md"
   done
@@ -374,13 +374,13 @@ PY
   if grep -Fq 'Run `/rig-gaps --collect` first' "$process"; then return 1; fi
 }
 
-@test "run.md surfaces scaffold generator refusals and verifies expected files" {
-  grep -Fq "### Step 2 — Execute tasks in queue order" "$COMMAND_DIR/run.md"
-  grep -Fq "Guard scaffold generators" "$COMMAND_DIR/run.md"
-  grep -Fq "Capture the command exit status and read both stdout and stderr" "$COMMAND_DIR/run.md"
-  grep -Fq "non-empty directory" "$COMMAND_DIR/run.md"
-  grep -Fq "verify every expected file or directory exists" "$COMMAND_DIR/run.md"
-  grep -Fq "Do not report the scaffold as" "$COMMAND_DIR/run.md"
+@test "rig-run.md surfaces scaffold generator refusals and verifies expected files" {
+  grep -Fq "### Step 2 — Execute tasks in queue order" "$COMMAND_DIR/rig-run.md"
+  grep -Fq "Guard scaffold generators" "$COMMAND_DIR/rig-run.md"
+  grep -Fq "Capture the command exit status and read both stdout and stderr" "$COMMAND_DIR/rig-run.md"
+  grep -Fq "non-empty directory" "$COMMAND_DIR/rig-run.md"
+  grep -Fq "verify every expected file or directory exists" "$COMMAND_DIR/rig-run.md"
+  grep -Fq "Do not report the scaffold as" "$COMMAND_DIR/rig-run.md"
 }
 
 @test "docs index convention is wired into feature doc commands" {
@@ -496,27 +496,27 @@ PY
   grep -q "skip silently" "$COMMAND_DIR/wrap.md"
 }
 
-@test "ship.md: Step 9 compares commits against existing PR description before prompting" {
-  grep -q "compare the branch commits against the existing PR description" "$COMMAND_DIR/ship.md"
+@test "rig-ship.md: Step 9 compares commits against existing PR description before prompting" {
+  grep -q "compare the branch commits against the existing PR description" "$COMMAND_DIR/rig-ship.md"
 }
 
-@test "ship.md: Step 9 skips housekeeping commit types in freshness check" {
-  grep -qE "chore\(memory\)" "$COMMAND_DIR/ship.md"
+@test "rig-ship.md: Step 9 skips housekeeping commit types in freshness check" {
+  grep -qE "chore\(memory\)" "$COMMAND_DIR/rig-ship.md"
 }
 
-@test "code-review.md: requires dependency impact analysis before findings" {
-  grep -Fq "## Step 4.5 — Dependency impact analysis" "$COMMAND_DIR/code-review.md"
-  grep -Fq "Canonical sources and generated artifacts" "$COMMAND_DIR/code-review.md"
-  grep -Fq "Upstream/downstream install and upgrade paths" "$COMMAND_DIR/code-review.md"
-  grep -Fq "Dependency impact gaps" "$COMMAND_DIR/code-review.md"
+@test "rig-review.md: requires dependency impact analysis before findings" {
+  grep -Fq "## Step 4.5 — Dependency impact analysis" "$COMMAND_DIR/rig-review.md"
+  grep -Fq "Canonical sources and generated artifacts" "$COMMAND_DIR/rig-review.md"
+  grep -Fq "Upstream/downstream install and upgrade paths" "$COMMAND_DIR/rig-review.md"
+  grep -Fq "Dependency impact gaps" "$COMMAND_DIR/rig-review.md"
 }
 
-@test "ship.md: dependency impact gate is blocking and feeds PR evidence" {
-  grep -Fq "## Step 4.6 — Dependency impact gate" "$COMMAND_DIR/ship.md"
-  grep -Fq "This is a blocking gate" "$COMMAND_DIR/ship.md"
-  grep -Fq "Generated artifacts: PASS / N/A / HOLD" "$COMMAND_DIR/ship.md"
-  grep -Fq "Retain this matrix and reuse it in the pull request **Dependency impact** section" "$COMMAND_DIR/ship.md"
-  grep -Fq "## Dependency impact" "$COMMAND_DIR/ship.md"
+@test "rig-ship.md: dependency impact gate is blocking and feeds PR evidence" {
+  grep -Fq "## Step 4.6 — Dependency impact gate" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "This is a blocking gate" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "Generated artifacts: PASS / N/A / HOLD" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "Retain this matrix and reuse it in the pull request **Dependency impact** section" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "## Dependency impact" "$COMMAND_DIR/rig-ship.md"
 }
 
 @test "sprint workflow codifies Dependency Surface Audit planning gate" {
@@ -545,9 +545,9 @@ PY
 }
 
 @test "ship and post-merge document batch issue and PR handling" {
-  grep -Fq "multi-issue PR candidate" "$COMMAND_DIR/ship.md"
-  grep -Fq "one closing line per" "$COMMAND_DIR/ship.md"
-  grep -Fq "For multi-issue PRs" "$COMMAND_DIR/ship.md"
+  grep -Fq "multi-issue PR candidate" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "one closing line per" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "For multi-issue PRs" "$COMMAND_DIR/rig-ship.md"
   grep -Fq "batch ledger" "$COMMAND_DIR/post-merge.md"
   grep -Fq "verify each PR number, merge SHA" "$COMMAND_DIR/post-merge.md"
   grep -Fq "one entry per PR or an explicit combined batch summary" "$COMMAND_DIR/post-merge.md"
@@ -564,20 +564,20 @@ PY
 }
 
 @test "ship merge guidance verifies GitHub PR state after non-zero merge" {
-  grep -Fq "## Step 10 — Merge verification and branch cleanup" "$COMMAND_DIR/ship.md"
-  grep -Fq 'gh pr view "$PR_NUMBER" --json state,mergedAt' "$COMMAND_DIR/ship.md"
-  grep -Fq "linked worktree" "$COMMAND_DIR/ship.md"
-  grep -Fq "local cleanup failure" "$COMMAND_DIR/ship.md"
-  grep -Fq "Do not run" "$COMMAND_DIR/ship.md"
-  grep -Fq "destructive local branch cleanup" "$COMMAND_DIR/ship.md"
-  grep -Fq "do not delete a local linked-worktree branch" "$COMMAND_DIR/ship.md"
-  grep -Fq "delete only the remote branch after confirming the PR is merged" "$COMMAND_DIR/ship.md"
-  grep -Fq "target" "$COMMAND_DIR/ship.md"
-  grep -Fq "PR head branch" "$COMMAND_DIR/ship.md"
+  grep -Fq "## Step 10 — Merge verification and branch cleanup" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq 'gh pr view "$PR_NUMBER" --json state,mergedAt' "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "linked worktree" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "local cleanup failure" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "Do not run" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "destructive local branch cleanup" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "do not delete a local linked-worktree branch" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "delete only the remote branch after confirming the PR is merged" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "target" "$COMMAND_DIR/rig-ship.md"
+  grep -Fq "PR head branch" "$COMMAND_DIR/rig-ship.md"
 }
 
-@test "code-review and ship discover PR validation candidates safely" {
-  for command in code-review ship; do
+@test "rig-review and rig-ship discover PR validation candidates safely" {
+  for command in rig-review rig-ship; do
     grep -Fq "Local verification" "$COMMAND_DIR/$command.md"
     grep -Fq "Validation" "$COMMAND_DIR/$command.md"
     grep -Fq "Test plan" "$COMMAND_DIR/$command.md"
@@ -694,7 +694,7 @@ PY
   git -C "$repo" add staged.md
   printf 'new\n' > "$repo/new.md"
   local block
-  block="$(sed -n '/^# ship-changed-paths:start$/,/^# ship-changed-paths:end$/p' "$COMMAND_DIR/ship.md")"
+  block="$(sed -n '/^# ship-changed-paths:start$/,/^# ship-changed-paths:end$/p' "$COMMAND_DIR/rig-ship.md")"
   run env REPO="$repo" BASE=main bash -c "$block"
   [ "$status" -eq 0 ]
   [[ "$output" == *"feature.md"* && "$output" == *"staged.md"* && "$output" == *"new.md"* ]] || return 1
@@ -716,7 +716,7 @@ SH
   [ "$status" -ne 0 ]
 
   # Both copies of the command must carry the same explicit failure checks.
-  [ "$(grep -Fc 'git diff --name-only "origin/$BASE"...HEAD || exit 1;' "$COMMAND_DIR/ship.md")" -eq 2 ]
+  [ "$(grep -Fc 'git diff --name-only "origin/$BASE"...HEAD || exit 1;' "$COMMAND_DIR/rig-ship.md")" -eq 2 ]
 }
 
 @test "wrap orphan scan finds active record under external Rig path with apostrophe" {
@@ -741,7 +741,7 @@ SH
 }
 
 @test "ship workflows push the branch before PR creation and find docs templates" {
-  python3 - "$COMMAND_DIR/ship.md" "$REPO_ROOT/templates/project/.rig/processes/SHIP_WORKFLOW.md" <<'PY'
+  python3 - "$COMMAND_DIR/rig-ship.md" "$REPO_ROOT/templates/project/.rig/processes/SHIP_WORKFLOW.md" <<'PY'
 import pathlib, sys
 for file in sys.argv[1:]:
     text = pathlib.Path(file).read_text()
@@ -752,7 +752,7 @@ PY
 }
 
 @test "task completion has one post-merge owner across run and ship" {
-  python3 - "$COMMAND_DIR/run.md" "$COMMAND_DIR/ship.md" \
+  python3 - "$COMMAND_DIR/rig-run.md" "$COMMAND_DIR/rig-ship.md" \
     "$REPO_ROOT/templates/project/.rig/processes/NEW_TASK_WORKFLOW.md" \
     "$REPO_ROOT/templates/project/.rig/processes/SHIP_WORKFLOW.md" \
     "$COMMAND_DIR/post-merge.md" <<'PY'
@@ -769,17 +769,17 @@ PY
 
 @test "review and workflow docs use remote base, resolved directories, and project CLI" {
   local process="$REPO_ROOT/templates/project/.rig/processes"
-  grep -Fq 'git fetch origin "$BASE" || exit 1' "$COMMAND_DIR/code-review.md"
-  grep -Fq 'git diff --stat "origin/$BASE"...HEAD || exit 1' "$COMMAND_DIR/code-review.md"
-  grep -Fq 'git diff --name-only "origin/$BASE"...HEAD || exit 1' "$COMMAND_DIR/code-review.md"
-  grep -Fq 'git diff "origin/$BASE"...HEAD || exit 1' "$COMMAND_DIR/code-review.md"
+  grep -Fq 'git fetch origin "$BASE" || exit 1' "$COMMAND_DIR/rig-review.md"
+  grep -Fq 'git diff --stat "origin/$BASE"...HEAD || exit 1' "$COMMAND_DIR/rig-review.md"
+  grep -Fq 'git diff --name-only "origin/$BASE"...HEAD || exit 1' "$COMMAND_DIR/rig-review.md"
+  grep -Fq 'git diff "origin/$BASE"...HEAD || exit 1' "$COMMAND_DIR/rig-review.md"
   grep -Fq 'DOCS_DIR="$REPO/docs"' "$COMMAND_DIR/wrap.md"
   grep -Fq 'DOCS_DIR="$REPO/docs"' "$COMMAND_DIR/post-merge.md"
   grep -Fq 'bin/rig session resolve --json' "$REPO_ROOT/templates/project/.rig/memory/PROGRESS.md"
   grep -Fq '`confidence: exact`' "$REPO_ROOT/templates/project/.rig/memory/PROGRESS.md"
   grep -Fq '"$REPO/bin/rig" sprint audit' "$process/SPRINT_WORKFLOW.md"
   grep -Fq '"$REPO/bin/rig" connector preflight' "$process/CONNECTOR_PREFLIGHT.md"
-  grep -Fq 'lint-command from CLAUDE.md' "$COMMAND_DIR/ship.md"
+  grep -Fq 'lint-command from CLAUDE.md' "$COMMAND_DIR/rig-ship.md"
 }
 
 @test "wrap.md: contains Permission scan opt-in section" {

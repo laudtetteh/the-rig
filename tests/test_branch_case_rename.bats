@@ -19,7 +19,7 @@ load_rename_helper() {
 @test "task and ship document the identical branch rename helper" {
   run diff \
     <(sed -n '/^# branch-case-rename:start$/,/^# branch-case-rename:end$/p' "$COMMAND_DIR/task.md") \
-    <(sed -n '/^# branch-case-rename:start$/,/^# branch-case-rename:end$/p' "$COMMAND_DIR/ship.md")
+    <(sed -n '/^# branch-case-rename:start$/,/^# branch-case-rename:end$/p' "$COMMAND_DIR/rig-ship.md")
   [ "$status" -eq 0 ]
 }
 
@@ -30,7 +30,7 @@ load_rename_helper() {
   rename_branch_case_safe FEAT-241
   [ "$(git branch --show-current)" = "FEAT-241" ]
 
-  load_rename_helper "$COMMAND_DIR/ship.md"
+  load_rename_helper "$COMMAND_DIR/rig-ship.md"
   rename_branch_case_safe feat-241
   [ "$(git branch --show-current)" = "feat-241" ]
   [ -z "$(git for-each-ref --format='%(refname:short)' 'refs/heads/tmp/*')" ]
@@ -53,7 +53,7 @@ load_rename_helper() {
   git branch -M Example
   git branch tmp/Example-rename
   git branch tmp/Example-rename-1
-  load_rename_helper "$COMMAND_DIR/ship.md"
+  load_rename_helper "$COMMAND_DIR/rig-ship.md"
 
   rename_branch_case_safe example
   [ "$(git branch --show-current)" = "example" ]

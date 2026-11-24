@@ -48,7 +48,7 @@ Ask the user the following. Collect all answers before moving to Part 2.
    - **yes** — tests are required before this task can ship
    - **no** — tests are explicitly out of scope (state why, e.g. "pure config change")
    - **optional** — write tests if the logic warrants it; no hard gate
-   Record the answer in the task file under `## Testing`. The `/ship` pre-commit step
+   Record the answer in the task file under `## Testing`. The `/rig-ship` pre-commit step
    reads this field — if `yes`, tests must exist before the commit is allowed.
 
    - **`issue-tracking: github`** (or field absent — default):
@@ -250,7 +250,7 @@ Regardless of autonomy level:
 - Pre-tool hooks still run. Governance files (listed in `pre-tool.sh`) are still protected.
 - Changes to The Rig's own `.rig/processes/`, `.rig/rules/`, hooks, or CLAUDE.md still require `/rig-propose`.
 - Secrets and credentials are never written to files.
-- The pre-ship checklist (`/ship`) still runs before any PR is opened.
+- The pre-ship checklist (`/rig-ship`) still runs before any PR is opened.
 - At task completion, any Rig workflow friction or gaps observed must be logged to
   `.rig/memory/RIG_GAPS.md`. Use `/rig-gaps` to compile and submit them.
 

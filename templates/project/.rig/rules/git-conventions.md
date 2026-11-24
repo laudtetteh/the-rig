@@ -38,7 +38,7 @@ Optional body explaining WHY, not what. The diff shows what.
 > is merged to the default branch — or when those keywords appear in the **PR body** of a
 > PR merging to the default branch. The `[#N]` subject-line format fulfils The Rig's
 > commit-msg validation and creates a hyperlink in GitHub history, but does not auto-close.
-> Always include `Closes #N` in the PR body (the `/ship` PR template already does this).
+> Always include `Closes #N` in the PR body (the `/rig-ship` PR template already does this).
 
 ### Examples
 

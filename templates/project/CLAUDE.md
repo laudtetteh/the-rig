@@ -86,7 +86,7 @@ approval, and do not infer preferences from observed behavior or one-off request
 ## Base branch
 
 The repository's main integration branch. All PRs target this branch.
-`/post-merge`, `/ship`, and related workflows read this field.
+`/post-merge`, `/rig-ship`, and related workflows read this field.
 
 ```
 base-branch: [BASE_BRANCH]
@@ -130,7 +130,7 @@ issue-tracking: github
 |---|---|
 | `github` | GitHub issues required. `/task` blocks until an issue number is provided (or drafts one and files it after exact approval when `issue-creator: agent`). Ref format: `[#N]`. `gh` CLI used for all PR/issue operations. |
 | Any other tracker name | User provides an existing reference. Commits use `[reference]`. Optional `issue-ref-pattern:` validates the reference; without it, any nonempty bracketed reference is accepted. The agent does not create tickets in that tracker. |
-| `none` | No issue tracker. Issue requirement is skipped in `/task`, `/ship`, and commit messages. Use for personal projects or prototypes. |
+| `none` | No issue tracker. Issue requirement is skipped in `/task`, `/rig-ship`, and commit messages. Use for personal projects or prototypes. |
 
 `linear`, `trello`, and `gus` remain built-in reference presets for existing
 projects: `ENG-123`, `trello:CARD-ID`, and `W-1234567` respectively. Any
@@ -191,20 +191,20 @@ rig-gaps-push-target:
 # test-command: bats tests/
 ```
 
-Optional. Command to run the project's test suite. Read by `/code-review` to validate changes before
-reviewing the diff. Set this once and every future `/code-review` run uses it automatically.
+Optional. Command to run the project's test suite. Read by `/rig-review` to validate changes before
+reviewing the diff. Set this once and every future `/rig-review` run uses it automatically.
 
 ```
 # lint-command: bash -n install.sh
 ```
 
-Optional. Command to run the linter or syntax checker. Read by `/code-review` alongside `test-command`.
+Optional. Command to run the linter or syntax checker. Read by `/rig-review` alongside `test-command`.
 
 ```
 # testing: playwright
 ```
 
-Optional. If set to `playwright`, `/code-review` runs `npx playwright test` as an additional
+Optional. If set to `playwright`, `/rig-review` runs `npx playwright test` as an additional
 validation step and includes the result in the review report.
 
 ```
@@ -212,7 +212,7 @@ validation step and includes the result in the review report.
 # prod-url:
 ```
 
-Optional. Included in `/code-review` reports when set — links review findings to the
+Optional. Included in `/rig-review` reports when set — links review findings to the
 environment under test.
 
 Optional. Absolute path to a `RIG_GAPS.md` file in The Rig's own repo on this machine.
@@ -334,11 +334,11 @@ transition, approval, and resume contract. Route intent to the smallest mode:
 
 - New project with no established backlog: `/kickoff` (project mode).
 - Define or configure one unit of work: `/task` (task intake).
-- Execute one task or a simple ordered queue: `/run` (task mode).
+- Execute one task or a simple ordered queue: `/rig-run` (task mode).
 - Coordinate multiple tasks with conflicts/dependencies: `/sprint` (sprint mode).
 
 Supported compositions are project -> task, project -> sprint, task -> sprint,
-and sprint -> isolated task. A task embedded in `/run` or `/sprint` keeps the
+and sprint -> isolated task. A task embedded in `/rig-run` or `/sprint` keeps the
 same task card, operating mode, checkpoint, and ship gate. Never treat a mode
 transition as execution approval; checkpoint the source artifact and obtain the
 receiving mode's required approval.

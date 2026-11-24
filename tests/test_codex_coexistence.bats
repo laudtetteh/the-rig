@@ -46,8 +46,8 @@ run_install() {
   expected="$(find "$REPO_ROOT/templates/project/.claude/commands" -maxdepth 1 -name '*.md' ! -name 'doc-feature.md' ! -name 'doc-list.md' ! -name 'feature-context.md' ! -name 'refresh-feature-doc.md' ! -name 'rig-gaps.md' ! -name 'rig-propose.md' | wc -l | tr -d ' ')"
   actual="$(find "$TEST_PROJECT/.agents/skills" -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l | tr -d ' ')"
   [ "$actual" -eq "$expected" ]
-  [ -f "$TEST_PROJECT/.agents/skills/status/references/command.md" ]
-  grep -Fq 'name: status' "$TEST_PROJECT/.agents/skills/status/SKILL.md"
+  [ -f "$TEST_PROJECT/.agents/skills/rig-status/references/command.md" ]
+  grep -Fq 'name: rig-status' "$TEST_PROJECT/.agents/skills/rig-status/SKILL.md"
   [ -f "$TEST_PROJECT/.agents/skills/connector-preflight/references/command.md" ]
   grep -Fq 'CONNECTOR_PREFLIGHT.md' "$TEST_PROJECT/.agents/skills/connector-preflight/references/command.md"
   grep -Fq 'exact #409 root session' "$TEST_PROJECT/.agents/skills/connector-preflight/references/command.md"
@@ -65,14 +65,14 @@ run_install() {
   run_install codex merge --feature-docs
   [ "$status" -eq 0 ]
   [ -f "$TEST_PROJECT/.claude/commands/doc-feature.md" ]
-  [ ! -f "$TEST_PROJECT/.claude/commands/ship.md" ]
+  [ ! -f "$TEST_PROJECT/.claude/commands/rig-ship.md" ]
 
   run bash -c 'cd "$1" && bash bin/rig doctor --json' _ "$TEST_PROJECT"
   [ "$status" -eq 1 ]  # Fresh scaffold still has unfilled project placeholders.
   JSON_OUTPUT="$output" python3 -c 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="pass"'
 
   cp "$TEST_PROJECT/.rig/memory/.rig-manifest" "$TEST_PROJECT/.rig/memory/.rig-manifest.original"
-  python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_text("".join(line for line in p.read_text().splitlines(keepends=True) if ".agents/skills/ship/references/command.md" not in line))' "$TEST_PROJECT/.rig/memory/.rig-manifest"
+  python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_text("".join(line for line in p.read_text().splitlines(keepends=True) if ".agents/skills/rig-ship/references/command.md" not in line))' "$TEST_PROJECT/.rig/memory/.rig-manifest"
   run bash -c 'cd "$1" && bash bin/rig doctor --json' _ "$TEST_PROJECT"
   [ "$status" -eq 1 ]
   JSON_OUTPUT="$output" python3 -c 'import json,os; c={x["name"]:x for x in json.loads(os.environ["JSON_OUTPUT"])["checks"]}; assert c["codex_skill_parity"]["state"]=="pass"'
@@ -135,7 +135,7 @@ run_install() {
   run_install codex merge --base-branch trunk
   [ "$status" -eq 0 ]
   if grep -R -Fq '[BASE_BRANCH]' "$TEST_PROJECT/.agents/skills"; then return 1; fi
-  grep -Fq 'trunk' "$TEST_PROJECT/.agents/skills/ship/references/command.md"
+  grep -Fq 'trunk' "$TEST_PROJECT/.agents/skills/rig-ship/references/command.md"
 }
 
 @test "Claude-only install has no Codex skill side effects" {
@@ -164,23 +164,23 @@ run_install() {
 @test "Codex skill upgrade preserves a customized generated reference" {
   run_install codex
   [ "$status" -eq 0 ]
-  printf '\nuser customization\n' >> "$TEST_PROJECT/.agents/skills/status/references/command.md"
+  printf '\nuser customization\n' >> "$TEST_PROJECT/.agents/skills/rig-status/references/command.md"
 
   run_install codex upgrade
   [ "$status" -eq 0 ]
-  grep -Fq 'user customization' "$TEST_PROJECT/.agents/skills/status/references/command.md"
-  grep -Fq '.agents/skills/status/references/command.md' "$TEST_PROJECT/.rig/memory/.rig-manifest"
-  [[ "$output" == *'Non-interactive mode — skipping customized file: .agents/skills/status/references/command.md'* ]] || return 1
+  grep -Fq 'user customization' "$TEST_PROJECT/.agents/skills/rig-status/references/command.md"
+  grep -Fq '.agents/skills/rig-status/references/command.md' "$TEST_PROJECT/.rig/memory/.rig-manifest"
+  [[ "$output" == *'Non-interactive mode — skipping customized file: .agents/skills/rig-status/references/command.md'* ]] || return 1
 }
 
 @test "global Codex target installs valid personal skills without Claude assets" {
   run env HOME="$TEST_HOME" bash "$INSTALLER" --global-only \
     --global-agent codex --strategy merge
   [ "$status" -eq 0 ]
-  [ -f "$TEST_HOME/.agents/skills/code-review/SKILL.md" ]
-  grep -Fq 'name: code-review' "$TEST_HOME/.agents/skills/code-review/SKILL.md"
-  grep -Fq '~/.agents/skills/code-review/SKILL.md' "$TEST_HOME/.agents/skills/code-review/SKILL.md"
-  if grep -Fq '~/.claude/skills/code-review.md' "$TEST_HOME/.agents/skills/code-review/SKILL.md"; then return 1; fi
+  [ -f "$TEST_HOME/.agents/skills/rig-review-basics/SKILL.md" ]
+  grep -Fq 'name: rig-review-basics' "$TEST_HOME/.agents/skills/rig-review-basics/SKILL.md"
+  grep -Fq '~/.agents/skills/rig-review-basics/SKILL.md' "$TEST_HOME/.agents/skills/rig-review-basics/SKILL.md"
+  if grep -Fq '~/.claude/skills/rig-review-basics.md' "$TEST_HOME/.agents/skills/rig-review-basics/SKILL.md"; then return 1; fi
   [ -f "$TEST_HOME/.agents/skills/rig-upgrade/SKILL.md" ]
   [ -f "$TEST_HOME/.agents/skills/rig-upgrade/references/command.md" ]
   grep -Fq 'name: rig-upgrade' "$TEST_HOME/.agents/skills/rig-upgrade/SKILL.md"
@@ -189,16 +189,16 @@ run_install() {
 }
 
 @test "global Codex target preserves an existing personal skill" {
-  mkdir -p "$TEST_HOME/.agents/skills/code-review"
-  printf 'personal customization\n' > "$TEST_HOME/.agents/skills/code-review/SKILL.md"
+  mkdir -p "$TEST_HOME/.agents/skills/rig-review-basics"
+  printf 'personal customization\n' > "$TEST_HOME/.agents/skills/rig-review-basics/SKILL.md"
   run env HOME="$TEST_HOME" bash "$INSTALLER" --global-only \
     --global-agent codex --strategy overwrite
   [ "$status" -eq 0 ]
-  [ "$(cat "$TEST_HOME/.agents/skills/code-review/SKILL.md")" = 'personal customization' ]
+  [ "$(cat "$TEST_HOME/.agents/skills/rig-review-basics/SKILL.md")" = 'personal customization' ]
 }
 
 @test "global Codex target preserves a dangling personal-skill symlink" {
-  skill_dir="$TEST_HOME/.agents/skills/code-review"
+  skill_dir="$TEST_HOME/.agents/skills/rig-review-basics"
   missing_target="$TEST_ROOT/user-owned-missing-target"
   mkdir -p "$skill_dir"
   ln -s "$missing_target" "$skill_dir/SKILL.md"

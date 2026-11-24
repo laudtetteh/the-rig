@@ -130,7 +130,7 @@ is_rig_owned_stub() {
 }
 
 @test "is_rig_owned: slash command is Rig-owned" {
-  is_rig_owned_stub ".claude/commands/ship.md"
+  is_rig_owned_stub ".claude/commands/rig-ship.md"
   [ "$?" -eq 0 ]
 }
 
@@ -155,7 +155,7 @@ is_rig_owned_stub() {
 }
 
 @test "is_rig_owned: generated Codex skill is Rig-owned" {
-  is_rig_owned_stub ".agents/skills/ship/SKILL.md"
+  is_rig_owned_stub ".agents/skills/rig-ship/SKILL.md"
 }
 
 @test "is_rig_owned: Codex hook registry is Rig-owned" {
@@ -562,24 +562,24 @@ _make_failing_sha_tools() {
     --global-agent claude --strategy upgrade
   [ "$status" -eq 0 ]
 
-  local skill="$fake_home/.claude/skills/code-review/SKILL.md"
+  local skill="$fake_home/.claude/skills/rig-review-basics/SKILL.md"
   [ -f "$skill" ]
   printf '# old global skill\n' > "$skill"
   local old_hash
   old_hash="$(_sha256 "$skill")"
   awk -v hash="$old_hash" '
-    $2 == "skills/code-review/SKILL.md" { print hash "  skills/code-review/SKILL.md"; next }
+    $2 == "skills/rig-review-basics/SKILL.md" { print hash "  skills/rig-review-basics/SKILL.md"; next }
     { print }
   ' "$fake_home/.claude/.rig-global-manifest" > "$TEMP_DIR/global-manifest"
   mv "$TEMP_DIR/global-manifest" "$fake_home/.claude/.rig-global-manifest"
-  jq --arg hash "$old_hash" '.entries["skills/code-review/SKILL.md"].sha256 = $hash | .entries["skills/code-review/SKILL.md"].owner = "user"' \
+  jq --arg hash "$old_hash" '.entries["skills/rig-review-basics/SKILL.md"].sha256 = $hash | .entries["skills/rig-review-basics/SKILL.md"].owner = "user"' \
     "$fake_home/.claude/.rig-global-manifest.json" > "$TEMP_DIR/global-manifest.json"
   mv "$TEMP_DIR/global-manifest.json" "$fake_home/.claude/.rig-global-manifest.json"
 
   run env HOME="$fake_home" bash "$INSTALLER" --global-only \
     --global-agent claude --strategy upgrade
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Updated: skills/code-review/SKILL.md"* ]] || return 1
+  [[ "$output" == *"Updated: skills/rig-review-basics/SKILL.md"* ]] || return 1
   run grep -q '# old global skill' "$skill"
   [ "$status" -ne 0 ]
 }
@@ -777,12 +777,12 @@ _make_failing_sha_tools() {
   [ -f "$TEST_PROJECT/.claude/hooks/pre-tool.sh" ]
 }
 
-# ── Command behavior: /status ─────────────────────────────────────────────────
-# /status reads RIG_DIR, counts backlog tasks, and checks pending flag files.
+# ── Command behavior: /rig-status ─────────────────────────────────────────────────
+# /rig-status reads RIG_DIR, counts backlog tasks, and checks pending flag files.
 # We test the extractable shell logic in isolation.
 
 _status_resolve_rig_dir() {
-  # Mirrors RIG_DIR resolution in /status (and all other commands).
+  # Mirrors RIG_DIR resolution in /rig-status (and all other commands).
   # Prints the resolved RIG_DIR path.
   local repo="$1"
   if [[ -f "$repo/.rigpath" ]]; then

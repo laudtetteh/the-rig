@@ -70,14 +70,14 @@ _write_manifest_fixture() {
   mkdir -p "$rig_dir/memory"
   cat > "$rig_dir/memory/.rig-manifest" <<'EOF'
 # The Rig manifest
-1111111111111111111111111111111111111111111111111111111111111111  .claude/commands/ship.md
+1111111111111111111111111111111111111111111111111111111111111111  .claude/commands/rig-ship.md
 2222222222222222222222222222222222222222222222222222222222222222  .claude/hooks/pre-tool.sh
 3333333333333333333333333333333333333333333333333333333333333333  .rig/processes/SHIP_WORKFLOW.md
 4444444444444444444444444444444444444444444444444444444444444444  .rig/VERSION
 EOF
   cat > "$rig_dir/memory/.rig-manifest.json" <<'EOF'
 {"schema_version": 1, "entries": {
-  ".claude/commands/ship.md": {"sha256": "1111111111111111111111111111111111111111111111111111111111111111", "owner": "rig"},
+  ".claude/commands/rig-ship.md": {"sha256": "1111111111111111111111111111111111111111111111111111111111111111", "owner": "rig"},
   ".claude/hooks/pre-tool.sh": {"sha256": "2222222222222222222222222222222222222222222222222222222222222222", "owner": "rig"}
 }}
 EOF
@@ -86,27 +86,27 @@ EOF
 @test "rig-upgrade 2b-classic: manifest update rewrites only the exact path entry" {
   _write_manifest_fixture "$PROJECT/.rig"
   mkdir -p "$PROJECT/.claude/commands"
-  printf 'accepted template\n' > "$PROJECT/.claude/commands/ship.md"
+  printf 'accepted template\n' > "$PROJECT/.claude/commands/rig-ship.md"
   local script
   script=$(_snippet_script "$RIG_UPGRADE" 'REL="$rel"' "RIG_DIR='$PROJECT/.rig'
-rel='.claude/commands/ship.md'
-installed_path='$PROJECT/.claude/commands/ship.md'
+rel='.claude/commands/rig-ship.md'
+installed_path='$PROJECT/.claude/commands/rig-ship.md'
 CUSTOMIZED_ACCEPTED=()
 RIG_WRITTEN_PATHS=()")
   printf 'echo "accepted=${CUSTOMIZED_ACCEPTED[*]-}"\n' >> "$script"
   run /bin/bash "$script"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"accepted=.claude/commands/ship.md"* ]] || false
+  [[ "$output" == *"accepted=.claude/commands/rig-ship.md"* ]] || false
   local expected
-  expected=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$PROJECT/.claude/commands/ship.md")
-  grep -qx "$expected  .claude/commands/ship.md" "$PROJECT/.rig/memory/.rig-manifest"
+  expected=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$PROJECT/.claude/commands/rig-ship.md")
+  grep -qx "$expected  .claude/commands/rig-ship.md" "$PROJECT/.rig/memory/.rig-manifest"
   grep -qx '2222222222222222222222222222222222222222222222222222222222222222  .claude/hooks/pre-tool.sh' "$PROJECT/.rig/memory/.rig-manifest"
   grep -qx '3333333333333333333333333333333333333333333333333333333333333333  .rig/processes/SHIP_WORKFLOW.md' "$PROJECT/.rig/memory/.rig-manifest"
   [ "$(grep -c '^[0-9a-f]' "$PROJECT/.rig/memory/.rig-manifest")" -eq 4 ]
   python3 - "$PROJECT/.rig/memory/.rig-manifest.json" "$expected" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1]))
-assert data["entries"][".claude/commands/ship.md"]["sha256"] == sys.argv[2]
+assert data["entries"][".claude/commands/rig-ship.md"]["sha256"] == sys.argv[2]
 assert data["entries"][".claude/hooks/pre-tool.sh"]["sha256"] == "2" * 64
 PY
 }
@@ -152,7 +152,7 @@ RIG_WRITTEN_PATHS=()")
   local expected
   expected=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$rig_dir/VERSION")
   grep -qx "$expected  .rig/VERSION" "$rig_dir/memory/.rig-manifest"
-  grep -qx '1111111111111111111111111111111111111111111111111111111111111111  .claude/commands/ship.md' "$rig_dir/memory/.rig-manifest"
+  grep -qx '1111111111111111111111111111111111111111111111111111111111111111  .claude/commands/rig-ship.md' "$rig_dir/memory/.rig-manifest"
 }
 
 _detect_tracking() {
@@ -278,13 +278,13 @@ _stage_fixture() {
   echo base > "$PROJECT/README.md"
   echo '{"hooks": {}}' > "$PROJECT/.claude/settings.json"
   echo 'user command' > "$PROJECT/.claude/commands/my-own.md"
-  echo old > "$PROJECT/.claude/commands/ship.md"
+  echo old > "$PROJECT/.claude/commands/rig-ship.md"
   echo old > "$PROJECT/.rig/processes/SHIP_WORKFLOW.md"
   echo old > "$PROJECT/.rig/memory/.rig-manifest"
   git -C "$PROJECT" add -A
   git -C "$PROJECT" commit -qm init
   # Rig writes ...
-  echo new > "$PROJECT/.claude/commands/ship.md"
+  echo new > "$PROJECT/.claude/commands/rig-ship.md"
   echo new > "$PROJECT/.rig/processes/SHIP_WORKFLOW.md"
   echo new > "$PROJECT/.rig/memory/.rig-manifest"
   echo template > "$PROJECT/.github/PULL_REQUEST_TEMPLATE.md"
@@ -302,7 +302,7 @@ _run_stage() {
   local script
   script=$(_snippet_script "$RIG_UPGRADE" '_rig_stage_candidate() {' "REPO='$PROJECT'
 TRACKING=$1
-RIG_WRITTEN_PATHS=(.claude/commands/ship.md .rig/processes/SHIP_WORKFLOW.md .github/PULL_REQUEST_TEMPLATE.md bin/rig .git/hooks/pre-commit)")
+RIG_WRITTEN_PATHS=(.claude/commands/rig-ship.md .rig/processes/SHIP_WORKFLOW.md .github/PULL_REQUEST_TEMPLATE.md bin/rig .git/hooks/pre-commit)")
   /bin/bash "$script"
 }
 
@@ -315,7 +315,7 @@ RIG_WRITTEN_PATHS=(.claude/commands/ship.md .rig/processes/SHIP_WORKFLOW.md .git
   [ "$status" -eq 0 ]
   local staged
   staged=$(git -C "$PROJECT" diff --cached --name-only)
-  [ "$staged" = "$(printf '.claude/commands/ship.md\n.github/PULL_REQUEST_TEMPLATE.md\nbin/rig')" ]
+  [ "$staged" = "$(printf '.claude/commands/rig-ship.md\n.github/PULL_REQUEST_TEMPLATE.md\nbin/rig')" ]
 }
 
 @test "rig-upgrade 5a: repo mode adds .rig/ writes and bookkeeping, never user edits" {
@@ -326,7 +326,7 @@ RIG_WRITTEN_PATHS=(.claude/commands/ship.md .rig/processes/SHIP_WORKFLOW.md .git
   [[ "$output" == *".claude/commands/my-own.md"* ]] || false
   local staged
   staged=$(git -C "$PROJECT" diff --cached --name-only)
-  echo "$staged" | grep -qx '.claude/commands/ship.md'
+  echo "$staged" | grep -qx '.claude/commands/rig-ship.md'
   echo "$staged" | grep -qx '.rig/processes/SHIP_WORKFLOW.md'
   echo "$staged" | grep -qx '.rig/memory/.rig-manifest'
   echo "$staged" | grep -qx '.github/PULL_REQUEST_TEMPLATE.md'
@@ -358,7 +358,7 @@ RIG_WRITTEN_PATHS=(.claude/commands/ship.md .rig/processes/SHIP_WORKFLOW.md .git
   local log
   log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
   # Real install.sh styles: colourised, with and without a colon after the verb.
-  printf '\033[0;32m✓\033[0m Updated: .claude/commands/ship.md\n' > "$log"
+  printf '\033[0;32m✓\033[0m Updated: .claude/commands/rig-ship.md\n' > "$log"
   printf '\033[0;32m✓\033[0m Created .github/PULL_REQUEST_TEMPLATE.md\n' >> "$log"
   printf '\033[0;32m✓\033[0m Created bin/rig\n' >> "$log"
   printf '\033[0;32m✓\033[0m Updated: .rig/processes/SHIP_WORKFLOW.md\n' >> "$log"
@@ -370,7 +370,7 @@ RIG_WRITTEN_PATHS=(.claude/commands/ship.md .rig/processes/SHIP_WORKFLOW.md .git
   [ "$status" -eq 0 ]
   local staged
   staged=$(git -C "$PROJECT" diff --cached --name-only)
-  [ "$staged" = "$(printf '.claude/commands/ship.md\n.github/PULL_REQUEST_TEMPLATE.md\n.rig/memory/.rig-manifest\n.rig/processes/SHIP_WORKFLOW.md\nbin/rig')" ]
+  [ "$staged" = "$(printf '.claude/commands/rig-ship.md\n.github/PULL_REQUEST_TEMPLATE.md\n.rig/memory/.rig-manifest\n.rig/processes/SHIP_WORKFLOW.md\nbin/rig')" ]
   # Unrelated user edits under Rig-managed paths are listed, not staged.
   [[ "$output" == *"Not staged"* ]] || false
   [[ "$output" == *".claude/commands/my-own.md"* ]] || false
@@ -387,7 +387,7 @@ RIG_WRITTEN_PATHS=(.claude/commands/ship.md .rig/processes/SHIP_WORKFLOW.md .git
   [ -z "$(git -C "$PROJECT" diff --cached --name-only)" ]
 
   log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
-  printf '\033[0;32m✓\033[0m Updated: .claude/commands/ship.md\n' > "$log"
+  printf '\033[0;32m✓\033[0m Updated: .claude/commands/rig-ship.md\n' > "$log"
   touch -t 202001010000 "$log"
   echo 9.9.9 > "$PROJECT/.rig/VERSION"
   run /bin/bash "$script"
@@ -575,7 +575,7 @@ cd '$PROJECT'")
   _stage_fixture
   local log script
   log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
-  printf '\033[0;32m✓\033[0m Updated: .claude/commands/ship.md\n' > "$log"
+  printf '\033[0;32m✓\033[0m Updated: .claude/commands/rig-ship.md\n' > "$log"
   touch "$log.failed"
   script=$(_snippet_script "$UPGRADE_WORKFLOW" 'done < <(sed "s/${ESC}' "cd '$PROJECT'")
   run /bin/bash "$script"
@@ -589,7 +589,7 @@ cd '$PROJECT'")
   local log script
   log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
   # A second run that only re-reports up-to-date files names nothing written.
-  printf '\033[0;34m→\033[0m Up to date: .claude/commands/ship.md\n' > "$log"
+  printf '\033[0;34m→\033[0m Up to date: .claude/commands/rig-ship.md\n' > "$log"
   script=$(_snippet_script "$UPGRADE_WORKFLOW" 'done < <(sed "s/${ESC}' "cd '$PROJECT'")
   run /bin/bash "$script"
   [ "$status" -eq 0 ]
@@ -615,22 +615,22 @@ RIG_WRITTEN_PATHS=()")
   echo "$ext" > "$PROJECT/.rigpath"
   echo rig > "$ext/processes/SHIP_WORKFLOW.md"
   echo old > "$PROJECT/processes/SHIP_WORKFLOW.md"
-  echo old > "$PROJECT/.claude/commands/ship.md"
+  echo old > "$PROJECT/.claude/commands/rig-ship.md"
   git -C "$PROJECT" add -A
   git -C "$PROJECT" commit -qm init
   echo 'user edit' > "$PROJECT/processes/SHIP_WORKFLOW.md"
-  echo new > "$PROJECT/.claude/commands/ship.md"
+  echo new > "$PROJECT/.claude/commands/rig-ship.md"
   local log
   log="$(git -C "$PROJECT" rev-parse --absolute-git-dir)/rig-upgrade.log"
   printf '\033[0;32m✓\033[0m Created processes/SHIP_WORKFLOW.md\n' > "$log"
-  printf '\033[0;32m✓\033[0m Updated: .claude/commands/ship.md\n' >> "$log"
+  printf '\033[0;32m✓\033[0m Updated: .claude/commands/rig-ship.md\n' >> "$log"
 
   local script staged
   script=$(_snippet_script "$UPGRADE_WORKFLOW" 'done < <(sed "s/${ESC}' "cd '$PROJECT'")
   run /bin/bash "$script"
   [ "$status" -eq 0 ]
   staged=$(git -C "$PROJECT" diff --cached --name-only)
-  [ "$staged" = ".claude/commands/ship.md" ]
+  [ "$staged" = ".claude/commands/rig-ship.md" ]
 
   git -C "$PROJECT" reset -q
   script="$TEST_TMP/classic-ext.sh"
@@ -645,5 +645,5 @@ RIG_WRITTEN_PATHS=()")
   run /bin/bash "$script"
   [ "$status" -eq 0 ]
   staged=$(git -C "$PROJECT" diff --cached --name-only)
-  [ "$staged" = ".claude/commands/ship.md" ]
+  [ "$staged" = ".claude/commands/rig-ship.md" ]
 }
