@@ -12,6 +12,10 @@
 # It lives on disk only — read at session start, never committed.
 CONTEXT_SNAPSHOT.md
 
+# NEXT_SESSION_PROMPT.md is the single fixed file a handoff prompt is saved to,
+# only on explicit request; it restates session state, so it is never committed.
+NEXT_SESSION_PROMPT.md
+
 # PROGRESS_archive.md holds older entries trimmed from PROGRESS.md.
 # Archive is disk-only: useful for manual reference but not loaded at session start.
 PROGRESS_archive.md
