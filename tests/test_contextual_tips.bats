@@ -298,6 +298,38 @@ EOF
   context | grep -Fq 'PROGRESS.md references at least three distinct issues'
 }
 
+@test "#727: a Codex session sees the tip invocation as \$rig-debug" {
+  cat > "$RIG_DIR/memory/ERRORS.md" <<'EOF'
+## [2026-07-31] — observed parser failure
+EOF
+  (cd "$REPO" && RIG_SESSION_PID="$$" RIG_AGENT=codex bash .claude/hooks/session-start.sh \
+    > "$OUTPUT" 2>/dev/null <<<'{"source":"startup"}')
+
+  context | grep -Fq 'Run $rig-debug to investigate'
+  if context | grep -Fq '/rig-debug'; then return 1; fi
+}
+
+@test "#727: a Claude session sees the tip invocation as /rig-debug" {
+  cat > "$RIG_DIR/memory/ERRORS.md" <<'EOF'
+## [2026-07-31] — observed parser failure
+EOF
+  (cd "$REPO" && RIG_SESSION_PID="$$" RIG_AGENT=claude bash .claude/hooks/session-start.sh \
+    > "$OUTPUT" 2>/dev/null <<<'{"source":"startup"}')
+
+  context | grep -Fq 'Run /rig-debug to investigate'
+  if context | grep -Fq '{rig-debug}'; then return 1; fi
+}
+
+@test "#727: a command name is matched literally, not as a regex" {
+  printf 'ran /axb earlier\n' > "$RIG_DIR/memory/PROGRESS.md"
+  run bash -c 'source "$1"; RIG_DIR="$2"; tip_command_already_used a.b' \
+    _ "$RIG_DIR/contextual-tips.sh" "$RIG_DIR"
+  [ "$status" -ne 0 ]
+  run bash -c 'source "$1"; RIG_DIR="$2"; tip_command_already_used axb' \
+    _ "$RIG_DIR/contextual-tips.sh" "$RIG_DIR"
+  [ "$status" -eq 0 ]
+}
+
 @test "#727: no tip promotes the disabled permission-pattern scan" {
   mkdir -p "$RIG_DIR/memory/tips"
   touch "$RIG_DIR/memory/tips/.tip-session-name-shown"

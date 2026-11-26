@@ -17,9 +17,32 @@ tip_command_available() {
 # Evidence of use is a whole invocation (/name or $name) not embedded in a
 # path or a longer name, so ".rig/tasks/" or "/task-list" never count as /task.
 tip_command_already_used() {
-  local command="$1"
-  grep -Eq -- "(^|[^A-Za-z0-9_./-])[/\$]${command}([^A-Za-z0-9_/-]|$)" \
+  local escaped
+  # Escape ERE metacharacters so a name such as "a.b" matches only itself.
+  escaped=$(printf '%s' "$1" | sed 's/[][\.*^$+?(){}|/]/\\&/g')
+  grep -Eq -- "(^|[^A-Za-z0-9_./-])[/\$]${escaped}([^A-Za-z0-9_/-]|$)" \
     "$RIG_DIR/memory/PROGRESS.md" "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md" 2>/dev/null
+}
+
+# How the active provider invokes a Rig workflow, matching session-start.sh's
+# rig_workflow_invocation: /name for Claude, $name for Codex.
+tip_invocation() {
+  case "${RIG_AGENT:-claude}" in
+    claude) printf '/%s' "$1" ;;
+    codex) printf '$%s' "$1" ;;
+    *) printf 'the %s workflow' "$1" ;;
+  esac
+}
+
+# Replaces each {name} placeholder in catalog copy with the provider's
+# invocation. Only catalog text reaches this; project content never does.
+tip_render_copy() {
+  local copy="$1" name pattern='\{([a-z][a-z0-9-]*)\}'
+  while [[ "$copy" =~ $pattern ]]; do
+    name="${BASH_REMATCH[1]}"
+    copy="${copy//\{$name\}/$(tip_invocation "$name")}"
+  done
+  printf '%s' "$copy"
 }
 
 tip_sentinel_mtime() {
@@ -115,12 +138,12 @@ suppress_project_docs_without_index() { [[ -f "$REPO/docs/INDEX.md" ]]; }
 
 tip_catalog() {
   cat <<'CATALOG'
-100|debug-errors|evidence_errors_logged|suppress_debug|Rig tip (workflow): ERRORS.md contains a recorded failure. Run /rig-debug to investigate the observed error with a saved hypothesis trail.
-90|rig-gaps|evidence_gaps_logged|suppress_rig_gaps|Rig tip (workflow): RIG_GAPS.md contains workflow friction. Run /rig-gaps to review and format the observed gaps for action.
-80|code-review|evidence_reviewable_branch|suppress_code_review|Rig tip (workflow): this feature branch is at least two commits ahead of its base. Run /rig-review for a focused review before shipping.
-70|sprint|evidence_sprint|suppress_sprint|Rig tip (workflow): PROGRESS.md references at least three distinct issues. Run /sprint to plan and batch that multi-issue work.
-60|task-tracking|evidence_task_tracking|suppress_task_tracking|Rig tip (workflow): multiple sessions exist with no active task. Run /task to give multi-file work a recovery anchor.
-50|session-name|evidence_session_name|suppress_session_name|Rig tip (workflow): this repository has committed work. Run /session-name to anchor this session with a name that survives compaction.
+100|debug-errors|evidence_errors_logged|suppress_debug|Rig tip (workflow): ERRORS.md contains a recorded failure. Run {rig-debug} to investigate the observed error with a saved hypothesis trail.
+90|rig-gaps|evidence_gaps_logged|suppress_rig_gaps|Rig tip (workflow): RIG_GAPS.md contains workflow friction. Run {rig-gaps} to review and format the observed gaps for action.
+80|code-review|evidence_reviewable_branch|suppress_code_review|Rig tip (workflow): this feature branch is at least two commits ahead of its base. Run {rig-review} for a focused review before shipping.
+70|sprint|evidence_sprint|suppress_sprint|Rig tip (workflow): PROGRESS.md references at least three distinct issues. Run {sprint} to plan and batch that multi-issue work.
+60|task-tracking|evidence_task_tracking|suppress_task_tracking|Rig tip (workflow): multiple sessions exist with no active task. Run {task} to give multi-file work a recovery anchor.
+50|session-name|evidence_session_name|suppress_session_name|Rig tip (workflow): this repository has committed work. Run {session-name} to anchor this session with a name that survives compaction.
 45|project-docs-index|evidence_project_docs_without_index|suppress_project_docs_without_index|Rig tip (project): docs/ exists without docs/INDEX.md. Add a short docs/INDEX.md so project documentation has one discoverable entry point.
 CATALOG
 }
@@ -147,5 +170,5 @@ collect_contextual_tip() {
   [[ -n "$best_id" ]] || return 0
   mkdir -p "$RIG_DIR/memory/tips" 2>/dev/null || return 0
   touch "$RIG_DIR/memory/tips/.tip-${best_id}-shown" 2>/dev/null || return 0
-  printf '%s' "$best_copy"
+  tip_render_copy "$best_copy"
 }
