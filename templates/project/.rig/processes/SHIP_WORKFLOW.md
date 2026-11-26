@@ -159,7 +159,7 @@ Retain the steps and actual results for the PR **Test plan**.
 
 ---
 
-## Step 2.5 — Optional manual validation card + commit pause
+## Step 2.5 — Commit gate: evidence block, validation card + commit pause
 
 **Before presenting this prompt, confirm you have worked through the Step 1 checklist.**
 Do not jump here from Step 0 or mid-implementation — the checklist is not optional.
@@ -175,7 +175,7 @@ it to these bullets; link long output instead of pasting it. Fill every bullet
 from results you actually observed in this session:
 
 ```text
-Commit gate — <branch> @ <short SHA of HEAD, or "staged">
+Commit gate — <branch> · staged on <HEAD short SHA>   (post-commit review: <branch> @ <commit SHA>)
 • Diff: <N> files, +<added>/−<deleted> — <one-line scope>
 • Checks: <name> <passed>/<total> ✓ · <name> ✓   (or ✗ with the failing check name)
 • Review: <independent diff review result> — pre-commit on staged diff   (or post-commit @ <SHA>, or not run + why)
@@ -184,8 +184,13 @@ Commit gate — <branch> @ <short SHA of HEAD, or "staged">
 • Approving covers: this commit + push to <branch>
 ```
 
-- **Diff:** take counts from `git diff --cached --shortstat` (or
-  `git diff --shortstat` before staging).
+- **Heading:** before the commit, `HEAD` is the parent commit, so write
+  `staged on <HEAD short SHA>`. Use `@ <commit SHA>` only when the review covered
+  a commit that already exists.
+- **Diff:** count every change, including new files. Run
+  `git diff HEAD --shortstat` for tracked changes, then
+  `git ls-files --others --exclude-standard` for untracked files, and add each
+  untracked file to the file count and its lines to the added count.
 - **Checks:** list the required checks (lint, unit, static) with pass counts. A
   check that did not run is listed as not run, never as passed.
 - **Review:** label provenance. *Pre-commit* means the review covered the staged
@@ -509,7 +514,8 @@ with the normalized tracker value, `--closing FILE` when available,
 required `area:` label. This review is read-only.
 
 Exit 0 means the metadata is clean: show the reviewed head SHA and final commits,
-then confirm the PR body still describes those commits. On findings (exit 3),
+then confirm the PR body still describes those commits, show the merge gate
+evidence block, and stop for the user's explicit merge approval. On findings (exit 3),
 show each proposed change and obtain explicit approval before any external PR
 edit; rerun the review after an approved edit. On invalid input (exit 64), fix
 the fetch and rerun. If the head changes, repeat the review.
@@ -534,6 +540,10 @@ Merge gate — PR #<N> @ <head SHA>
   re-run the review or disclose the gap; a stale review never counts as current.
 - **Approving covers:** a merge approval never covers a tag, release, or push to
   the base branch.
+- **Stop after the block.** Show the block, then end your turn and wait for an
+  explicit go-ahead in a new user message that approves this merge. An earlier
+  request such as "merge it" is not that approval. Never show the block and run
+  the merge command in the same turn.
 
 Merge only after CI is green and the user has explicitly approved this specific
 merge. Use `gh pr merge` with `--match-head-commit` set to the reviewed SHA. If
