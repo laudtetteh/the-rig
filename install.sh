@@ -47,6 +47,33 @@ ask()     { [[ -n "$AGENT_MODE" ]] && return 0; echo -e "${BOLD}?${RESET} $*"; }
 # consumer breaks outright.
 blank()   { [[ -n "$AGENT_MODE" ]] && return 0; echo ""; }
 
+# ── Per-run temporary files (issue #724) ──────────────────────────────────────
+# BSD mktemp replaces only a trailing run of X's, so a template such as
+# /tmp/rig-settings-XXXXXX.json was created literally on macOS and two
+# concurrent installs collided on one path. Every installer temp file now lives
+# in one private directory per run, under $TMPDIR, with the X run last. The
+# directory is created here, before anything can fail, so the EXIT trap can
+# always remove what an early `set -e` exit left behind.
+RIG_RUN_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/rig-install.XXXXXX")"
+
+# Print the path of a new empty file in this run's temp directory.
+rig_temp_file() {
+  mktemp "${RIG_RUN_TMPDIR}/$1.XXXXXX"
+}
+
+# EXIT handler for the whole installer. Legacy-adoption rollback (defined
+# further down) runs first, with the installer's real exit status, then the
+# per-run temp directory is removed.
+rig_on_exit() {
+  local status=$?
+  if declare -F cleanup_legacy_adoption_on_exit >/dev/null; then
+    cleanup_legacy_adoption_on_exit "$status" || true
+  fi
+  [[ -n "${RIG_RUN_TMPDIR:-}" && -d "$RIG_RUN_TMPDIR" ]] && rm -rf "$RIG_RUN_TMPDIR"
+  return 0
+}
+trap rig_on_exit EXIT
+
 confirm() {
   local msg="$1"
   local default="${2:-n}"
@@ -1067,7 +1094,6 @@ PYEOF
       return 1
     fi
     LEGACY_ADOPTION_CREATED=true
-    trap cleanup_legacy_adoption_on_exit EXIT
     rm -f "$tmp" || true
   else
     mv "$tmp" "$state_file"
@@ -1925,8 +1951,10 @@ LEGACY_ADOPTION_CREATED=false
 LEGACY_ADOPTION_OWNER_SHA=""
 LEGACY_ADOPTION_OWNER_ID=""
 
+# Called from rig_on_exit (the installer's single EXIT trap) with the exit
+# status as $1; it only acts once this run has created the owner record.
 cleanup_legacy_adoption_on_exit() {
-  local status=$?
+  local status="${1:-0}"
   [[ "$status" -ne 0 && "$LEGACY_ADOPTION_CREATED" == true ]] || return 0
   # The owner record is created before the rest of the upgrade and its
   # transaction may be finalized as writes switch between project and Rig
@@ -3039,11 +3067,11 @@ copy_file() {
       # settings.json gets special treatment; everything else is skipped
       if [[ "$(basename "$dest")" == "settings.json" && "$dest" == *".claude/settings.json" ]]; then
         local tmp_merged tmp_src_subst abs_target
-        tmp_merged="$(mktemp /tmp/rig-settings-merged-XXXXXX.json)"
+        tmp_merged="$(rig_temp_file settings-merged)"
         # Substitute [REPO_ROOT] in a temp copy of the incoming template before
         # merging, so dedup can compare identical command strings (not template
         # placeholders vs real paths).
-        tmp_src_subst="$(mktemp /tmp/rig-settings-src-XXXXXX.json)"
+        tmp_src_subst="$(rig_temp_file settings-src)"
         abs_target="$(cd "$TARGET" && pwd)"
         render_repo_root_settings "$src" "$tmp_src_subst" "$abs_target"
         if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged" "$abs_target"; then
@@ -3300,10 +3328,10 @@ _copy_upgrade_existing() {
   # ── settings.json: always smart-merge ──────────────────────────────────────
   if [[ "$settings_mode" == "smart-merge" && "$(basename "$dest")" == "settings.json" && "$dest" == *".claude/settings.json" ]]; then
     local tmp_merged tmp_src_subst abs_target
-    tmp_merged="$(mktemp /tmp/rig-settings-merged-XXXXXX.json)"
+    tmp_merged="$(rig_temp_file settings-merged)"
     # Substitute [REPO_ROOT] before merging so dedup compares real paths,
     # not template placeholders vs already-substituted existing commands.
-    tmp_src_subst="$(mktemp /tmp/rig-settings-src-XXXXXX.json)"
+    tmp_src_subst="$(rig_temp_file settings-src)"
     abs_target="$(cd "$TARGET" && pwd)"
     render_repo_root_settings "$src" "$tmp_src_subst" "$abs_target"
     if merge_settings_json "$dest" "$tmp_src_subst" "$tmp_merged" "$abs_target"; then
@@ -5275,7 +5303,7 @@ PYEOF
      guard_destination_before_write "$TARGET" "$TARGET_SETTINGS" ".claude/settings.json"; then
     # agent-plan: classification only, never substitute placeholders.
     if [[ "$AGENT_DRY_RUN" != true ]]; then
-      _settings_rendered="$(mktemp /tmp/rig-settings-rendered-XXXXXX.json)"
+      _settings_rendered="$(rig_temp_file settings-rendered)"
       render_repo_root_settings "$TARGET_SETTINGS" "$_settings_rendered" "$TARGET_ABS"
       cat "$_settings_rendered" > "$TARGET_SETTINGS"
       rm -f "$_settings_rendered"
