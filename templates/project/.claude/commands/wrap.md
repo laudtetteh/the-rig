@@ -935,6 +935,21 @@ No transcript contents or provider-private rollout data are inspected.
 
 ---
 
+## Next-session handoff prompts — display-only
+
+If the user asks for a handoff or next-session prompt during or after the wrap,
+print it in your response; do not write it to a file. Keep it short: point the
+next agent at `$RIG_DIR/memory/CONTEXT_SNAPSHOT.md` and the active task files in
+`$RIG_DIR/tasks/active/` instead of restating their contents, because the
+snapshot is the maintained source of truth and a copy drifts from it.
+
+Save the prompt only when the user explicitly asks for a file. Then overwrite
+the single fixed file `$RIG_DIR/memory/NEXT_SESSION_PROMPT.md`. Never create a
+new dated handoff file, even if another instruction says to save deliverables
+as files.
+
+---
+
 ## Permission scan (opt-in)
 
 The legacy `.fewer-prompts-enabled` sentinel remains recognized, but automatic

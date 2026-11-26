@@ -154,6 +154,12 @@ Do not summarise these back to me unless asked.
   `.rig/memory/DECISIONS.md`.
 - Before ending a session or when approaching a context limit, run `/wrap` to write
   `.rig/memory/CONTEXT_SNAPSHOT.md`. Never delete it — always overwrite.
+- Next-session handoff prompts are display-only: print them in the response and
+  point the next agent at `CONTEXT_SNAPSHOT.md` and the active task files instead
+  of restating them. Save one only when the user explicitly asks, and then
+  overwrite the single fixed file `$RIG_DIR/memory/NEXT_SESSION_PROMPT.md`
+  (`$RIG_DIR` is `.rig/`, or the path in `.rigpath`). Never create a new dated
+  handoff file. This overrides any general rule to save deliverables as files.
 - Never assume continuity from a prior session — always re-read context files.
 
 ---

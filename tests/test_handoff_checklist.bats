@@ -54,3 +54,46 @@ EOF
   [ "$status" -ne 0 ]
   [ ! -f "$RIG_DIR/memory/.handoff-suggested" ]
 }
+
+# ── Display-only handoff prompts (#717) ──────────────────────────────────────
+
+handoff_surfaces() {
+  printf '%s\n' \
+    "$REPO_ROOT/templates/project/.claude/commands/handoff-checklist.md" \
+    "$REPO_ROOT/templates/project/.claude/commands/wrap.md" \
+    "$REPO_ROOT/templates/global/CLAUDE.md"
+}
+
+@test "handoff guidance: every shipped surface makes handoff prompts display-only" {
+  while IFS= read -r surface; do
+    grep -Fq 'display-only' "$surface" || { echo "missing display-only: $surface"; return 1; }
+    grep -Fq '$RIG_DIR/memory/NEXT_SESSION_PROMPT.md' "$surface" || { echo "missing fixed path: $surface"; return 1; }
+    grep -Fq 'Never create a' "$surface" || { echo "missing dated-file ban: $surface"; return 1; }
+    grep -Fq 'CONTEXT_SNAPSHOT.md' "$surface" || { echo "missing snapshot pointer: $surface"; return 1; }
+  done < <(handoff_surfaces)
+}
+
+@test "handoff guidance: saving a prompt requires an explicit user request" {
+  while IFS= read -r surface; do
+    grep -Eq 'only when the user explicitly asks|only when the user explicitly asks for a file' "$surface" \
+      || { echo "missing explicit-request gate: $surface"; return 1; }
+  done < <(handoff_surfaces)
+}
+
+@test "handoff guidance: generated Codex skills carry the display-only rule" {
+  out="$TEST_ROOT/codex-skills"
+  python3 "$REPO_ROOT/installer/generate-codex-skills.py" --output "$out" --base-branch main \
+    "$REPO_ROOT/templates/project/.claude/commands/handoff-checklist.md" \
+    "$REPO_ROOT/templates/project/.claude/commands/wrap.md"
+  for name in handoff-checklist wrap; do
+    grep -Fq 'display-only' "$out/$name/references/command.md"
+    grep -Fq '$RIG_DIR/memory/NEXT_SESSION_PROMPT.md' "$out/$name/references/command.md"
+  done
+}
+
+@test "handoff guidance: no shipped template tells agents to write a dated handoff file" {
+  run grep -rEn -i \
+    'next-session-prompt-[0-9]|handoff-prompt-[0-9]|(handoff|next-session)[^`]*\$\(date|(handoff|next-session)[^`]*YYYY-MM-DD' \
+    "$REPO_ROOT/templates"
+  [ "$status" -ne 0 ]
+}
