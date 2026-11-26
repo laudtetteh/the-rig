@@ -104,9 +104,11 @@ _sha256() {
   # installer doesn't crash on an unknown strategy value — it should warn
   # and continue (or at least not exit non-zero before the interaction).
   # Instead, check that a valid unknown value produces a warning in output.
+  # --rig-dir keeps the default stealth Rig directory out of the real HOME (#726).
   run bash "$INSTALLER" --project-only \
     --target "$TEST_PROJECT" \
     --project-name "TestProject" \
+    --rig-dir "$TEMP_DIR/rig-bogus-strategy" \
     --strategy "bogus" <<< "2"   # pipe "2" (skip) to answer the strategy prompt
   # The installer should still succeed when given a fallback answer
   [ "$status" -eq 0 ]
@@ -123,9 +125,12 @@ _sha256() {
 @test "non-interactive: --project-only with empty stdin does not exit 1 on intent menu read" {
   # Simulates Claude Code / CI calling install.sh --project-only without --strategy.
   # Without the || true fix, read exits 1 on EOF and set -euo pipefail kills the script.
+  # --rig-dir keeps the default stealth Rig directory out of the real HOME, so a
+  # second run on the same machine is not refused by the owner guard (#726).
   run bash "$INSTALLER" --project-only \
     --target "$TEST_PROJECT" \
-    --project-name "TestProject" <<< ""
+    --project-name "TestProject" \
+    --rig-dir "$TEMP_DIR/rig-empty-stdin" <<< ""
   [ "$status" -eq 0 ]
 }
 
