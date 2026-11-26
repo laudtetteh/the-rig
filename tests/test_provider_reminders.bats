@@ -142,10 +142,19 @@ prompt_context() {
 
 @test "Codex handoff suggestion and governance denial name Codex skills" {
   rm "$RIG_DIR/memory/.handoff-suggested"
-  RIG_SESSION_FILE="$RIG_DIR/memory/sessions/session-613.json"
-  python3 -c 'import json,sys,datetime; json.dump({"status":"active","started_at":(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=3)).isoformat()},open(sys.argv[1],"w"))' "$RIG_SESSION_FILE"
+  # The suggestion measures only the exact session resolved for the prompt
+  # (#665), so bind a real Codex session record and age it.
+  for helper in rig rig-session-resolve.py; do
+    cp "$BATS_TEST_DIRNAME/../templates/project/bin/$helper" "$CASE_DIR/bin/$helper"
+  done
+  chmod +x "$CASE_DIR/bin/rig"
+  run env RIG_SESSION_PID=613613 bash -c 'cd "$1" && bin/rig session bind --agent codex --native-session-id thread-613 --source startup --json' _ "$CASE_DIR"
+  [ "$status" -eq 0 ]
+  RIG_SESSION_FILE=$(OUTPUT="$output" python3 -c 'import json,os; print(json.loads(os.environ["OUTPUT"])["session_file"])')
+  python3 -c 'import json,sys,datetime; p=sys.argv[1]; d=json.load(open(p)); d["created_at"]=(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=3)).isoformat(); json.dump(d,open(p,"w"))' "$RIG_SESSION_FILE"
+  payload='{"hook_event_name":"UserPromptSubmit","prompt":"hi","session_id":"thread-613"}'
   run env RIG_AGENT=codex RIG_HANDOFF_ELAPSED_SECONDS=60 \
-    bash -c 'cd "$1" && bash .claude/hooks/prompt-submit.sh </dev/null' _ "$CASE_DIR"
+    bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/prompt-submit.sh' _ "$CASE_DIR" "$payload"
   [ "$status" -eq 0 ]
   [[ "$output" == *"handoff suggestion"* ]] || return 1
   [[ "$output" == *'$handoff-checklist'* && "$output" != *"/handoff-checklist"* ]] || return 1
@@ -155,4 +164,16 @@ prompt_context() {
   run bash -c 'cd "$1" && printf "%s" "$2" | bash .codex/hooks/rig-adapter.sh' _ "$CASE_DIR" "$payload"
   [ "$status" -eq 2 ]
   [[ "$output" == *'$rig-propose'* && "$output" != *"/rig-propose"* ]] || return 1
+}
+
+@test "post-merge hook names both providers and never claims --no-verify silences it" {
+  mkdir -p "$CASE_DIR/.husky"
+  cp "$BATS_TEST_DIRNAME/../templates/project/.husky/post-merge" "$CASE_DIR/.husky/post-merge"
+  run bash -c 'cd "$1" && sh .husky/post-merge 0' _ "$CASE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/post-merge in Claude Code"* ]] || return 1
+  [[ "$output" == *'$post-merge in Codex'* ]] || return 1
+  [[ "$output" != *"Open Claude Code"* ]] || return 1
+  ! grep -Eq 'To silence .*--no-verify' "$CASE_DIR/.husky/post-merge"
+  [ -f "$RIG_DIR/memory/.post-merge-pending" ]
 }

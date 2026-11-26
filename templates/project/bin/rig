@@ -1740,11 +1740,25 @@ if rigpath.exists():
     extra_content_anchors.append(resolved_exclude.parent)
     exclude = read(resolved_exclude).splitlines()
     entries = {line.strip().rstrip("/") for line in exclude if line.strip() and not line.lstrip().startswith("#")}
-    required = ["CLAUDE.md", "PROJECT_BRIEF.md", ".claude", ".rigpath"]
-    for candidate in [".agents", ".codex", ".mcp.json", ".playwright-mcp"]:
-        if (root / candidate).exists(): required.append(candidate)
+    # External installs (--tracking external) also write .rigpath but track
+    # CLAUDE.md and .claude/ in git; only .rigpath is excluded. Treat the
+    # install as stealth when its Rig directory sits under ~/.rig/projects/
+    # (the installer's own rule) or a stealth-only entry is already excluded.
+    stealth_only = ["CLAUDE.md", "PROJECT_BRIEF.md", ".claude"]
+    try:
+        rig.resolve().relative_to((pathlib.Path(os.path.expanduser("~")) / ".rig" / "projects").resolve())
+        stealth_install = True
+    except ValueError:
+        stealth_install = any(item in entries for item in stealth_only)
+    if stealth_install:
+        required = stealth_only + [".rigpath"]
+        for candidate in [".agents", ".codex", ".mcp.json", ".playwright-mcp"]:
+            if (root / candidate).exists(): required.append(candidate)
+    else:
+        required = [".rigpath"]
     missing = [item for item in required if item.rstrip("/") not in entries]
-    check("stealth_exclusions", not missing, "complete" if not missing else "missing: " + ", ".join(missing),
+    scope = "stealth" if stealth_install else "external"
+    check("stealth_exclusions", not missing, f"{scope}: complete" if not missing else f"{scope}: missing: " + ", ".join(missing),
           fix=f"inspect {resolved_exclude} (add one line per missing entry)")
 else:
     check("stealth_exclusions", True, "not a stealth install", state=SKIPPED)
@@ -2404,17 +2418,13 @@ else:
 # These gates make "the upgrade succeeded" a verifiable claim: manifest
 # provenance, stealth-status, mode/hash drift, and stale-state detection.
 #
-# installer/validate-manifest-provenance.py (444-B / #448) and
-# installer/audit-stealth.py (444-D / #449) are release-engineering tools that
-# live in The Rig's own source repo, not artifacts shipped into downstream
-# target projects (nothing under templates/ copies an installer/ directory
-# into an installed project). They can only be found here when this doctor
-# run is itself operating inside a colocated checkout of the source repo
-# (The Rig dogfooding itself) or when _RIG_INSTALLER_DIR names their
-# directory explicitly (used by tests and any future explicit wiring). In an
-# ordinary downstream install neither script will ever be found, and both
-# gates below correctly and permanently report "skipped" rather than
-# "failed" — that is expected steady state, not a gap.
+# installer/validate-manifest-provenance.py and installer/audit-stealth.py are
+# release-engineering tools that live in The Rig's own source repository; no
+# installer/ directory is ever copied into a downstream project. Their gates
+# therefore run only where the tool is present: inside a checkout of The Rig
+# itself, or when _RIG_INSTALLER_DIR names the tools' directory explicitly
+# (tests). An ordinary downstream install omits both gates rather than
+# reporting a permanent "skipped" for a check that can never run (#665).
 def find_installer_script(name):
     candidates = []
     override = os.environ.get("_RIG_INSTALLER_DIR")
@@ -2439,13 +2449,9 @@ manifest_metadata = rig / "memory" / ".rig-manifest.json"
 # installed here — an impossible/bogus state, reported as a distinct
 # future_revision finding and treated as a failure, same as malformed.
 provenance_script = find_installer_script("validate-manifest-provenance.py")
-if provenance_script is None:
-    check("manifest_provenance", True,
-          "skipped: installer/validate-manifest-provenance.py not present (activates once #448 merges/is colocated)",
-          state=SKIPPED)
-elif not manifest_metadata.is_file():
+if provenance_script is not None and not manifest_metadata.is_file():
     check("manifest_provenance", True, "skipped: no manifest metadata file present", state=SKIPPED)
-else:
+elif provenance_script is not None:
     provenance_command = ["python3", str(provenance_script), str(manifest_metadata)]
     installed_version_file = rig / "VERSION"
     installed_version = read(installed_version_file).strip() if installed_version_file.is_file() else ""
@@ -2495,11 +2501,7 @@ else:
 # .rigpath) or an unreadable non-primary git dir (e.g. a linked worktree,
 # which audit-stealth.py cannot classify) is reported as skipped, not failed.
 stealth_script = find_installer_script("audit-stealth.py")
-if stealth_script is None:
-    check("stealth_status", True,
-          "skipped: installer/audit-stealth.py not present (activates once #449 merges/is colocated)",
-          state=SKIPPED)
-else:
+if stealth_script is not None:
     stealth_command = ["python3", str(stealth_script), str(root)]
     stealth_run = run(stealth_command)
     if stealth_run is None:
@@ -2651,17 +2653,17 @@ else:
 
 # Idempotence gate: doctor is a read-only diagnostic and deliberately never
 # re-invokes the installer against a live project tree (there is no safe way
-# to snapshot/roll back a real target from inside a read-only command, and
-# bin/rig has no recorded path back to the install.sh that produced it once
-# installed). Idempotence is instead proven by a dedicated test that runs
-# install.sh twice against a disposable fixture and asserts the second run
-# changes nothing: tests/test_install_idempotence.bats. This check is always
-# reported as skipped with the documented procedure, never as a pass, because
-# no live verification happened (issue #603).
-check("idempotence", True,
-      "not verified live (would require mutating the live project tree from a read-only command); "
-      "run: bats tests/test_install_idempotence.bats",
-      state=SKIPPED)
+# to snapshot/roll back a real target from inside a read-only command).
+# Idempotence is proven by tests/test_install_idempotence.bats, which exists
+# only in The Rig's own source repository, so the pointer is reported only
+# there. It is always "skipped", never a pass, because no live verification
+# happened (issues #603, #665).
+idempotence_test = root / "tests" / "test_install_idempotence.bats"
+if idempotence_test.is_file() and (root / "install.sh").is_file():
+    check("idempotence", True,
+          "not verified live (would require mutating the live project tree from a read-only command); "
+          "run: bats tests/test_install_idempotence.bats",
+          state=SKIPPED)
 
 # ── Post-upgrade validation against known historical bug patterns (issue #473) ──
 # Diffs the most recent #472 pre-flight snapshot against current state for a

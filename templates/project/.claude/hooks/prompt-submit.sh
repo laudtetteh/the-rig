@@ -203,6 +203,7 @@ except (ValueError, TypeError, AttributeError):
 # or start a continuation after a completed wrap, before the flag fast path.
 PROMPT_PAYLOAD=$(cat)
 PROMPT_AGENT="${RIG_AGENT:-claude}"
+PROMPT_SESSION_JSON=""
 if [[ "$PROMPT_AGENT" == codex || "$PROMPT_AGENT" == claude ]]; then
   PROMPT_NATIVE_ID=$(printf '%s' "$PROMPT_PAYLOAD" | python3 -c '
 import json,sys
@@ -225,6 +226,7 @@ except (ValueError,TypeError,AttributeError):
         [[ "$RESOLVE_REASON" == ended_record ]] && BIND_ARGS+=(--allow-continuation)
         BIND_STATUS=0
         BOUND=$("$REPO/bin/rig" "${BIND_ARGS[@]}") || BIND_STATUS=$?
+        [[ "$BIND_STATUS" -eq 0 ]] && PROMPT_SESSION_JSON="$BOUND"
         if [[ "$BIND_STATUS" -ne 0 ]]; then
           WARNINGS="Rig could not attach this $PROMPT_AGENT session ($RESOLVE_REASON); run session doctor before naming or wrapping it."
         fi
@@ -232,6 +234,7 @@ except (ValueError,TypeError,AttributeError):
         WARNINGS="Rig session identity is unresolved ($RESOLVE_REASON); stop before naming or completing a session record."
       fi
     else
+      PROMPT_SESSION_JSON="$RESOLVED"
       BRANCH_WARNING=$(rig_branch_change_warning "$RESOLVED")
       [[ -n "$BRANCH_WARNING" ]] && WARNINGS="$BRANCH_WARNING"
     fi
@@ -243,7 +246,21 @@ fi
 # evaluate it, and must not consume the project-wide once-only flag.
 NUDGE_PENDING=false
 [[ "${RIG_AGENT:-claude}" == claude && ! -f "$NUDGE_FLAG" ]] && NUDGE_PENDING=true
-if [[ -z "$WARNINGS" && ! -f "$WRAP_NEEDED" && ! -f "$POST_MERGE_PENDING" && "$NUDGE_PENDING" == false && -f "$HANDOFF_SUGGESTED" ]]; then
+# The handoff suggestion is offered once per exact session. Its flag records
+# the anchor it was offered to; without an exact session there is nothing to
+# suggest, because elapsed time can't be attributed to this conversation.
+PROMPT_SESSION_FILE=""
+PROMPT_SESSION_ANCHOR=""
+if [[ -n "$PROMPT_SESSION_JSON" ]]; then
+  PROMPT_SESSION_FILE=$(printf '%s' "$PROMPT_SESSION_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("session_file") or "") if d.get("confidence")=="exact" else "")' 2>/dev/null || true)
+  PROMPT_SESSION_ANCHOR=$(printf '%s' "$PROMPT_SESSION_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("anchor") or "")' 2>/dev/null || true)
+fi
+HANDOFF_PENDING=false
+if [[ -n "$PROMPT_SESSION_FILE" && -n "$PROMPT_SESSION_ANCHOR" ]] && \
+   [[ "$(sed -n '1p' "$HANDOFF_SUGGESTED" 2>/dev/null)" != "$PROMPT_SESSION_ANCHOR" ]]; then
+  HANDOFF_PENDING=true
+fi
+if [[ -z "$WARNINGS" && ! -f "$WRAP_NEEDED" && ! -f "$POST_MERGE_PENDING" && "$NUDGE_PENDING" == false && "$HANDOFF_PENDING" == false ]]; then
   exit 0
 fi
 
@@ -260,37 +277,34 @@ fi
 # Session-size/cost benchmark — default 2 hours elapsed wall-clock for the
 # active session. This intentionally suggests only; the user must explicitly
 # agree before /handoff-checklist runs any checklist work.
-if [[ ! -f "$HANDOFF_SUGGESTED" ]] && command -v python3 >/dev/null 2>&1; then
+if [[ "$HANDOFF_PENDING" == true ]] && command -v python3 >/dev/null 2>&1; then
   HANDOFF_SECONDS="${RIG_HANDOFF_ELAPSED_SECONDS:-7200}"
-  SESSION_DIR="$RIG_DIR/memory/sessions"
-  handoff_age=$(SESSION_DIR="$SESSION_DIR" HANDOFF_SECONDS="$HANDOFF_SECONDS" python3 - <<'PYEOF' 2>/dev/null || true
+  handoff_age=$(HANDOFF_SECONDS="$HANDOFF_SECONDS" python3 - "$PROMPT_SESSION_FILE" <<'PYEOF' 2>/dev/null || true
 import datetime as dt
-import glob
 import json
 import os
+import sys
 
+# Only the exact session record resolved for this prompt is measured. The
+# bind schema (schema_version 1) keeps state in lifecycle.state and the start
+# time in created_at; other sessions' records are never consulted.
 threshold = int(os.environ.get("HANDOFF_SECONDS", "7200"))
-now = dt.datetime.now(dt.timezone.utc)
-best = 0
-for path in glob.glob(os.path.join(os.environ["SESSION_DIR"], "session-*.json")):
-    try:
-        with open(path) as fh:
-            doc = json.load(fh)
-        if doc.get("status") != "active":
-            continue
-        raw = str(doc.get("started_at", "")).replace("Z", "+00:00")
-        started = dt.datetime.fromisoformat(raw)
-        if started.tzinfo is None:
-            started = started.replace(tzinfo=dt.timezone.utc)
-        age = int((now - started.astimezone(dt.timezone.utc)).total_seconds())
-        best = max(best, age)
-    except Exception:
-        continue
-print(best if best >= threshold else "")
+try:
+    with open(sys.argv[1]) as fh:
+        doc = json.load(fh)
+    if (doc.get("lifecycle") or {}).get("state") != "active":
+        raise SystemExit(0)
+    started = dt.datetime.fromisoformat(str(doc.get("created_at", "")).replace("Z", "+00:00"))
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=dt.timezone.utc)
+    age = int((dt.datetime.now(dt.timezone.utc) - started.astimezone(dt.timezone.utc)).total_seconds())
+except (OSError, ValueError, TypeError, AttributeError):
+    raise SystemExit(0)
+print(age if age >= threshold else "")
 PYEOF
 )
   if [[ -n "$handoff_age" ]]; then
-    touch "$HANDOFF_SUGGESTED" 2>/dev/null || true
+    printf '%s\n' "$PROMPT_SESSION_ANCHOR" > "$HANDOFF_SUGGESTED" 2>/dev/null || true
     [[ -n "$WARNINGS" ]] && WARNINGS+=$'\n\n'
     WARNINGS+="Rig handoff suggestion: this session has been active for about $((handoff_age / 60)) minutes. Want to wrap and hand off to a new session? Reply explicitly before I run $(rig_workflow_invocation handoff-checklist); silence or an ambiguous reply is not consent."
   fi

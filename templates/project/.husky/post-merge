@@ -2,14 +2,15 @@
 # post-merge
 #
 # Fires after `git merge` completes — including `git pull` that brings in a merge.
-# Reminds you to run the post-merge housekeeping workflow in Claude Code.
-# Writes .post-merge-pending so the next Claude Code session detects the gap
-# and prompts you to run /post-merge before starting new work.
+# Reminds you to run the post-merge housekeeping workflow in your agent session.
+# Writes .post-merge-pending so the next Claude Code or Codex session detects
+# the gap and prompts you to run the post-merge workflow before new work.
 #
 # The reminder runs after successful merges. Guarded merge commits created
 # directly by `git merge` also reuse post-commit's progress/footer handling.
 #
-# To silence on a specific pull: git pull --no-verify
+# `--no-verify` does not skip this hook: Git never bypasses post-merge. The
+# pending reminder clears when the post-merge workflow acknowledges the merge.
 
 # $1 is 1 if this was a squash merge, 0 otherwise.
 # We want to show the reminder on all merge types.
@@ -17,12 +18,13 @@
 echo ""
 echo "  ✔ Merge complete."
 echo ""
-echo "  → Open Claude Code in this project and run: /post-merge"
+echo "  → In your agent session for this project, run the post-merge workflow:"
+echo "    /post-merge in Claude Code, or \$post-merge in Codex."
 echo "    This verifies the merge, updates memory, moves the task file, and surfaces what's next."
 echo "    Skipping this is how sessions start stale."
 echo ""
 
-# Write a flag file so the next Claude Code session detects the skipped /post-merge.
+# Write a flag file so the next agent session detects the skipped post-merge workflow.
 # Resolved via .rigpath if present (external .rig/), otherwise defaults to .rig/.
 REPO=$(git rev-parse --show-toplevel 2>/dev/null)
 if [ -n "$REPO" ]; then

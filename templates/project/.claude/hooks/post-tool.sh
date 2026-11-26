@@ -103,7 +103,8 @@ PY
               STUB_RESULT=""
             }
             if [[ "$STUB_RESULT" == inserted ]]; then
-              echo "[$(date +%H:%M:%S)] PROGRESS fallback stub: $COMMIT_HASH" >> "$SESSION_LOG"
+              # stop.sh counts "PROGRESS stub:" lines to decide when a session needs /wrap.
+              echo "[$(date +%H:%M:%S)] PROGRESS stub: $COMMIT_HASH $COMMIT_MSG" >> "$SESSION_LOG"
             fi
           fi
         fi

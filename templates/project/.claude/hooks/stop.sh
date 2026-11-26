@@ -220,7 +220,8 @@ PY
     fi
 
     if [[ "$NEEDS_WRAP" == false && -z "$NATIVE_SESSION_ID" ]]; then
-      SESSION_COMMIT_COUNT=$(grep -c "PROGRESS stub:" "$SESSION_LOG" 2>/dev/null || echo 0)
+      # grep -c prints 0 and exits 1 when nothing matches; don't append a second 0.
+      SESSION_COMMIT_COUNT=$(grep -c "PROGRESS stub:" "$SESSION_LOG" 2>/dev/null) || SESSION_COMMIT_COUNT=0
       if [[ "$SESSION_COMMIT_COUNT" -ge 2 ]]; then
         write_wrap_needed "${SESSION_COMMIT_COUNT} commits this session"
         NEEDS_WRAP=true

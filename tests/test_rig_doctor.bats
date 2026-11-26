@@ -140,7 +140,7 @@ PY
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 1 ]
-  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); assert d["ok"] is True and d["command"] == "doctor"; c={x["name"]:x for x in d["checks"]}; assert all(c[n]["state"]=="skipped" for n in ("idempotence","worktree_bootstrap","connector_declarations")); assert d["summary"]["skipped"] >= 3'
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); assert d["ok"] is True and d["command"] == "doctor"; c={x["name"]:x for x in d["checks"]}; assert all(c[n]["state"]=="skipped" for n in ("worktree_bootstrap","connector_declarations")); assert d["summary"]["skipped"] >= 2'
 
   run "$CASE_DIR/bin/rig" doctor
   [ "$status" -eq 0 ]
@@ -757,15 +757,24 @@ sys.exit(0 if not leaks else 1)
 PYEOF
 }
 
-@test "manifest provenance and stealth-status gates skip gracefully when tools are absent" {
+@test "downstream doctor omits release-engineering gates whose tools never ship" {
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}
-assert c["manifest_provenance"]["ok"] and "not present" in c["manifest_provenance"]["detail"]
-assert c["stealth_status"]["ok"] and "not present" in c["stealth_status"]["detail"]
+assert "manifest_provenance" not in c and "stealth_status" not in c and "idempotence" not in c
+assert not any("#448" in x["detail"] or "#449" in x["detail"] or "test_install_idempotence" in x["detail"] for x in d["checks"])
 assert c["manifest_mode_hash"]["ok"] and "no manifest metadata file" in c["manifest_mode_hash"]["detail"]
-assert c["stale_manifest_entries"]["ok"] and "no manifest metadata file" in c["stale_manifest_entries"]["detail"]
-assert c["idempotence"]["ok"] and "test_install_idempotence.bats" in c["idempotence"]["detail"]'
+assert c["stale_manifest_entries"]["ok"] and "no manifest metadata file" in c["stale_manifest_entries"]["detail"]'
+}
+
+@test "doctor inside a Rig source checkout reports the idempotence test pointer" {
+  mkdir -p "$CASE_DIR/tests"
+  : > "$CASE_DIR/install.sh"
+  : > "$CASE_DIR/tests/test_install_idempotence.bats"
+  run "$CASE_DIR/bin/rig" doctor --json
+  [ "$status" -eq 0 ]
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}
+assert c["idempotence"]["state"] == "skipped" and "test_install_idempotence.bats" in c["idempotence"]["detail"]'
 }
 
 @test "manifest provenance gate reports a malformed entry once the validator is present" {
@@ -946,10 +955,13 @@ EOF
 }
 
 @test "postflight gate JSON output stays schema-consistent across pass and fail states" {
+  write_fixture_provenance_validator "$BATS_TEST_TMPDIR/installer-fixture"
+  write_fixture_stealth_auditor "$BATS_TEST_TMPDIR/installer-fixture"
+  export _RIG_INSTALLER_DIR="$BATS_TEST_TMPDIR/installer-fixture"
   run "$CASE_DIR/bin/rig" doctor --json
   [ "$status" -eq 0 ]
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"])
-names = {"manifest_provenance","stealth_status","manifest_mode_hash","stale_manifest_entries","idempotence"}
+names = {"manifest_provenance","stealth_status","manifest_mode_hash","stale_manifest_entries"}
 present = {c["name"] for c in d["checks"]}
 assert names <= present
 for c in d["checks"]:
@@ -985,4 +997,29 @@ assert d["ok"] is False'
   run "$CASE_DIR/bin/rig" doctor --repair --json
   [ "$status" -eq 64 ]
   json_assert 'import json,os; assert json.loads(os.environ["JSON_OUTPUT"])["error"] == "usage"'
+}
+
+@test "external install requires only the .rigpath exclusion (#665)" {
+  local external="$BATS_TEST_TMPDIR/external-rig"
+  mkdir -p "$external/memory"
+  cp "$CASE_DIR/.rig/memory/.rig-manifest" "$external/memory/.rig-manifest"
+  printf '%s\n' "$external" > "$CASE_DIR/.rigpath"
+  printf '.rigpath\n' > "$CASE_DIR/.git/info/exclude"
+  run env HOME="$BATS_TEST_TMPDIR/home" "$CASE_DIR/bin/rig" doctor --json
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert c["stealth_exclusions"]["state"] == "pass" and c["stealth_exclusions"]["detail"] == "external: complete", c["stealth_exclusions"]'
+
+  : > "$CASE_DIR/.git/info/exclude"
+  run env HOME="$BATS_TEST_TMPDIR/home" "$CASE_DIR/bin/rig" doctor --json
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; assert not c["stealth_exclusions"]["ok"] and c["stealth_exclusions"]["detail"] == "external: missing: .rigpath"'
+}
+
+@test "a Rig directory under ~/.rig/projects is checked as stealth even with no exclusions (#665)" {
+  local home="$BATS_TEST_TMPDIR/home" stealth
+  stealth="$home/.rig/projects/proj"
+  mkdir -p "$stealth/memory"
+  cp "$CASE_DIR/.rig/memory/.rig-manifest" "$stealth/memory/.rig-manifest"
+  printf '%s\n' "$stealth" > "$CASE_DIR/.rigpath"
+  : > "$CASE_DIR/.git/info/exclude"
+  run env HOME="$home" "$CASE_DIR/bin/rig" doctor --json
+  json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); c={x["name"]:x for x in d["checks"]}; x=c["stealth_exclusions"]; assert not x["ok"] and x["detail"].startswith("stealth: missing: CLAUDE.md, PROJECT_BRIEF.md, .claude, .rigpath"), x'
 }

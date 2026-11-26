@@ -88,5 +88,7 @@
   "tests/test_upgrade_prepare_directory_scope.bats": 5.0,
   "tests/test_work_modes.bats": 5.0,
   "tests/test_wrap_transcript_pruning.bats": 5.0,
-  "tests/test_session_start_clear.bats": 5.0
+  "tests/test_handoff_suggestion.bats": 5.0,
+  "tests/test_session_start_clear.bats": 5.0,
+  "tests/test_session_stub_marker.bats": 5.0
 }

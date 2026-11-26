@@ -900,7 +900,7 @@ These sit alongside the existing `base-branch:` and `housekeeping:` fields:
 | `housekeeping:` | `direct-push` | `direct-push` \| `pr-required` | How `/post-merge` handles memory-update commits |
 | `issue-tracking:` | `github` | `github`, `none`, or any tracker name | Which issue tracker is required; shapes ref format in commit messages and intake wizard |
 | `issue-creator:` | `user` | `user` \| `agent` | GitHub only: `agent` drafts the exact issue and files it after separate approval; `user` waits for the user to provide a number |
-| `secret-scanner:` | `gitleaks` | `gitleaks` \| `none` | Secret scanning on commit; disabling requires editing `.husky/pre-commit` |
+| `secret-scanner:` | `gitleaks` | `gitleaks` \| `none` | Secret scanning on commit; `none` makes `.husky/pre-commit` skip it, and any other value runs gitleaks |
 | `commit-cleanup:` | `yes` | `yes` \| `no` | Whether auto-injected tool footers are stripped from commit messages |
 | `rig-gaps-push-target:` | *(unset)* | Absolute file path | Path to `RIG_GAPS.md` in the local Rig repo on this machine; enables `/rig-gaps --push` to append entries directly. Leave blank if The Rig repo isn't on this machine. |
 

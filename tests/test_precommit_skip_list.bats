@@ -146,3 +146,71 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"gitleaks not installed"* ]] || return 1
 }
+
+# A gitleaks stub that always reports a finding, so a run is observable.
+stub_gitleaks_finding() {
+  cat > "$TEST_REPO/test-bin/gitleaks" <<'STUB'
+#!/bin/sh
+echo "Finding: stub-secret"
+exit 1
+STUB
+  chmod +x "$TEST_REPO/test-bin/gitleaks"
+  printf 'clean\n' > "$TEST_REPO/clean.txt"
+  git -C "$TEST_REPO" add clean.txt
+}
+
+@test "secret-scanner: none in CLAUDE.md skips gitleaks" {
+  stub_gitleaks_finding
+  printf 'secret-scanner: none # intentional opt-out\n' > "$TEST_REPO/CLAUDE.md"
+  run_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Secret scanning disabled (CLAUDE.md secret-scanner: none)"* ]] || return 1
+  [[ "$output" != *"gitleaks blocked this commit"* ]] || return 1
+}
+
+@test "secret-scanner: none with an extra value keeps gitleaks enabled" {
+  stub_gitleaks_finding
+  printf 'secret-scanner: none accidental\n' > "$TEST_REPO/CLAUDE.md"
+  run_hook
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not exactly one well-formed"* ]] || return 1
+  [[ "$output" == *"gitleaks blocked this commit"* ]] || return 1
+  [[ "$output" != *"Secret scanning disabled"* ]] || return 1
+}
+
+@test "secret-scanner: duplicate none settings keep gitleaks enabled" {
+  stub_gitleaks_finding
+  printf 'secret-scanner: none\nsecret-scanner: none\n' > "$TEST_REPO/CLAUDE.md"
+  run_hook
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not exactly one well-formed"* ]] || return 1
+  [[ "$output" == *"gitleaks blocked this commit"* ]] || return 1
+  [[ "$output" != *"Secret scanning disabled"* ]] || return 1
+}
+
+@test "secret-scanner: gitleaks and a missing setting both keep gitleaks" {
+  stub_gitleaks_finding
+  printf 'secret-scanner: gitleaks\n' > "$TEST_REPO/CLAUDE.md"
+  run_hook
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gitleaks blocked this commit"* ]] || return 1
+
+  printf '# no setting\n' > "$TEST_REPO/CLAUDE.md"
+  run_hook
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gitleaks blocked this commit"* ]] || return 1
+}
+
+@test "secret-scanner: an unknown or conflicting value fails safe to gitleaks" {
+  stub_gitleaks_finding
+  printf 'secret-scanner: nope\n' > "$TEST_REPO/CLAUDE.md"
+  run_hook
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not exactly one well-formed 'gitleaks' or 'none' value"* ]] || return 1
+  [[ "$output" == *"gitleaks blocked this commit"* ]] || return 1
+
+  printf 'secret-scanner: none\nsecret-scanner: gitleaks\n' > "$TEST_REPO/CLAUDE.md"
+  run_hook
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gitleaks blocked this commit"* ]] || return 1
+}

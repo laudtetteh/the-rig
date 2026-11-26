@@ -161,8 +161,8 @@ secret-scanner: gitleaks
 
 | Value | Behaviour |
 |---|---|
-| `gitleaks` | `gitleaks --staged` runs on every commit. Requires `gitleaks` to be installed. |
-| `none` | Secret scanning disabled. Remove or comment out the gitleaks block in `.husky/pre-commit`. |
+| `gitleaks` | (Default) `gitleaks --staged` runs on every commit when `gitleaks` is installed; without it, `.husky/pre-commit` warns and continues. A missing or unrecognized value also runs gitleaks. |
+| `none` | `.husky/pre-commit` skips secret scanning. |
 
 ```
 commit-cleanup: yes
