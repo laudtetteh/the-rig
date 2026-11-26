@@ -206,7 +206,8 @@ jobs:
             tests/test_commit_attribution.bats \
             tests/test_precommit_skip_list.bats \
             tests/test_provider_reminders.bats \
-            tests/test_contextual_tips.bats
+            tests/test_contextual_tips.bats \
+            tests/test_install_concurrency.bats
 
   static:
     name: shell and static checks

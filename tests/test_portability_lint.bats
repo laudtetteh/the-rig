@@ -35,3 +35,19 @@ setup() {
   run python3 "$LINT" --root "$CASE_DIR"
   [ "$status" -eq 0 ]
 }
+
+@test "portability lint distinguishes suffixed mktemp templates from portable forms" {
+  mkdir -p "$CASE_DIR/scripts"
+  printf 'a="$(mktemp /tmp/rig-example-%s.json)"\nb="$(mktemp /tmp/rig-example-%s/child)"\nc="$(mktemp /tmp/rig-example-%s:suffix)"\nd="$(mktemp /tmp/rig-example-%s+suffix)"\ne="$(mktemp /tmp/rig-example-%s,suffix)"\n' \
+    XXXXXX XXXXXX XXXXXX XXXXXX XXXXXX > "$CASE_DIR/scripts/template.sh"
+  git -C "$CASE_DIR" add scripts/template.sh
+  run python3 "$LINT" --root "$CASE_DIR"
+  [ "$status" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | grep -c 'mktemp_suffix')" -eq 5 ] || return 1
+
+  printf 'a="$(mktemp "${TMPDIR:-/tmp}/rig-example.%s")"\nb="$(mktemp -d /tmp/rig-dir-%s)"\nc="$(mktemp "${f}.tmp.%s")"\n' \
+    XXXXXX XXXXXX XXXXXX > "$CASE_DIR/scripts/template.sh"
+  git -C "$CASE_DIR" add scripts/template.sh
+  run python3 "$LINT" --root "$CASE_DIR"
+  [ "$status" -eq 0 ]
+}
