@@ -59,6 +59,7 @@ Check the installed CLI's help if a native control is unavailable. See the [Clau
 | Command | What it does |
 |---|---|
 | `/rig-debug` | Structured diagnosis. Hypothesis → reproduce → isolate → fix → log in `ERRORS.md`. No code touched until the bug is reproduced. |
+| `/rig-review-comments` | Assess PR review comments (fetched with `gh`, pasted, or both) on their merits. Verifies each claim at the PR's pinned head SHA and sorts it into Blockers, Nits or Pushbacks, each with cited evidence or rationale. Read-only: replies, thread resolution, PR edits and follow-up tickets need explicit approval per write. |
 | `/rig-review` | Diff-focused review of the current branch. Runs tests + lint (from `test-command:`/`lint-command:` in CLAUDE.md), analyses the diff by category (logic, security, coverage, dependency impact, style), and produces a structured LGTM/HOLD report. Playwright opt-in via `testing: playwright`. |
 
 ## Release

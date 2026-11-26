@@ -839,6 +839,7 @@ skills covering the full development lifecycle:
 |---|---|---|
 | `/pre-release-review` | Full review sweep | Covers regressions, test coverage, security, docs accuracy, maintainability, edge cases, and version bump readiness. Outputs a scored Markdown report with a SHIP / HOLD / SHIP WITH FIXES recommendation. |
 | `/rig-review` | Rig review workflow | Reviews the current diff for bugs, regressions, risks, and missing tests before summary. |
+| `/rig-review-comments` | Review-comment assessment | Collects PR review comments (inline threads, review summaries, conversation) and pasted comments, verifies each claim at the PR's pinned head SHA, and sorts it into Blockers, Nits or Pushbacks with evidence or a named pushback reason. Read-only until the user approves each reply, thread resolution, PR edit or follow-up ticket. |
 | `/connector-preflight` | Connector verification | Checks MCP/app connector readiness before workflows rely on external tool access. |
 | `/handoff-checklist` | Handoff gate | Produces a durable handoff checklist when work must transfer between sessions or agents. |
 
