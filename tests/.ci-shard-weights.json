@@ -93,5 +93,6 @@
   "tests/test_session_start_clear.bats": 5.0,
   "tests/test_session_stub_marker.bats": 5.0,
   "tests/test_commit_cleanup.bats": 5.0,
-  "tests/test_rig_config.bats": 5.0
+  "tests/test_rig_config.bats": 5.0,
+  "tests/test_install_concurrency.bats": 120.0
 }

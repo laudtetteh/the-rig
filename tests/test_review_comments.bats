@@ -94,9 +94,15 @@ PY
 }
 
 @test "review-comments: temporary worktree mktemp template ends in X characters (#724)" {
-  run grep -En 'mktemp[^)]*XXXXXX[^X")]' "$COMMAND"
-  [ "$status" -ne 0 ]
-  grep -Fq 'mktemp -d "${TMPDIR:-/tmp}/rig-review-comments.XXXXXX"' "$COMMAND"
+  run python3 - "$COMMAND" <<'PY'
+import pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+tail = "X" * 6
+bad_suffix = re.compile(r"mktemp[^)]*" + tail + r'[^X")]')
+assert not bad_suffix.search(text), "mktemp template has a suffix after its X run"
+assert 'mktemp -d "${TMPDIR:-/tmp}/rig-review-comments.' + tail + '"' in text
+PY
+  [ "$status" -eq 0 ]
 }
 
 @test "review-comments: pasted comments keep given author and source and are never fetched" {
