@@ -8,7 +8,7 @@ HOOKS="$BATS_TEST_DIRNAME/../templates/project/.claude/hooks"
 @test "post-tool logs fallback stubs with the marker stop.sh counts" {
   grep -Fq 'grep -c "PROGRESS stub:" "$SESSION_LOG"' "$HOOKS/stop.sh"
   grep -Fq '] PROGRESS stub: $COMMIT_HASH' "$HOOKS/post-tool.sh"
-  ! grep -Fq 'PROGRESS fallback stub:' "$HOOKS/post-tool.sh"
+  if grep -Fq 'PROGRESS fallback stub:' "$HOOKS/post-tool.sh"; then return 1; fi
 }
 
 @test "stop.sh counts a stub-free session log as a single 0" {

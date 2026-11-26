@@ -53,14 +53,14 @@ commit_with_late_footer() {
   write_settings 'commit-cleanup: yes'
   run commit_with_footer
   [ "$status" -eq 0 ]
-  ! git -C "$TEST_PROJECT" log -1 --format=%B | grep -qF "$FOOTER"
+  if git -C "$TEST_PROJECT" log -1 --format=%B | grep -qF "$FOOTER"; then return 1; fi
 }
 
 @test "commit-cleanup missing: the default still strips a tool footer" {
   write_settings ''
   run commit_with_footer
   [ "$status" -eq 0 ]
-  ! git -C "$TEST_PROJECT" log -1 --format=%B | grep -qF "$FOOTER"
+  if git -C "$TEST_PROJECT" log -1 --format=%B | grep -qF "$FOOTER"; then return 1; fi
 }
 
 @test "commit-cleanup no: post-commit does not warn about a late footer" {
@@ -114,10 +114,10 @@ commit_with_late_footer() {
   rm "$TEST_PROJECT/bin/rig-config"
   run commit_with_footer
   [ "$status" -eq 0 ]
-  ! git -C "$TEST_PROJECT" log -1 --format=%B | grep -qF "$FOOTER"
+  if git -C "$TEST_PROJECT" log -1 --format=%B | grep -qF "$FOOTER"; then return 1; fi
 }
 
 @test "commit-cleanup no row no longer tells users to delete the hooks" {
-  ! grep -q 'Comment out or remove `.husky/commit-msg`' "$REPO_ROOT/templates/project/CLAUDE.md"
+  if grep -q 'Comment out or remove `.husky/commit-msg`' "$REPO_ROOT/templates/project/CLAUDE.md"; then return 1; fi
   grep -q 'Do not delete the hooks' "$REPO_ROOT/templates/project/CLAUDE.md"
 }

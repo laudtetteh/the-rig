@@ -174,6 +174,6 @@ prompt_context() {
   [[ "$output" == *"/post-merge in Claude Code"* ]] || return 1
   [[ "$output" == *'$post-merge in Codex'* ]] || return 1
   [[ "$output" != *"Open Claude Code"* ]] || return 1
-  ! grep -Eq 'To silence .*--no-verify' "$CASE_DIR/.husky/post-merge"
+  if grep -Eq 'To silence .*--no-verify' "$CASE_DIR/.husky/post-merge"; then return 1; fi
   [ -f "$RIG_DIR/memory/.post-merge-pending" ]
 }
