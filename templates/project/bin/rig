@@ -3978,9 +3978,13 @@ def load_allowed_change_paths():
 
 
 ALLOWED_PROJECT_PATHS, ALLOWED_RIG_PATHS = load_allowed_change_paths()
+# Every project-layer row of install.sh's RENAMED_RIG_ARTIFACTS and
+# RETIRED_RIG_ARTIFACTS must be listed here, or rollback refuses to restore it
+# (tests/test_retired_artifacts.bats enforces this).
 LEGACY_DELETED_RIG_PATHS = {
+    # Merged into stop.sh in v1.21.0; RETIRED_RIG_ARTIFACTS retires it.
     ".claude/hooks/session-end.sh",
-    # Commands renamed in #714; install.sh RENAMED_RIG_ARTIFACTS retires them.
+    # Commands renamed in #714; RENAMED_RIG_ARTIFACTS retires them.
     *(f".claude/commands/{name}.md" for name in ("status", "code-review", "debug", "run", "ship")),
     *(f".agents/skills/{name}/{leaf}" for name in ("status", "code-review", "debug", "run", "ship")
       for leaf in ("SKILL.md", "references/command.md")),
