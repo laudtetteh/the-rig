@@ -18,6 +18,13 @@ After explicit agreement:
 1. Check local task files, GitHub issues, README, `docs/`, Rig commands, hooks, processes, rules, and Codex skills for stale or inaccurate handoff context.
 2. If there is no remaining in-session work, run `/post-merge` when a merge is pending, then run `/wrap`.
 3. Generate a handoff prompt for the next session using the user's stated next unit of work. Do not invent the scope.
+   The prompt is display-only: print it in your response and do not write it to
+   a file. Point the next agent at `$RIG_DIR/memory/CONTEXT_SNAPSHOT.md` and the
+   active task files in `$RIG_DIR/tasks/active/` instead of restating them.
+   (`$RIG_DIR` is the project's Rig directory: `.rig/`, or the path in `.rigpath`.)
+   Save it only when the user explicitly asks; then overwrite the single fixed
+   file `$RIG_DIR/memory/NEXT_SESSION_PROMPT.md`. Never create a new dated
+   handoff file, even if another instruction says to save deliverables as files.
 4. Include the expected operating process in the prompt: re-validate tickets against current main, use isolated worktrees, reproduce before fixing, add Bats coverage with proof-by-revert, run independent review, use one consolidated parent PR, run full surface review and hosted CI, and wait for explicit go-ahead before merge.
 5. If the prompt asks the next session to delegate review or validation, state
    that delegated agents must not run a local full `bats tests/` suite unless
@@ -28,4 +35,4 @@ After explicit agreement:
 
 ## Output
 
-Report exactly what was checked, whether `/post-merge` or `/wrap` ran, and the final handoff prompt.
+Report exactly what was checked, whether `/post-merge` or `/wrap` ran, and the final handoff prompt, printed in full in the response (display-only, per step 3).
