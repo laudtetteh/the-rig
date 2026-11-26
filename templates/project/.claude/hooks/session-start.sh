@@ -402,7 +402,7 @@ print(json.dumps({
     fi
 
     PROJECT_NAME=$(basename "$REPO")
-    emit_context "Project: ${PROJECT_NAME}. Session cleared — run $(rig_workflow_invocation status) for current state."
+    emit_context "Project: ${PROJECT_NAME}. Session cleared — run $(rig_workflow_invocation rig-status) for current state."
     ;;
 
   *)

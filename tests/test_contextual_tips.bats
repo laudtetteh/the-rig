@@ -253,3 +253,58 @@ EOF
   context | grep -Fq '/rig-debug'
   if context | grep -Fq 'touch'; then return 1; fi
 }
+
+@test "#727: .rig/tasks/ paths in PROGRESS.md do not count as using /task" {
+  touch "$RIG_DIR/memory/sessions/session-1.json" "$RIG_DIR/memory/sessions/session-2.json"
+  printf 'Updated .rig/tasks/active/TASK_42.md and .rig/tasks/done/TASK_41.md\n' \
+    > "$RIG_DIR/memory/PROGRESS.md"
+
+  run_start
+
+  context | grep -Fq 'Run /task to give multi-file work a recovery anchor'
+}
+
+@test "#727: an explicit /task invocation still suppresses the /task tip" {
+  touch "$RIG_DIR/memory/sessions/session-1.json" "$RIG_DIR/memory/sessions/session-2.json"
+  printf 'Opened intake with `/task` for the parser fix.\n' > "$RIG_DIR/memory/PROGRESS.md"
+
+  run_start
+
+  if context | grep -Fq 'Run /task'; then return 1; fi
+  [ ! -e "$RIG_DIR/memory/tips/.tip-task-tracking-shown" ]
+}
+
+@test "#727: a Codex-only install still receives command tips" {
+  rm -rf "$REPO/.claude/commands"
+  mkdir -p "$REPO/.agents/skills/rig-debug"
+  : > "$REPO/.agents/skills/rig-debug/SKILL.md"
+  cat > "$RIG_DIR/memory/ERRORS.md" <<'EOF'
+## [2026-07-31] — observed parser failure
+EOF
+
+  run_start
+
+  context | grep -Fq 'ERRORS.md contains a recorded failure'
+}
+
+@test "#727: the hand-maintained Codex sprint skill counts as installed" {
+  rm -rf "$REPO/.claude/commands"
+  mkdir -p "$REPO/.codex/skills/sprint"
+  : > "$REPO/.codex/skills/sprint/SKILL.md"
+  printf '[#1] [#2] [#3]\n' > "$RIG_DIR/memory/PROGRESS.md"
+
+  run_start
+
+  context | grep -Fq 'PROGRESS.md references at least three distinct issues'
+}
+
+@test "#727: no tip promotes the disabled permission-pattern scan" {
+  mkdir -p "$RIG_DIR/memory/tips"
+  touch "$RIG_DIR/memory/tips/.tip-session-name-shown"
+
+  run_start
+
+  [ "$(tip_count)" -eq 0 ]
+  if grep -Fq 'fewer-prompts' "$RIG_DIR/contextual-tips.sh"; then return 1; fi
+  [ ! -e "$RIG_DIR/memory/tips/.tip-fewer-prompts-shown" ]
+}

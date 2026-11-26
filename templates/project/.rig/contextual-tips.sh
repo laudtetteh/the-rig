@@ -5,14 +5,21 @@
 # Catalog rows are: priority|id|evidence function|suppression function|copy.
 # Evidence and suppression names are static; project content is never evaluated.
 
+# A command counts as installed when either provider has it: the Claude
+# command file, a generated Codex skill, or a hand-maintained Codex skill
+# (sprint). A Codex-only install has no .claude/commands directory.
 tip_command_available() {
-  [[ -f "$REPO/.claude/commands/$1.md" ]]
+  [[ -f "$REPO/.claude/commands/$1.md" ||
+    -f "$REPO/.agents/skills/$1/SKILL.md" ||
+    -f "$REPO/.codex/skills/$1/SKILL.md" ]]
 }
 
+# Evidence of use is a whole invocation (/name or $name) not embedded in a
+# path or a longer name, so ".rig/tasks/" or "/task-list" never count as /task.
 tip_command_already_used() {
   local command="$1"
-  grep -Fq -- "/$command" "$RIG_DIR/memory/PROGRESS.md" \
-    "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md" 2>/dev/null
+  grep -Eq -- "(^|[^A-Za-z0-9_./-])[/\$]${command}([^A-Za-z0-9_/-]|$)" \
+    "$RIG_DIR/memory/PROGRESS.md" "$RIG_DIR/memory/CONTEXT_SNAPSHOT.md" 2>/dev/null
 }
 
 tip_sentinel_mtime() {
@@ -101,9 +108,6 @@ evidence_session_name() {
 }
 suppress_session_name() { ! tip_command_available session-name || tip_command_already_used session-name; }
 
-evidence_fewer_prompts() { return 0; }
-suppress_fewer_prompts() { [[ -f "$RIG_DIR/memory/.fewer-prompts-enabled" ]]; }
-
 evidence_project_docs_without_index() {
   [[ -d "$REPO/docs" ]] && [[ ! -f "$REPO/docs/INDEX.md" ]]
 }
@@ -118,7 +122,6 @@ tip_catalog() {
 60|task-tracking|evidence_task_tracking|suppress_task_tracking|Rig tip (workflow): multiple sessions exist with no active task. Run /task to give multi-file work a recovery anchor.
 50|session-name|evidence_session_name|suppress_session_name|Rig tip (workflow): this repository has committed work. Run /session-name to anchor this session with a name that survives compaction.
 45|project-docs-index|evidence_project_docs_without_index|suppress_project_docs_without_index|Rig tip (project): docs/ exists without docs/INDEX.md. Add a short docs/INDEX.md so project documentation has one discoverable entry point.
-40|fewer-prompts|evidence_fewer_prompts|suppress_fewer_prompts|Rig tip (workflow): permission-pattern scanning is off. Touch $RIG_DIR/memory/.fewer-prompts-enabled to scan for fewer safe prompts at every /wrap.
 CATALOG
 }
 
