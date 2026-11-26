@@ -170,8 +170,8 @@ commit-cleanup: yes
 
 | Value | Behaviour |
 |---|---|
-| `yes` | `commit-msg` removes known tool footers before the commit. If a client adds one later, `post-commit` warns; `RIG_POST_COMMIT_AUTO_AMEND=1` permits amendment of ordinary unsigned commits. Signed and replayed commits keep late footers for manual cleanup. |
-| `no` | Footers are kept. Comment out or remove `.husky/commit-msg` and `.husky/post-commit` to disable cleanup. |
+| `yes` | (Default; also used when the line is missing) `commit-msg` removes known tool footers before the commit. If a client adds one later, `post-commit` warns; `RIG_POST_COMMIT_AUTO_AMEND=1` permits amendment of ordinary unsigned commits. Signed and replayed commits keep late footers for manual cleanup. |
+| `no` | Footers are kept: `commit-msg` skips footer removal and `post-commit` skips the late-footer check. Commit approval, base-branch and message checks still run. Do not delete the hooks; that disables those checks too. |
 
 ```
 # transcript-retention-days: 14

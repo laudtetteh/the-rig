@@ -7,6 +7,16 @@
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 RIG_DIR=$(python3 "$ROOT/bin/rig-path.py" "$ROOT") || exit 1
 
+# Keep the late-footer check consistent with commit-msg. If the shared config
+# reader is absent, preserve the historical default (cleanup enabled).
+COMMIT_CLEANUP=yes
+CONFIG_READER="$ROOT/bin/rig-config"
+if [ -f "$CONFIG_READER" ] && command -v python3 >/dev/null 2>&1; then
+  COMMIT_CLEANUP=$(python3 "$CONFIG_READER" get "$ROOT/CLAUDE.md" commit-cleanup --default yes --choices yes,no)
+  CONFIG_STATUS=$?
+  [ "$CONFIG_STATUS" -eq 0 ] || COMMIT_CLEANUP=yes
+fi
+
 # A manually completed merge runs post-commit. Its pending marker is only for
 # generated `git merge` commits, which reach the same logger via post-merge.
 if [ "${RIG_COMMIT_POLICY:-}" = guarded ]; then
@@ -73,6 +83,9 @@ with open(path.parent / ".progress.lock", "a+") as lock:
 PY
 }
 trap 'record_progress' EXIT
+
+# `no` keeps tool footers and should not warn about them after a commit.
+[ "$COMMIT_CLEANUP" != no ] || exit 0
 
 HOOK_DIR="$(CDPATH='' cd "$(dirname "$0")" && pwd -P)" || exit 0
 FILTER="$HOOK_DIR/filter-commit-message-inplace.sh"

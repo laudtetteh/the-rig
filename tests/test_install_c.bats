@@ -91,7 +91,7 @@ _sha256() {
 is_rig_owned_stub() {
   local rel="$1"
   case "$rel" in
-    bin/rig|bin/rig-connector-preflight|bin/rig-sprint|bin/rig-tab-title-watch|bin/rig-session-resolve.py|bin/rig-session-index.py|bin/rig_project_roots.py|bin/rig-snapshot.py|bin/rig-tracker-config.py|\
+    bin/rig|bin/rig-connector-preflight|bin/rig-sprint|bin/rig-tab-title-watch|bin/rig-session-resolve.py|bin/rig-session-index.py|bin/rig_project_roots.py|bin/rig-snapshot.py|bin/rig-tracker-config.py|bin/rig-config|\
     .claude/hooks/*|\
     .claude/commands/*|\
     .claude/agents/*|\
@@ -121,6 +121,7 @@ is_rig_owned_stub() {
   is_rig_owned "bin/rig-connector-preflight"
   is_rig_owned "bin/rig-sprint"
   is_rig_owned "bin/rig-tab-title-watch"
+  is_rig_owned "bin/rig-config"
   is_rig_owned ".codex/skills/sprint/SKILL.md"
 }
 
