@@ -298,7 +298,8 @@ Step 0:   For GitHub tracking, create the issue before code; commit references [
 Step 1:   Pre-ship checklist (AC, no debug code, no secrets, Docker verification)
 Step 2:   Self-review — does this do ONLY what was asked?
 Step 2.4: Derive and run 1–5 task-specific live checks; record results, skips, and risk
-Step 2.5: Show an optional copyable validation card; approval attests to evidence review
+Step 2.5: Show the commit gate evidence block, then the optional copyable validation card;
+          approval covers what the block lists, not a claim the user reviewed the diff
 Step 3:   Commit (conventional format, issue reference; one-use sentinel via Git hook or visible-command fallback)
 Step 4:   Update memory (verify task file accuracy; move task; PROGRESS; SNAPSHOT; ERRORS;
           RIG_GAPS; close GitHub Issue with actual-scope comment)

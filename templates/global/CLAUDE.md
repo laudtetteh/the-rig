@@ -114,7 +114,17 @@ Do not summarise these back to me unless asked.
     (a) Confirm you have worked through the SHIP_WORKFLOW.md Step 1 checklist: no debug
         statements, no commented-out code, no hardcoded secrets, error cases handled.
         If you cannot confirm this, work through the list now — do not skip to the gate.
-    (b) Show the proposed commit message, then pause and say:
+    (b) Directly above the question, show the commit gate evidence block: the
+        branch and the commit the change is staged on; diff size, including
+        untracked files, and scope; checks run with pass counts; review result
+        labeled pre-commit or post-commit with the commit reviewed; skipped
+        checks or open risks; and what the approval covers. Before
+        asking to merge, show the merge gate block instead:
+        CI result at the exact PR head, review provenance, metadata/body review,
+        unresolved items, and what the approval covers. Then stop and wait for
+        an explicit go-ahead in a new user message;
+        never show the merge block and merge in the same turn.
+    (c) Show the proposed commit message, then pause and say:
     > "Ready to commit. Test locally, then say **'commit approved'** (or 'ship it',
     > 'lgtm', 'go') and I'll commit and push immediately."
     When the user says one of those trigger phrases, resolve the target worktree's

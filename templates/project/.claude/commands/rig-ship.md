@@ -459,12 +459,46 @@ request **Test plan** instead of replacing them with a generic test claim.
 
 ---
 
-## Step 5 — Optional manual validation card and commit pause
+## Step 5 — Commit gate: evidence block, validation card and commit pause
 
 **Stop here.** Do not commit yet.
 
-Present a concise, copyable card containing the live steps from Step 4.9. Do not
-include lint, unit, or static checks in the card.
+### Commit gate evidence block
+
+Show this required evidence block immediately before the approval request. Keep
+it to these bullets; link long output instead of pasting it. Fill every bullet
+from results you actually observed in this session:
+
+```text
+Commit gate — <branch> · staged on <HEAD short SHA>   (post-commit review: <branch> @ <commit SHA>)
+• Diff: <N> files, +<added>/−<deleted> — <one-line scope>
+• Checks: <name> <passed>/<total> ✓ · <name> ✓   (or ✗ with the failing check name)
+• Review: <independent diff review result> — pre-commit on staged diff   (or post-commit @ <SHA>, or not run + why)
+• Live validation: <passed>/<total> PASS · <skipped> skipped (<reason>)
+• Open risk: none   (or one line each, including every skipped check)
+• Approving covers: this commit + push to <branch>
+```
+
+- **Heading:** before the commit, `HEAD` is the parent commit, so write
+  `staged on <HEAD short SHA>`. Use `@ <commit SHA>` only when the review covered
+  a commit that already exists.
+- **Diff:** count every change, including new files. Run
+  `git diff HEAD --shortstat` for tracked changes, then
+  `git ls-files --others --exclude-standard` for untracked files, and add each
+  untracked file to the file count and its lines to the added count.
+- **Checks:** list the required Step 3 checks (lint, unit, static) with pass
+  counts. A check that did not run is listed as not run, never as passed.
+- **Review:** label provenance. *Pre-commit* means the review covered the staged
+  diff; *post-commit* means it covered a pushed commit, named by SHA. If the diff
+  changed after the review, say so and re-run the review or disclose the gap.
+- **Approving covers:** name exactly what the approval authorizes. It never
+  covers a merge, tag, or release.
+
+### Optional manual validation card
+
+Then present a concise, copyable card containing the live steps from Step 4.9. Do
+not include lint, unit, or static checks in the card; they belong in the commit
+gate evidence block.
 
 ```text
 Optional manual validation (agent results: PASS / SKIPPED as noted)
@@ -477,9 +511,9 @@ Optional manual validation (agent results: PASS / SKIPPED as noted)
 
 Then say:
 > "Ready to commit. The card above is optional to repeat. By saying
-> **'commit approved'** (or 'ship it', 'lgtm', 'go'), you confirm that you
-> reviewed the diff and reported evidence; it does not claim you personally
-> ran the card."
+> **'commit approved'** (or 'ship it', 'lgtm', 'go'), you approve what the
+> evidence block lists under 'Approving covers'; it does not claim you personally
+> reviewed the diff or ran the card."
 
 Wait for one of those explicit trigger phrases (or equivalent clear confirmation).
 Do not proceed if the response is ambiguous. This step cannot be skipped
@@ -511,9 +545,9 @@ message is explicitly approved.
 
 ## Step 7 — Commit
 
-The user reviewed the diff and reported validation evidence at Step 5, then
-approved the commit message at Step 6. Do not claim that the user personally ran
-the optional validation card.
+The user approved the Step 5 evidence block, then approved the commit message at
+Step 6. Do not claim that the user personally reviewed the diff or ran the
+optional validation card.
 That constitutes explicit go-ahead. Resolve the current worktree's Rig directory,
 write the approved message, and create the commit sentinel. Run `git commit`
 in a separate Bash tool call. An active Rig `commit-msg` hook checks the prepared
@@ -765,7 +799,8 @@ Act on the exit code:
 
 - **0 (CLEAN):** show the `Reviewed head:` SHA and the final-commit list. Confirm
   the body still describes what landed; if it does not, draft a replacement body
-  and treat it like a proposed edit below. Then proceed to the merge.
+  and treat it like a proposed edit below. Then show the merge gate evidence
+  block and stop for the user's explicit merge approval.
 - **3 (findings):** show every finding and the proposed edits exactly as printed.
   No edit has been made. Ask the user to approve or reject each proposed external
   write. Run only the approved commands the reviewer printed — they use the REST
@@ -780,9 +815,35 @@ Act on the exit code:
 - **64 (bad input):** the metadata could not be read. Fix the fetch and re-run;
   never merge on unreviewed metadata.
 
-Merge only the reviewed head, using the `Merge only the reviewed head:` command
-the reviewer printed (`gh pr merge [N] --match-head-commit SHA`, plus the merge
-method the project uses). If the head moved after the review, run Step 9.5 again.
+### Merge gate evidence block
+
+Before asking the user to approve the merge, show this required evidence block.
+Keep it to these bullets and fill each one from observed results:
+
+```text
+Merge gate — PR #<N> @ <head SHA>
+• CI: <passed>/<total> ✓ at this exact head (<run link>)   (or ✗ with the failing check name)
+• Review: <result> — post-commit on PR @ <SHA>   (or pre-commit + head unchanged since)
+• Metadata/body review: clean   (or the approved changes)
+• Unresolved: none   (or one line each, including skipped checks and open risks)
+• Approving covers: merge PR #<N> into <base> (no tag or release)
+```
+
+- **CI:** report the check results for the exact head SHA in the heading, not for
+  an earlier push.
+- **Review:** label provenance. If the head moved after the review, say so and
+  re-run the review or disclose the gap; a stale review never counts as current.
+- **Approving covers:** a merge approval never covers a tag, release, or push to
+  the base branch.
+- **Stop after the block.** Show the block, then end your turn and wait for an
+  explicit go-ahead in a new user message that approves this merge. An earlier
+  request such as "merge it" is not that approval. Never show the block and run
+  the merge command in the same turn.
+
+Merge only after the user explicitly approves this specific merge. Merge only the
+reviewed head, using the `Merge only the reviewed head:` command the reviewer
+printed (`gh pr merge [N] --match-head-commit SHA`, plus the merge method the
+project uses). If the head moved after the review, run Step 9.5 again.
 
 ---
 
