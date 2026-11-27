@@ -61,7 +61,7 @@ install_hooks() {
   printf 'issue-tracking: none\nbranch-prefixes: feature/,chore/\n' > "$TEST_PROJECT/CLAUDE.md"
   run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: wrong branch'
   [ "$status" -ne 0 ]
-  [[ "$output" == *'branch prefix'* ]]
+  [[ "$output" == *'branch prefix'* ]] || return 1
   git -C "$TEST_PROJECT" branch -m feature/custom
   run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: configured prefix'
   [ "$status" -eq 0 ]
@@ -71,11 +71,18 @@ install_hooks() {
   [ "$status" -eq 0 ]
 }
 
+@test "commit-msg rejects a malformed configured branch prefix" {
+  printf 'issue-tracking: none\nbranch-prefixes: feature//\n' > "$TEST_PROJECT/CLAUDE.md"
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: malformed prefix'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid branch prefix 'feature//' in CLAUDE.md"* ]] || return 1
+}
+
 @test "commit-msg enforces a configured subject length" {
   printf 'issue-tracking: none\ncommit-subject-max-length: 12\n' > "$TEST_PROJECT/CLAUDE.md"
   run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: subject is too long'
   [ "$status" -ne 0 ]
-  [[ "$output" == *'subject limit'* ]]
+  [[ "$output" == *'subject limit'* ]] || return 1
   run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: short'
   [ "$status" -eq 0 ]
 }
