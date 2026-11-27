@@ -235,9 +235,12 @@ type(scope): short description [#N]
 Body: explain WHY, not what. The diff shows what.
 ```
 
-Types: `feat` | `fix` | `refactor` | `test` | `docs` | `chore` | `style` | `perf` | `devops`
-
-Max subject line: 72 characters.
+Commit types, branch prefixes, and the subject limit come from the project
+`CLAUDE.md` settings `commit-types:`, `branch-prefixes:`, and
+`commit-subject-max-length:`. Read explicit values with
+`python3 bin/rig-config get CLAUDE.md KEY`; older projects without these fields
+keep their existing hook behavior. New project scaffolds start with the common
+types, prefixes, and a 72-character subject limit.
 Reference the GitHub issue number (`[#N]`) when one exists and `issue-tracking: github` is set.
 Never commit directly to the project's base branch (`base-branch:` in the project
 `CLAUDE.md`), `main`, or `master`.

@@ -371,6 +371,20 @@ before committing:
 git checkout -b feat/your-change
 ```
 
+When `branch-prefixes` is configured in `CLAUDE.md`, the hook also reports these
+configuration or branch-name errors:
+
+```
+ERROR: Invalid branch prefix 'feature//' in CLAUDE.md.
+```
+
+```
+ERROR: Branch 'wip/no-prefix' does not use a configured branch prefix.
+```
+
+Correct the setting to a comma-separated list of valid prefixes, or rename the
+branch to start with one of the configured prefixes.
+
 **Fix for solo or housekeeping projects** that legitimately commit housekeeping
 changes directly to `main` (e.g. post-merge memory updates): make sure your
 project's `CLAUDE.md` contains this line. The scaffolded `CLAUDE.md` ships with

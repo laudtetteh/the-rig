@@ -123,8 +123,18 @@ These fields are read by Claude commands, Codex skills, and shared workflow file
 future session inherits them — no need to re-state preferences in chat.
 
 ```
+commit-types: feat,fix,chore,refactor,docs,test,perf,devops,style
+branch-prefixes: feat/,fix/,chore/,refactor/,docs/,devops/
+commit-subject-max-length: 72
 issue-tracking: github
 ```
+
+`commit-types`, `branch-prefixes`, and `commit-subject-max-length` are also
+enforced by the commit hook. They are read through the shared
+`python3 bin/rig-config get CLAUDE.md KEY` helper. Keep comma-separated lists
+without spaces. Existing projects that lack these settings keep their current
+hook behavior until an owner adds the settings; upgrading preserves their
+user-owned `CLAUDE.md`.
 
 | Value | Behaviour |
 |---|---|

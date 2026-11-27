@@ -32,7 +32,8 @@ install_hooks() {
   mkdir -p "$TEST_PROJECT/bin"
   cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$TEST_PROJECT/bin/rig-path.py"
   cp "$REPO_ROOT/templates/project/bin/rig-tracker-config.py" "$TEST_PROJECT/bin/rig-tracker-config.py"
-  chmod +x "$hook_dir/commit-msg" "$hook_dir/post-commit" "$hook_dir/post-merge"
+  cp "$REPO_ROOT/templates/project/bin/rig-config" "$TEST_PROJECT/bin/rig-config"
+  chmod +x "$hook_dir/commit-msg" "$hook_dir/post-commit" "$hook_dir/post-merge" "$TEST_PROJECT/bin/rig-config"
 }
 
 @test "commit-msg accepts a configured tracker and reference pattern" {
@@ -42,6 +43,48 @@ install_hooks() {
   run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: reject wrong ref [bad-123]'
   [ "$status" -ne 0 ]
   [[ "$output" == *'[APP-123]'* ]] || return 1
+}
+
+@test "commit-msg accepts project-configured custom commit types" {
+  printf 'issue-tracking: none\ncommit-types: feat,fix,build\n' > "$TEST_PROJECT/CLAUDE.md"
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'build: compile assets'
+  [ "$status" -eq 0 ]
+}
+
+@test "commit-msg preserves legacy defaults when the shared config reader is absent" {
+  rm "$TEST_PROJECT/bin/rig-config"
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: legacy default'
+  [ "$status" -eq 0 ]
+}
+
+@test "commit-msg enforces configured branch prefixes and exempts valid prefixes and base branch" {
+  printf 'issue-tracking: none\nbranch-prefixes: feature/,chore/\n' > "$TEST_PROJECT/CLAUDE.md"
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: wrong branch'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'branch prefix'* ]] || return 1
+  git -C "$TEST_PROJECT" branch -m feature/custom
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: configured prefix'
+  [ "$status" -eq 0 ]
+  git -C "$TEST_PROJECT" checkout -qb develop
+  printf 'base-branch: develop\nissue-tracking: none\nbranch-prefixes: feature/,chore/\n' > "$TEST_PROJECT/CLAUDE.md"
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: base branch remains usable'
+  [ "$status" -eq 0 ]
+}
+
+@test "commit-msg rejects a malformed configured branch prefix" {
+  printf 'issue-tracking: none\nbranch-prefixes: feature//\n' > "$TEST_PROJECT/CLAUDE.md"
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: malformed prefix'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid branch prefix 'feature//' in CLAUDE.md"* ]] || return 1
+}
+
+@test "commit-msg enforces a configured subject length" {
+  printf 'issue-tracking: none\ncommit-subject-max-length: 12\n' > "$TEST_PROJECT/CLAUDE.md"
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: subject is too long'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'subject limit'* ]] || return 1
+  run git -C "$TEST_PROJECT" commit --allow-empty -m 'feat: short'
+  [ "$status" -eq 0 ]
 }
 
 @test "tracker helper uses POSIX extended regular expressions for task references" {

@@ -107,10 +107,15 @@ hook = pathlib.Path(sys.argv[1]).read_text()
 docs = pathlib.Path(sys.argv[2]).read_text()
 
 messages = re.findall(r'echo "(ERROR: [^"]*\$BRANCH[^"]*)"', hook)
-if len(messages) != 2:
-    raise SystemExit(f"expected two branch guard messages in commit-msg, found {messages!r}")
+if len(messages) != 4:
+    raise SystemExit(f"expected four branch guard messages in commit-msg, found {messages!r}")
 for message in messages:
-    rendered = message.replace("$BRANCH", "main")
+    if "$BRANCH_PREFIX" in message:
+        rendered = message.replace("$BRANCH_PREFIX", "feature//")
+    elif "does not use a configured branch prefix" in message:
+        rendered = message.replace("$BRANCH", "wip/no-prefix")
+    else:
+        rendered = message.replace("$BRANCH", "main")
     if rendered not in docs:
         raise SystemExit(f"troubleshooting does not quote guard message: {rendered!r}")
 pretool = pathlib.Path(sys.argv[3]).read_text()
@@ -122,7 +127,8 @@ if f"prefixed with `{prefix.group(1).strip()}`" not in docs:
 pretool_messages = re.findall(r'fail_closed "([^"]*\$CURRENT_BRANCH[^"]*)"', pretool)
 if len(pretool_messages) != 2:
     raise SystemExit(f"expected two PreToolUse branch guard messages, found {pretool_messages!r}")
-hook_rendered = sorted(m.replace("ERROR: ", "", 1).replace("$BRANCH", "main") for m in messages)
+core_hook_messages = [m for m in messages if "Commit to " in m or "Direct-to-" in m]
+hook_rendered = sorted(m.replace("ERROR: ", "", 1).replace("$BRANCH", "main") for m in core_hook_messages)
 pretool_rendered = sorted(m.replace("$CURRENT_BRANCH", "main") for m in pretool_messages)
 if hook_rendered != pretool_rendered:
     raise SystemExit(f"PreToolUse wording differs from commit-msg: {pretool_rendered!r} vs {hook_rendered!r}")

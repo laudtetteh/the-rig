@@ -3,7 +3,7 @@
 #
 # 1. Strips auto-injected tool footers (Co-Authored-By, Made-with-Claude, etc.)
 #    to keep history clean and human-authored in tone.
-# 2. Validates Conventional Commits subject-line format.
+# 2. Validates configured commit types, branch prefixes and subject length.
 # 3. Requires an issue/ticket reference in the subject line, format depending on
 #    issue-tracking: and optional issue-ref-pattern: in CLAUDE.md.
 #
@@ -121,6 +121,100 @@ fi
 
 # ── Step 2: Guard the actual branch using the prepared subject ──────────────
 SUBJECT=$(head -1 "$COMMIT_MSG_FILE" | sed 's/\r//')
+
+# Project commit policy lives in CLAUDE.md and is parsed by the shared Rig
+# config reader. Missing settings preserve the original hook behavior.
+CONFIG_READER="${ROOT}/bin/rig-config"
+read_config_setting() {
+  if [ -f "$CONFIG_READER" ] && command -v python3 >/dev/null 2>&1; then
+    if [ "$#" -ge 2 ]; then
+      python3 "$CONFIG_READER" get "$ROOT/CLAUDE.md" "$1" --default "$2"
+    else
+      python3 "$CONFIG_READER" get "$ROOT/CLAUDE.md" "$1"
+    fi
+  else
+    [ "$#" -ge 2 ] || return 3
+    printf '%s\n' "$2"
+  fi
+}
+
+VALID_TYPES=$(read_config_setting commit-types 'feat,fix,chore,refactor,docs,test,perf,devops,style')
+CONFIG_STATUS=$?
+if [ "$CONFIG_STATUS" -eq 2 ]; then
+  echo "ERROR: Invalid commit-types setting in CLAUDE.md." >&2
+  exit 1
+elif [ "$CONFIG_STATUS" -ne 0 ]; then
+  VALID_TYPES='feat,fix,chore,refactor,docs,test,perf,devops,style'
+fi
+case "$VALID_TYPES" in
+  ''|,*|*,|*,,*) echo "ERROR: commit-types must be a comma-separated list." >&2; exit 1 ;;
+esac
+if ! printf '%s\n' "$VALID_TYPES" | awk -F, 'NF > 0 { for (i = 1; i <= NF; i++) if ($i !~ /^[a-z][a-z0-9-]*$/) exit 1; next } { exit 1 }'; then
+  echo "ERROR: commit-types contains an invalid type in CLAUDE.md." >&2
+  exit 1
+fi
+VALID_TYPES_PATTERN=$(printf '%s' "$VALID_TYPES" | sed 's/,/|/g')
+
+BRANCH_PREFIXES=$(read_config_setting branch-prefixes)
+CONFIG_STATUS=$?
+if [ "$CONFIG_STATUS" -eq 2 ]; then
+  echo "ERROR: Invalid branch-prefixes setting in CLAUDE.md." >&2
+  exit 1
+elif [ "$CONFIG_STATUS" -eq 0 ]; then
+  case "$BRANCH_PREFIXES" in
+    ''|,*|*,|*,,*) echo "ERROR: branch-prefixes must be a comma-separated list." >&2; exit 1 ;;
+  esac
+  PREFIXES_LEFT="$BRANCH_PREFIXES"
+  while [ -n "$PREFIXES_LEFT" ]; do
+    case "$PREFIXES_LEFT" in
+      *,*) BRANCH_PREFIX=${PREFIXES_LEFT%%,*}; PREFIXES_LEFT=${PREFIXES_LEFT#*,} ;;
+      *) BRANCH_PREFIX=$PREFIXES_LEFT; PREFIXES_LEFT="" ;;
+    esac
+    case "$BRANCH_PREFIX" in
+      ''|*[!a-zA-Z0-9._/-]*|/*|*..*|*//*) echo "ERROR: Invalid branch prefix '$BRANCH_PREFIX' in CLAUDE.md." >&2; exit 1 ;;
+    esac
+  done
+  BRANCH=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  if [ -n "$BRANCH" ]; then
+    IS_BASE_BRANCH=0
+    case "$BRANCH" in main|master) IS_BASE_BRANCH=1 ;; esac
+    if [ "$IS_BASE_BRANCH" -eq 0 ] && [ -f "$ROOT/CLAUDE.md" ] && \
+       sed -n 's/^base-branch:[[:space:]]*\([^[:space:]#][^[:space:]#]*\).*/\1/p' "$ROOT/CLAUDE.md" 2>/dev/null |
+         sed -e 's/^"\(..*\)"$/\1/' -e "s/^'\(..*\)'\$/\1/" | grep -Fxq -- "$BRANCH"; then
+      IS_BASE_BRANCH=1
+    fi
+    if [ "$IS_BASE_BRANCH" -eq 0 ]; then
+      PREFIX_MATCH=0
+      PREFIXES_LEFT="$BRANCH_PREFIXES"
+      while [ -n "$PREFIXES_LEFT" ]; do
+        case "$PREFIXES_LEFT" in
+          *,*) BRANCH_PREFIX=${PREFIXES_LEFT%%,*}; PREFIXES_LEFT=${PREFIXES_LEFT#*,} ;;
+          *) BRANCH_PREFIX=$PREFIXES_LEFT; PREFIXES_LEFT="" ;;
+        esac
+        case "$BRANCH" in "$BRANCH_PREFIX"*) PREFIX_MATCH=1 ;; esac
+      done
+      if [ "$PREFIX_MATCH" -eq 0 ]; then
+        echo "ERROR: Branch '$BRANCH' does not use a configured branch prefix." >&2
+        exit 1
+      fi
+    fi
+  fi
+fi
+
+SUBJECT_LIMIT=$(read_config_setting commit-subject-max-length)
+CONFIG_STATUS=$?
+if [ "$CONFIG_STATUS" -eq 2 ]; then
+  echo "ERROR: Invalid commit-subject-max-length setting in CLAUDE.md." >&2
+  exit 1
+elif [ "$CONFIG_STATUS" -eq 0 ]; then
+  case "$SUBJECT_LIMIT" in ''|*[!0-9]*|0) echo "ERROR: commit-subject-max-length must be a positive integer." >&2; exit 1 ;; esac
+  SUBJECT_LENGTH=$(printf '%s' "$SUBJECT" | wc -m | tr -d '[:space:]')
+  if [ "$SUBJECT_LENGTH" -gt "$SUBJECT_LIMIT" ]; then
+    echo "ERROR: Commit subject exceeds the configured subject limit of $SUBJECT_LIMIT characters ($SUBJECT_LENGTH)." >&2
+    exit 1
+  fi
+fi
+
 if [ "${RIG_COMMIT_POLICY:-}" = guarded ] && [ "$REPLAY" -eq 0 ]; then
   BRANCH=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
   # Protect main, master, and every base-branch: value CLAUDE.md configures
@@ -148,7 +242,7 @@ if [ "${RIG_COMMIT_POLICY:-}" = guarded ] && [ "$REPLAY" -eq 0 ]; then
 
 fi
 
-# ── Step 3: Validate Conventional Commits format ─────────────────────────────
+# ── Step 3: Validate Conventional Commits format ────────────────────────────
 [ "${SKIP_COMMIT_VALIDATION:-0}" = "1" ] && accept_commit
 
 # Skip validation for auto-generated commit types
@@ -157,12 +251,11 @@ case "$SUBJECT" in
     accept_commit ;;
 esac
 
-VALID_TYPES="feat|fix|chore|refactor|docs|test|perf|devops|style"
-if ! echo "$SUBJECT" | grep -qE "^($VALID_TYPES)(\(.+\))?: .+"; then
+if ! echo "$SUBJECT" | grep -qE "^($VALID_TYPES_PATTERN)(\(.+\))?: .+"; then
   echo ""
   echo "ERROR: Commit message does not follow Conventional Commits format."
   echo "  Expected: type(scope): description"
-  echo "  Types:    feat | fix | chore | refactor | docs | test | perf | devops | style"
+  echo "  Types:    $(printf '%s' "$VALID_TYPES" | sed 's/,/ | /g')"
   echo "  Got:      $SUBJECT"
   echo ""
   echo "  To bypass: SKIP_COMMIT_VALIDATION=1 git commit ..."
