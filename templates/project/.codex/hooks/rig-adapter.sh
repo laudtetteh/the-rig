@@ -24,7 +24,8 @@ fi
 
 MANIFEST="$RIG_DIR/memory/.rig-manifest"
 [[ -r "$MANIFEST" ]] || fail_closed "project identity manifest is missing or unreadable."
-/usr/bin/grep -Eq '^[[:xdigit:]]+[[:space:]]+\.rig/rules/protected-paths\.txt$' "$MANIFEST" || \
+command -v grep >/dev/null 2>&1 || fail_closed "grep is required to validate the project identity manifest."
+grep -Eq '^[[:xdigit:]]+[[:space:]]+\.rig/rules/protected-paths\.txt$' "$MANIFEST" || \
   fail_closed "project identity manifest does not own the protected-path policy."
 EXPECTED_ADAPTER=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$REPO/.codex/hooks/rig-adapter.sh")
 ACTUAL_ADAPTER=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$0")
@@ -234,7 +235,15 @@ if [[ "${PATCH_EVENT:-false}" == true ]]; then
   # governance paths. Codex cannot apply a per-target Write redirection to a
   # patch command, so require the caller to use the canonical destination.
   while IFS= read -r path; do
-    target_payload=$(python3 -c 'import json,sys; print(json.dumps({"file_path":sys.argv[1]}))' "$path") || \
+    target_payload=$(python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+tool_input = data.get("tool_input", {})
+target = {"file_path": sys.argv[1]}
+if isinstance(data.get("cwd"), str):
+    target["cwd"] = data["cwd"]
+print(json.dumps(target))
+' "$path" <<< "$PAYLOAD") || \
       fail_closed "apply_patch target could not be encoded."
     OUTPUT=$(printf '%s' "$target_payload" | RIG_AGENT=codex bash "$HOOK" Write); STATUS=$?
     [[ "$STATUS" -eq 0 ]] || exit "$STATUS"

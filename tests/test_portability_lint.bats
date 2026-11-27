@@ -1,10 +1,31 @@
 #!/usr/bin/env bats
 
 setup() {
+  export REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   export CASE_DIR="$BATS_TEST_TMPDIR/case"
   mkdir -p "$CASE_DIR/docs"
   git -C "$CASE_DIR" init -q
   export LINT="$BATS_TEST_DIRNAME/lint-portability.py"
+}
+
+@test "shipped portability guidance uses PATH tools and portable migration examples" {
+  local kickoff="$REPO_ROOT/templates/project/.claude/commands/kickoff.md"
+  local adapter="$REPO_ROOT/templates/project/.codex/hooks/rig-adapter.sh"
+  local upgrade="$REPO_ROOT/templates/project/.claude/commands/rig-upgrade.md"
+  local workflow="$REPO_ROOT/templates/project/.rig/processes/UPGRADE_WORKFLOW.md"
+  if grep -Fq '/usr/bin/grep' "$kickoff"; then return 1; fi
+  if grep -Fq '/usr/bin/grep' "$adapter"; then return 1; fi
+  grep -Fq 'command -v grep' "$kickoff"
+  grep -Fq 'command -v grep' "$adapter"
+  if grep -Fq '/Users/*/' "$upgrade"; then return 1; fi
+  grep -Fq 'sha256sum' "$upgrade"
+  grep -Fq 'shasum -a 256' "$upgrade"
+  grep -Fq 'sha256sum' "$workflow"
+  grep -Fq 'shasum -a 256' "$workflow"
+  grep -Fq 'Bash 3.2+' "$REPO_ROOT/README.md"
+  grep -Fq 'Python 3.9+' "$REPO_ROOT/README.md"
+  grep -Fq 'Git 2.23+' "$REPO_ROOT/README.md"
+  grep -Fq 'jq` is not required' "$REPO_ROOT/README.md"
 }
 
 @test "portability lint permits the approved README pilot credit" {

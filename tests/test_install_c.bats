@@ -495,6 +495,23 @@ print(len(s.get('permissions', {}).get('deny', [])))
   [ "$status" -eq 0 ]
 }
 
+@test "notifications install validates settings without requiring jq" {
+  local fake_home="$TEMP_DIR/no-jq-home" fake_bin="$TEMP_DIR/no-jq-bin"
+  mkdir -p "$fake_home" "$fake_bin"
+  printf '#!/bin/sh\nprintf called > "%s/jq-called"\nexit 127\n' "$TEMP_DIR" > "$fake_bin/jq"
+  chmod +x "$fake_bin/jq"
+  run env HOME="$fake_home" PATH="$fake_bin:$PATH" bash "$INSTALLER" \
+    --global-only --global-agent claude --strategy merge --notifications
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEMP_DIR/jq-called" ]
+  python3 - "$fake_home/.claude/settings.json" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["preferredNotifChannel"]
+assert data["hooks"]["Notification"]
+PY
+}
+
 @test "global Claude target installs rig-upgrade bootstrap command" {
   local fake_home="$TEMP_DIR/fake-home"
   mkdir -p "$fake_home"
