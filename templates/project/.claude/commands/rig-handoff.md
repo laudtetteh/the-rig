@@ -24,6 +24,6 @@ If `.post-merge-pending` exists, explain what merge remains to process and ask w
 
 ## Step 5 — Show one handoff prompt in chat
 
-Write a short prompt that points the next agent to the repository's resolved `$RIG_DIR/memory/CONTEXT_SNAPSHOT.md` and active task cards. Include only the scope the user actually stated and any exact pending approval. Do not restate the full snapshot, create a new issue, or write a prompt file by default.
+The handoff prompt is display-only: write a short prompt in chat that points the next agent to the repository's resolved `$RIG_DIR/memory/CONTEXT_SNAPSHOT.md` and active task cards. Include only the scope the user actually stated and any exact pending approval. Do not restate the full snapshot, create a new issue, or write a prompt file by default.
 
 If the user explicitly asks to save the prompt, overwrite only `$RIG_DIR/memory/NEXT_SESSION_PROMPT.md` after showing the exact content. Never create dated copies or save the prompt elsewhere.

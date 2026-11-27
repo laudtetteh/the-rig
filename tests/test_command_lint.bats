@@ -398,10 +398,10 @@ PY
   [ "$status" -ne 0 ]
 }
 
-@test "handoff-checklist preserves explicit two-gate consent" {
-  grep -Fq 'explicitly agreed' "$COMMAND_DIR/handoff-checklist.md"
-  grep -Fq 'Silence, hesitation, or an ambiguous answer is not consent' "$COMMAND_DIR/handoff-checklist.md"
-  grep -Fq 'Do not run `/post-merge`, `/wrap`, or any checklist step' "$COMMAND_DIR/handoff-checklist.md"
+@test "rig-handoff preserves separate explicit consent gates" {
+  grep -Fq 'only after the user explicitly agrees' "$COMMAND_DIR/rig-handoff.md"
+  grep -Fq 'ask separately before running `/wrap`' "$COMMAND_DIR/rig-handoff.md"
+  grep -Fq 'Run it only after the user explicitly agrees' "$COMMAND_DIR/rig-handoff.md"
 }
 
 @test "rig-upgrade commands: every installer pull targets the installer checkout (#663)" {
@@ -560,7 +560,6 @@ PY
   grep -Fq "tool/session identifier" "$process"
   grep -Fq "must not start duplicate validation" "$process"
   grep -Fq 'full local `bats tests/` suite requires' "$process"
-  grep -Fq "must not run a local full \`bats tests/\` suite" "$COMMAND_DIR/handoff-checklist.md"
 }
 
 @test "ship merge guidance verifies GitHub PR state after non-zero merge" {

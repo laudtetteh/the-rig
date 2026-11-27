@@ -9,7 +9,7 @@ Default to the current session scope. Accept only the optional `--full` flag. Re
 ## Step 1 — Establish scope and evidence
 
 - **Session scope (default):** inspect repository files changed since this session started; Rig memory, task, and documentation files under `$RIG_DIR` edited since the exact session's `started_at`; and helper scripts created under `$RIG_DIR` during this session. Read the exact session record with `rig session resolve --json`. If the session is not exact, report the limitation and do not use another session's timestamps or files.
-- **Full scope (`--full`):** inspect active, backlog, and done task cards; live open GitHub issues and PRs; README files and repository docs; `$RIG_DIR/docs/`; shipped and local commands/skills, processes and rules; `CLAUDE.md` and `AGENTS.md`; and Claude/Codex parity using `bin/rig doctor`.
+- **Full scope (`--full`):** inspect active, backlog, and done task cards; live open GitHub issues and PRs; README files and repository documentation under `docs/`; Rig-authored documentation under the resolved `$RIG_DIR`; shipped and local commands/skills, processes and rules; `CLAUDE.md` and `AGENTS.md`; and Claude/Codex parity using `bin/rig doctor`.
 
 For every claim, open the cited current file or live tracker item and reproduce the behavior when it is technical. Check closed issues for duplicates. Treat older reports and subagent findings as leads, not evidence. Include install and upgrade behavior, Claude/Codex parity, memory/session contracts, and CI effects when those surfaces are in scope.
 
