@@ -638,51 +638,46 @@ another session can then start its own memory housekeeping while the user decide
 
 ## PR description freshness step
 
-After the workflow lock is released, verify that the open PR for this branch
-reflects all commits that have landed since it was opened.
+When this branch has an open PR, check whether the body still matches the final
+diff and verification evidence. This check is read-only unless the user approves
+a body update.
 
-**How:**
-
-1. Check for an open PR on the current branch:
-   ```bash
-   CURRENT_BRANCH=$(git branch --show-current)
-   PR_JSON=$(gh pr list --head "$CURRENT_BRANCH" --json number,title,body,labels --limit 1 2>/dev/null || echo "[]")
-   PR_NUMBER=$(echo "$PR_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['number'] if d else '')" 2>/dev/null || echo "")
-   ```
-   If `PR_NUMBER` is empty (no open PR or `gh` unavailable): skip silently.
-
-2. Get the PR body:
-   ```bash
-   PR_BODY=$(echo "$PR_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['body'] if d else '')" 2>/dev/null || echo "")
-   ```
-
-3. Get commits on this branch not yet in base:
-   ```bash
-   BASE=$(grep "^base-branch:" "$REPO/CLAUDE.md" 2>/dev/null | awk '{print $2}' | tr -d '[:space:]')
-   BASE="${BASE:-main}"
-   git log "origin/$BASE"..HEAD --format="%s" 2>/dev/null
-   ```
-
-4. For each commit subject, skip housekeeping types: `chore(memory)`, `chore(post-merge)`,
-   `chore(release)`, `chore(rig)`. For the rest, do a case-insensitive substring check
-   against the PR body.
-
-5. **If any non-housekeeping commits are not reflected in the PR body**, surface in the
-   wrap summary:
-   > "PR #[N] description may be stale — [N] commit(s) not in description:
-   >   - type(scope): commit subject
-   >   - ...
-   > Update PR description? [yes / no]"
-
-   If the user says yes: append an `## Additional changes` section to the PR body
-   listing the unrepresented commits. Show the proposed addition before editing:
-   ```bash
-   gh pr edit "$PR_NUMBER" --body-file /tmp/wrap-pr-body.md
-   ```
-
-6. If all commits are reflected, or this is a housekeeping-only session: skip silently.
-
----
+1. Find the open PR for the current branch. If none exists, skip this step.
+2. Fetch the PR's full metadata and final changed-file list:
+```
+REPO=$(git rev-parse --show-toplevel)
+CURRENT_BRANCH=$(git branch --show-current)
+PR_JSON=$(gh pr list --head "$CURRENT_BRANCH" --json number --limit 1)
+PR_NUMBER=$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["number"] if d else "")')
+if [[ -n "$PR_NUMBER" ]]; then
+  REVIEW_DIR=$(mktemp -d)
+  gh pr view "$PR_NUMBER" --json number,state,isDraft,headRefOid,title,body,labels,commits > "$REVIEW_DIR/pr.json"
+  gh pr diff "$PR_NUMBER" --name-only > "$REVIEW_DIR/files.txt" || exit 1
+  TRACKER_JSON=$(python3 "$REPO/bin/rig-tracker-config.py" show "$REPO/CLAUDE.md") || exit 1
+  TRACKING=$(printf '%s' "$TRACKER_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tracker"])') || exit 1
+  "$REPO/bin/rig" pr review-metadata --pr "$REVIEW_DIR/pr.json" --files "$REVIEW_DIR/files.txt" --issue-tracking "$TRACKING" --payload-out "$REVIEW_DIR/payload.json"
+fi
+```
+3. Review the Summary and Changes sections against the changed-file list. The
+   metadata command reports explicit file paths that do not appear in the final
+   diff. Also compare test and verification statements, including counts, with
+   focused results and CI at the current PR head; the command cannot validate
+   semantic claims or test counts.
+4. If the body is stale, show the exact proposed correction and ask before
+   updating it. A finding is evidence to review, not permission to edit. After
+   approval, write the body through GitHub's REST API:
+```
+python3 - "$REVIEW_DIR/body.md" "$REVIEW_DIR/payload.json" <<'BODYJSON'
+import json,sys
+json.dump({"body":open(sys.argv[1],encoding="utf-8").read()},open(sys.argv[2],"w"))
+BODYJSON
+gh api repos/{owner}/{repo}/pulls/"$PR_NUMBER" --method PATCH --input "$REVIEW_DIR/payload.json"
+gh pr view "$PR_NUMBER" --json body
+```
+5. If the final diff, test/verification claims, and current-head CI all support
+   the body, report it as current and continue wrap.
+6. If no PR exists or GitHub is unavailable, report the concrete skip reason.
+   Do not infer freshness from the commit-subject substring check alone.
 
 ## Session naming step
 

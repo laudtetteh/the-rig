@@ -105,6 +105,29 @@ fi
 
 ---
 
+## Post-merge PR description accuracy
+
+For each merged PR, compare its final body with the merged diff and exact-head
+verification evidence before updating shared memory:
+
+1. Read the merged PR's title and body with `gh pr view N --json title,body,headRefOid`.
+2. Read the merged diff's changed files with `gh pr diff N --name-only`.
+3. Compare Summary and Changes claims with the changed files and merged diff.
+   Compare test and verification claims, including counts, with the checks that
+   passed at the reviewed PR head. Mechanical file-path checks can help before
+   merge; post-merge review also confirms behavior and test claims.
+4. If the body is inaccurate, draft a dated correction note that states what
+   was inaccurate and the verified correction, then ask for approval. After
+   approval, append that note to the PR body while preserving the original
+   description, using
+   `gh api repos/{owner}/{repo}/pulls/N --method PATCH --input FILE`, then fetch
+   the PR body again to verify it. Do not use gh pr edit.
+
+Record whether the body was accurate, corrected with an appended note after
+approval, or has an
+unresolved discrepancy in the post-merge report. Do not change the merged
+diff's historical PR description without the user's approval.
+
 ## Step 2 — Update PROGRESS.md
 
 Add an entry at the **top** of `$RIG_DIR/memory/PROGRESS.md` (below the header):
