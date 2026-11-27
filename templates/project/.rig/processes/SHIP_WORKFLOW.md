@@ -553,7 +553,8 @@ Merge gate — PR #<N> @ <head SHA>
   re-run the review or disclose the gap; a stale review never counts as current.
 - **Approving covers:** a merge approval never covers a tag, release, or push to
   the base branch.
-- **Stop after the block.** Show the block, then end your turn and wait for an
+- **Stop after the block.** This is a stop for the user's explicit merge approval.
+  Show the block, then end your turn and wait for an
   explicit go-ahead in a new user message that approves this merge. An earlier
   request such as "merge it" is not that approval. Never show the block and run
   the merge command in the same turn.

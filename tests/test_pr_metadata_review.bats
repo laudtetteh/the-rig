@@ -91,8 +91,8 @@ assert not any("gh pr edit" in c for c in d["commands"]), d["commands"]
   printf 'src/actual.py\n' > "$FILES_LIST"
   review --pr "$PR_JSON" --files "$FILES_LIST" --issue-tracking none
   [ "$status" -eq 3 ]
-  [[ "$output" == *"[body_claim_not_in_diff]"*"src/never-touched.py"* ]]
-  [[ "$output" != *"tests/test_demo.bats"* ]]
+  [[ "$output" == *"[body_claim_not_in_diff]"*"src/never-touched.py"* ]] || return 1
+  [[ "$output" != *"tests/test_demo.bats"* ]] || return 1
 }
 
 @test "pr review-metadata: accepts changed paths and scopes body checks to change sections" {
@@ -100,7 +100,7 @@ assert not any("gh pr edit" in c for c in d["commands"]), d["commands"]
   printf 'docs/release-20261126.md\n' > "$FILES_LIST"
   review --pr "$PR_JSON" --files "$FILES_LIST" --issue-tracking none
   [ "$status" -eq 0 ]
-  [[ "$output" == *'Result: CLEAN'* ]]
+  [[ "$output" == *'Result: CLEAN'* ]] || return 1
 }
 
 @test "pr review-metadata: reports a change-section commit ID absent from final commits" {
@@ -108,7 +108,7 @@ assert not any("gh pr edit" in c for c in d["commands"]), d["commands"]
   printf 'src/actual.py\n' > "$FILES_LIST"
   review --pr "$PR_JSON" --files "$FILES_LIST" --issue-tracking none
   [ "$status" -eq 3 ]
-  [[ "$output" == *"[body_commit_not_in_pr]"*"deadbeef1234567"* ]]
+  [[ "$output" == *"[body_commit_not_in_pr]"*"deadbeef1234567"* ]] || return 1
 }
 
 @test "pr review-metadata: an issue named by a final commit but not closed gets a Closes line in the payload" {

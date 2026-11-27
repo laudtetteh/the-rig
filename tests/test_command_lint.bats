@@ -488,8 +488,8 @@ PY
   grep -q "## PR description freshness step" "$COMMAND_DIR/wrap.md"
 }
 
-@test "wrap.md: PR freshness step skips housekeeping commit types" {
-  grep -q "chore(memory)" "$COMMAND_DIR/wrap.md"
+@test "wrap.md: PR freshness checks final diff claims, not commit-subject substrings" {
+  grep -q "Do not infer freshness from the commit-subject substring check alone" "$COMMAND_DIR/wrap.md"
 }
 
 @test "wrap.md: PR freshness step skips silently when no open PR" {

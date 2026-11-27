@@ -123,7 +123,7 @@ baseline = s.index('WRAP_MARKER_TOKEN=$(python3')
 first_write = s.index('## Trim step — PROGRESS.md')
 release = s.index('"$REPO/bin/rig" memory workflow-lock release --token "$SNAP_LOCK_TOKEN" --json || exit 1')
 guarded_clear = s.index('--adopt-legacy-if-marker-token "${WRAP_MARKER_TOKEN:-}"')
-pr_prompt = s.index('Update PR description? [yes / no]')
+pr_prompt = s.index('If the body is stale, show the exact proposed correction and ask before')
 name_prompt = s.index('### Step 4 — Present and confirm')
 assert git < dirty < report < acquire < baseline < first_write < release < pr_prompt < name_prompt < guarded_clear
 assert 'After printing the Wrap report' in s[acquire:first_write]
