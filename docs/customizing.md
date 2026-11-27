@@ -724,7 +724,7 @@ runs these current postflight checks:
 | `worktree_bootstrap` | A linked worktree has every copyable stealth artifact present in the primary checkout, including `.gitleaks.toml` when present | Not a linked worktree with a primary `.rigpath` |
 | `rig_directory` | The resolved Rig directory exists and has a readable `memory/` directory | Never; missing Rig state is a failure |
 | `rigpath` | `.rigpath` is a single non-empty line resolving to a usable Rig directory, or local `.rig/` is selected | Never; malformed path state is a failure |
-| `stealth_exclusions` | Stealth/external artifacts are excluded from git visibility | Project is not a stealth/external install |
+| `stealth_exclusions` | A stealth install excludes `CLAUDE.md`, `PROJECT_BRIEF.md`, `.claude/`, `.rigpath` and any detected Codex or MCP paths from git; an external install (which tracks `CLAUDE.md` and `.claude/`) excludes `.rigpath` | Project has no `.rigpath` |
 | `install_targets` | Present project target metadata is valid and names only supported agents | Metadata is absent in a legacy install; provider checks infer from files and the manifest |
 | `settings_json` | Selected, present, or manifest-recorded Claude settings and present Codex hooks JSON files parse correctly | Neither provider's settings file is selected, present, or recorded |
 | `content_file_types` | Files read for doctor checks are regular files; named pipes, symlinks, devices, and directories are refused before opening | Never; a non-regular content input fails |
@@ -741,11 +741,11 @@ runs these current postflight checks:
 | `recent_pr_references` | Recent GitHub PRs contain issue references or close keywords | Invalid or non-GitHub tracker, non-GitHub remote, or unavailable GitHub auth |
 | `connector_declarations` | Optional connector dependency declarations have the expected public envelope | No connector declaration file exists |
 | `template_placeholder_content` | Core project docs are not still showing raw scaffold placeholder content | Never; unfilled content is a failure, but its cause is not assumed |
-| `manifest_provenance` | Every `.rig-manifest.json` entry's `owner`/`source`/`generator`/`provider`/`type` value is within its known vocabulary | No manifest metadata file exists, or `installer/validate-manifest-provenance.py` isn't colocated (only true for a Rig-dogfooding checkout, not an ordinary downstream install) |
-| `stealth_status` | No Rig-generated artifact is tracked by git or visible-and-unignored in a stealth/external install | The project isn't a stealth/external install, or `installer/audit-stealth.py` isn't colocated |
+| `manifest_provenance` | Every `.rig-manifest.json` entry's `owner`/`source`/`generator`/`provider`/`type` value is within its known vocabulary. Reported only where `installer/validate-manifest-provenance.py` is present (The Rig's own source checkout) | No manifest metadata file exists |
+| `stealth_status` | No Rig-generated artifact is tracked by git or visible-and-unignored in a stealth/external install. Reported only where `installer/audit-stealth.py` is present (The Rig's own source checkout) | The project isn't a stealth/external install |
 | `manifest_mode_hash` | Every Rig-owned artifact's file mode and content hash still match what the manifest recorded (catches hand-edits outside the installer) | No manifest metadata file exists |
 | `stale_manifest_entries` | No manifest entry points at a path that no longer exists on disk | No manifest metadata file exists |
-| `idempotence` | Not verified live by `doctor` itself (a read-only command has no safe way to mutate and roll back a real project tree) — reports the documented procedure: run `bats tests/test_install_idempotence.bats` | Always; it is a pointer to the real check, not a live result |
+| `idempotence` | Not verified live by `doctor` itself (a read-only command has no safe way to mutate and roll back a real project tree). Reported only in The Rig's own source checkout, as a pointer to `bats tests/test_install_idempotence.bats` | Always, where reported; it is a pointer to the real check, not a live result |
 | `upgrade_pattern_blanked_file` | `CLAUDE.md`/`PROJECT_BRIEF.md` didn't revert to raw, unsubstituted template content (i.e. reintroduce the `[Project Name]` placeholder) since the last pre-flight snapshot — the signature of lessons-learned #14 | No pre-flight snapshot exists yet (issue #472 hasn't taken one — e.g. no upgrade-family run has happened on this project since the check shipped) |
 | `upgrade_pattern_symlink_replaced` | No path that was a symlink in the last pre-flight snapshot now exists as a regular file — the signature of a symlink-refusal guard being bypassed (lessons-learned #15) | No pre-flight snapshot exists yet |
 
@@ -810,9 +810,9 @@ automated diff can check.
 `installer/validate-manifest-provenance.py` and `installer/audit-stealth.py`
 are release-engineering tools that live in The Rig's own source repo — they
 are never installed into a downstream target project. In an ordinary
-downstream install, `manifest_provenance` and `stealth_status` will therefore
-permanently report "skipped" with an explanatory detail string; that is
-expected steady state, not a gap you need to fix.
+downstream install, `doctor` therefore omits `manifest_provenance`,
+`stealth_status` and `idempotence`; that is expected, not a gap you need to
+fix.
 
 ### Repairing common post-upgrade findings
 

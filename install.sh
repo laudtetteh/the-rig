@@ -163,7 +163,7 @@ git_exclude_contains() {
 is_rig_owned() {
   local rel="$1"
   case "$rel" in
-    bin/rig|bin/rig-path.py|bin/rig-connector-preflight|bin/rig-sprint|bin/rig-tab-title-watch|bin/rig-session-resolve.py|bin/rig-session-index.py|bin/rig-session-archive.py|bin/rig_project_roots.py|bin/rig-snapshot.py|bin/rig-tracker-config.py|\
+    bin/rig|bin/rig-path.py|bin/rig-connector-preflight|bin/rig-sprint|bin/rig-tab-title-watch|bin/rig-session-resolve.py|bin/rig-session-index.py|bin/rig-session-archive.py|bin/rig_project_roots.py|bin/rig-snapshot.py|bin/rig-tracker-config.py|bin/rig-config|\
     .claude/hooks/*|\
     .claude/commands/*|\
     .claude/agents/*|\
@@ -2696,7 +2696,7 @@ preflight_snapshot_project() {
   local -a rel_paths=(
     "CLAUDE.md" "PROJECT_BRIEF.md" ".claude" ".agents" ".codex" ".mcp.json"
     ".playwright-mcp" ".github" ".gitleaks.toml" "docs/INDEX.md" "docs/features/README.md"
-    ".husky" ".rigpath" "bin/rig" "bin/rig-path.py" "bin/rig-session-resolve.py" "bin/rig-session-index.py" "bin/rig-session-archive.py" "bin/rig_project_roots.py" "bin/rig-snapshot.py" "bin/rig-tracker-config.py" ".git/hooks"
+    ".husky" ".rigpath" "bin/rig" "bin/rig-path.py" "bin/rig-session-resolve.py" "bin/rig-session-index.py" "bin/rig-session-archive.py" "bin/rig_project_roots.py" "bin/rig-snapshot.py" "bin/rig-tracker-config.py" "bin/rig-config" ".git/hooks"
   )
   # Tracked .rig/ lives at $base/.rig for repo/exclude tracking, so it's just
   # another base-relative path. external/stealth tracking is handled below —
@@ -3619,135 +3619,29 @@ _copy_global_file_upgrade() {
     "$manifest_file" none "$rig_owned_default"
 }
 
-# Migrate the old flat Claude skill only when its manifest hash still matches.
-# Customized or untracked files remain untouched for the operator to review.
-retire_flat_global_skill() {
-  local name="$1" new_path="$2" incoming="$3"
-  local rel="skills/$1.md" new_rel="skills/$1/SKILL.md" legacy="$SKILLS_DIR/$1.md" state baseline current incoming_hash new_state new_hash new_baseline
-  [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
-  [[ -e "$legacy" || -L "$legacy" ]] || return 0
-  incoming_hash="$(sha256_file "$incoming")"
-  if [[ "$AGENT_DRY_RUN" == true ]]; then
-    new_state="$(upgrade_destination_state "$CLAUDE_DIR" "$new_path")"
-    case "$new_state" in
-      missing) ;;
-      regular-file)
-        new_hash="$(sha256_file "$new_path")"
-        new_baseline="$(read_manifest_hash "$new_rel" "$GLOBAL_MANIFEST_FILE")"
-        if [[ "$new_hash" != "$incoming_hash" && "$new_hash" != "$new_baseline" ]]; then
-          info "Preserved legacy Claude skill until the new skill is installed: $rel"
-          return 0
-        fi
-        ;;
-      *) info "Preserved legacy Claude skill until the new skill is installed: $rel"; return 0 ;;
-    esac
-  elif [[ "$(upgrade_destination_state "$CLAUDE_DIR" "$new_path")" != regular-file ||
-          -L "$new_path" || ! -f "$new_path" ||
-          "$(sha256_file "$new_path")" != "$incoming_hash" ||
-          "$(read_manifest_hash "$new_rel" "$GLOBAL_MANIFEST_FILE")" != "$incoming_hash" ]]; then
-    info "Preserved legacy Claude skill until the new skill is installed: $rel"
-    return 0
-  fi
-  state="$(upgrade_destination_state "$CLAUDE_DIR" "$legacy")"
-  if [[ "$state" != regular-file ]]; then
-    warn "Preserved legacy Claude skill requiring review: $rel ($state)"
-    record_upgrade_result skipped-conflict "$rel"
-    return 0
-  fi
-  baseline="$(read_manifest_hash "$rel" "$GLOBAL_MANIFEST_FILE")"
-  current="$(sha256_file "$legacy")"
-  if [[ -z "$baseline" || "$baseline" != "$current" ]]; then
-    warn "Preserved customized legacy Claude skill: $rel"
-    record_upgrade_result skipped-customized "$rel"
-    return 0
-  fi
-  if ! upgrade_manifest_mutation_allowed "$GLOBAL_MANIFEST_FILE" "$rel"; then
-    return 0
-  fi
-  ensure_upgrade_transaction "$CLAUDE_DIR"
-  snapshot_upgrade_metadata
-  backup_file "$legacy" "$CLAUDE_DIR"
-  if [[ "$AGENT_DRY_RUN" != true ]]; then
-    rm -f "$legacy" || return 1
-    repair_stale_manifest_entry "${GLOBAL_MANIFEST_FILE}.json" "$GLOBAL_MANIFEST_FILE" "$rel"
-  fi
-  success "Migrated legacy Claude skill: $rel"
-  record_upgrade_result removed "$rel"
-}
-
-# Retire the hook merged into stop.sh in v1.21.0 only when the manifest proves
-# that the installed regular file is an unchanged Rig artifact. Untracked,
-# customized, symlinked, dangling, and wrong-type paths are user state until
-# an operator explicitly repairs them. Never remove or follow those paths.
-retire_legacy_session_end() {
-  local rel=".claude/hooks/session-end.sh"
-  local legacy="$TARGET/$rel"
-  local manifest_hash current_hash
-
-  [[ -e "$legacy" || -L "$legacy" ]] || return 0
-
-  if [[ -L "$TARGET/.claude" || -L "$TARGET/.claude/hooks" ]]; then
-    warn "Preserved legacy hook with symlinked parent: $rel"
-    record_upgrade_result skipped-conflict "$rel"
-    return 0
-  fi
-
-  if [[ -L "$legacy" ]]; then
-    warn "Preserved legacy hook symlink: $rel"
-    info "Remove it explicitly after reviewing its target."
-    record_upgrade_result skipped-conflict "$rel"
-    return 0
-  fi
-
-  if [[ ! -f "$legacy" ]]; then
-    warn "Preserved legacy hook with unsupported file type: $rel"
-    info "Repair the path explicitly before retrying the upgrade."
-    record_upgrade_result skipped-conflict "$rel"
-    return 0
-  fi
-
-  manifest_hash="$(read_manifest_hash "$rel" "$MANIFEST_FILE")"
-  current_hash="$(sha256_file "$legacy")"
-  if [[ -z "$manifest_hash" || -z "$current_hash" || "$current_hash" != "$manifest_hash" ]]; then
-    warn "Preserved legacy hook requiring review: $rel"
-    info "The file is customized or has no trusted manifest baseline; no deletion was performed."
-    record_upgrade_result skipped-conflict "$rel"
-    return 0
-  fi
-
-  ensure_upgrade_transaction "$TARGET"
-  # Capture the pre-state before the backup/removal, so this retirement is
-  # inside the rollback contract like any other change (issue #562). Without
-  # it a removed legacy hook could never be restored by
-  # `rig upgrade rollback`, even though its backup exists.
-  local _rm_hash="" _rm_mode="" _rm_backup=""
-  if upgrade_report_enabled && [[ -f "$legacy" && ! -L "$legacy" ]]; then
-    _rm_hash="$(sha256_file "$legacy")"
-    _rm_mode="$(manifest_artifact_mode "$legacy")"
-  fi
-  backup_file "$legacy" "$TARGET"
-  [[ -n "$_rm_hash" && -n "$BACKUP_DIR" && -f "$BACKUP_DIR/$rel" ]] &&
-    _rm_backup="$BACKUP_DIR/$rel"
-  # agent-plan: classification only, never delete the legacy hook.
-  if [[ "$AGENT_DRY_RUN" != true ]]; then
-    if ! rm -f "$legacy"; then
-      error "Could not retire legacy hook: $rel"
-      return 1
-    fi
-    if [[ -n "$_rm_hash" ]]; then
-      record_report_artifact "deleted" "$TARGET" "$rel" \
-        "$_rm_hash" "$_rm_mode" "file" "" "" "absent" "$_rm_backup"
-    fi
-  fi
-  success "Removed obsolete legacy hook: $rel"
-  record_upgrade_result removed "$rel"
-}
-
-# ── RENAMED RIG ARTIFACTS (issue #714) ───────────────────────────────────────
-# Rig commands and skills whose old names shadowed (or, for `ship`, were never
-# loaded because of) a Claude Code built-in. Each entry is
-# "layer|old_rel|new_rel|builtin". Plain indexed array: bash 3.2 has no
-# associative arrays. #612/#715 can extend this table.
+# ── RETIRED RIG ARTIFACTS (issues #714, #612) ───────────────────────────────
+# Upgrade removes an installed Rig artifact that the current release no
+# longer ships, but only when the manifest proves it unchanged; anything else
+# is preserved with a warning. Two tables feed one routine
+# (retire_rig_artifacts):
+#
+#   RENAMED_RIG_ARTIFACTS  "layer|old_rel|new_rel|builtin"
+#       The artifact moved to new_rel. The old file goes only once the
+#       replacement is installed and intact. builtin names the Claude Code
+#       built-in the old name shadowed (empty when none).
+#   RETIRED_RIG_ARTIFACTS  "layer|old_rel|reason"
+#       The artifact has no replacement. A customized copy is a conflict
+#       for the operator to review, since there is nowhere to move it.
+#
+# layer is project, claude-global or codex-global. Every project-layer old_rel
+# must also be listed in LEGACY_DELETED_RIG_PATHS in templates/project/bin/rig,
+# or `rig upgrade rollback` refuses to restore it; tests enforce this and that
+# no old_rel is still shipped. Plain indexed arrays: bash 3.2 has no
+# associative arrays. Append rows; never reuse an old_rel for new content.
+#
+# The flat-to-directory move of global Claude skills (skills/<name>.md ->
+# skills/<name>/SKILL.md) is a rename of every shipped skill, so its rows are
+# generated from templates/global/skills by global_skill_layout_rows.
 RENAMED_RIG_ARTIFACTS=(
   "project|.claude/commands/status.md|.claude/commands/rig-status.md|/status"
   "project|.claude/commands/code-review.md|.claude/commands/rig-review.md|/code-review"
@@ -3772,6 +3666,21 @@ RENAMED_RIG_ARTIFACTS=(
   "codex-global|.agents/skills/debug/SKILL.md|.agents/skills/rig-debug-basics/SKILL.md|"
 )
 
+RETIRED_RIG_ARTIFACTS=(
+  "project|.claude/hooks/session-end.sh|merged into stop.sh in v1.21.0"
+)
+
+# Print one RENAMED-format row per shipped global Claude skill, moving its
+# pre-directory flat file to the directory layout.
+global_skill_layout_rows() {
+  local skill_src stem
+  for skill_src in "$GLOBAL_TEMPLATES/skills/"*.md; do
+    [[ -f "$skill_src" ]] || continue
+    stem="$(basename "$skill_src" .md)"
+    printf 'claude-global|skills/%s.md|skills/%s/SKILL.md|\n' "$stem" "$stem"
+  done
+}
+
 # True when `rel` (relative to `base`) is a regular, non-symlinked file whose
 # content matches the manifest entry Rig wrote for it. That entry exists only
 # when Rig itself installed the file, so a user-owned file at the same path
@@ -3785,16 +3694,18 @@ rig_installed_intact() {
 
 # The replacement gate. A real run requires the replacement installed and
 # intact. agent-plan writes nothing, so it accepts a missing replacement (the
-# run would create it) or one Rig already owns (the run would update it), and
-# still refuses a user-owned file at the new path.
+# run would create it) or a regular file Rig already owns (the run would
+# update it), and still refuses a user-owned file at the new path or one the
+# run could not write (a symlinked parent, a directory, another file type).
 retire_replacement_ready() {
-  local base="$1" rel="$2" manifest_file="$3"
+  local base="$1" rel="$2" manifest_file="$3" state
   if [[ "$AGENT_DRY_RUN" != true ]]; then
     rig_installed_intact "$base" "$rel" "$manifest_file"
     return
   fi
-  [[ "$(upgrade_destination_state "$base" "$base/$rel")" == missing ]] && return 0
-  [[ -n "$(read_manifest_hash "$rel" "$manifest_file")" ]]
+  state="$(upgrade_destination_state "$base" "$base/$rel")"
+  [[ "$state" == missing ]] && return 0
+  [[ "$state" == regular-file && -n "$(read_manifest_hash "$rel" "$manifest_file")" ]]
 }
 
 # True when an existing old artifact is provably unchanged Rig content: it has
@@ -3834,14 +3745,15 @@ retire_layer_root() {
   esac
 }
 
-# Print why one existing renamed artifact must be preserved, or nothing when
-# it may be retired. Read-only. Output is "kind|detail" with kind one of
-# replacement, state, customized.
+# Print why one existing retired artifact must be preserved, or nothing when
+# it may be removed. Read-only. Output is "kind|detail" with kind one of
+# replacement, state, customized. An empty new_rel means no replacement, so
+# there is no replacement gate.
 retire_blocker() {
   local layer="$1" old_rel="$2" new_rel="$3" root base manifest_file state note
   root="$(retire_layer_root "$layer")"
   base="${root%%|*}"; manifest_file="${root#*|}"
-  if ! retire_replacement_ready "$base" "$new_rel" "$manifest_file"; then
+  if [[ -n "$new_rel" ]] && ! retire_replacement_ready "$base" "$new_rel" "$manifest_file"; then
     printf 'replacement|'
     return 0
   fi
@@ -3858,14 +3770,17 @@ retire_blocker() {
 
 # A generated Codex skill is a pair: SKILL.md only points at
 # references/command.md. Print the other half of a pair entry (old and new
-# rel, "|"-joined), or nothing for a non-skill entry.
+# rel, "|"-joined; the new half is empty when there is no replacement), or
+# nothing for a non-skill entry.
 retire_skill_sibling() {
-  local old_rel="$1" new_rel="$2"
+  local old_rel="$1" new_rel="$2" sib_new=""
   case "$old_rel" in
     .agents/skills/*/SKILL.md)
-      printf '%s|%s' "${old_rel%SKILL.md}references/command.md" "${new_rel%SKILL.md}references/command.md" ;;
+      [[ -z "$new_rel" ]] || sib_new="${new_rel%SKILL.md}references/command.md"
+      printf '%s|%s' "${old_rel%SKILL.md}references/command.md" "$sib_new" ;;
     .agents/skills/*/references/command.md)
-      printf '%s|%s' "${old_rel%references/command.md}SKILL.md" "${new_rel%references/command.md}SKILL.md" ;;
+      [[ -z "$new_rel" ]] || sib_new="${new_rel%references/command.md}SKILL.md"
+      printf '%s|%s' "${old_rel%references/command.md}SKILL.md" "$sib_new" ;;
   esac
 }
 
@@ -3879,15 +3794,102 @@ remove_empty_retired_dirs() {
   done
 }
 
-# Retire one renamed artifact during an upgrade. Removal requires all of:
-# upgrade strategy; the replacement installed by Rig and intact; the old path a
-# regular file under non-symlinked parents; proof that it is unchanged Rig
-# content; and, for a generated Codex skill, the same for the other half of
-# the pair, so a skill is never left half-deleted. Anything else is preserved
-# with a warning, so no customization is lost. agent-plan only reports.
-retire_renamed_artifact() {
-  local layer="$1" old_rel="$2" new_rel="$3" builtin="$4"
-  local root base manifest_file old_path why blocker sibling sib_old sib_new sib_kind detail
+# How a retirement is reported. "renamed": the artifact moved to a new name;
+# "layout": a flat global Claude skill moved into its skill directory;
+# "obsolete": the artifact has no replacement.
+retire_style() {
+  local layer="$1" old_rel="$2" new_rel="$3" stem
+  if [[ -z "$new_rel" ]]; then
+    printf 'obsolete'
+    return 0
+  fi
+  stem="${old_rel#skills/}"; stem="${stem%.md}"
+  if [[ "$layer" == claude-global && "$old_rel" == "skills/$stem.md" && "$new_rel" == "skills/$stem/SKILL.md" ]]; then
+    printf 'layout'
+  else
+    printf 'renamed'
+  fi
+}
+
+# Report why a retirement was blocked and record the upgrade result. A
+# customized renamed or layout artifact is skipped-customized (the changes
+# belong in the replacement); with no replacement it is a conflict the
+# operator must review.
+report_retire_blocker() {
+  local style="$1" layer="$2" old_rel="$3" new_rel="$4" why="$5" blocker="$6" noun detail
+  case "$style" in
+    layout)
+      case "${blocker%%|*}" in
+        replacement)
+          info "Preserved legacy Claude skill until the new skill is installed: $old_rel" ;;
+        state)
+          warn "Preserved legacy Claude skill requiring review: $old_rel (${blocker#*|})"
+          record_upgrade_result skipped-conflict "$old_rel" ;;
+        *)
+          warn "Preserved customized legacy Claude skill: $old_rel"
+          record_upgrade_result skipped-customized "$old_rel" ;;
+      esac
+      return 0 ;;
+    obsolete)
+      noun="Rig artifact"
+      [[ "$old_rel" != .claude/hooks/* ]] || noun="legacy hook"
+      case "${blocker%%|*}" in
+        state)
+          case "${blocker#*|}" in
+            symlinked-parent|symlinked-root)
+              warn "Preserved $noun with symlinked parent: $old_rel" ;;
+            symlink)
+              warn "Preserved $noun symlink: $old_rel"
+              info "Remove it explicitly after reviewing its target." ;;
+            *)
+              warn "Preserved $noun with unsupported file type: $old_rel"
+              info "Repair the path explicitly before retrying the upgrade." ;;
+          esac ;;
+        pair)
+          detail="${blocker#pair|}"
+          warn "Preserved $noun with its skill: $old_rel (${detail%%|*} must stay, so the whole skill stays)" ;;
+        *)
+          warn "Preserved $noun requiring review: $old_rel ($why)"
+          info "The file is customized or has no trusted manifest baseline; no deletion was performed." ;;
+      esac
+      record_upgrade_result skipped-conflict "$old_rel"
+      return 0 ;;
+  esac
+  case "${blocker%%|*}" in
+    replacement)
+      warn "Preserved renamed Rig artifact until its replacement is installed: $old_rel ($why)"
+      record_upgrade_result skipped-conflict "$old_rel" ;;
+    state)
+      warn "Preserved renamed Rig artifact requiring review (${blocker#*|}): $old_rel ($why)"
+      record_upgrade_result skipped-conflict "$old_rel" ;;
+    customized)
+      if [[ -n "${blocker#*|}" ]]; then
+        warn "Preserved renamed Rig artifact that could not be proven unchanged: $old_rel ($why). ${blocker#*|}"
+      else
+        warn "Preserved customized renamed Rig artifact: $old_rel ($why). Rig now ships $new_rel; move your changes there and delete the old file."
+      fi
+      record_upgrade_result skipped-customized "$old_rel" ;;
+    pair)
+      detail="${blocker#pair|}"
+      warn "Preserved renamed Rig artifact with its skill: $old_rel (${detail%%|*} must stay, so the whole skill stays)"
+      if [[ "${detail##*|}" == customized ]]; then
+        record_upgrade_result skipped-customized "$old_rel"
+      else
+        record_upgrade_result skipped-conflict "$old_rel"
+      fi ;;
+  esac
+}
+
+# Retire one artifact during an upgrade. Removal requires all of: upgrade
+# strategy; for a rename, the replacement installed by Rig and intact; the old
+# path a regular file under non-symlinked parents; proof that it is unchanged
+# Rig content; and, for a generated Codex skill, the same for the other half
+# of the pair, so a skill is never left half-deleted. Anything else is
+# preserved with a warning, so no customization is lost. agent-plan only
+# reports. builtin applies to renames, reason to retirements without one.
+retire_rig_artifact() {
+  local layer="$1" old_rel="$2" new_rel="$3" builtin="$4" reason="$5"
+  local root base manifest_file old_path why blocker sibling sib_old sib_new sib_kind style noun
   local _rm_hash="" _rm_mode="" _rm_backup=""
   [[ "$COLLISION_STRATEGY" == upgrade ]] || return 0
   root="$(retire_layer_root "$layer")"
@@ -3895,7 +3897,10 @@ retire_renamed_artifact() {
   base="${root%%|*}"; manifest_file="${root#*|}"
   old_path="$base/$old_rel"
   [[ -e "$old_path" || -L "$old_path" ]] || return 0
-  if [[ -n "$builtin" ]]; then
+  style="$(retire_style "$layer" "$old_rel" "$new_rel")"
+  if [[ "$style" == obsolete ]]; then
+    why="$reason"
+  elif [[ -n "$builtin" ]]; then
     if [[ "$builtin" == /ship ]]; then
       why="Claude Code never loads a custom command named ship"
     else
@@ -3913,38 +3918,21 @@ retire_renamed_artifact() {
       [[ -z "$sib_kind" ]] || blocker="pair|$sib_old|${sib_kind%%|*}"
     fi
   fi
-  case "${blocker%%|*}" in
-    replacement)
-      warn "Preserved renamed Rig artifact until its replacement is installed: $old_rel ($why)"
-      record_upgrade_result skipped-conflict "$old_rel"
-      return 0 ;;
-    state)
-      warn "Preserved renamed Rig artifact requiring review (${blocker#*|}): $old_rel ($why)"
-      record_upgrade_result skipped-conflict "$old_rel"
-      return 0 ;;
-    customized)
-      if [[ -n "${blocker#*|}" ]]; then
-        warn "Preserved renamed Rig artifact that could not be proven unchanged: $old_rel ($why). ${blocker#*|}"
-      else
-        warn "Preserved customized renamed Rig artifact: $old_rel ($why). Rig now ships $new_rel; move your changes there and delete the old file."
-      fi
-      record_upgrade_result skipped-customized "$old_rel"
-      return 0 ;;
-    pair)
-      detail="${blocker#pair|}"
-      warn "Preserved renamed Rig artifact with its skill: $old_rel (${detail%%|*} must stay, so the whole skill stays)"
-      if [[ "${detail##*|}" == customized ]]; then
-        record_upgrade_result skipped-customized "$old_rel"
-      else
-        record_upgrade_result skipped-conflict "$old_rel"
-      fi
-      return 0 ;;
-  esac
+  if [[ -n "$blocker" ]]; then
+    report_retire_blocker "$style" "$layer" "$old_rel" "$new_rel" "$why" "$blocker"
+    return 0
+  fi
   if ! upgrade_manifest_mutation_allowed "$manifest_file" "$old_rel"; then
     return 0
   fi
+  noun="Rig artifact"
+  [[ "$old_rel" != .claude/hooks/* ]] || noun="legacy hook"
   if [[ "$AGENT_DRY_RUN" == true ]]; then
-    info "Would retire renamed Rig artifact: $old_rel -> $new_rel"
+    case "$style" in
+      layout) info "Would migrate legacy Claude skill: $old_rel" ;;
+      obsolete) info "Would remove obsolete $noun: $old_rel ($why)" ;;
+      *) info "Would retire renamed Rig artifact: $old_rel -> $new_rel" ;;
+    esac
     record_upgrade_result removed "$old_rel"
     return 0
   fi
@@ -3958,7 +3946,7 @@ retire_renamed_artifact() {
   [[ -n "$_rm_hash" && -n "$BACKUP_DIR" && -f "$BACKUP_DIR/$old_rel" ]] &&
     _rm_backup="$BACKUP_DIR/$old_rel"
   if ! rm -f "$old_path"; then
-    error "Could not retire renamed Rig artifact: $old_rel"
+    error "Could not retire Rig artifact: $old_rel"
     return 1
   fi
   if [[ -n "$_rm_hash" ]]; then
@@ -3967,27 +3955,51 @@ retire_renamed_artifact() {
   fi
   repair_stale_manifest_entry "${manifest_file}.json" "$manifest_file" "$old_rel"
   remove_empty_retired_dirs "$(dirname "$old_path")" "$base"
-  success "Retired renamed Rig artifact: $old_rel -> $new_rel"
-  [[ "$layer" == project ]] || info "Backup: ${BACKUP_DIR}/${old_rel} (global changes are not covered by rig upgrade rollback; see #721)"
+  case "$style" in
+    layout)
+      success "Migrated legacy Claude skill: $old_rel" ;;
+    obsolete)
+      success "Removed obsolete $noun: $old_rel ($why)" ;;
+    *)
+      success "Retired renamed Rig artifact: $old_rel -> $new_rel" ;;
+  esac
+  if [[ "$layer" != project && "$style" != layout ]]; then
+    info "Backup: ${BACKUP_DIR}/${old_rel} (global changes are not covered by rig upgrade rollback; see #721)"
+  fi
   record_upgrade_result removed "$old_rel"
 }
 
-# Retire every renamed artifact of one layer. Project entries for a provider
-# this run does not install are skipped: their replacements will never be
-# installed, and an old Codex skill shadows no Claude Code built-in (doctor
-# reports it as advisory). This keeps agent-plan and agent-upgrade in step.
-retire_renamed_rig_artifacts() {
-  local want="$1" entry layer old_rel new_rel builtin
+# Retire every listed artifact of one layer: the generated global skill layout
+# rows first, then RENAMED_RIG_ARTIFACTS, then RETIRED_RIG_ARTIFACTS. Project
+# command and Codex skill entries for a provider this run does not install are
+# skipped: their replacements will never be installed, and an old Codex skill
+# shadows no Claude Code built-in (doctor reports it as advisory). This keeps
+# agent-plan and agent-upgrade in step.
+retire_rig_artifacts() {
+  local want="$1" entry layer old_rel new_rel builtin reason
+  local -a rows=()
+  if [[ "$want" == claude-global ]]; then
+    while IFS= read -r entry; do
+      [[ -n "$entry" ]] && rows+=("$entry|")
+    done < <(global_skill_layout_rows)
+  fi
   for entry in "${RENAMED_RIG_ARTIFACTS[@]}"; do
-    IFS='|' read -r layer old_rel new_rel builtin <<< "$entry"
+    rows+=("$entry|")
+  done
+  for entry in "${RETIRED_RIG_ARTIFACTS[@]}"; do
+    IFS='|' read -r layer old_rel reason <<< "$entry"
+    rows+=("$layer|$old_rel|||$reason")
+  done
+  for entry in "${rows[@]}"; do
+    IFS='|' read -r layer old_rel new_rel builtin reason <<< "$entry"
     [[ "$layer" == "$want" ]] || continue
     if [[ "$layer" == project ]]; then
       case "$old_rel" in
-        .claude/*) [[ "${INSTALL_COMMANDS:-false}" == true ]] || continue ;;
+        .claude/commands/*) [[ "${INSTALL_COMMANDS:-false}" == true ]] || continue ;;
         .agents/*) has_agent "${PROJECT_AGENT:-}" codex || continue ;;
       esac
     fi
-    retire_renamed_artifact "$layer" "$old_rel" "$new_rel" "$builtin" || return 1
+    retire_rig_artifact "$layer" "$old_rel" "$new_rel" "$builtin" "$reason" || return 1
   done
 }
 
@@ -4258,13 +4270,12 @@ pathlib.Path(destination).write_text(
 PYEOF
     if [[ "$COLLISION_STRATEGY" == "upgrade" ]]; then
       _copy_global_file_upgrade "$skill_generated" "$skill_dest" "$CLAUDE_DIR" "$skill_rel"
-      retire_flat_global_skill "$skill_stem" "$skill_dest" "$skill_generated"
     else
       copy_file "$skill_generated" "$skill_dest" "$CLAUDE_DIR" "$skill_rel"
     fi
   done
   rm -rf "$_CLAUDE_SKILL_STAGE"
-  retire_renamed_rig_artifacts claude-global || exit 1
+  retire_rig_artifacts claude-global || exit 1
 
   # ── Global commands ───────────────────────────────────────────────────────
   if compgen -G "$GLOBAL_TEMPLATES/commands/*.md" >/dev/null; then
@@ -4307,7 +4318,7 @@ PYEOF
       fi
     done < <(find "$_CODEX_GLOBAL_STAGE" -type f -print0)
     rm -rf "$_CODEX_GLOBAL_STAGE"
-    retire_renamed_rig_artifacts codex-global || exit 1
+    retire_rig_artifacts codex-global || exit 1
   fi
 
   # Restore manifest pointer
@@ -5168,13 +5179,6 @@ PYEOF
     fi
   fi
 
-  # ── REMOVE SCRIPTS MERGED INTO OTHER HOOKS (upgrade cleanup) ─────────────
-  # session-end.sh was merged into stop.sh in v1.21.0. Retire it only when its
-  # manifest proves it is unchanged Rig state; uncertain paths remain intact.
-  if [[ "$COLLISION_STRATEGY" == upgrade ]]; then
-    retire_legacy_session_end || exit 1
-  fi
-
   # ── WRITE INSTALLER VERSION INTO .rig/VERSION ─────────────────────────────
   # No static template file — write the running installer's version directly
   # so the installed project always reports the correct Rig version without
@@ -5390,7 +5394,7 @@ PYEOF
 
   # Renamed commands are retired only after the replacements are installed and
   # [BASE_BRANCH]-substituted, so the manifest proves each replacement intact.
-  retire_renamed_rig_artifacts project || exit 1
+  retire_rig_artifacts project || exit 1
 
   # agent-plan: most of the tracking-mode bookkeeping below (.rigpath, git
   # excludes, stale in-repo .rig/ cleanup) never calls record_upgrade_result

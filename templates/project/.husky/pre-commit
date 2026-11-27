@@ -3,7 +3,8 @@
 #
 # Two checks run on every commit:
 #
-#   1. Secret scanning via gitleaks (requires install: brew install gitleaks)
+#   1. Secret scanning via gitleaks (requires install: brew install gitleaks),
+#      unless CLAUDE.md sets `secret-scanner: none`
 #   2. Debug artifact scanning — blocks commits containing leftover debug code
 #
 # Both checks scan staged files only.
@@ -19,6 +20,35 @@
 # to stage individual files if a hook needs to modify the index.
 
 # ── 1. Secret scanning ────────────────────────────────────────────────────────
+#
+# CLAUDE.md `secret-scanner:` selects the scanner. `none` turns scanning off.
+# A missing setting, `gitleaks`, or any other value keeps the gitleaks check,
+# so a typo or a duplicate line can never silently disable scanning.
+
+SECRET_SCANNER=gitleaks
+HOOK_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || HOOK_ROOT=""
+if [ -n "$HOOK_ROOT" ] && [ -f "$HOOK_ROOT/CLAUDE.md" ]; then
+  SCANNER_VALUE=$(awk '
+    /^[[:space:]]*secret-scanner[[:space:]]*:/ {
+      count++
+      value = $0
+      sub(/^[[:space:]]*secret-scanner[[:space:]]*:[[:space:]]*/, "", value)
+      sub(/[[:space:]]+#.*/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      values[count] = tolower(value)
+    }
+    END {
+      if (count == 0) print "__missing__"
+      else if (count > 1) print "__duplicate__"
+      else print values[1]
+    }
+  ' "$HOOK_ROOT/CLAUDE.md" 2>/dev/null)
+  if [ "$SCANNER_VALUE" = "none" ]; then
+    SECRET_SCANNER=none
+  elif [ "$SCANNER_VALUE" != "gitleaks" ] && [ "$SCANNER_VALUE" != "__missing__" ]; then
+    echo "WARNING: CLAUDE.md secret-scanner: is not exactly one well-formed 'gitleaks' or 'none' value; running gitleaks."
+  fi
+fi
 
 GITLEAKS_BIN=""
 
@@ -30,7 +60,9 @@ elif [ "${RIG_GITLEAKS_PATH_ONLY:-0}" != "1" ] && [ -x "/opt/homebrew/bin/gitlea
   GITLEAKS_BIN="/opt/homebrew/bin/gitleaks"
 fi
 
-if [ -n "$GITLEAKS_BIN" ]; then
+if [ "$SECRET_SCANNER" = none ]; then
+  echo "Secret scanning disabled (CLAUDE.md secret-scanner: none)."
+elif [ -n "$GITLEAKS_BIN" ]; then
   if [ ! -f ".gitleaks.toml" ]; then
     echo ""
     echo "gitleaks configuration error — .gitleaks.toml is missing."

@@ -839,6 +839,7 @@ skills covering the full development lifecycle:
 |---|---|---|
 | `/pre-release-review` | Full review sweep | Covers regressions, test coverage, security, docs accuracy, maintainability, edge cases, and version bump readiness. Outputs a scored Markdown report with a SHIP / HOLD / SHIP WITH FIXES recommendation. |
 | `/rig-review` | Rig review workflow | Reviews the current diff for bugs, regressions, risks, and missing tests before summary. |
+| `/rig-review-comments` | Review-comment assessment | Collects PR review comments (inline threads, review summaries, conversation) and pasted comments, verifies each claim at the PR's pinned head SHA, and sorts it into Blockers, Nits or Pushbacks with evidence or a named pushback reason. Read-only until the user approves each reply, thread resolution, PR edit or follow-up ticket. |
 | `/connector-preflight` | Connector verification | Checks MCP/app connector readiness before workflows rely on external tool access. |
 | `/handoff-checklist` | Handoff gate | Produces a durable handoff checklist when work must transfer between sessions or agents. |
 
@@ -900,7 +901,7 @@ These sit alongside the existing `base-branch:` and `housekeeping:` fields:
 | `housekeeping:` | `direct-push` | `direct-push` \| `pr-required` | How `/post-merge` handles memory-update commits |
 | `issue-tracking:` | `github` | `github`, `none`, or any tracker name | Which issue tracker is required; shapes ref format in commit messages and intake wizard |
 | `issue-creator:` | `user` | `user` \| `agent` | GitHub only: `agent` drafts the exact issue and files it after separate approval; `user` waits for the user to provide a number |
-| `secret-scanner:` | `gitleaks` | `gitleaks` \| `none` | Secret scanning on commit; disabling requires editing `.husky/pre-commit` |
+| `secret-scanner:` | `gitleaks` | `gitleaks` \| `none` | Secret scanning on commit; `none` makes `.husky/pre-commit` skip it, and any other value runs gitleaks |
 | `commit-cleanup:` | `yes` | `yes` \| `no` | Whether auto-injected tool footers are stripped from commit messages |
 | `rig-gaps-push-target:` | *(unset)* | Absolute file path | Path to `RIG_GAPS.md` in the local Rig repo on this machine; enables `/rig-gaps --push` to append entries directly. Leave blank if The Rig repo isn't on this machine. |
 

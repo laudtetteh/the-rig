@@ -6,11 +6,16 @@ setup() {
   TEST_ROOT="$(mktemp -d)"
   REPO="$TEST_ROOT/repo"
   RIG_DIR="$REPO/.rig"
-  mkdir -p "$REPO/.claude/hooks" "$RIG_DIR/memory/sessions"
+  mkdir -p "$REPO/.claude/hooks" "$RIG_DIR/memory/sessions" "$REPO/bin"
   cp "$REPO_ROOT/templates/project/.claude/hooks/prompt-submit.sh" "$REPO/.claude/hooks/prompt-submit.sh"
-  mkdir -p "$REPO/bin"
+  cp "$REPO_ROOT/templates/project/bin/rig" "$REPO/bin/rig"
   cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$REPO/bin/rig-path.py"
+  cp "$REPO_ROOT/templates/project/bin/rig-session-resolve.py" "$REPO/bin/rig-session-resolve.py"
+  chmod +x "$REPO/bin/rig"
   git -C "$REPO" init -q
+  git -C "$REPO" config user.email test@example.com
+  git -C "$REPO" config user.name Test
+  touch "$RIG_DIR/memory/.permission-nudge-offered"
 }
 
 teardown() {
@@ -18,19 +23,23 @@ teardown() {
 }
 
 run_prompt_submit() {
-  (cd "$REPO" && RIG_HANDOFF_ELAPSED_SECONDS=1 bash .claude/hooks/prompt-submit.sh <<<'{}')
+  local session_id="$1"
+  local payload
+  payload=$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"UserPromptSubmit","prompt":"hi","session_id":sys.argv[1]}))' "$session_id")
+  (cd "$REPO" && printf '%s' "$payload" | RIG_AGENT=claude RIG_SESSION_PID=665665 RIG_HANDOFF_ELAPSED_SECONDS=1 bash .claude/hooks/prompt-submit.sh)
+}
+
+bind_session() {
+  run env RIG_SESSION_PID=665665 bash -c 'cd "$1" && bin/rig session bind --agent claude --native-session-id "$2" --source startup --json' _ "$REPO" "$1"
+  [ "$status" -eq 0 ]
+  BOUND_FILE=$(OUTPUT="$output" python3 -c 'import json,os; print(json.loads(os.environ["OUTPUT"])["session_file"])')
 }
 
 @test "handoff detector suggests only and never runs wrap or post-merge" {
-  cat > "$RIG_DIR/memory/sessions/session-old.json" <<'EOF'
-{
-  "anchor": "old",
-  "started_at": "2020-01-01T00:00:00+00:00",
-  "status": "active"
-}
-EOF
+  bind_session old
+  python3 -c 'import datetime,json,sys; p=sys.argv[1]; d=json.load(open(p)); d["created_at"]=(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=3)).isoformat(); json.dump(d,open(p,"w"))' "$BOUND_FILE"
 
-  run run_prompt_submit
+  run run_prompt_submit old
   [ "$status" -eq 0 ]
   grep -Fq 'Rig handoff suggestion:' <<< "$output"
   grep -Fq 'Reply explicitly before I run /handoff-checklist' <<< "$output"
@@ -40,15 +49,10 @@ EOF
 }
 
 @test "handoff detector does not suggest below benchmark" {
-  cat > "$RIG_DIR/memory/sessions/session-new.json" <<EOF
-{
-  "anchor": "new",
-  "started_at": "2999-01-01T00:00:00+00:00",
-  "status": "active"
-}
-EOF
+  bind_session new
+  python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["created_at"]="2999-01-01T00:00:00+00:00"; json.dump(d,open(p,"w"))' "$BOUND_FILE"
 
-  run run_prompt_submit
+  run run_prompt_submit new
   [ "$status" -eq 0 ]
   run grep -F 'Rig handoff suggestion:' <<< "$output"
   [ "$status" -ne 0 ]

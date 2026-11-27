@@ -349,6 +349,7 @@ for a full snapshot — hooks are a safety net, not a replacement.
 **Ship and debug**
 ```
 /rig-review   →  review current diff for bugs, regressions, risk, and missing tests
+/rig-review-comments → assess PR review comments at the pinned head SHA: blockers, nits, pushbacks, each with evidence
 /connector-preflight → verify connector readiness before MCP/app-dependent work
 /rig-ship         →  pre-commit cleanup + checklist + commit + PR; review metadata and verify merge when authorized
 /rig-debug        →  hypothesis-first diagnosis, mandatory ERRORS.md entry

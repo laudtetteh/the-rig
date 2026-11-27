@@ -906,17 +906,17 @@ classification, exactly like any other customized artifact.
 
 | Gate | Verifies | Reports "skipped" (not "failed") when |
 |---|---|---|
-| `manifest_provenance` | Every `.rig-manifest.json` entry's `owner`/`source`/`generator`/`provider`/`type` is within its known vocabulary (delegates to `installer/validate-manifest-provenance.py`) | No manifest metadata file exists, or the validator script isn't colocated with this checkout (true for every ordinary downstream install — that script never ships into a target project) |
-| `stealth_status` | No Rig-generated artifact is tracked by git or visible-and-unignored in a stealth/external install (delegates to `installer/audit-stealth.py`) | The project isn't a stealth/external install, the audit script isn't colocated, or the git directory can't be classified (e.g. a linked worktree) |
+| `manifest_provenance` | Every `.rig-manifest.json` entry's `owner`/`source`/`generator`/`provider`/`type` is within its known vocabulary (delegates to `installer/validate-manifest-provenance.py`). Reported only where that script is present | No manifest metadata file exists |
+| `stealth_status` | No Rig-generated artifact is tracked by git or visible-and-unignored in a stealth/external install (delegates to `installer/audit-stealth.py`). Reported only where that script is present | The project isn't a stealth/external install, or the git directory can't be classified (e.g. a linked worktree) |
 | `manifest_mode_hash` | Every Rig-owned artifact's file mode and content hash still match the manifest (catches hand-edits made outside the installer) | No manifest metadata file exists |
 | `stale_manifest_entries` | No manifest entry points at a path that no longer exists on disk at all | No manifest metadata file exists |
-| `idempotence` | Not verified live — `doctor` is read-only and has no safe way to mutate/roll back a real project tree from inside itself. Always reports the documented procedure instead of fabricating a live result | Never "fails" on its own; always points to `bats tests/test_install_idempotence.bats` |
+| `idempotence` | Not verified live — `doctor` is read-only and has no safe way to mutate/roll back a real project tree from inside itself. Reported only in The Rig's own source checkout, as a pointer to its idempotence test | Always, where reported; it never "fails" on its own |
 
 `installer/validate-manifest-provenance.py` and `installer/audit-stealth.py`
 are release-engineering tools that live only in The Rig's own source repo.
-Neither ships into a downstream target project, so `manifest_provenance` and
-`stealth_status` permanently report "skipped" with an explanatory detail
-string on an ordinary install — that is expected steady state, not a defect.
+Neither ships into a downstream target project, so an ordinary install's
+`doctor` output omits `manifest_provenance`, `stealth_status` and
+`idempotence` entirely — that is expected, not a defect.
 
 ### Repair guidance by finding
 

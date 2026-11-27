@@ -1288,9 +1288,10 @@ RIG_WRITTEN_PATHS+=(".claude/commands/$name")
 Run the installed project's own `bin/rig doctor` to verify its gates pass on
 the state the upgrade just produced. `doctor` emits well over twenty named
 checks — do not assume a fixed list. The upgrade-critical ones are
-`manifest_provenance`, `stealth_status`, `manifest_mode_hash`,
-`stale_manifest_entries`, `idempotence`, `codex_skill_parity`, and the
-`upgrade_pattern_*` family; `docs/customizing.md` carries the full table.
+`manifest_mode_hash`, `stale_manifest_entries`, `codex_skill_parity`, and the
+`upgrade_pattern_*` family (`manifest_provenance`, `stealth_status` and
+`idempotence` appear only in The Rig's own source checkout);
+`docs/customizing.md` carries the full table.
 Read whatever `checks[]` the JSON actually returns rather than a list
 memorised from this file:
 

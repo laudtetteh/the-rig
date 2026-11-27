@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Read one single-value project setting from CLAUDE.md for Rig hooks and commands.
+
+The grammar matches bin/rig-tracker-config.py so every Rig reader agrees on
+what a setting line is: a line of the form `key: value` (key matched
+case-insensitively, `#` comments allowed after the value). Declarations are
+counted before values are parsed, so a blank duplicate is still a duplicate
+(#682). A missing CLAUDE.md or a missing key yields the caller's default.
+
+Usage:
+  rig-config get CLAUDE.md KEY [--default VALUE] [--choices a,b,...]
+
+Exit status:
+  0  value (or default) printed on stdout
+  2  invalid configuration (duplicate, several values, value outside --choices,
+     unreadable or non-regular CLAUDE.md); message on stderr
+  3  key not set and no --default given
+"""
+
+import argparse
+import os
+import re
+import shlex
+import stat
+import sys
+from pathlib import Path
+
+KEY_PATTERN = re.compile(r"[a-z][a-z0-9-]*")
+LINE_PATTERN = re.compile(r"^\s*([a-z][a-z0-9-]*):\s*(.*?)\s*$", re.I)
+
+
+def read_lines(path):
+    """Return CLAUDE.md lines, or [] when it does not exist; refuse non-regular files."""
+    config_path = Path(path)
+    if not (config_path.exists() or config_path.is_symlink()):
+        return []
+    flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
+    descriptor = os.open(config_path, flags)
+    with os.fdopen(descriptor, "r") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise ValueError("CLAUDE.md must be a regular file")
+        return handle.read().splitlines()
+
+
+def lookup(lines, key):
+    """Return the single declared value for key, or None when it is not declared."""
+    declarations = [(number, match.group(2))
+                    for number, line in enumerate(lines, 1)
+                    if (match := LINE_PATTERN.match(line)) and match.group(1).lower() == key]
+    if not declarations:
+        return None
+    if len(declarations) > 1:
+        lines_text = ", ".join(str(number) for number, _ in declarations)
+        raise ValueError(f"duplicate {key} setting at lines {lines_text}")
+    number, raw = declarations[0]
+    try:
+        tokens = shlex.split(raw, comments=True)
+    except ValueError as exc:
+        raise ValueError(f"invalid {key} setting at line {number}: {exc}") from exc
+    if len(tokens) > 1:
+        raise ValueError(f"{key} must contain one value at line {number}")
+    return tokens[0] if tokens else ""
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="rig-config")
+    parser.add_argument("action", choices=("get",))
+    parser.add_argument("config")
+    parser.add_argument("key")
+    parser.add_argument("--default")
+    parser.add_argument("--choices")
+    args = parser.parse_args()
+    key = args.key.lower()
+    if not KEY_PATTERN.fullmatch(key):
+        print(f"ERROR: invalid setting name: {args.key}", file=sys.stderr)
+        return 2
+    try:
+        value = lookup(read_lines(args.config), key)
+    except (OSError, ValueError, UnicodeError) as exc:
+        print(f"ERROR: invalid {key} configuration: {exc}", file=sys.stderr)
+        return 2
+    if value is None:
+        if args.default is None:
+            return 3
+        print(args.default)
+        return 0
+    if args.choices is not None:
+        allowed = [choice.strip().lower() for choice in args.choices.split(",") if choice.strip()]
+        value = value.lower()
+        if value not in allowed:
+            print(f"ERROR: invalid {key} setting '{value}'; expected one of: "
+                  f"{', '.join(allowed)}", file=sys.stderr)
+            return 2
+    print(value)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

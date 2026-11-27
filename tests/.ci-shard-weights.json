@@ -4,7 +4,6 @@
   "tests/test_stealth_worktree.bats": 500.0,
   "tests/test_command_name_collisions.bats": 420.0,
   "tests/test_portability_lint.bats": 5.0,
-  "tests/test_install_concurrency.bats": 120.0,
   "tests/test_upgrade_rollback.bats": 620.0,
   "tests/test_upgrade_reports.bats": 596.0,
   "tests/test_upgrade_agent_contract.bats": 530.0,
@@ -88,5 +87,12 @@
   "tests/test_upgrade_prepare_directory_scope.bats": 5.0,
   "tests/test_work_modes.bats": 5.0,
   "tests/test_wrap_transcript_pruning.bats": 5.0,
-  "tests/test_session_start_clear.bats": 5.0
+  "tests/test_retired_artifacts.bats": 5.0,
+  "tests/test_handoff_suggestion.bats": 5.0,
+  "tests/test_review_comments.bats": 5.0,
+  "tests/test_session_start_clear.bats": 5.0,
+  "tests/test_session_stub_marker.bats": 5.0,
+  "tests/test_commit_cleanup.bats": 5.0,
+  "tests/test_rig_config.bats": 5.0,
+  "tests/test_install_concurrency.bats": 120.0
 }
