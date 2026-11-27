@@ -9,6 +9,10 @@ import stat
 import sys
 import tempfile
 
+# This helper imports the shipped project module directly from the template
+# tree. Do not leave Python bytecode there: a later installer copy would ship
+# the cache into a user's project.
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "templates/project/bin"))
 from rig_project_roots import RootsConfigError, read_project_roots  # noqa: E402
 
