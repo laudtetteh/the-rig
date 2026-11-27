@@ -13,11 +13,11 @@ setup() {
   local adapter="$REPO_ROOT/templates/project/.codex/hooks/rig-adapter.sh"
   local upgrade="$REPO_ROOT/templates/project/.claude/commands/rig-upgrade.md"
   local workflow="$REPO_ROOT/templates/project/.rig/processes/UPGRADE_WORKFLOW.md"
-  ! grep -Fq '/usr/bin/grep' "$kickoff"
-  ! grep -Fq '/usr/bin/grep' "$adapter"
+  if grep -Fq '/usr/bin/grep' "$kickoff"; then return 1; fi
+  if grep -Fq '/usr/bin/grep' "$adapter"; then return 1; fi
   grep -Fq 'command -v grep' "$kickoff"
   grep -Fq 'command -v grep' "$adapter"
-  ! grep -Fq '/Users/*/' "$upgrade"
+  if grep -Fq '/Users/*/' "$upgrade"; then return 1; fi
   grep -Fq 'sha256sum' "$upgrade"
   grep -Fq 'shasum -a 256' "$upgrade"
   grep -Fq 'sha256sum' "$workflow"
