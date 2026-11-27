@@ -4,6 +4,11 @@
 
 ## Branch naming
 
+The commit hook enforces `branch-prefixes:` when the project `CLAUDE.md` sets
+it. The value is a comma-separated list such as
+`feat/,fix/,chore/,refactor/,docs/,devops/`; base branches are exempt. Read
+the effective value with `python3 bin/rig-config get CLAUDE.md branch-prefixes`.
+
 ```
 feat/short-description        # new feature
 fix/short-description         # bug fix
@@ -27,7 +32,13 @@ type(scope): short description [#N]
 Optional body explaining WHY, not what. The diff shows what.
 ```
 
-**Types:** `feat` | `fix` | `chore` | `refactor` | `docs` | `test` | `perf` | `devops`
+**Default types:** `feat` | `fix` | `chore` | `refactor` | `docs` | `test` | `perf` | `devops` | `style`
+
+The commit hook reads the accepted types from the project's `commit-types:`
+setting through `bin/rig-config`. When `commit-subject-max-length:` is set,
+the hook enforces that character limit. The new project scaffold sets it to 72;
+missing settings retain the existing hook behavior. Use
+`python3 bin/rig-config get CLAUDE.md KEY` to inspect an explicit value.
 
 **Scope:** the area of the codebase affected (e.g. `auth`, `api`, `ui`, `db`, `hooks`)
 
