@@ -17,6 +17,7 @@ setup() {
   export PATH="$BATS_TEST_TMPDIR/fakebin:$PATH"
   PR_JSON="$BATS_TEST_TMPDIR/pr.json"
   CLOSING_JSON="$BATS_TEST_TMPDIR/closing.json"
+  FILES_LIST="$BATS_TEST_TMPDIR/files.txt"
   PAYLOAD="$BATS_TEST_TMPDIR/payload.json"
 }
 
@@ -36,7 +37,8 @@ data = {
 }
 for spec in commits:
     headline, _, commit_body = spec.partition("|")
-    data["commits"].append({"messageHeadline": headline, "messageBody": commit_body.replace("\\n", "\n")})
+    data["commits"].append({"oid": "abc1234def5678", "messageHeadline": headline,
+                            "messageBody": commit_body.replace("\\n", "\n")})
 json.dump(data, open(path, "w"))
 PY
 }
@@ -82,6 +84,31 @@ assert not any("gh pr edit" in c for c in d["commands"]), d["commands"]
 '
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d == {"title": "fix(hooks): warn on branch change [#12]"}, d' "$PAYLOAD"
   [ ! -e "$BATS_TEST_TMPDIR/gh-calls" ]
+}
+
+@test "pr review-metadata: reports files claimed in Changes but absent from final diff" {
+  write_pr 'feat(demo): add feature [#12]' $'## Summary\nAdds a demo feature.\n\n## Changes\n- Updated `src/never-touched.py` to handle the new path.\n\n## Test plan\n- Ran `tests/test_demo.bats`\n\nCloses #12\n' 'type: feat' 'feat(demo): add feature [#12]'
+  printf 'src/actual.py\n' > "$FILES_LIST"
+  review --pr "$PR_JSON" --files "$FILES_LIST" --issue-tracking none
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"[body_claim_not_in_diff]"*"src/never-touched.py"* ]]
+  [[ "$output" != *"tests/test_demo.bats"* ]]
+}
+
+@test "pr review-metadata: accepts changed paths and scopes body checks to change sections" {
+  write_pr 'feat(demo): add feature [#12]' $'## Summary\nAdds a demo feature.\n\n## Changes\n- Updated `docs/release-20261126.md` in commit `abc1234`.\n\n## Test plan\n- Ran `tests/test_demo.bats`\n\nCloses #12\n' 'type: feat' 'feat(demo): add feature [#12]'
+  printf 'docs/release-20261126.md\n' > "$FILES_LIST"
+  review --pr "$PR_JSON" --files "$FILES_LIST" --issue-tracking none
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Result: CLEAN'* ]]
+}
+
+@test "pr review-metadata: reports a change-section commit ID absent from final commits" {
+  write_pr 'feat(demo): add feature [#12]' $'## Summary\nAdds a demo feature.\n\n## Changes\n- Backported commit `deadbeef1234567`.\n\nCloses #12\n' 'type: feat' 'feat(demo): add feature [#12]'
+  printf 'src/actual.py\n' > "$FILES_LIST"
+  review --pr "$PR_JSON" --files "$FILES_LIST" --issue-tracking none
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"[body_commit_not_in_pr]"*"deadbeef1234567"* ]]
 }
 
 @test "pr review-metadata: an issue named by a final commit but not closed gets a Closes line in the payload" {
@@ -187,11 +214,40 @@ merge = text.index("## Step 10 — Merge verification and branch cleanup")
 assert review < merge
 section = text[review:merge]
 for needle in ('bin/rig" pr review-metadata', "--match-head-commit", "--method PATCH",
-               "closingIssuesReferences", "Do not run it on every"):
+               "closingIssuesReferences", "Do not run it on every", "gh pr diff",
+               "--files \"$REVIEW_DIR/files.txt\"", "test-count accuracy still needs"):
     assert needle in section, needle
 assert "gh pr edit" not in section.split("Act on the exit code:")[1].replace("`gh pr edit` can fail", "")
 step9 = text[text.index("## Step 9"):review]
 assert "gh api repos/{owner}/{repo}/pulls/[N] --method PATCH" in step9
+
+workflow = open("templates/project/.rig/processes/SHIP_WORKFLOW.md").read()
+workflow_section = workflow[workflow.index("## Step 8 — Review PR metadata at the merge boundary"):
+                            workflow.index("### Merge gate evidence block")]
+for needle in ("gh pr diff N --name-only", "--files FILE", "Summary, Changes, Files changed, and Scope",
+               "test and verification claims", "focused", "CI run for the reviewed head",
+               "gh api repos/{owner}/{repo}/pulls/N --method PATCH", "Do not use `gh pr edit`"):
+    assert needle in workflow_section, needle
+PY
+}
+
+@test "wrap and post-merge check PR body claims against final diffs and use REST for approved edits" {
+  python3 - <<'PY'
+from pathlib import Path
+wrap = Path("templates/project/.claude/commands/wrap.md").read_text()
+wrap_section = wrap[wrap.index("## PR description freshness step"):wrap.index("## Session naming step")]
+for needle in ("gh pr diff", "pr review-metadata", "--files", "current PR head",
+               "ask before", "gh api repos/{owner}/{repo}/pulls/"):
+    assert needle in wrap_section, needle
+assert "gh pr edit" not in wrap_section
+
+post_merge = Path("templates/project/.rig/processes/POST_MERGE_WORKFLOW.md").read_text()
+post_section = post_merge[post_merge.index("## Post-merge PR description accuracy"):
+                          post_merge.index("## Step 2 — Update PROGRESS.md")]
+for needle in ("gh pr diff", "exact-head", "ask for approval", "gh api",
+               "append that note to the PR body", "preserving the original",
+               "Do not use gh pr edit"):
+    assert needle in post_section, needle
 PY
 }
 

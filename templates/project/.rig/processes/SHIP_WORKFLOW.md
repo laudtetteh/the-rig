@@ -504,18 +504,31 @@ After the last commit is pushed and the user asks to merge, fetch the PR's
 `number,state,isDraft,headRefOid,title,body,labels,commits` with
 `gh pr view --json` into a temporary JSON file. Read the normalized tracker
 from `python3 bin/rig-tracker-config.py show CLAUDE.md`. Stop on a config error.
-Only for GitHub tracking, fetch
-the PR's closing issue references with `gh api graphql`; if that fetch fails,
-report that the reviewer will use closing keywords from the body. Run
-`bin/rig pr review-metadata --pr FILE --issue-tracking TRACKING --payload-out FILE`
-with the normalized tracker value, `--closing FILE` when available,
+Fetch the final changed-file list with `gh pr diff N --name-only` into a
+separate temporary file. Run
+`bin/rig pr review-metadata --pr FILE --files FILE --issue-tracking TRACKING --payload-out FILE`
+with the normalized tracker value and changed-file list. Only for GitHub
+tracking, fetch the PR's closing issue references with `gh api graphql`; if
+that fetch fails, report that the reviewer will use closing keywords from the
+body. Include `--closing FILE` when available,
 `--issue NUMBER` for every scoped GitHub issue,
 `--not-closing NUMBER` for partial GitHub issues, and `--require-label LABEL` for each
 required `area:` label. This review is read-only.
 
+Check every explicit path in the PR's Summary, Changes, Files changed, and Scope
+sections against the final changed-file list. Resolve any reported path that is
+missing from the diff by verifying the body claim and proposing a correction.
+Also compare test and verification claims, including counts, with the focused
+results and CI run for the reviewed head; the metadata command cannot validate
+semantic claims or test counts. Ask for approval before changing PR metadata or
+body text. For an approved body correction, use the GitHub REST API with
+`gh api repos/{owner}/{repo}/pulls/N --method PATCH --input FILE`, then fetch the
+body again to verify it. Do not use `gh pr edit`.
+
 Exit 0 means the metadata is clean: show the reviewed head SHA and final commits,
-then confirm the PR body still describes those commits, show the merge gate
-evidence block, and stop for the user's explicit merge approval. On findings (exit 3),
+then confirm the PR body still describes those commits and matches the changed
+files and verification evidence, show the merge gate evidence block, and stop
+for the user's explicit merge approval. On findings (exit 3),
 show each proposed change and obtain explicit approval before any external PR
 edit; rerun the review after an approved edit. On invalid input (exit 64), fix
 the fetch and rerun. If the head changes, repeat the review.

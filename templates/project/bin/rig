@@ -120,12 +120,15 @@ EOF
     session-name) printf 'Usage: rig session-name set [--tentative|--final] [--complete] [--json] <name>\n';;
     sprint) printf 'Usage: rig sprint <audit|plan|status> [options] --json\n';;
     pr) cat <<'EOF'
-Usage: rig pr review-metadata --pr FILE [--closing FILE] [--issue N]... [--not-closing N]...
+Usage: rig pr review-metadata --pr FILE [--closing FILE] [--files FILE] [--issue N]... [--not-closing N]...
                               [--require-label LABEL]... [--issue-tracking MODE] [--payload-out FILE] [--json]
 
 Read-only final merge-boundary review. Compares the PR title, body, labels and
-closing links with its final commits. Inputs are JSON fetched by the caller:
+closing links with its final commits. With --files, explicit paths and commit
+IDs in summary and change sections are compared with the final diff and commits.
+Inputs are fetched by the caller:
   gh pr view N --json number,state,isDraft,headRefOid,title,body,labels,commits > FILE
+  gh pr diff N --name-only > FILES_FILE
   gh api graphql ... closingIssuesReferences ... > CLOSING_FILE   (optional)
 Never contacts GitHub or edits the PR. Proposed title/body edits are written to
 --payload-out for a REST PATCH that runs only after explicit approval; body
@@ -549,7 +552,12 @@ def parse_pr(data):
         subject = entry.get("messageHeadline") if isinstance(entry, dict) else None
         if not isinstance(subject, str):
             raise InputError("each commit needs a 'messageHeadline' string")
-        parsed_commits.append(rejoin_headline(subject, entry.get("messageBody") or ""))
+        commit = rejoin_headline(subject, entry.get("messageBody") or "")
+        oid = entry.get("oid")
+        if oid is not None and (not isinstance(oid, str) or not re.fullmatch(r"[0-9a-fA-F]{7,40}", oid)):
+            raise InputError("each commit oid must be a 7-40 character hexadecimal string")
+        commit["oid"] = oid.lower() if isinstance(oid, str) else None
+        parsed_commits.append(commit)
     labels = []
     for label in data.get("labels") or []:
         name = label.get("name") if isinstance(label, dict) else None
@@ -582,6 +590,85 @@ def parse_closing(data):
             raise InputError("each closing reference needs an integer 'number'")
         numbers.add(value)
     return numbers
+
+
+def parse_changed_files(path):
+    """Read the `gh pr diff --name-only` file list, when supplied."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return {line.strip().removeprefix("./") for line in handle if line.strip()}
+    except (OSError, UnicodeDecodeError) as exc:
+        raise InputError(f"changed-file list cannot be read: {path} ({exc.__class__.__name__})") from exc
+
+
+def change_section_paths(body):
+    """Find explicit inline-code file paths in PR sections describing changes."""
+    target_headings = {"summary", "changes", "files changed", "scope"}
+    paths = set()
+    active = False
+    for line in body.splitlines():
+        heading = re.match(r"^#{1,6}\s+(.+?)\s*#*\s*$", line)
+        if heading:
+            active = heading.group(1).strip().lower() in target_headings
+            continue
+        if not active:
+            continue
+        for span in re.findall(r"`([^`]+)`", line):
+            for value in span.split():
+                candidate = value.strip("'\"()[]{}<>,;:")
+                candidate = candidate.removeprefix("./")
+                suffix = candidate.rsplit("/", 1)[-1]
+                if ("/" in candidate or re.search(r"\.(?:md|sh|py|json|ya?ml|bats|toml|txt|js|ts|tsx|jsx)$", suffix, re.I)
+                        or suffix in {"CLAUDE", "VERSION", "LICENSE", "Makefile"}):
+                    paths.add(candidate.rstrip("."))
+    return paths
+
+
+def body_file_findings(body, changed_files):
+    """Report explicit change-section paths absent from the final PR diff."""
+    findings = []
+    for path in sorted(change_section_paths(body)):
+        if not any(changed == path or changed.startswith(path.rstrip("/") + "/")
+                   for changed in changed_files):
+            findings.append(finding("body_claim_not_in_diff",
+                                    f"Changes section names '{path}', but that path is absent from the final diff; "
+                                    "verify the claim or update the PR body"))
+    return findings
+
+
+def change_section_commits(body):
+    """Find explicit abbreviated/full Git object IDs in change-description sections."""
+    target_headings = {"summary", "changes", "files changed", "scope"}
+    commit_context = re.compile(
+        r"\b(?:commit(?:\s+id)?|sha(?:-1)?|object(?:\s+id)?|revision)"
+        r"\s*(?:[:=@]\s*)?[`'\"(]*([0-9a-fA-F]{7,40})(?![0-9a-fA-F])",
+        re.IGNORECASE,
+    )
+    active = False
+    references = set()
+    for line in body.splitlines():
+        heading = re.match(r"^#{1,6}\s+(.+?)\s*#*\s*$", line)
+        if heading:
+            active = heading.group(1).strip().lower() in target_headings
+            continue
+        if active:
+            references.update(match.lower() for match in commit_context.findall(line))
+            for span in re.findall(r"`([^`]+)`", line):
+                if re.fullmatch(r"[0-9a-fA-F]{7,40}", span):
+                    references.add(span.lower())
+    return references
+
+
+def body_commit_findings(body, commits):
+    """Report explicit change-section commit IDs absent from the final PR commits."""
+    oids = [commit["oid"] for commit in commits if commit.get("oid")]
+    findings = []
+    for reference in sorted(change_section_commits(body)):
+        if not any(oid.startswith(reference) or reference.startswith(oid) for oid in oids):
+            findings.append(finding("body_commit_not_in_pr",
+                                    f"Changes section references commit '{reference}', but it is absent from the final PR commits; "
+                                    "verify the claim or update the PR body"))
+    return findings
 
 
 def is_housekeeping(subject):
@@ -618,7 +705,7 @@ def with_closing_lines(body, numbers):
     return (base + "\n\n" if base else "") + "## Closes\n\n" + "\n".join(lines) + "\n"
 
 
-def review(pr, closing, closing_checked, scope, not_closing, required_labels):
+def review(pr, closing, closing_checked, scope, not_closing, required_labels, changed_files=None):
     """Compare PR metadata with the final commits; return findings and a proposal."""
     findings = []
     work = [c for c in pr["commits"] if not is_housekeeping(c["subject"])]
@@ -680,6 +767,9 @@ def review(pr, closing, closing_checked, scope, not_closing, required_labels):
         findings.append(finding("empty_body", "PR body is empty; draft one from the final commits"))
     if PLACEHOLDER.search(pr["body"]):
         findings.append(finding("body_placeholder", "PR body still contains a literal 'Closes #N' placeholder"))
+    if changed_files is not None:
+        findings.extend(body_file_findings(pr["body"], changed_files))
+        findings.extend(body_commit_findings(pr["body"], pr["commits"]))
 
     if closing_checked:
         missing = expected - closing
@@ -731,6 +821,8 @@ def render_text(result):
     lines = [f"PR metadata review (read-only) for PR #{result['pr']}: {result['title']}",
              f"Reviewed head: {result['head'] or 'unknown'}",
              f"Closing links: {result['closing_source']}"]
+    if result["changed_files"] is not None:
+        lines.append(f"Changed files reviewed: {len(result['changed_files'])}")
     findings = result["findings"]
     lines.append("Result: CLEAN" if not findings else f"Result: {len(findings)} finding(s). No edit has been made.")
     lines.extend(f"  - [{item['code']}] {item['detail']}" for item in findings)
@@ -764,6 +856,7 @@ def build_parser():
     parser = Parser(prog="rig pr review-metadata", add_help=False)
     parser.add_argument("--pr", required=True)
     parser.add_argument("--closing")
+    parser.add_argument("--files", help="text file from `gh pr diff --name-only`")
     parser.add_argument("--issue", action="append", type=int, default=[])
     parser.add_argument("--not-closing", action="append", type=int, default=[])
     parser.add_argument("--require-label", action="append", default=[])
@@ -779,6 +872,7 @@ def main():
     tracking = args.issue_tracking.strip().lower() or "github"
     try:
         pr = parse_pr(load_json(args.pr))
+        changed_files = parse_changed_files(args.files) if args.files else None
         if tracking != "github":
             closing, closing_checked = set(), False
             closing_source = f"not checked: issue-tracking is '{tracking}'"
@@ -791,7 +885,8 @@ def main():
     except InputError as exc:
         fail(str(exc))
 
-    findings, proposal = review(pr, closing, closing_checked, args.issue, args.not_closing, args.require_label)
+    findings, proposal = review(pr, closing, closing_checked, args.issue, args.not_closing,
+                                args.require_label, changed_files)
     payload = {key: proposal[key] for key in ("title", "body") if proposal[key] is not None}
     payload_written = None
     if payload and args.payload_out:
@@ -810,6 +905,7 @@ def main():
         "title": pr["title"],
         "head": pr["head"],
         "closing_source": closing_source,
+        "changed_files": sorted(changed_files) if changed_files is not None else None,
         "findings": findings,
         "final_commits": [c["subject"] for c in pr["commits"] if not is_housekeeping(c["subject"])],
         "proposal": proposal,

@@ -662,18 +662,14 @@ If user chooses **[u]**:
 1. Show the current PR title and body (run `gh pr view [N] --json title,body`)
 2. Draft the updated title and body based on ALL work on this branch (not just the latest commit)
 3. Show the proposed changes and ask for approval
-4. Run:
-   ```bash
-   gh pr edit [N] --title "[updated title]" --body-file /tmp/ship-pr-body.md
-   ```
-   If `gh pr edit` exits non-zero (for example a GraphQL error about Projects
-   (classic) `projectCards`), write the same approved title and body through REST:
-   ```bash
-   python3 -c 'import json,sys; json.dump({"title": sys.argv[1], "body": open(sys.argv[2]).read()}, open(sys.argv[3], "w"))' \
-     "[updated title]" /tmp/ship-pr-body.md /tmp/ship-pr-payload.json
-   gh api repos/{owner}/{repo}/pulls/[N] --method PATCH --input /tmp/ship-pr-payload.json
-   ```
-   Then confirm with `gh pr view [N] --json title,body` that the edit landed.
+4. Write the approved title and body through GitHub's REST API, then confirm
+   the edit landed:
+```
+python3 -c 'import json,sys; json.dump({"title": sys.argv[1], "body": open(sys.argv[2]).read()}, open(sys.argv[3], "w"))' \
+  "[updated title]" /tmp/ship-pr-body.md /tmp/ship-pr-payload.json
+gh api repos/{owner}/{repo}/pulls/[N] --method PATCH --input /tmp/ship-pr-payload.json
+gh pr view [N] --json title,body
+```
 5. Check labels: `gh pr view [N] --json labels` — add any missing labels for new work areas
 6. Verify the `Closes #[issue]` line covers all linked issues for the full scope of work
 
@@ -782,7 +778,8 @@ TRACKER_JSON=$(python3 "$REPO/bin/rig-tracker-config.py" show "$REPO/CLAUDE.md")
 TRACKING=$(printf '%s' "$TRACKER_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tracker"])') || exit 1
 REVIEW_DIR=$(mktemp -d)
 gh pr view "$PR_NUMBER" --json number,state,isDraft,headRefOid,title,body,labels,commits > "$REVIEW_DIR/pr.json"
-REVIEW_ARGS=(--pr "$REVIEW_DIR/pr.json" --issue-tracking "$TRACKING" --payload-out "$REVIEW_DIR/payload.json")
+gh pr diff "$PR_NUMBER" --name-only > "$REVIEW_DIR/files.txt" || exit 1
+REVIEW_ARGS=(--pr "$REVIEW_DIR/pr.json" --files "$REVIEW_DIR/files.txt" --issue-tracking "$TRACKING" --payload-out "$REVIEW_DIR/payload.json")
 if [[ "$TRACKING" == github ]] && gh api graphql \
   -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){closingIssuesReferences(first:50){nodes{number}}}}}' \
   -F o='{owner}' -F r='{repo}' -F n="$PR_NUMBER" > "$REVIEW_DIR/closing.json"; then
@@ -797,15 +794,18 @@ body and says so in its `Closing links:` line. Report that fallback to the user.
 
 Act on the exit code:
 
-- **0 (CLEAN):** show the `Reviewed head:` SHA and the final-commit list. Confirm
-  the body still describes what landed; if it does not, draft a replacement body
-  and treat it like a proposed edit below. Then show the merge gate evidence
-  block and stop for the user's explicit merge approval.
+- **0 (CLEAN):** show the reviewed head SHA and final-commit list. Confirm the
+  Summary and Changes sections describe the files and behavior in the final
+  diff. Check every test and verification claim against exact-head CI and the
+  observed focused results, including numeric counts. The CLI flags explicit
+  file paths absent from the diff; semantic and test-count accuracy still needs
+  this review. If the body is stale, draft a replacement body and treat it like
+  a proposed edit below. Then show the merge gate evidence block and stop for
+  the user's explicit merge approval.
 - **3 (findings):** show every finding and the proposed edits exactly as printed.
   No edit has been made. Ask the user to approve or reject each proposed external
   write. Run only the approved commands the reviewer printed — they use the REST
-  API (`gh api ... --method PATCH` / `--method POST`) because `gh pr edit` can fail
-  on repositories affected by the GitHub Projects (classic) deprecation. For a
+  API (`gh api ... --method PATCH` / `--method POST`). For a
   finding without a proposed edit (for example an unexpected closing link or an
   empty body), draft the exact change, get approval, write it with
   `gh api repos/{owner}/{repo}/pulls/[N] --method PATCH --input FILE` where FILE
