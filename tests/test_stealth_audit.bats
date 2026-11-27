@@ -213,6 +213,13 @@ make_leaky_stealth_fixture() {
     --tracking stealth --rig-dir "$external" --strategy skip
   [ "$status" -eq 0 ]
 
+  local pycache_root="$BATS_TEST_TMPDIR/python-cache"
+  run env PYTHONPYCACHEPREFIX="$pycache_root" "$project/bin/rig" doctor --json
+  [ "$status" -le 1 ]
+  JSON_OUTPUT="$output" python3 -c 'import json,os; assert json.loads(os.environ["JSON_OUTPUT"])["command"] == "doctor"'
+  [ ! -e "$project/bin/__pycache__" ]
+  CACHE_ROOT="$pycache_root" python3 -c 'import os,pathlib; assert not list(pathlib.Path(os.environ["CACHE_ROOT"]).rglob("rig_project_roots*.pyc"))'
+
   run python3 "$AUDIT" "$project"
   if [ "$status" -ne 0 ]; then
     echo "fresh stealth install audit failed (status=$status): $output" >&2

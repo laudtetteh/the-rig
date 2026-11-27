@@ -1701,6 +1701,7 @@ doctor() {
   _doctor_paths="$(rig_bootstrap_paths "$_doctor_primary" 2>/dev/null || printf '%s' "$RIG_WORKTREE_BOOTSTRAP_PATHS")"
   RIG_ROOT="$_doctor_root" RIG_DIR="$(rig_dir)" RIG_BOOTSTRAP_PATHS="$_doctor_paths" python3 - "$@" <<'PY'
 import hashlib, importlib.util, json, os, pathlib, re, shlex, stat, subprocess, sys
+sys.dont_write_bytecode = True
 
 try:
     import tomllib
