@@ -425,6 +425,24 @@ HOOK
   [[ "$output" == *"$TEST_PROJECT/src/app.py"* ]] || return 1
 }
 
+@test "Claude worktree isolation follows symlink aliases to another managed worktree" {
+  setup_claude_managed_worktree
+  alias="$TEST_PROJECT/worktree-alias"
+  ln -s "$CLAUDE_MANAGED_WORKTREE" "$alias"
+  target="$alias/src/new-file.py"
+  payload="$(claude_write_payload "$TEST_PROJECT" "$target")"
+
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"another Claude worktree"* ]] || return 1
+
+  printf 'worktree-writes: primary\n' > "$TEST_PROJECT/CLAUDE.md"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"updatedInput"'* ]] || return 1
+  [[ "$output" == *"$TEST_PROJECT/src/new-file.py"* ]] || return 1
+}
+
 @test "Codex apply_patch inside its managed worktree keeps the worktree target" {
   setup_claude_managed_worktree
   patch=$'*** Begin Patch\n*** Add File: src/new-file.txt\n+safe\n*** End Patch'

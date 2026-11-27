@@ -505,15 +505,16 @@ print(path, end="")
   # Keep writes in the session's own isolated checkout. A session rooted in a
   # different checkout must not silently edit that worktree's files.
   REDIRECT_ORIGINAL=""
-  if [[ "$PATH_ARG" == *"/.claude/worktrees/"* ]]; then
-    TARGET_REPO=$(same_project_root_for_path "$PATH_ARG") || \
+  PATH_CANONICAL=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$PATH_ARG") || fail_closed "write path could not be resolved."
+  if [[ "$PATH_CANONICAL" == *"/.claude/worktrees/"* ]]; then
+    TARGET_REPO=$(same_project_root_for_path "$PATH_CANONICAL") || \
       fail_closed "managed worktree path could not be associated with this project."
     WORKTREE_WRITE_MODE=$(python3 "$REPO/bin/rig-config" get "$REPO/CLAUDE.md" \
       worktree-writes --default in-place --choices in-place,primary) || \
       fail_closed "worktree-writes must be 'in-place' or 'primary' in CLAUDE.md."
     if [[ "$WORKTREE_WRITE_MODE" == primary ]]; then
       REDIRECT_ORIGINAL="$PATH_ARG"
-      PATH_ARG=$(printf '%s' "$PATH_ARG" | python3 -c '
+      PATH_ARG=$(printf '%s' "$PATH_CANONICAL" | python3 -c '
 import re, sys
 path = sys.stdin.read()
 match = re.match(r"^(.*)/\.claude/worktrees/[^/]+(/.*|$)", path)
@@ -526,7 +527,8 @@ print(match.group(1) + (match.group(2) or "/"), end="")
         fail_closed "write targets another Claude worktree; switch to that worktree or set worktree-writes: primary for the legacy redirect."
     fi
   fi
-  PATH_CANONICAL=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$PATH_ARG") || fail_closed "write path could not be resolved."
+  [[ "$PATH_ARG" == "$PATH_CANONICAL" ]] || \
+    PATH_CANONICAL=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$PATH_ARG") || fail_closed "write path could not be resolved."
   TARGET_REPO=$(same_project_root_for_path "$PATH_ARG") || TARGET_REPO="$REPO"
   TARGET_RIG_DIR=$(rig_dir_for_root "$TARGET_REPO") || fail_closed "write target .rigpath is invalid."
   if [[ "$TARGET_REPO" != "$REPO" && ! -e "$TARGET_REPO/.rigpath" &&
