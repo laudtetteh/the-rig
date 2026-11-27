@@ -15,12 +15,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Claude worktree writes now stay in the session's own checkout; writes into another worktree are denied by default. Set `worktree-writes: primary` to keep the legacy redirect temporarily. The global `CLAUDE.md` hard rule is user-owned on upgrade; review it manually and replace its old "always work in the main repo" guidance with the current-checkout rule (#667).
 - Issue, label, and comment writes now require approval of the exact target and content immediately before each action; `issue-creator: agent` drafts first and files only after approval (#684).
 - Session snapshots now preserve separate active task handoffs across concurrent wrap, post-merge, and ship workflows, with owner-aware writes and recoverable workflow locks (#598).
 - Permission auto-approval now covers only read-only inspection and Markdown notes under the Rig's memory, tasks, and docs (excluding owner-approved conventions); hook-loaded Rig files are protected, and protected paths are matched by filesystem identity, including `MultiEdit` writes (#675).
 
 ### Fixed
 
+- Notification setup no longer depends on `jq`; its settings JSON is validated before the atomic write. Kickoff and Codex hook checks use `grep` from `PATH`, and shipped upgrade examples have portable SHA-256 fallbacks and no maintainer-machine paths. The README now lists the supported minimum Bash, Python, and Git versions and non-Homebrew Gitleaks installation options (#662).
 - Owned-task snapshot updates now retain the current shared context even when their drafts contain only a handoff or an older shared header; wrap and post-merge explain how to continue handoff updates after a session record completes (#689).
 - Claude pre-tool policy now enforces protected-file and command checks on real hook payloads (#593).
 - Native Git commit hooks now remove recognized AI attribution while preserving human trailers (#594).

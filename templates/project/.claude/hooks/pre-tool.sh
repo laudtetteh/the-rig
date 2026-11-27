@@ -83,6 +83,14 @@ try:
 except (ValueError, TypeError):
     raise SystemExit(1)
 ' "$TOOL") || fail_closed "PreToolUse payload is malformed or has no trustworthy tool name."
+EVENT_CWD=$(printf '%s' "$INPUT" | python3 -c '
+import json, os, sys
+data = json.load(sys.stdin)
+cwd = data.get("cwd")
+if isinstance(cwd, str) and cwd:
+    print(os.path.abspath(cwd), end="")
+') || fail_closed "PreToolUse event cwd could not be read."
+EVENT_CWD="${EVENT_CWD:-$PWD}"
 
 # ── Repo root — derive from the installed hook, not the current directory ───
 # A tool may run after /cd; its cwd must not decide which policy protects it.
@@ -493,23 +501,38 @@ if not os.path.isabs(path):
 print(path, end="")
 ') || fail_closed "write tool input has no file path."
 
-  # ── Worktree write redirect ───────────────────────────────────────────────
-  # Determine the destination now, but run every path policy against that
-  # destination before returning updatedInput to the provider.
+  # ── Claude-managed worktree write policy ──────────────────────────────────
+  # Keep writes in the session's own isolated checkout. A session rooted in a
+  # different checkout must not silently edit that worktree's files.
   REDIRECT_ORIGINAL=""
   if [[ "$PATH_ARG" == *"/.claude/worktrees/"* ]]; then
-    REDIRECT_ORIGINAL="$PATH_ARG"
-    PATH_ARG=$(printf '%s' "$PATH_ARG" | python3 -c '
+    TARGET_REPO=$(same_project_root_for_path "$PATH_ARG") || \
+      fail_closed "managed worktree path could not be associated with this project."
+    WORKTREE_WRITE_MODE=$(python3 "$REPO/bin/rig-config" get "$REPO/CLAUDE.md" \
+      worktree-writes --default in-place --choices in-place,primary) || \
+      fail_closed "worktree-writes must be 'in-place' or 'primary' in CLAUDE.md."
+    if [[ "$WORKTREE_WRITE_MODE" == primary ]]; then
+      REDIRECT_ORIGINAL="$PATH_ARG"
+      PATH_ARG=$(printf '%s' "$PATH_ARG" | python3 -c '
 import re, sys
 path = sys.stdin.read()
 match = re.match(r"^(.*)/\.claude/worktrees/[^/]+(/.*|$)", path)
 if not match: raise SystemExit(1)
 print(match.group(1) + (match.group(2) or "/"), end="")
 ') || fail_closed "worktree write destination could not be resolved."
+    else
+      SESSION_REPO=$(same_project_root_for_path "$EVENT_CWD") || SESSION_REPO=""
+      [[ "$SESSION_REPO" == "$TARGET_REPO" ]] || \
+        fail_closed "write targets another Claude worktree; switch to that worktree or set worktree-writes: primary for the legacy redirect."
+    fi
   fi
   PATH_CANONICAL=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$PATH_ARG") || fail_closed "write path could not be resolved."
   TARGET_REPO=$(same_project_root_for_path "$PATH_ARG") || TARGET_REPO="$REPO"
   TARGET_RIG_DIR=$(rig_dir_for_root "$TARGET_REPO") || fail_closed "write target .rigpath is invalid."
+  if [[ "$TARGET_REPO" != "$REPO" && ! -e "$TARGET_REPO/.rigpath" &&
+        ! -L "$TARGET_REPO/.rigpath" && ! -d "$TARGET_RIG_DIR" ]]; then
+    TARGET_RIG_DIR="$RIG_DIR"
+  fi
 
   # ── THE RIG'S OWN GOVERNANCE FILES (self-protection) ─────────────────────
   # The agent must not rewrite the rules it is supposed to follow.

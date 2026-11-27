@@ -92,6 +92,23 @@ The repository's main integration branch. All PRs target this branch.
 base-branch: [BASE_BRANCH]
 ```
 
+## Claude managed worktree writes
+
+Claude Code can run a session inside a linked checkout under
+`.claude/worktrees/<session>/`. Writes stay in that session's checkout by default.
+Writes from another checkout into a managed worktree are blocked. Set the option
+below only if you need the legacy behavior that redirects those writes to the
+primary checkout:
+
+```
+worktree-writes: in-place
+```
+
+| Value | Behaviour |
+|---|---|
+| `in-place` | Keep writes inside the checkout where the session runs. Default. |
+| `primary` | Redirect writes aimed at managed worktrees to the primary checkout. |
+
 ---
 
 ## Git workflow convention
@@ -253,7 +270,8 @@ The file is gitignored — opt-in is per-machine, not per-repo.
 ## Off-limits — never touch without explicit instruction
 
 - `.husky/` — git hooks are stable; do not modify
-- `.claude/worktrees/` — Claude Code-specific internal path; never edit or write here
+- `.claude/worktrees/` — Claude Code-managed checkouts; never write into a different
+  worktree. Work in the checkout assigned to the current session.
 - `.github/` — issue and PR templates are set; do not modify
 - `[any other protected path]` — [reason]
 

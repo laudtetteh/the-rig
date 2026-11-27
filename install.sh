@@ -4226,11 +4226,18 @@ for event, arg in (("Notification","notification"),("Stop","stop"),("SubagentSto
     entry={"hooks":[{"type":"command","command":f"{cmd} {arg}"}]}
     if not any(entry == x for x in hooks.setdefault(event, [])): hooks[event].append(entry)
 d=os.path.dirname(p); os.makedirs(d, exist_ok=True)
-fd,tmp=tempfile.mkstemp(dir=d); os.close(fd)
-with open(tmp,"w") as f: json.dump(data,f,indent=2); f.write("\n")
-os.replace(tmp,p)
+fd,tmp=tempfile.mkstemp(dir=d)
+try:
+    with os.fdopen(fd,"w") as f:
+        json.dump(data,f,indent=2); f.write("\n")
+    with open(tmp) as f:
+        json.load(f)
+    os.replace(tmp,p)
+except BaseException:
+    try: os.unlink(tmp)
+    except OSError: pass
+    raise
 PYEOF
-      command -v jq >/dev/null 2>&1 && jq -e . "$CLAUDE_DIR/settings.json" >/dev/null || { error "Notification settings validation failed."; exit 1; }
     else
       info "Skipped notification settings due to a conflicting destination."
     fi

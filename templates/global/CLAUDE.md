@@ -138,11 +138,12 @@ Do not summarise these back to me unless asked.
     call to one visible, explicitly marked `git commit`. Use the
     marker for every agent commit; ordinary terminal commits do
     not use this opt-in gate. This pause is non-negotiable regardless of autonomy level.
-12. **Always work in the main repo, not the worktree.** Claude Code sessions run inside
-    `.claude/worktrees/<name>/`. File edits made there are invisible to the user's git
-    client. At the start of every session, identify the main repo root with
-    `git rev-parse --show-toplevel` and target ALL Write/Edit tool calls and `git`
-    commands there. Never create branches or write files inside the worktree path.
+12. **Work in the checkout this session is using.** At the start of every session,
+    run `git rev-parse --show-toplevel` and confirm the branch before editing. Keep
+    writes inside that checkout; never write into a different linked worktree. The
+    Rig blocks cross-worktree writes by default. A project may temporarily set
+    `worktree-writes: primary` in `CLAUDE.md` to restore the legacy redirect to its
+    primary checkout.
 13. **Require exact approval before every external tracker write.** Before creating,
     editing, deleting, or commenting on an issue, ticket, card, label, milestone,
     or project item, show the target and complete proposed content, then wait for

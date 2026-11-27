@@ -21,6 +21,7 @@ setup() {
   mkdir -p "$TEST_PROJECT/bin"
   cp "$REPO_ROOT/templates/project/bin/rig" "$TEST_PROJECT/bin/rig"
   cp "$REPO_ROOT/templates/project/bin/rig-path.py" "$TEST_PROJECT/bin/rig-path.py"
+  cp "$REPO_ROOT/templates/project/bin/rig-config" "$TEST_PROJECT/bin/rig-config"
   cp "$REPO_ROOT/templates/project/bin/rig-session-resolve.py" "$TEST_PROJECT/bin/rig-session-resolve.py"
   chmod +x "$TEST_PROJECT/bin/rig"
   cp "$REPO_ROOT/templates/project/.rig/rules/protected-paths.txt" \
@@ -75,6 +76,13 @@ run_linked_pretool() {
   local payload="$1"
   run bash -c 'cd "$1" && printf "%s" "$2" | bash .claude/hooks/pre-tool.sh' \
     _ "$LINKED_FEATURE" "$payload"
+}
+
+setup_claude_managed_worktree() {
+  local branch_path="$TEST_PROJECT/.claude/worktrees/agent-session"
+  mkdir -p "$(dirname "$branch_path")"
+  git -C "$TEST_PROJECT" worktree add -q -b rig/agent-session "$branch_path"
+  CLAUDE_MANAGED_WORKTREE="$branch_path"
 }
 
 run_codex_adapter() {
@@ -393,18 +401,43 @@ HOOK
   [ "$status" -eq 2 ]
 }
 
-@test "normal Claude worktree redirect returns documented updatedInput" {
-  target="$TEST_PROJECT/.claude/worktrees/other-session/src/app.py"
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":sys.argv[1],"content":"hello"}}))' "$target")"
+@test "Claude writes in its own managed worktree stay in that checkout" {
+  setup_claude_managed_worktree
+  target="$CLAUDE_MANAGED_WORKTREE/src/app.py"
+  payload="$(claude_write_payload "$CLAUDE_MANAGED_WORKTREE" "$target")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "Claude primary-rooted session cannot write into another managed worktree" {
+  setup_claude_managed_worktree
+  target="$CLAUDE_MANAGED_WORKTREE/src/app.py"
+  payload="$(claude_write_payload "$TEST_PROJECT" "$target")"
+  run_claude_pretool_from_settings "$payload"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"another Claude worktree"* ]] || return 1
+  [[ "$output" != *'"updatedInput"'* ]] || return 1
+  printf 'worktree-writes: primary\n' > "$TEST_PROJECT/CLAUDE.md"
   run_claude_pretool_from_settings "$payload"
   [ "$status" -eq 0 ]
   [[ "$output" == *'"updatedInput"'* ]] || return 1
   [[ "$output" == *"$TEST_PROJECT/src/app.py"* ]] || return 1
 }
 
-@test "worktree redirect cannot bypass governance protection at destination" {
-  target="$TEST_PROJECT/.claude/worktrees/other-session/CLAUDE.md"
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":sys.argv[1],"content":"unsafe"}}))' "$target")"
+@test "Codex apply_patch inside its managed worktree keeps the worktree target" {
+  setup_claude_managed_worktree
+  patch=$'*** Begin Patch\n*** Add File: src/new-file.txt\n+safe\n*** End Patch'
+  run_codex_adapter "$(codex_patch_payload "$CLAUDE_MANAGED_WORKTREE" "$patch")"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "legacy worktree redirect still checks governance at its destination" {
+  setup_claude_managed_worktree
+  printf 'worktree-writes: primary\n' > "$TEST_PROJECT/CLAUDE.md"
+  target="$CLAUDE_MANAGED_WORKTREE/CLAUDE.md"
+  payload="$(claude_write_payload "$TEST_PROJECT" "$target")"
   run_claude_pretool_from_settings "$payload"
   [ "$status" -eq 2 ]
   [[ "$output" == *"governance file"* ]] || return 1

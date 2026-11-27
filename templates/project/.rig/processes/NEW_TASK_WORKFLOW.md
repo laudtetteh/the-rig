@@ -72,21 +72,22 @@ ledger current as commits and PRs land.
 
 ## Step 1 — Confirm your working directory
 
-Before touching any file, identify the main repo root and confirm all edits will target it.
+Before touching any file, identify the checkout this session is using and confirm its branch.
 
-> **Why this matters:** Claude Code runs sessions inside hidden git worktrees at paths like
-> `.claude/worktrees/<session-name>/`. File edits written there are **invisible** to the
-> user's git client (Sourcetree, GitKraken, Tower, etc.). This has caused entire sessions
-> worth of work to be silently discarded. Always work in the main repo.
+> **Why this matters:** Linked worktrees have separate files and branches. Keep edits in
+> the checkout assigned to this session; writing into another worktree can silently
+> change a different branch. The Rig blocks cross-worktree writes by default.
 
 ```bash
-# Identify the main repo root
+# Identify the current checkout and branch
 git rev-parse --show-toplevel
+git branch --show-current
 ```
 
-- All `Write` and `Edit` tool calls must use **absolute paths** under the main repo root
-- All `git` commands must target the main repo: `git -C <repo-root> <command>`
-- Never create branches, commits, or files inside the `.claude/worktrees/` path
+- Keep `Write` and `Edit` calls within the current checkout.
+- Run Git commands in the current checkout; use `git rev-parse --git-common-dir` only
+  when a task explicitly needs shared repository metadata.
+- Do not write into a different path under `.claude/worktrees/`.
 
 ### 1a — Stale-main pre-check (before creating any branch)
 

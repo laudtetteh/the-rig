@@ -244,7 +244,14 @@ If it still shows the old version, fix manually:
 
 ```bash
 echo "X.Y.Z" > .rig/VERSION
-NEW_HASH=$(shasum -a 256 .rig/VERSION | awk '{print $1}')
+if command -v sha256sum >/dev/null 2>&1; then
+  NEW_HASH=$(sha256sum .rig/VERSION | awk '{print $1}')
+elif command -v shasum >/dev/null 2>&1; then
+  NEW_HASH=$(shasum -a 256 .rig/VERSION | awk '{print $1}')
+else
+  echo "ERROR: sha256sum or shasum is required to update the manifest." >&2
+  exit 1
+fi
 # Edit .rig/memory/.rig-manifest and replace the old VERSION hash with $NEW_HASH
 ```
 

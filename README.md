@@ -8,6 +8,15 @@ The Rig wraps Claude Code and Codex with shared structured memory, enforced work
 
 Built and refined across 100+ pull requests on a real production project.
 
+## Requirements
+
+The installer and shipped workflows are tested with Bash 3.2+, Python 3.9+,
+and Git 2.23+. The installed project also needs standard command-line tools
+such as `grep`, `awk`, `sed`, and `sha256sum` or `shasum`. `jq` is not required
+by the installer. `gitleaks` is optional; install it from Homebrew on macOS, a
+package manager such as `apt`, `dnf`, or `pacman`, or the official Gitleaks
+release binaries on other systems.
+
 ---
 
 ## The problem it solves

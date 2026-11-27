@@ -393,12 +393,12 @@ If user chooses **[f]**: make the following substitutions in `$CLAUDE_MD`:
 
 1. Replace the numbered context-loading list (lines starting with `1.`, `2.`, etc. that
    reference an absolute `.rig/projects/*/memory/` path) with relative equivalents:
-   - `/Users/*/memory/CONTEXT_SNAPSHOT.md` → `.rig/memory/CONTEXT_SNAPSHOT.md`
-   - `/Users/*/memory/PROGRESS.md` → `.rig/memory/PROGRESS.md`
-   - `/Users/*/memory/ERRORS.md` → `.rig/memory/ERRORS.md`
-   - `/Users/*/memory/DECISIONS.md` → `.rig/memory/DECISIONS.md`
-   - `/Users/*/tasks/active/` → `.rig/tasks/active/`
-2. Replace `@/Users/*/rules/*.md` imports with `@.rig/rules/*.md`
+   - The existing Rig memory directory's `memory/CONTEXT_SNAPSHOT.md` → `$RIG_DIR/memory/CONTEXT_SNAPSHOT.md`
+   - `memory/PROGRESS.md` → `$RIG_DIR/memory/PROGRESS.md`
+   - `memory/ERRORS.md` → `$RIG_DIR/memory/ERRORS.md`
+   - `memory/DECISIONS.md` → `$RIG_DIR/memory/DECISIONS.md`
+   - `tasks/active/` → `$RIG_DIR/tasks/active/`
+2. Replace imports that point into the old Rig rules directory with imports to the corresponding rules under the project's selected Rig tracking location.
 3. Replace the "External .rig/ note" block with the hook-enforced context note from the
    current template.
 
@@ -731,7 +731,15 @@ if [[ -f "$MANIFEST" ]]; then
       installed_path="$REPO/$rel_path"
     fi
     [[ -f "$installed_path" ]] || continue
-    current_hash=$(shasum -a 256 "$installed_path" 2>/dev/null | awk '{print $1}' || sha256sum "$installed_path" 2>/dev/null | awk '{print $1}')
+    if command -v sha256sum >/dev/null 2>&1; then
+      current_hash=$(sha256sum "$installed_path" 2>/dev/null | awk '{print $1}')
+    elif command -v shasum >/dev/null 2>&1; then
+      current_hash=$(shasum -a 256 "$installed_path" 2>/dev/null | awk '{print $1}')
+    else
+      echo "ERROR: sha256sum or shasum is required to inspect the manifest." >&2
+      exit 1
+    fi
+    [[ -n "$current_hash" ]] || { echo "ERROR: Could not hash $installed_path." >&2; exit 1; }
     [[ "$current_hash" != "$manifest_hash" ]] && echo "USER-MODIFIED: $rel_path"
   done < "$MANIFEST"
 fi
