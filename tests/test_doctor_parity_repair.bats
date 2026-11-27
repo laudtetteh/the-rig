@@ -159,8 +159,11 @@ process = subprocess.Popen([project + "/bin/rig", "doctor", "fix", "--check",
                             "codex_skill_parity", "--confirm", "--json"],
                            cwd=project, env=environment, stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, text=True, start_new_session=True)
+# A blocked FIFO open never returns, so any finite budget still catches the
+# hang. Doctor's own startup takes ~3 s on a loaded macOS runner, which made a
+# 4 s budget fail spuriously (#726); 30 s keeps the guard without that race.
 try:
-    output, error = process.communicate(timeout=4)
+    output, error = process.communicate(timeout=30)
 except subprocess.TimeoutExpired:
     os.killpg(process.pid, signal.SIGKILL)
     process.communicate()
