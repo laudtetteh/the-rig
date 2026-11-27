@@ -592,11 +592,16 @@ def parse_closing(data):
     return numbers
 
 
+def strip_dot_slash(path):
+    """Remove an optional current-directory prefix compatibly."""
+    return path[2:] if path.startswith("./") else path
+
+
 def parse_changed_files(path):
     """Read the `gh pr diff --name-only` file list, when supplied."""
     try:
         with open(path, encoding="utf-8") as handle:
-            return {line.strip().removeprefix("./") for line in handle if line.strip()}
+            return {strip_dot_slash(line.strip()) for line in handle if line.strip()}
     except (OSError, UnicodeDecodeError) as exc:
         raise InputError(f"changed-file list cannot be read: {path} ({exc.__class__.__name__})") from exc
 
@@ -616,7 +621,7 @@ def change_section_paths(body):
         for span in re.findall(r"`([^`]+)`", line):
             for value in span.split():
                 candidate = value.strip("'\"()[]{}<>,;:")
-                candidate = candidate.removeprefix("./")
+                candidate = strip_dot_slash(candidate)
                 suffix = candidate.rsplit("/", 1)[-1]
                 if ("/" in candidate or re.search(r"\.(?:md|sh|py|json|ya?ml|bats|toml|txt|js|ts|tsx|jsx)$", suffix, re.I)
                         or suffix in {"CLAUDE", "VERSION", "LICENSE", "Makefile"}):

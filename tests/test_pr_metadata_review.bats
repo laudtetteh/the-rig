@@ -96,8 +96,8 @@ assert not any("gh pr edit" in c for c in d["commands"]), d["commands"]
 }
 
 @test "pr review-metadata: accepts changed paths and scopes body checks to change sections" {
-  write_pr 'feat(demo): add feature [#12]' $'## Summary\nAdds a demo feature.\n\n## Changes\n- Updated `docs/release-20261126.md` in commit `abc1234`.\n\n## Test plan\n- Ran `tests/test_demo.bats`\n\nCloses #12\n' 'type: feat' 'feat(demo): add feature [#12]'
-  printf 'docs/release-20261126.md\n' > "$FILES_LIST"
+  write_pr 'feat(demo): add feature [#12]' $'## Summary\nAdds a demo feature.\n\n## Changes\n- Updated `./docs/release-20261126.md` in commit `abc1234`.\n\n## Test plan\n- Ran `tests/test_demo.bats`\n\nCloses #12\n' 'type: feat' 'feat(demo): add feature [#12]'
+  printf './docs/release-20261126.md\n' > "$FILES_LIST"
   review --pr "$PR_JSON" --files "$FILES_LIST" --issue-tracking none
   [ "$status" -eq 0 ]
   [[ "$output" == *'Result: CLEAN'* ]] || return 1
