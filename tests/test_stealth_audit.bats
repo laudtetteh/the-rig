@@ -214,7 +214,10 @@ make_leaky_stealth_fixture() {
   [ "$status" -eq 0 ]
 
   run python3 "$AUDIT" "$project"
-  [ "$status" -eq 0 ]
+  if [ "$status" -ne 0 ]; then
+    echo "fresh stealth install audit failed (status=$status): $output" >&2
+    return 1
+  fi
   json_assert() { JSON_OUTPUT="$output" python3 -c "$1"; }
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); assert d["ok"] is True and d["leak_count"] == 0'
 
