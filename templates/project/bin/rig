@@ -27,6 +27,7 @@ Commands:
   rig session repair        Preview or confirm explicit orphan repair
   rig session retrofit      Bind this process' native session ID safely
   rig session obligation    Mark or clear an exact session obligation
+  rig session decision      Record, list, or close non-blocking decisions
   rig sprint                Audit, plan, or inspect a durable sprint
   rig task inventory        Identify installed, omitted, or uncertain task lifecycle
   rig pr review-metadata    Review PR metadata read-only before merge
@@ -104,7 +105,7 @@ command_help() {
     worktree) printf 'Usage: rig worktree bootstrap\n';;
     upgrade) printf 'Usage: rig upgrade rollback (--last | --id ID) [--dry-run | --confirm ID] [--json]\n\nUndoes one completed upgrade using the report that run wrote.\nRestores only the paths that upgrade changed, and refuses anything\nedited since. For an interrupted upgrade, use install.sh --recover.\n\nExit codes: 0 fully undone, 3 some paths refused, 70 a restore failed.\n';;
     session) cat <<'EOF'
-Usage: rig session <resolve|current|list|index|archive|doctor|legacy|repair|retrofit|obligation> [options]
+Usage: rig session <resolve|current|list|index|archive|doctor|legacy|repair|retrofit|obligation|decision> [options]
 
 Native IDs are redacted unless --verbose is explicitly supplied.
 Repair is preview-only unless --confirm TOKEN and --reason REASON are supplied.
@@ -463,6 +464,98 @@ with os.fdopen(fd,"w") as f: json.dump(d,f,indent=2); f.write("\n"); f.flush(); 
 os.replace(tmp,p)
 if action=="clear": write_marker()
 print(json.dumps({"ok":True,"anchor":anchor,"kind":kind,"action":action,"cleared_global":cleared_global,"legacy_preserved":legacy_preserved,"revision":d["revision"]}))
+PY
+}
+
+session_decision() {
+  local action="${1:-}" question="" decision_id="" answer="" json=true arg resolved anchor state confidence
+  shift || true
+  while [[ "$#" -gt 0 ]]; do
+    arg="$1"
+    case "$arg" in
+      --question) [[ "$#" -ge 2 ]] || { usage_error "--question requires text" "$@"; return; }; question="$2"; shift 2;;
+      --id) [[ "$#" -ge 2 ]] || { usage_error "--id requires a value" "$@"; return; }; decision_id="$2"; shift 2;;
+      --answer) [[ "$#" -ge 2 ]] || { usage_error "--answer requires text" "$@"; return; }; answer="$2"; shift 2;;
+      --json) json=true; shift;;
+      *) usage_error "unknown decision option: $arg" "$@"; return;;
+    esac
+  done
+  [[ "$action" == append || "$action" == list || "$action" == close ]] || { usage_error "decision action must be append, list, or close"; return; }
+  [[ "$action" != append || ( -n "$question" && -z "$decision_id" && -z "$answer" ) ]] || { usage_error "decision append requires only --question"; return; }
+  [[ "$action" != list || ( -z "$question" && -z "$decision_id" && -z "$answer" ) ]] || { usage_error "decision list takes no other options"; return; }
+  [[ "$action" != close || ( -n "$decision_id" && -n "$answer" && -z "$question" ) ]] || { usage_error "decision close requires --id and --answer"; return; }
+  resolved=$(session_resolve --json) || return $?
+  anchor=$(printf '%s' "$resolved" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("anchor") or "")')
+  state=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("state") or "")')
+  confidence=$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("confidence") or "")')
+  [[ "$state" == active && "$confidence" == exact && -n "$anchor" ]] || return "$RIG_EXIT_UNAVAILABLE"
+  RIG_DIR="$(rig_dir)" SESSION_ANCHOR="$anchor" DECISION_ACTION="$action" DECISION_QUESTION="$question" DECISION_ID="$decision_id" DECISION_ANSWER="$answer" python3 <<'PY'
+import datetime, fcntl, json, os, pathlib, re, stat, tempfile, uuid
+root=pathlib.Path(os.environ["RIG_DIR"]); memory=root/"memory"
+anchor=os.environ["SESSION_ANCHOR"]
+if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",anchor):
+    raise SystemExit("session decision: unsafe session anchor")
+action=os.environ["DECISION_ACTION"]; question=os.environ.get("DECISION_QUESTION",""); decision_id=os.environ.get("DECISION_ID",""); answer=os.environ.get("DECISION_ANSWER","")
+if len(question)>4000 or len(answer)>4000:
+    raise SystemExit("session decision: text exceeds 4000 characters")
+directory=memory/"session-decisions"; path=directory/(anchor+".json")
+if directory.is_symlink(): raise SystemExit("session decision: ledger directory is unsafe")
+if action=="list":
+    if not directory.exists() or not directory.is_dir():
+        print(json.dumps({"ok":True,"anchor":anchor,"decisions":[]})); raise SystemExit(0)
+    if stat.S_IMODE(directory.stat().st_mode) != 0o700:
+        raise SystemExit("session decision: ledger directory permissions are unsafe")
+    if path.is_symlink(): raise SystemExit("session decision: ledger file is a symlink")
+    if not path.exists():
+        print(json.dumps({"ok":True,"anchor":anchor,"decisions":[]})); raise SystemExit(0)
+    try:
+        read_fd=os.open(path,os.O_RDONLY|getattr(os,"O_NOFOLLOW",0))
+    except OSError as exc:
+        raise SystemExit("session decision: ledger cannot be opened safely") from exc
+    with os.fdopen(read_fd,encoding="utf-8") as ledger:
+        if not stat.S_ISREG(os.fstat(ledger.fileno()).st_mode):
+            raise SystemExit("session decision: ledger is not a regular file")
+        data=json.load(ledger)
+    if data.get("schema_version")!=1 or data.get("anchor")!=anchor or not isinstance(data.get("decisions"),list):
+        raise SystemExit("session decision: ledger schema or anchor is invalid")
+    data["decisions"]=[item for item in data["decisions"] if item.get("status")=="open"]
+    print(json.dumps({"ok":True,"anchor":anchor,"decisions":data["decisions"]},ensure_ascii=False)); raise SystemExit(0)
+memory.mkdir(parents=True,exist_ok=True)
+directory.mkdir(mode=0o700,exist_ok=True)
+if not directory.is_dir(): raise SystemExit("session decision: ledger directory is unsafe")
+if stat.S_IMODE(directory.stat().st_mode) != 0o700:
+    os.chmod(directory,0o700)
+if path.is_symlink(): raise SystemExit("session decision: ledger file is a symlink")
+lock_path=directory/(anchor+".lock")
+fd=os.open(lock_path,os.O_CREAT|os.O_RDWR|getattr(os,"O_NOFOLLOW",0),0o600)
+with os.fdopen(fd,"a+") as lock:
+    fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
+    if path.exists():
+        if not stat.S_ISREG(path.stat().st_mode): raise SystemExit("session decision: ledger is not a regular file")
+        data=json.loads(path.read_text(encoding="utf-8"))
+        if data.get("schema_version")!=1 or data.get("anchor")!=anchor or not isinstance(data.get("decisions"),list):
+            raise SystemExit("session decision: ledger schema or anchor is invalid")
+    else: data={"schema_version":1,"anchor":anchor,"decisions":[]}
+    if action=="append":
+        entry={"id":uuid.uuid4().hex,"created_at":datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),"status":"open","question":question}
+        data["decisions"].append(entry)
+    elif action=="close":
+        matches=[item for item in data["decisions"] if item.get("id")==decision_id]
+        if len(matches)!=1 or matches[0].get("status")!="open": raise SystemExit("session decision: open decision ID was not found")
+        matches[0].update({"status":"answered","answer":answer,"answered_at":datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")})
+    payload=(json.dumps(data,ensure_ascii=False,indent=2)+"\n").encode()
+    temp_fd,temp_name=tempfile.mkstemp(prefix=".decision-",dir=directory)
+    try:
+        os.fchmod(temp_fd,0o600)
+        with os.fdopen(temp_fd,"wb") as output: output.write(payload); output.flush(); os.fsync(output.fileno())
+        os.replace(temp_name,path)
+        dfd=os.open(directory,os.O_RDONLY); os.fsync(dfd); os.close(dfd)
+    except BaseException:
+        try: os.unlink(temp_name)
+        except FileNotFoundError: pass
+        raise
+    result={"ok":True,"anchor":anchor,"decision":entry if action=="append" else matches[0]}
+    print(json.dumps(result,ensure_ascii=False))
 PY
 }
 unavailable() { local command="$1"; shift; if json_requested "$@"; then printf '{"ok":false,"command":"%s","error":"not_implemented"}\n' "$command"; else printf 'rig: %s is not implemented in this version\n' "$command" >&2; fi; return "$RIG_EXIT_UNAVAILABLE"; }
@@ -1608,6 +1701,7 @@ doctor() {
   _doctor_paths="$(rig_bootstrap_paths "$_doctor_primary" 2>/dev/null || printf '%s' "$RIG_WORKTREE_BOOTSTRAP_PATHS")"
   RIG_ROOT="$_doctor_root" RIG_DIR="$(rig_dir)" RIG_BOOTSTRAP_PATHS="$_doctor_paths" python3 - "$@" <<'PY'
 import hashlib, importlib.util, json, os, pathlib, re, shlex, stat, subprocess, sys
+sys.dont_write_bytecode = True
 
 try:
     import tomllib
@@ -4089,6 +4183,10 @@ LEGACY_DELETED_RIG_PATHS = {
     *(f".claude/commands/{name}.md" for name in ("status", "code-review", "debug", "run", "ship")),
     *(f".agents/skills/{name}/{leaf}" for name in ("status", "code-review", "debug", "run", "ship")
       for leaf in ("SKILL.md", "references/command.md")),
+    # Handoff command renamed in #719; RENAMED_RIG_ARTIFACTS retires it.
+    ".claude/commands/handoff-checklist.md",
+    ".agents/skills/handoff-checklist/SKILL.md",
+    ".agents/skills/handoff-checklist/references/command.md",
 }
 
 
@@ -4624,6 +4722,15 @@ obligation requires the pending marker's exact --merge-sha; a mismatch leaves
 the reminder in place.
 EOF
       ;;
+    session:decision) cat <<'EOF'
+Usage: rig session decision append --question TEXT [--json]
+       rig session decision list [--json]
+       rig session decision close --id ID --answer TEXT [--json]
+
+Stores non-blocking questions in a private ledger for the exact active session.
+Answers close entries; list is read-only and shows only open decisions.
+EOF
+      ;;
     session-name:set) cat <<'EOF'
 Usage: rig session-name set [--tentative|--final] [--complete] [--post-merge-ack-sha=SHA] [--json] [--] <name>
 
@@ -4740,7 +4847,7 @@ main() {
       subcommand="${1:-}"; shift || true
       # Help never runs the subcommand, so it cannot resolve, bind or write.
       if help_requested "$@" && subcommand_help "$command" "$subcommand"; then return; fi
-      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:index) session_index "$@";; session:archive) session_archive "$@";; session:doctor) session_inspect doctor "$@";; session:legacy) session_legacy "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; memory:restore-snapshot) memory_restore_snapshot "$@";; memory:workflow-lock) memory_workflow_lock "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
+      case "$command:$subcommand" in session:resolve) session_resolve "$@";; session:bind) session_bind "$@";; session:retrofit) session_retrofit "$@";; session:current) session_current "$@";; session:list) session_inspect list "$@";; session:index) session_index "$@";; session:archive) session_archive "$@";; session:doctor) session_inspect doctor "$@";; session:legacy) session_legacy "$@";; session:repair) session_repair "$@";; session:obligation) session_obligation "$@";; session:decision) session_decision "$@";; session-name:set) session_name_set "$@";; memory:validate) memory_markers validate "$@";; memory:repair-markers) memory_markers repair-markers "$@";; memory:append-gap) memory_append_gap "$@";; memory:append-progress) memory_append_progress "$@";; memory:write-snapshot) memory_write_snapshot "$@";; memory:restore-snapshot) memory_restore_snapshot "$@";; memory:workflow-lock) memory_workflow_lock "$@";; *) usage_error "unexpected $command subcommand" "$@";; esac;;
     *) shift; usage_error "unknown command: $command" "$@";;
   esac
 }

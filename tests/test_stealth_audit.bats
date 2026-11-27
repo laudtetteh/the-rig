@@ -41,8 +41,8 @@ make_leaky_stealth_fixture() {
 # ── audit-stealth.py: classification ──────────────────────────────────────
 
 @test "audit: identifies an uncovered launcher sibling as untracked_leak" {
-  local project="$BATS_TEST_TMPDIR/project"
-  local external="$BATS_TEST_TMPDIR/external"
+  local project="$BATS_TEST_TMPDIR/stealth-audit/project"
+  local external="$BATS_TEST_TMPDIR/stealth-audit/external"
   make_leaky_stealth_fixture "$project" "$external"
 
   run python3 "$AUDIT" "$project"
@@ -65,8 +65,8 @@ make_leaky_stealth_fixture() {
   # .git/info/exclude, hiding real content from git. Now scoped to the
   # installer's own real template source, mirroring install.sh's own
   # stealth-exclude enumeration.
-  local project="$BATS_TEST_TMPDIR/project"
-  local external="$BATS_TEST_TMPDIR/external"
+  local project="$BATS_TEST_TMPDIR/stealth-audit/project"
+  local external="$BATS_TEST_TMPDIR/stealth-audit/external"
   make_leaky_stealth_fixture "$project" "$external"
   printf '#!/bin/sh\necho my own deploy script\n' > "$project/bin/rig-my-deploy-script.sh"
 
@@ -77,8 +77,8 @@ make_leaky_stealth_fixture() {
 }
 
 @test "audit: a fully covered stealth project reports zero leaks" {
-  local project="$BATS_TEST_TMPDIR/project"
-  local external="$BATS_TEST_TMPDIR/external"
+  local project="$BATS_TEST_TMPDIR/stealth-audit/project"
+  local external="$BATS_TEST_TMPDIR/stealth-audit/external"
   make_leaky_stealth_fixture "$project" "$external"
   {
     echo "bin/rig-connector-preflight"
@@ -93,8 +93,8 @@ make_leaky_stealth_fixture() {
 }
 
 @test "audit: a tracked launcher is classified tracked_leak, not untracked_leak" {
-  local project="$BATS_TEST_TMPDIR/project"
-  local external="$BATS_TEST_TMPDIR/external"
+  local project="$BATS_TEST_TMPDIR/stealth-audit/project"
+  local external="$BATS_TEST_TMPDIR/stealth-audit/external"
   mkdir -p "$project/bin" "$project/.git/info" "$external/memory"
   git -C "$project" init -q
   git -C "$project" config user.email "test@test.com"
@@ -113,7 +113,7 @@ make_leaky_stealth_fixture() {
 }
 
 @test "audit: a non-stealth project (no .rigpath) reports stealth:false and ok" {
-  local project="$BATS_TEST_TMPDIR/project"
+  local project="$BATS_TEST_TMPDIR/stealth-audit/project"
   mkdir -p "$project/.git"
   git -C "$project" init -q
 
@@ -136,8 +136,8 @@ make_leaky_stealth_fixture() {
 # ── repair-stealth.py: safe, additive repair ──────────────────────────────
 
 @test "repair: adds missing exclude patterns without duplicating or touching unrelated rules" {
-  local project="$BATS_TEST_TMPDIR/project"
-  local external="$BATS_TEST_TMPDIR/external"
+  local project="$BATS_TEST_TMPDIR/stealth-audit/project"
+  local external="$BATS_TEST_TMPDIR/stealth-audit/external"
   make_leaky_stealth_fixture "$project" "$external"
   printf '*.local\n' >> "$project/.git/info/exclude"
 
@@ -163,8 +163,8 @@ make_leaky_stealth_fixture() {
 }
 
 @test "repair: never untracks an already-tracked leak, only reports it" {
-  local project="$BATS_TEST_TMPDIR/project"
-  local external="$BATS_TEST_TMPDIR/external"
+  local project="$BATS_TEST_TMPDIR/stealth-audit/project"
+  local external="$BATS_TEST_TMPDIR/stealth-audit/external"
   mkdir -p "$project/bin" "$project/.git/info" "$external/memory"
   git -C "$project" init -q
   git -C "$project" config user.email "test@test.com"
@@ -188,7 +188,7 @@ make_leaky_stealth_fixture() {
 }
 
 @test "repair: a non-stealth project is a safe no-op" {
-  local project="$BATS_TEST_TMPDIR/project"
+  local project="$BATS_TEST_TMPDIR/stealth-audit/project"
   mkdir -p "$project/.git"
   git -C "$project" init -q
 
@@ -201,8 +201,8 @@ make_leaky_stealth_fixture() {
 # ── End-to-end: real installer output feeds the classification tool ───────
 
 @test "end-to-end: a fresh install.sh stealth install audits clean" {
-  local project="$BATS_TEST_TMPDIR/project"
-  local external="$BATS_TEST_TMPDIR/external"
+  local project="$BATS_TEST_TMPDIR/stealth-audit/project"
+  local external="$BATS_TEST_TMPDIR/stealth-audit/external"
   mkdir -p "$project"
   git -C "$project" init -q
   git -C "$project" config user.email "test@test.com"
@@ -213,8 +213,13 @@ make_leaky_stealth_fixture() {
     --tracking stealth --rig-dir "$external" --strategy skip
   [ "$status" -eq 0 ]
 
+  [ ! -e "$project/bin/__pycache__" ]
+
   run python3 "$AUDIT" "$project"
-  [ "$status" -eq 0 ]
+  if [ "$status" -ne 0 ]; then
+    echo "fresh stealth install audit failed (status=$status): $output" >&2
+    return 1
+  fi
   json_assert() { JSON_OUTPUT="$output" python3 -c "$1"; }
   json_assert 'import json,os; d=json.loads(os.environ["JSON_OUTPUT"]); assert d["ok"] is True and d["leak_count"] == 0'
 

@@ -3643,6 +3643,7 @@ _copy_global_file_upgrade() {
 # skills/<name>/SKILL.md) is a rename of every shipped skill, so its rows are
 # generated from templates/global/skills by global_skill_layout_rows.
 RENAMED_RIG_ARTIFACTS=(
+  "project|.claude/commands/handoff-checklist.md|.claude/commands/rig-handoff.md|"
   "project|.claude/commands/status.md|.claude/commands/rig-status.md|/status"
   "project|.claude/commands/code-review.md|.claude/commands/rig-review.md|/code-review"
   "project|.claude/commands/debug.md|.claude/commands/rig-debug.md|/debug"
@@ -3658,6 +3659,8 @@ RENAMED_RIG_ARTIFACTS=(
   "project|.agents/skills/run/references/command.md|.agents/skills/rig-run/references/command.md|"
   "project|.agents/skills/ship/SKILL.md|.agents/skills/rig-ship/SKILL.md|"
   "project|.agents/skills/ship/references/command.md|.agents/skills/rig-ship/references/command.md|"
+  "project|.agents/skills/handoff-checklist/SKILL.md|.agents/skills/rig-handoff/SKILL.md|"
+  "project|.agents/skills/handoff-checklist/references/command.md|.agents/skills/rig-handoff/references/command.md|"
   "claude-global|skills/code-review/SKILL.md|skills/rig-review-basics/SKILL.md|/code-review"
   "claude-global|skills/code-review.md|skills/rig-review-basics/SKILL.md|/code-review"
   "claude-global|skills/debug/SKILL.md|skills/rig-debug-basics/SKILL.md|/debug"

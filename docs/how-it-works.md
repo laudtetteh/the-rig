@@ -841,7 +841,9 @@ skills covering the full development lifecycle:
 | `/rig-review` | Rig review workflow | Reviews the current diff for bugs, regressions, risks, and missing tests before summary. |
 | `/rig-review-comments` | Review-comment assessment | Collects PR review comments (inline threads, review summaries, conversation) and pasted comments, verifies each claim at the PR's pinned head SHA, and sorts it into Blockers, Nits or Pushbacks with evidence or a named pushback reason. Read-only until the user approves each reply, thread resolution, PR edit or follow-up ticket. |
 | `/connector-preflight` | Connector verification | Checks MCP/app connector readiness before workflows rely on external tool access. |
-| `/handoff-checklist` | Handoff gate | Produces a durable handoff checklist when work must transfer between sessions or agents. |
+| `/rig-next` / `$rig-next` | Session status | Read-only current-session work, open decisions, exact-head PR checks, repository next actions, and one recommendation. |
+| `/rig-audit` / `$rig-audit` | Accuracy audit | Audits current-session work by default or the full Rig surface with `--full`; reproduces technical claims and reports verified local fixes. |
+| `/rig-handoff` / `$rig-handoff` | Close-out and handoff | Resolves unfinished items under tracker approval gates, asks before post-merge/wrap writes, and displays a concise handoff prompt in chat. |
 
 ### Feature knowledge
 | Command | Triggers | Key behaviour |

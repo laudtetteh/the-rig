@@ -115,6 +115,21 @@ setup() {
   printf '%s' "$(cat "$TEST_HOME/.rig/config.json")" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["projects_roots"]==[sys.argv[1]]' "$catalog"
 }
 
+@test "project-root helper does not write bytecode into the shipped template" {
+  fixture="$BATS_TEST_TMPDIR/helper-fixture"
+  mkdir -p "$fixture/installer" "$fixture/templates/project/bin" "$fixture/cache"
+  cp "$BATS_TEST_DIRNAME/../installer/set-projects-root.py" "$fixture/installer/"
+  cp "$BATS_TEST_DIRNAME/../templates/project/bin/rig_project_roots.py" "$fixture/templates/project/bin/"
+
+  run env HOME="$TEST_HOME" PYTHONPYCACHEPREFIX="$fixture/cache" \
+    python3 "$fixture/installer/set-projects-root.py" check "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ ! -e "$fixture/templates/project/bin/__pycache__" ]
+  run find "$fixture/cache" -name 'rig_project_roots*.pyc' -print -quit
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "installer refuses malformed user config before project mutations" {
   project="$BATS_TEST_TMPDIR/untouched-project"
   catalog="$BATS_TEST_TMPDIR/catalog"

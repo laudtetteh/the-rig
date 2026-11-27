@@ -63,7 +63,7 @@ bind_session() {
 
 handoff_surfaces() {
   printf '%s\n' \
-    "$REPO_ROOT/templates/project/.claude/commands/handoff-checklist.md" \
+    "$REPO_ROOT/templates/project/.claude/commands/rig-handoff.md" \
     "$REPO_ROOT/templates/project/.claude/commands/wrap.md" \
     "$REPO_ROOT/templates/global/CLAUDE.md"
 }
@@ -72,7 +72,7 @@ handoff_surfaces() {
 # These phrases are new with #717, so the check cannot pass on older text.
 snapshot_pointer_phrase() {
   case "$1" in
-    */handoff-checklist.md) printf '%s' 'instead of restating them' ;;
+    */rig-handoff.md) printf '%s' 'Do not restate the full snapshot' ;;
     */wrap.md) printf '%s' 'instead of restating their contents' ;;
     */CLAUDE.md) printf '%s' 'point the next agent at `CONTEXT_SNAPSHOT.md`' ;;
   esac
@@ -82,14 +82,20 @@ snapshot_pointer_phrase() {
   while IFS= read -r surface; do
     grep -Fq 'display-only' "$surface" || { echo "missing display-only: $surface"; return 1; }
     grep -Fq '$RIG_DIR/memory/NEXT_SESSION_PROMPT.md' "$surface" || { echo "missing fixed path: $surface"; return 1; }
-    grep -Fq 'Never create a' "$surface" || { echo "missing dated-file ban: $surface"; return 1; }
+    case "$surface" in
+      */rig-handoff.md) grep -Fq 'Never create dated copies' "$surface" || { echo "missing dated-file ban: $surface"; return 1; } ;;
+      *) grep -Fq 'Never create a' "$surface" || { echo "missing dated-file ban: $surface"; return 1; } ;;
+    esac
     grep -Fq "$(snapshot_pointer_phrase "$surface")" "$surface" || { echo "missing snapshot pointer: $surface"; return 1; }
   done < <(handoff_surfaces)
 }
 
 @test "handoff guidance: saving a prompt requires an explicit user request" {
   while IFS= read -r surface; do
-    grep -Fq 'only when the user explicitly asks' "$surface" \
+    case "$surface" in
+      */rig-handoff.md) grep -Fq 'If the user explicitly asks to save the prompt' "$surface" ;;
+      *) grep -Fq 'only when the user explicitly asks' "$surface" ;;
+    esac \
       || { echo "missing explicit-request gate: $surface"; return 1; }
   done < <(handoff_surfaces)
 }
@@ -97,9 +103,9 @@ snapshot_pointer_phrase() {
 @test "handoff guidance: generated Codex skills carry the display-only rule" {
   out="$TEST_ROOT/codex-skills"
   python3 "$REPO_ROOT/installer/generate-codex-skills.py" --output "$out" --base-branch main \
-    "$REPO_ROOT/templates/project/.claude/commands/handoff-checklist.md" \
+    "$REPO_ROOT/templates/project/.claude/commands/rig-handoff.md" \
     "$REPO_ROOT/templates/project/.claude/commands/wrap.md"
-  for name in handoff-checklist wrap; do
+  for name in rig-handoff wrap; do
     grep -Fq 'display-only' "$out/$name/references/command.md"
     grep -Fq '$RIG_DIR/memory/NEXT_SESSION_PROMPT.md' "$out/$name/references/command.md"
   done
