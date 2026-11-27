@@ -134,6 +134,48 @@ for line in sys.stdin:
   [ -z "$output" ]
 }
 
+@test "upgrade: handoff-checklist Claude command and Codex skill retire after rig-handoff installs" {
+  install_with "$REPO_ROOT/install.sh" merge
+  [ "$status" -eq 0 ]
+
+  local old_command old_skill old_reference
+  old_command="$TEST_PROJECT/.claude/commands/handoff-checklist.md"
+  old_skill="$TEST_PROJECT/.agents/skills/handoff-checklist/SKILL.md"
+  old_reference="$TEST_PROJECT/.agents/skills/handoff-checklist/references/command.md"
+  mkdir -p "$(dirname "$old_command")" "$(dirname "$old_reference")"
+  cat > "$old_command" <<'EOF'
+# Command: /handoff-checklist
+
+Legacy handoff command.
+EOF
+  cat > "$old_skill" <<'EOF'
+---
+name: handoff-checklist
+description: Legacy handoff command.
+---
+EOF
+  cat > "$old_reference" <<'EOF'
+# Command: /handoff-checklist
+
+Legacy handoff command.
+EOF
+  track_in_manifest .claude/commands/handoff-checklist.md
+  track_in_manifest .agents/skills/handoff-checklist/SKILL.md
+  track_in_manifest .agents/skills/handoff-checklist/references/command.md
+
+  install_with "$REPO_ROOT/install.sh" upgrade
+  [ "$status" -eq 0 ]
+  [ ! -e "$old_command" ]
+  [ ! -e "$(dirname "$old_skill")" ]
+  [ -f "$TEST_PROJECT/.claude/commands/rig-handoff.md" ]
+  [ -f "$TEST_PROJECT/.agents/skills/rig-handoff/SKILL.md" ]
+  [ -f "$TEST_PROJECT/.agents/skills/rig-handoff/references/command.md" ]
+  case "$output" in
+    *"Retired renamed Rig artifact: .claude/commands/handoff-checklist.md -> .claude/commands/rig-handoff.md"*) ;;
+    *) return 1 ;;
+  esac
+}
+
 @test "retired tables: a retired path that reappears in the templates is detected" {
   local templates="$BATS_TEST_TMPDIR/templates"
   cp -R "$REPO_ROOT/templates" "$templates"

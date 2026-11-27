@@ -26,7 +26,9 @@ No arguments. Output the table below directly — do not read individual command
 | Command | What it does |
 |---|---|
 | `/wrap` | End a session. Writes `CONTEXT_SNAPSHOT.md`, expands `PROGRESS.md` stubs, captures in-flight task state, names the session. Use `/wrap --checkpoint` to save memory and handoffs while the exact session remains active; a later ordinary wrap still finalizes. |
-| `/handoff-checklist` | Consent-gated wrap-and-handoff routine for large or costly sessions. Asks before doing any checklist work. |
+| `/rig-next` | Read-only current-session status, unresolved decisions, pending PR approvals, repository next actions, and one recommendation. |
+| `/rig-handoff` | Reviews unfinished work and prepares a chat-only handoff. Asks separately before tracker writes, `/post-merge`, or `/wrap`. |
+| `/rig-audit` | Audits current-session work, or the full Rig surface with `--full`; reproduces claims and reports verified fixes. |
 | `/post-merge` | Post-merge housekeeping. Fetches the base branch and verifies each exact merge SHA before logging the PR to `PROGRESS.md`, moving the task file to done, refreshing `CONTEXT_SNAPSHOT.md`, checking feature doc freshness, and surfacing what's next. A clean base checkout is fast-forwarded only when tracked housekeeping needs it. |
 | `/rig-status` | Project state dashboard: current branch, active tasks, backlog count, recent `PROGRESS.md` entries, pending flags, and a one-line health verdict. Add `--health` for the full installation health check (hooks, memory, settings, flags). Read-only. Use Claude Code's built-in `/status` for version, model and account details. |
 | `/session-name` | Derive and set a session name from work completed so far. Uses the same tiered format as `/wrap` and `/post-merge` but callable at any time without triggering a full cycle. |

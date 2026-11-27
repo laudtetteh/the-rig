@@ -16,6 +16,10 @@ CONTEXT_SNAPSHOT.md
 # only on explicit request; it restates session state, so it is never committed.
 NEXT_SESSION_PROMPT.md
 
+# Non-blocking unanswered questions belong to one exact session. They can
+# contain private approval context, so keep the append/close ledger local.
+session-decisions/
+
 # PROGRESS_archive.md holds older entries trimmed from PROGRESS.md.
 # Archive is disk-only: useful for manual reference but not loaded at session start.
 PROGRESS_archive.md

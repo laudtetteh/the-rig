@@ -362,7 +362,9 @@ for a full snapshot — hooks are a safety net, not a replacement.
 /connector-preflight → verify connector readiness before MCP/app-dependent work
 /rig-ship         →  pre-commit cleanup + checklist + commit + PR; review metadata and verify merge when authorized
 /rig-debug        →  hypothesis-first diagnosis, mandatory ERRORS.md entry
-/handoff-checklist → prepare a durable handoff when work transfers sessions or agents
+/rig-next         → read-only view of this session's open work, repo next actions, and one recommendation
+/rig-audit        → accuracy and completeness review; use --full for the full Rig surface
+/rig-handoff      → ticket unfinished work, run the full audit, and show a handoff prompt in chat
 ```
 
 **Release**
@@ -386,6 +388,7 @@ bin/rig session index [--json] → read-only, bounded search of Rig session reco
 /rig-status   →  project dashboard (branch, active tasks, backlog, recent progress, flags) + one-line health verdict
 /doc-list     →  show docs/INDEX.md without loading full doc files
 /rig-help     →  print all Rig commands with descriptions and key flags
+Codex `$rig-next` and `$rig-audit` → session status and accuracy audit
 /rig-status --health  →  full provider-neutral health check for hooks, memory, adapters, and flags
 ```
 
